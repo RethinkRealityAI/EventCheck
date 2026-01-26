@@ -1,0 +1,7 @@
+{
+  "name": "EventCheck - QR Event Management",
+  "description": "A comprehensive event registration and check-in system. Features a webhook simulator for Jotform integration, QR code ticket generation, and an admin scanner for checking in attendees.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
