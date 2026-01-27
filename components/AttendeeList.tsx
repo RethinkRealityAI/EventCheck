@@ -10,9 +10,10 @@ import { generateEmailHtml } from '../utils/emailTemplates';
 
 interface AttendeeListProps {
   attendees: Attendee[];
+  isLoading?: boolean;
 }
 
-const AttendeeList: React.FC<AttendeeListProps> = ({ attendees }) => {
+const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, isLoading = false }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState<'live' | 'test'>('live');
   const [selectedAttendee, setSelectedAttendee] = useState<Attendee | null>(null);
@@ -263,7 +264,16 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees }) => {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {paginatedItems.length === 0 ? (
+            {isLoading ? (
+              <tr>
+                <td colSpan={6} className="px-6 py-12 text-center text-gray-400">
+                  <div className="flex flex-col items-center justify-center gap-2">
+                    <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
+                    <p className="text-sm font-medium">Loading attendees...</p>
+                  </div>
+                </td>
+              </tr>
+            ) : paginatedItems.length === 0 ? (
               <tr>
                 <td colSpan={6} className="px-6 py-12 text-center text-gray-400">
                   <User className="w-12 h-12 mx-auto mb-3 text-gray-200" />

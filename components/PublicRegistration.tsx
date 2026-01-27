@@ -179,7 +179,7 @@ const PublicRegistration = () => {
 
     // Generate Preview URL for Modal
     if (settings) {
-      const doc = generateTicketPDF(newAttendee, settings);
+      const doc = generateTicketPDF(newAttendee, settings, form);
       setPreviewPdfUrl(doc.output('bloburl').toString());
     }
   };
@@ -207,7 +207,7 @@ const PublicRegistration = () => {
 
   const downloadPdf = () => {
     if (generatedTicket && settings) {
-      const doc = generateTicketPDF(generatedTicket, settings);
+      const doc = generateTicketPDF(generatedTicket, settings, form);
       doc.save(`${generatedTicket.name}_Ticket.pdf`);
     }
   };
@@ -243,6 +243,19 @@ const PublicRegistration = () => {
         <div className="absolute inset-0 bg-black/10 pointer-events-none"></div>
       )}
 
+      {/* Loading Overlay */}
+      {loading && (
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/50 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white p-8 rounded-2xl shadow-2xl flex flex-col items-center gap-4">
+            <Loader2 className="w-12 h-12 text-indigo-600 animate-spin" />
+            <div className="text-center">
+              <h3 className="text-xl font-bold text-gray-900">Processing...</h3>
+              <p className="text-gray-500">Please wait while we complete your registration.</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {step === 'form' && (
         <div className="max-w-xl w-full bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl overflow-hidden relative z-10 border border-white/20">
           <div
@@ -253,7 +266,7 @@ const PublicRegistration = () => {
               className="text-3xl font-black mb-2"
               style={{ color: form.settings?.formTitleColor || '#FFFFFF' }}
             >
-              {form.title}
+              {form.settings?.formTitle || form.title}
             </h1>
             <p
               className="opacity-90 font-medium"
@@ -415,12 +428,15 @@ const PublicRegistration = () => {
             <div className="pt-4">
               <button
                 type="submit"
-                className="w-full py-4 text-white rounded-xl font-black uppercase tracking-widest transition shadow-lg flex justify-center items-center gap-2 transform hover:scale-[1.02] active:scale-95"
+                disabled={loading}
+                className="w-full py-4 text-white rounded-xl font-black uppercase tracking-widest transition shadow-lg flex justify-center items-center gap-2 transform hover:scale-[1.02] active:scale-95 disabled:opacity-70 disabled:grayscale disabled:cursor-not-allowed"
                 style={{ backgroundColor: form.settings?.formAccentColor || '#4F46E5' }}
               >
-                {(ticketField && paymentTotal > 0) ? (
+                {loading ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (ticketField && paymentTotal > 0) ? (
                   <>Proceed to Payment <ArrowRight className="w-5 h-5" /></>
-                ) : 'Register Now'}
+                ) : (form.settings?.submitButtonText || 'Register Now')}
               </button>
             </div>
           </form>

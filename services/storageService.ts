@@ -1,5 +1,12 @@
-import { Attendee, Form, AppSettings, DEFAULT_SETTINGS } from '../types';
+import { Attendee, Form, AppSettings, DEFAULT_SETTINGS, FormField, PdfSettings } from '../types';
 import { supabase } from './supabaseClient';
+import { Database } from './database.types';
+
+type AttendeeRow = Database['public']['Tables']['attendees']['Row'];
+type AttendeeInsert = Database['public']['Tables']['attendees']['Insert'];
+type FormRow = Database['public']['Tables']['forms']['Row'];
+type FormInsert = Database['public']['Tables']['forms']['Insert'];
+type AppSettingsRow = Database['public']['Tables']['app_settings']['Row'];
 
 // --- Attendees ---
 export const getAttendees = async (): Promise<Attendee[]> => {
@@ -41,13 +48,23 @@ export const saveAttendee = async (attendee: Attendee): Promise<void> => {
 };
 
 export const updateAttendee = async (id: string, updates: Partial<Attendee>): Promise<void> => {
-  // Map internal keys to DB columns if needed, but for simplicity we'll handle common ones
-  const dbUpdates: any = {};
+  const dbUpdates: Database['public']['Tables']['attendees']['Update'] = {};
+
   if (updates.name !== undefined) dbUpdates.name = updates.name;
   if (updates.email !== undefined) dbUpdates.email = updates.email;
   if (updates.ticketType !== undefined) dbUpdates.ticket_type = updates.ticketType;
   if (updates.paymentStatus !== undefined) dbUpdates.payment_status = updates.paymentStatus;
   if (updates.checkedInAt !== undefined) dbUpdates.checked_in_at = updates.checkedInAt;
+
+  // Add other fields if needed, kept targeted for now
+  if (updates.formId !== undefined) dbUpdates.form_id = updates.formId;
+  if (updates.formTitle !== undefined) dbUpdates.form_title = updates.formTitle;
+  if (updates.qrPayload !== undefined) dbUpdates.qr_payload = updates.qrPayload;
+  if (updates.invoiceId !== undefined) dbUpdates.invoice_id = updates.invoiceId;
+  if (updates.transactionId !== undefined) dbUpdates.transaction_id = updates.transactionId;
+  if (updates.paymentAmount !== undefined) dbUpdates.payment_amount = updates.paymentAmount;
+  if (updates.isTest !== undefined) dbUpdates.is_test = updates.isTest;
+  if (updates.answers !== undefined) dbUpdates.answers = updates.answers;
 
   const { error } = await supabase
     .from('attendees')
@@ -161,6 +178,8 @@ export const getSettings = async (): Promise<AppSettings> => {
 
   if (error || !data) return DEFAULT_SETTINGS;
 
+  const pdfSettings = (data.pdf_settings as unknown as PdfSettings) || DEFAULT_SETTINGS.pdfSettings;
+
   const settings: AppSettings = {
     paypalClientId: data.paypal_client_id || '',
     currency: data.currency || 'USD',
@@ -177,7 +196,7 @@ export const getSettings = async (): Promise<AppSettings> => {
     emailFooterText: data.email_footer_text || '',
     emailInvitationSubject: data.email_invitation_subject || '',
     emailInvitationBody: data.email_invitation_body || '',
-    pdfSettings: data.pdf_settings || DEFAULT_SETTINGS.pdfSettings
+    pdfSettings: pdfSettings
   };
 
   return settings;
@@ -201,7 +220,7 @@ export const saveSettings = async (settings: AppSettings): Promise<void> => {
     email_footer_text: settings.emailFooterText,
     email_invitation_subject: settings.emailInvitationSubject,
     email_invitation_body: settings.emailInvitationBody,
-    pdf_settings: settings.pdfSettings
+    pdf_settings: settings.pdfSettings as unknown as Database['public']['Tables']['app_settings']['Row']['pdf_settings']
   };
 
   const { error } = await supabase
@@ -218,27 +237,27 @@ export const clearData = async (): Promise<void> => {
 };
 
 // --- Mapping Helpers ---
-function mapAttendeeFromDb(db: any): Attendee {
+function mapAttendeeFromDb(db: AttendeeRow): Attendee {
   return {
     id: db.id,
     formId: db.form_id,
-    formTitle: db.form_title || '', // Added default if missing
+    formTitle: db.form_title || '',
     name: db.name,
     email: db.email,
     ticketType: db.ticket_type,
-    registeredAt: db.registered_at,
+    registeredAt: db.registered_at, // Assumed string from DB
     checkedInAt: db.checked_in_at,
     qrPayload: db.qr_payload,
-    paymentStatus: db.payment_status,
-    invoiceId: db.invoice_id,
-    transactionId: db.transaction_id,
-    paymentAmount: db.payment_amount,
-    answers: db.answers,
-    isTest: db.is_test
+    paymentStatus: db.payment_status as Attendee['paymentStatus'], // Managed by constraints
+    invoiceId: db.invoice_id || undefined,
+    transactionId: db.transaction_id || undefined,
+    paymentAmount: db.payment_amount || undefined,
+    answers: (db.answers as Record<string, any>) || {},
+    isTest: db.is_test || false
   };
 }
 
-function mapAttendeeToDb(a: Attendee): any {
+function mapAttendeeToDb(a: Attendee): AttendeeInsert {
   return {
     id: a.id,
     form_id: a.formId,
@@ -258,27 +277,27 @@ function mapAttendeeToDb(a: Attendee): any {
   };
 }
 
-function mapFormFromDb(db: any): Form {
+function mapFormFromDb(db: FormRow): Form {
   return {
     id: db.id,
     title: db.title,
     description: db.description,
     createdAt: db.created_at,
-    status: db.status,
-    settings: db.settings,
-    thankYouMessage: db.thank_you_message,
-    fields: db.fields
+    status: db.status as 'active' | 'draft' | 'closed',
+    settings: (db.settings as any), // Cast JSON to specific setting type if needed
+    thankYouMessage: db.thank_you_message || undefined,
+    fields: (db.fields as unknown as FormField[]) || []
   };
 }
 
-function mapFormToDb(f: Form): any {
+function mapFormToDb(f: Form): FormInsert {
   return {
     id: f.id,
     title: f.title,
     description: f.description,
     status: f.status,
-    settings: f.settings,
+    settings: f.settings as any,
     thank_you_message: f.thankYouMessage,
-    fields: f.fields
+    fields: f.fields as any
   };
 }

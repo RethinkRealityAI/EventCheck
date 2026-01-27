@@ -1,9 +1,19 @@
 import jsPDF from 'jspdf';
-import { Attendee, AppSettings } from '../types';
+import { Attendee, AppSettings, Form } from '../types';
 
-export const generateTicketPDF = (attendee: Attendee, settings: AppSettings): jsPDF => {
+export const generateTicketPDF = (
+  attendee: Attendee,
+  settings: AppSettings,
+  form?: Form
+): jsPDF => {
   const doc = new jsPDF();
-  const pdfConfig = settings.pdfSettings;
+
+  // Merge global PDF settings with form-specific overrides
+  const pdfConfig = {
+    ...settings.pdfSettings,
+    ...(form?.pdfSettings || {})
+  };
+
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const primaryColor = pdfConfig.primaryColor || '#4F46E5';

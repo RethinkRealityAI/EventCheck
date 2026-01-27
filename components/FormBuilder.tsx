@@ -923,6 +923,34 @@ const FormBuilder: React.FC = () => {
                                     </div>
 
                                     <div>
+                                       <h4 className="text-lg font-bold text-gray-900 mb-4">Form Text Customization</h4>
+                                       <div className="grid grid-cols-1 gap-4">
+                                          <div>
+                                             <label className="block text-sm font-bold text-gray-700 mb-2">Form Title (Override)</label>
+                                             <input
+                                                type="text"
+                                                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition"
+                                                placeholder={form.title}
+                                                value={form.settings?.formTitle || ''}
+                                                onChange={e => updateFormMetadata({ settings: { ...form.settings, formTitle: e.target.value } })}
+                                             />
+                                             <p className="text-xs text-gray-500 mt-1 italic">Leave blank to use the default form title</p>
+                                          </div>
+                                          <div>
+                                             <label className="block text-sm font-bold text-gray-700 mb-2">Submit Button Text</label>
+                                             <input
+                                                type="text"
+                                                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition"
+                                                placeholder="Register Now"
+                                                value={form.settings?.submitButtonText || ''}
+                                                onChange={e => updateFormMetadata({ settings: { ...form.settings, submitButtonText: e.target.value } })}
+                                             />
+                                             <p className="text-xs text-gray-500 mt-1 italic">Customize the text on the submit button (default: "Register Now")</p>
+                                          </div>
+                                       </div>
+                                    </div>
+
+                                    <div>
                                        <label className="block text-sm font-bold text-gray-700 mb-2">Background Image</label>
                                        <div className="flex items-center gap-3">
                                           {form.settings?.formBackgroundImage ? (
@@ -1098,7 +1126,7 @@ const FormBuilder: React.FC = () => {
                                                 <div className="flex items-center gap-4">
                                                    {form.pdfSettings?.logoUrl ? (
                                                       <div className="relative group">
-                                                         <img src={form.pdfSettings.logoUrl} alt="Logo" className="w-12 h-12 object-contain rounded-lg border border-indigo-100 shadow-sm p-1" />
+                                                         <img src={form.pdfSettings.logoUrl} className="w-12 h-12 object-contain rounded-lg border border-indigo-100 shadow-sm p-1" alt="Logo" />
                                                          <button
                                                             onClick={() => updateFormMetadata({ pdfSettings: { ...form.pdfSettings, logoUrl: undefined } })}
                                                             className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition shadow-lg"
@@ -1155,10 +1183,10 @@ const FormBuilder: React.FC = () => {
                                  <span className="px-3 py-1 bg-white rounded-full text-[10px] font-bold text-gray-400 border border-gray-200 uppercase tracking-tighter shadow-sm">Live Updates</span>
                               </div>
 
-                              <div className="w-full flex justify-center scale-[0.65] lg:scale-[0.55] xl:scale-[0.65] origin-top transition-transform duration-300">
+                              <div className="w-full flex justify-center scale-75 lg:scale-90 origin-top transition-transform duration-300">
                                  {settingsSubTab === 'appearance' && (
                                     <div
-                                       className="rounded-2xl shadow-2xl overflow-hidden border border-gray-200 w-full max-w-sm aspect-[4/5] flex flex-col relative"
+                                       className="rounded-2xl shadow-2xl overflow-hidden border border-gray-200 w-full max-w-md aspect-[9/16] flex flex-col relative"
                                        style={{
                                           backgroundColor: form.settings?.formBackgroundColor || '#F3F4F6',
                                           backgroundImage: form.settings?.formBackgroundImage ? `url(${form.settings.formBackgroundImage})` : 'none',
@@ -1179,7 +1207,7 @@ const FormBuilder: React.FC = () => {
                                              className="text-2xl font-black mb-2"
                                              style={{ color: form.settings?.formTitleColor || '#FFFFFF' }}
                                           >
-                                             {form.title}
+                                             {form.settings?.formTitle || form.title}
                                           </h3>
                                           <p
                                              className="text-sm opacity-90 font-medium"
@@ -1204,7 +1232,7 @@ const FormBuilder: React.FC = () => {
                                                    className="w-full py-4 text-white font-black text-sm uppercase tracking-widest rounded-xl shadow-lg transform transition hover:scale-[1.02]"
                                                    style={{ backgroundColor: form.settings?.formAccentColor || '#4F46E5' }}
                                                 >
-                                                   Register Now
+                                                   {form.settings?.submitButtonText || 'Register Now'}
                                                 </button>
                                              </div>
                                           </div>
@@ -1220,7 +1248,7 @@ const FormBuilder: React.FC = () => {
                                  )}
 
                                  {settingsSubTab === 'success' && (
-                                    <div className="bg-white rounded-2xl shadow-xl p-0 flex flex-col items-center relative overflow-hidden border border-gray-200 w-full max-w-sm aspect-[4/5]">
+                                    <div className="bg-white rounded-2xl shadow-xl p-0 flex flex-col items-center relative overflow-hidden border border-gray-200 w-full max-w-md aspect-[9/16]">
                                        {/* Success Banner */}
                                        <div
                                           className="w-full h-40 flex flex-col items-center justify-center text-white p-6"
@@ -1286,7 +1314,7 @@ const FormBuilder: React.FC = () => {
                                  )}
 
                                  {settingsSubTab === 'pdf' && (
-                                    <div className="bg-white rounded-lg shadow-2xl p-8 flex flex-col items-center relative overflow-hidden ring-4 ring-gray-200/50 w-full max-w-sm aspect-[1/1.4]">
+                                    <div className="bg-white rounded-lg shadow-2xl p-8 flex flex-col items-center relative overflow-hidden ring-4 ring-gray-200/50 w-full max-w-md aspect-[1/1.414]">
                                        {/* PDF Simulation Layout */}
                                        <div className="w-full flex justify-between items-start border-b-2 border-dashed border-gray-100 pb-8 mb-8">
                                           <div className="max-w-[70%] text-left">

@@ -65,6 +65,7 @@ const DashboardStats = ({ attendees }: { attendees: Attendee[] }) => {
 const AdminLayout = () => {
   const { signOut } = useAuth();
   const [attendees, setAttendees] = useState<Attendee[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showScanner, setShowScanner] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
@@ -79,8 +80,14 @@ const AdminLayout = () => {
   // Refresh data whenever route might have changed data or periodically
   useEffect(() => {
     const fetch = async () => {
-      const data = await getAttendees();
-      setAttendees(data);
+      try {
+        const data = await getAttendees();
+        setAttendees(data);
+      } catch (error) {
+        console.error("Failed to fetch attendees", error);
+      } finally {
+        setLoading(false);
+      }
     };
     fetch();
     const interval = setInterval(fetch, 5000);
@@ -204,7 +211,7 @@ const AdminLayout = () => {
                   </div>
                 </header>
                 <DashboardStats attendees={attendees} />
-                <AttendeeList attendees={attendees} />
+                <AttendeeList attendees={attendees} isLoading={loading} />
               </>
             } />
             <Route path="/forms" element={<FormsManager />} />

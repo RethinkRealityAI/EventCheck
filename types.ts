@@ -81,6 +81,8 @@ export interface Form {
     formAccentColor?: string; // For buttons, etc.
     formTitleColor?: string;
     formDescriptionColor?: string;
+    formTitle?: string; // Override the form title on the registration page
+    submitButtonText?: string; // Customize submit button text
   };
   pdfSettings?: Partial<PdfSettings>; // Per-form PDF overrides
 }

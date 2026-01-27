@@ -7,4 +7,6 @@ if (!supabaseUrl || !supabaseAnonKey) {
     console.error("Supabase environment variables are missing!");
 }
 
+import { Database } from './database.types';
+
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
