@@ -22,7 +22,12 @@ const Login = () => {
             });
 
             if (error) {
-                showNotification(error.message, 'error');
+                // Handle email confirmation error with clearer message
+                if (error.message.includes('Email not confirmed')) {
+                    showNotification('Email not confirmed. Please contact administrator or check your inbox.', 'error');
+                } else {
+                    showNotification(error.message, 'error');
+                }
             } else if (data.session) {
                 showNotification('Logged in successfully', 'success');
                 navigate('/admin');
