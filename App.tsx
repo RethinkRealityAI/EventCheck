@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { HashRouter, Routes, Route, Link, useLocation, Navigate } from 'react-router-dom';
-import { LayoutDashboard, QrCode, ClipboardList, LogOut, Settings as SettingsIcon, ExternalLink, Menu, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { HashRouter, Routes, Route, Link, useLocation, Navigate, useNavigate } from 'react-router-dom';
+import { LayoutDashboard, QrCode, ClipboardList, LogOut, Settings as SettingsIcon, ExternalLink, Menu, X, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import ManualTicketTool from './components/ManualTicketTool';
 import AttendeeList from './components/AttendeeList';
 import Scanner from './components/Scanner';
@@ -11,6 +11,8 @@ import PublicRegistration from './components/PublicRegistration';
 import { NotificationProvider } from './components/NotificationSystem';
 import { Attendee } from './types';
 import { getAttendees, checkInAttendee } from './services/storageService';
+import { AuthProvider, useAuth } from './components/AuthContext';
+import Login from './components/Login';
 
 const NavLink = ({ to, icon: Icon, children, collapsed }: { to: string, icon: any, children?: React.ReactNode, collapsed?: boolean }) => {
   const location = useLocation();
@@ -61,11 +63,18 @@ const DashboardStats = ({ attendees }: { attendees: Attendee[] }) => {
 };
 
 const AdminLayout = () => {
+  const { signOut } = useAuth();
   const [attendees, setAttendees] = useState<Attendee[]>([]);
   const [showScanner, setShowScanner] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
   const [isSidebarPinned, setIsSidebarPinned] = useState(false);
+  const navigate = useNavigate();
+
+  const handleLogout = async () => {
+    await signOut();
+    navigate('/login');
+  };
 
   // Refresh data whenever route might have changed data or periodically
   useEffect(() => {
@@ -172,7 +181,10 @@ const AdminLayout = () => {
         </nav>
 
         <div className="p-4 border-t border-slate-800 bg-slate-900/50">
-          <div className={`flex items-center gap-3 px-3 py-3 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl cursor-pointer transition-all ${(isSidebarCollapsed && !isSidebarPinned) ? 'justify-center transition-none' : ''}`} title="Logout">
+          <div
+            onClick={handleLogout}
+            className={`flex items-center gap-3 px-3 py-3 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl cursor-pointer transition-all ${(isSidebarCollapsed && !isSidebarPinned) ? 'justify-center transition-none' : ''}`} title="Logout"
+          >
             <LogOut className="w-5 h-5" />
             <span className={`font-medium whitespace-nowrap transition-all duration-300 ${(isSidebarCollapsed && !isSidebarPinned) ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}>Logout</span>
           </div>
@@ -222,21 +234,51 @@ const AdminLayout = () => {
   );
 };
 
+const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return <>{children}</>;
+};
+
 export default function App() {
   return (
     <NotificationProvider>
-      <HashRouter>
-        <Routes>
-          {/* Redirect Root to Admin */}
-          <Route path="/" element={<Navigate to="/admin" replace />} />
+      <AuthProvider>
+        <HashRouter>
+          <Routes>
+            {/* Login Route */}
+            <Route path="/login" element={<Login />} />
 
-          {/* Public Form Route */}
-          <Route path="/form/:formId" element={<PublicRegistration />} />
+            {/* Redirect Root to Admin */}
+            <Route path="/" element={<Navigate to="/admin" replace />} />
 
-          {/* Admin Routes */}
-          <Route path="/admin/*" element={<AdminLayout />} />
-        </Routes>
-      </HashRouter>
+            {/* Public Form Route */}
+            <Route path="/form/:formId" element={<PublicRegistration />} />
+
+            {/* Admin Routes */}
+            <Route
+              path="/admin/*"
+              element={
+                <ProtectedRoute>
+                  <AdminLayout />
+                </ProtectedRoute>
+              }
+            />
+          </Routes>
+        </HashRouter>
+      </AuthProvider>
     </NotificationProvider>
   );
 }
