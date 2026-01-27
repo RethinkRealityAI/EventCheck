@@ -9,15 +9,17 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@paypal/react-paypal-js": "^8.9.2",
+    "@supabase/supabase-js": "^2.93.1",
+    "date-fns": "^4.1.0",
+    "jspdf": "^2.5.1",
+    "jsqr": "^1.4.0",
+    "lucide-react": "^0.563.0",
+    "qrcode.react": "^4.2.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
-    "lucide-react": "^0.563.0",
-    "react-router-dom": "^7.12.0",
-    "jsqr": "^1.4.0",
-    "date-fns": "^4.1.0",
     "react-qr-code": "^2.0.18",
-    "qrcode.react": "^4.2.0",
-    "jspdf": "^2.5.1"
+    "react-router-dom": "^7.12.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

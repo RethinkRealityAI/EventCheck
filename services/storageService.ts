@@ -1,121 +1,284 @@
 import { Attendee, Form, AppSettings, DEFAULT_SETTINGS } from '../types';
-
-const STORAGE_KEY_ATTENDEES = 'eventcheck_attendees_v1';
-const STORAGE_KEY_FORMS = 'eventcheck_forms_v1';
-const STORAGE_KEY_SETTINGS = 'eventcheck_settings_v1';
+import { supabase } from './supabaseClient';
 
 // --- Attendees ---
-export const getAttendees = (): Attendee[] => {
-  try {
-    const data = localStorage.getItem(STORAGE_KEY_ATTENDEES);
-    return data ? JSON.parse(data) : [];
-  } catch (error) {
+export const getAttendees = async (): Promise<Attendee[]> => {
+  const { data, error } = await supabase
+    .from('attendees')
+    .select('*')
+    .order('registered_at', { ascending: false });
+
+  if (error) {
     console.error("Failed to load attendees", error);
     return [];
   }
+
+  return (data || []).map(mapAttendeeFromDb);
 };
 
-export const getAttendeesByForm = (formId: string): Attendee[] => {
-  return getAttendees().filter(a => a.formId === formId);
-};
+export const getAttendeesByForm = async (formId: string): Promise<Attendee[]> => {
+  const { data, error } = await supabase
+    .from('attendees')
+    .select('*')
+    .eq('form_id', formId)
+    .order('registered_at', { ascending: false });
 
-export const saveAttendee = (attendee: Attendee): void => {
-  const current = getAttendees();
-  // Check update or insert
-  const index = current.findIndex(a => a.id === attendee.id);
-  if (index !== -1) {
-    current[index] = attendee;
-  } else {
-    current.unshift(attendee);
-  }
-  localStorage.setItem(STORAGE_KEY_ATTENDEES, JSON.stringify(current));
-};
-
-export const checkInAttendee = (id: string): Attendee | null => {
-  const current = getAttendees();
-  const index = current.findIndex(a => a.id === id);
-  
-  if (index === -1) return null;
-  
-  const attendee = current[index];
-  if (attendee.checkedInAt) {
-    return attendee; 
+  if (error) {
+    console.error("Failed to load attendees by form", error);
+    return [];
   }
 
-  const updatedAttendee = { ...attendee, checkedInAt: new Date().toISOString() };
-  current[index] = updatedAttendee;
-  
-  localStorage.setItem(STORAGE_KEY_ATTENDEES, JSON.stringify(current));
-  return updatedAttendee;
+  return (data || []).map(mapAttendeeFromDb);
+};
+
+export const saveAttendee = async (attendee: Attendee): Promise<void> => {
+  const dbRecord = mapAttendeeToDb(attendee);
+  const { error } = await supabase
+    .from('attendees')
+    .upsert(dbRecord);
+
+  if (error) console.error("Failed to save attendee", error);
+};
+
+export const updateAttendee = async (id: string, updates: Partial<Attendee>): Promise<void> => {
+  // Map internal keys to DB columns if needed, but for simplicity we'll handle common ones
+  const dbUpdates: any = {};
+  if (updates.name !== undefined) dbUpdates.name = updates.name;
+  if (updates.email !== undefined) dbUpdates.email = updates.email;
+  if (updates.ticketType !== undefined) dbUpdates.ticket_type = updates.ticketType;
+  if (updates.paymentStatus !== undefined) dbUpdates.payment_status = updates.paymentStatus;
+  if (updates.checkedInAt !== undefined) dbUpdates.checked_in_at = updates.checkedInAt;
+
+  const { error } = await supabase
+    .from('attendees')
+    .update(dbUpdates)
+    .eq('id', id);
+
+  if (error) console.error("Failed to update attendee", error);
+};
+
+export const deleteAttendee = async (id: string): Promise<void> => {
+  const { error } = await supabase
+    .from('attendees')
+    .delete()
+    .eq('id', id);
+
+  if (error) console.error("Failed to delete attendee", error);
+};
+
+export const checkInAttendee = async (id: string): Promise<Attendee | null> => {
+  const { data: existing, error: fetchError } = await supabase
+    .from('attendees')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (fetchError || !existing) return null;
+  if (existing.checked_in_at) return mapAttendeeFromDb(existing);
+
+  const { data: updated, error: updateError } = await supabase
+    .from('attendees')
+    .update({ checked_in_at: new Date().toISOString() })
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (updateError) {
+    console.error("Failed to check in", updateError);
+    return null;
+  }
+
+  return mapAttendeeFromDb(updated);
 };
 
 // --- Forms ---
-export const getForms = (): Form[] => {
-  try {
-    const data = localStorage.getItem(STORAGE_KEY_FORMS);
-    if (!data) {
-      // Create a default demo form if none exist
-      const defaultForm: Form = {
-        id: 'default_event',
-        title: 'General Event Registration',
-        description: 'Please fill out your details to register.',
-        createdAt: new Date().toISOString(),
-        status: 'active',
-        fields: [
-          { id: 'f_name', type: 'text', label: 'Full Name', required: true },
-          { id: 'f_email', type: 'email', label: 'Email Address', required: true }
-        ]
-      };
-      saveForm(defaultForm);
-      return [defaultForm];
-    }
-    return JSON.parse(data);
-  } catch (error) {
+export const getForms = async (): Promise<Form[]> => {
+  const { data, error } = await supabase
+    .from('forms')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error("Failed to load forms", error);
     return [];
   }
-};
 
-export const getFormById = (id: string): Form | undefined => {
-  const forms = getForms();
-  return forms.find(f => f.id === id);
-};
-
-export const saveForm = (form: Form) => {
-  const forms = getForms();
-  const index = forms.findIndex(f => f.id === form.id);
-  if (index !== -1) {
-    forms[index] = form;
-  } else {
-    forms.push(form);
+  if (data?.length === 0) {
+    const defaultForm: Form = {
+      id: crypto.randomUUID(),
+      title: 'General Event Registration',
+      description: 'Please fill out your details to register.',
+      createdAt: new Date().toISOString(),
+      status: 'active',
+      fields: [
+        { id: 'f_name', type: 'text', label: 'Full Name', required: true },
+        { id: 'f_email', type: 'email', label: 'Email Address', required: true }
+      ]
+    };
+    await saveForm(defaultForm);
+    return [defaultForm];
   }
-  localStorage.setItem(STORAGE_KEY_FORMS, JSON.stringify(forms));
+
+  return (data || []).map(mapFormFromDb);
 };
 
-export const deleteForm = (id: string) => {
-  const forms = getForms().filter(f => f.id !== id);
-  localStorage.setItem(STORAGE_KEY_FORMS, JSON.stringify(forms));
+export const getFormById = async (id: string): Promise<Form | undefined> => {
+  const { data, error } = await supabase
+    .from('forms')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (error) return undefined;
+  return mapFormFromDb(data);
+};
+
+export const saveForm = async (form: Form): Promise<void> => {
+  const dbRecord = mapFormToDb(form);
+  const { error } = await supabase
+    .from('forms')
+    .upsert(dbRecord);
+
+  if (error) console.error("Failed to save form", error);
+};
+
+export const deleteForm = async (id: string): Promise<void> => {
+  const { error } = await supabase
+    .from('forms')
+    .delete()
+    .eq('id', id);
+
+  if (error) console.error("Failed to delete form", error);
 };
 
 // --- Settings ---
-export const getSettings = (): AppSettings => {
-  try {
-    const data = localStorage.getItem(STORAGE_KEY_SETTINGS);
-    if (!data) return DEFAULT_SETTINGS;
-    
-    const parsed = JSON.parse(data);
-    // Merge with defaults to ensure new fields (like pdfSettings) exist if upgrading from old version
-    return { ...DEFAULT_SETTINGS, ...parsed, pdfSettings: { ...DEFAULT_SETTINGS.pdfSettings, ...parsed.pdfSettings } };
-  } catch (error) {
-    return DEFAULT_SETTINGS;
-  }
+export const getSettings = async (): Promise<AppSettings> => {
+  const { data, error } = await supabase
+    .from('app_settings')
+    .select('*')
+    .eq('id', 1)
+    .single();
+
+  if (error || !data) return DEFAULT_SETTINGS;
+
+  const settings: AppSettings = {
+    paypalClientId: data.paypal_client_id || '',
+    currency: data.currency || 'USD',
+    ticketPrice: data.ticket_price || 0,
+    smtpHost: data.smtp_host || '',
+    smtpPort: data.smtp_port || '',
+    smtpUser: data.smtp_user || '',
+    smtpPass: data.smtp_pass || '',
+    emailHeaderLogo: data.email_header_logo || '',
+    emailHeaderColor: data.email_header_color || '#f8fafc',
+    emailFooterColor: data.email_footer_color || '#f8fafc',
+    emailSubject: data.email_subject || '',
+    emailBodyTemplate: data.email_body_template || '',
+    emailFooterText: data.email_footer_text || '',
+    emailInvitationSubject: data.email_invitation_subject || '',
+    emailInvitationBody: data.email_invitation_body || '',
+    pdfSettings: data.pdf_settings || DEFAULT_SETTINGS.pdfSettings
+  };
+
+  return settings;
 };
 
-export const saveSettings = (settings: AppSettings) => {
-  localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(settings));
+export const saveSettings = async (settings: AppSettings): Promise<void> => {
+  const dbRecord = {
+    id: 1,
+    paypal_client_id: settings.paypalClientId,
+    currency: settings.currency,
+    ticket_price: settings.ticketPrice,
+    smtp_host: settings.smtpHost,
+    smtp_port: settings.smtpPort,
+    smtp_user: settings.smtpUser,
+    smtp_pass: settings.smtpPass,
+    email_header_logo: settings.emailHeaderLogo,
+    email_header_color: settings.emailHeaderColor,
+    email_footer_color: settings.emailFooterColor,
+    email_subject: settings.emailSubject,
+    email_body_template: settings.emailBodyTemplate,
+    email_footer_text: settings.emailFooterText,
+    email_invitation_subject: settings.emailInvitationSubject,
+    email_invitation_body: settings.emailInvitationBody,
+    pdf_settings: settings.pdfSettings
+  };
+
+  const { error } = await supabase
+    .from('app_settings')
+    .upsert(dbRecord);
+
+  if (error) console.error("Failed to save settings", error);
 };
 
-export const clearData = () => {
-  localStorage.removeItem(STORAGE_KEY_ATTENDEES);
-  localStorage.removeItem(STORAGE_KEY_FORMS);
-  localStorage.removeItem(STORAGE_KEY_SETTINGS);
+export const clearData = async (): Promise<void> => {
+  // Not used in Supabase version usually, but for completeness:
+  await supabase.from('attendees').delete().neq('id', '0');
+  await supabase.from('forms').delete().neq('id', '0');
 };
+
+// --- Mapping Helpers ---
+function mapAttendeeFromDb(db: any): Attendee {
+  return {
+    id: db.id,
+    formId: db.form_id,
+    formTitle: db.form_title || '', // Added default if missing
+    name: db.name,
+    email: db.email,
+    ticketType: db.ticket_type,
+    registeredAt: db.registered_at,
+    checkedInAt: db.checked_in_at,
+    qrPayload: db.qr_payload,
+    paymentStatus: db.payment_status,
+    invoiceId: db.invoice_id,
+    transactionId: db.transaction_id,
+    paymentAmount: db.payment_amount,
+    answers: db.answers,
+    isTest: db.is_test
+  };
+}
+
+function mapAttendeeToDb(a: Attendee): any {
+  return {
+    id: a.id,
+    form_id: a.formId,
+    form_title: a.formTitle,
+    name: a.name,
+    email: a.email,
+    ticket_type: a.ticketType,
+    registered_at: a.registeredAt,
+    checked_in_at: a.checkedInAt,
+    qr_payload: a.qrPayload,
+    payment_status: a.paymentStatus,
+    invoice_id: a.invoiceId,
+    transaction_id: a.transactionId,
+    payment_amount: a.paymentAmount,
+    answers: a.answers,
+    is_test: a.isTest
+  };
+}
+
+function mapFormFromDb(db: any): Form {
+  return {
+    id: db.id,
+    title: db.title,
+    description: db.description,
+    createdAt: db.created_at,
+    status: db.status,
+    settings: db.settings,
+    thankYouMessage: db.thank_you_message,
+    fields: db.fields
+  };
+}
+
+function mapFormToDb(f: Form): any {
+  return {
+    id: f.id,
+    title: f.title,
+    description: f.description,
+    status: f.status,
+    settings: f.settings,
+    thank_you_message: f.thankYouMessage,
+    fields: f.fields
+  };
+}

@@ -1,8 +1,12 @@
 import React, { useState } from 'react';
 import { Attendee } from '../types';
-import { CheckCircle, Clock, Search, Calendar, Eye, X, Mail, Tag, User } from 'lucide-react';
+import { CheckCircle, Clock, Search, Calendar, Eye, X, Mail, Tag, User, Download, FileSpreadsheet, Settings as SettingsIcon, Check, MoreVertical, Trash2, Edit3, ChevronLeft, ChevronRight, Filter, AlertCircle } from 'lucide-react';
 import { format } from 'date-fns';
 import QRCode from 'react-qr-code';
+import { updateAttendee, deleteAttendee, getSettings } from '../services/storageService';
+import { useNotifications } from './NotificationSystem';
+import { sendEmail } from '../services/emailService';
+import { generateEmailHtml } from '../utils/emailTemplates';
 
 interface AttendeeListProps {
   attendees: Attendee[];
@@ -13,64 +17,235 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees }) => {
   const [activeTab, setActiveTab] = useState<'live' | 'test'>('live');
   const [selectedAttendee, setSelectedAttendee] = useState<Attendee | null>(null);
   const [resending, setResending] = useState(false);
+  const { showNotification } = useNotifications();
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editData, setEditData] = useState<Partial<Attendee>>({});
+
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
+
+  // Advanced Filter State
+  const [statusFilter, setStatusFilter] = useState<'all' | 'checked-in' | 'pending'>('all');
+  const [paymentFilter, setPaymentFilter] = useState<'all' | 'paid' | 'free' | 'pending'>('all');
+
+  const [exportFields, setExportFields] = useState<Record<string, boolean>>({
+    id: true,
+    name: true,
+    email: true,
+    ticketType: true,
+    registeredAt: true,
+    checkedInAt: true,
+    paymentStatus: true,
+    invoiceId: true,
+    transactionId: true,
+    paymentAmount: true,
+    formTitle: true
+  });
+
+  const fieldLabels: Record<string, string> = {
+    id: 'Registration ID',
+    name: 'Full Name',
+    email: 'Email Address',
+    ticketType: 'Ticket Type',
+    registeredAt: 'Registered Date',
+    checkedInAt: 'Check-in Time',
+    paymentStatus: 'Payment Status',
+    invoiceId: 'Invoice ID',
+    transactionId: 'PayPal Transaction ID',
+    paymentAmount: 'Amount Paid',
+    formTitle: 'Event Title'
+  };
 
   // Filter logic
   const filtered = attendees.filter(a => {
-    const matchesSearch = 
+    const matchesSearch =
       a.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       a.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
       a.id.toLowerCase().includes(searchTerm.toLowerCase());
-    
+
     const isTest = !!a.isTest;
     const matchesTab = activeTab === 'test' ? isTest : !isTest;
 
-    return matchesSearch && matchesTab;
+    const matchesStatus = statusFilter === 'all'
+      ? true
+      : statusFilter === 'checked-in' ? !!a.checkedInAt : !a.checkedInAt;
+
+    const matchesPayment = paymentFilter === 'all'
+      ? true
+      : a.paymentStatus === paymentFilter;
+
+    return matchesSearch && matchesTab && matchesStatus && matchesPayment;
   });
 
-  const handleResendEmail = () => {
+  // Pagination Logic
+  const totalPages = Math.ceil(filtered.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const paginatedItems = filtered.slice(startIndex, startIndex + itemsPerPage);
+
+  const handleResendEmail = async () => {
+    if (!selectedAttendee) return;
     setResending(true);
-    // Simulate API call
-    setTimeout(() => {
-      alert(`Ticket resent to ${selectedAttendee?.email}`);
+    try {
+      const settings = await getSettings();
+      const html = generateEmailHtml(settings, settings.emailBodyTemplate, selectedAttendee);
+      await sendEmail(selectedAttendee.email, settings.emailSubject, html);
+      showNotification(`Ticket resent to ${selectedAttendee.email}`, 'success');
+    } catch (err: any) {
+      console.error(err);
+      showNotification(`Failed to resend email: ${err.message}`, 'error');
+    } finally {
       setResending(false);
-    }, 1000);
+    }
+  };
+
+  const handleUpdateAttendee = async (id: string, updates: Partial<Attendee>) => {
+    await updateAttendee(id, updates);
+    setIsEditing(false);
+    setSelectedAttendee(null);
+  };
+
+  const handleDeleteAttendee = async (id: string) => {
+    if (window.confirm("Are you sure you want to delete this registration? This cannot be undone.")) {
+      await deleteAttendee(id);
+      setSelectedAttendee(null);
+      showNotification('Registration deleted', 'info');
+    }
+  };
+
+  const toggleField = (field: string) => {
+    setExportFields(prev => ({ ...prev, [field]: !prev[field] }));
+  };
+
+  const handleExportCSV = () => {
+    const selectedKeys = Object.entries(exportFields)
+      .filter(([_, enabled]) => enabled)
+      .map(([key]) => key);
+
+    if (selectedKeys.length === 0) {
+      showNotification("Please select at least one field to export.", 'warning');
+      return;
+    }
+
+    // Header row
+    const headers = selectedKeys.map(key => fieldLabels[key] || key).join(',');
+
+    // Data rows
+    const rows = filtered.map(attendee => {
+      return selectedKeys.map(key => {
+        let val = (attendee as any)[key];
+        if (val && (key === 'registeredAt' || key === 'checkedInAt')) {
+          val = format(new Date(val), 'yyyy-MM-dd HH:mm:ss');
+        }
+        if (val === undefined || val === null) val = '';
+        const strVal = String(val).replace(/"/g, '""');
+        return `"${strVal}"`;
+      }).join(',');
+    });
+
+    const csvContent = [headers, ...rows].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `attendees_${format(new Date(), 'yyyyMMdd_HHmm')}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setShowExportModal(false);
   };
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col h-full">
       {/* Header & Tabs */}
       <div className="p-4 border-b border-gray-100 space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <h2 className="font-semibold text-lg text-gray-900">Registered Attendees</h2>
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input 
-              type="text" 
-              placeholder="Search attendees..." 
-              className="pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none w-full sm:w-64"
-              value={searchTerm}
-              onChange={e => setSearchTerm(e.target.value)}
-            />
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="flex flex-col gap-1">
+            <h2 className="font-semibold text-lg text-gray-900">Registered Attendees</h2>
+            <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit">
+              <button
+                onClick={() => { setActiveTab('live'); setCurrentPage(1); }}
+                className={`px-3 py-1 text-xs font-medium rounded-md transition ${activeTab === 'live' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
+              >
+                Live
+              </button>
+              <button
+                onClick={() => { setActiveTab('test'); setCurrentPage(1); }}
+                className={`px-3 py-1 text-xs font-medium rounded-md transition ${activeTab === 'test' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
+              >
+                Test
+              </button>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search..."
+                className="pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none w-full"
+                value={searchTerm}
+                onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }}
+              />
+            </div>
+
+            <select
+              value={itemsPerPage}
+              onChange={e => { setItemsPerPage(Number(e.target.value)); setCurrentPage(1); }}
+              className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value={10}>10 per page</option>
+              <option value={25}>25 per page</option>
+              <option value={50}>50 per page</option>
+              <option value={100}>100 per page</option>
+            </select>
+
+            <button
+              onClick={() => setShowExportModal(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition shadow-sm"
+              title="Export as CSV"
+            >
+              <Download className="w-4 h-4" />
+              <span className="hidden sm:inline">Export</span>
+            </button>
           </div>
         </div>
 
-        <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit">
-          <button
-            onClick={() => setActiveTab('live')}
-            className={`px-4 py-1.5 text-sm font-medium rounded-md transition ${
-              activeTab === 'live' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-900'
-            }`}
-          >
-            Live Attendees
-          </button>
-          <button
-            onClick={() => setActiveTab('test')}
-            className={`px-4 py-1.5 text-sm font-medium rounded-md transition ${
-              activeTab === 'test' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-900'
-            }`}
-          >
-            Test / Previews
-          </button>
+        {/* Filters Row */}
+        <div className="flex flex-wrap items-center gap-4 text-sm bg-slate-50 p-3 rounded-lg border border-slate-100">
+          <div className="flex items-center gap-2 text-slate-500">
+            <Filter className="w-4 h-4" />
+            <span className="font-medium">Filters:</span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-slate-400">Attendance:</span>
+            <select
+              value={statusFilter}
+              onChange={e => { setStatusFilter(e.target.value as any); setCurrentPage(1); }}
+              className="bg-transparent font-medium text-slate-700 outline-none cursor-pointer"
+            >
+              <option value="all">All Status</option>
+              <option value="checked-in">Checked In</option>
+              <option value="pending">Pending</option>
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-slate-400">Payment:</span>
+            <select
+              value={paymentFilter}
+              onChange={e => { setPaymentFilter(e.target.value as any); setCurrentPage(1); }}
+              className="bg-transparent font-medium text-slate-700 outline-none cursor-pointer"
+            >
+              <option value="all">All Payments</option>
+              <option value="paid">Paid Only</option>
+              <option value="free">Free Only</option>
+              <option value="pending">Pending Payments</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -88,27 +263,27 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees }) => {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {filtered.length === 0 ? (
+            {paginatedItems.length === 0 ? (
               <tr>
                 <td colSpan={6} className="px-6 py-12 text-center text-gray-400">
                   <User className="w-12 h-12 mx-auto mb-3 text-gray-200" />
-                  <p>No {activeTab} attendees found.</p>
+                  <p>No attendees match your filters.</p>
                 </td>
               </tr>
             ) : (
-              filtered.map((attendee) => (
+              paginatedItems.map((attendee) => (
                 <tr key={attendee.id} className="hover:bg-gray-50 transition">
                   <td className="px-6 py-4">
                     <div className="font-medium text-gray-900">{attendee.name}</div>
                     <div className="text-gray-400 text-xs">{attendee.email}</div>
                   </td>
                   <td className="px-6 py-4">
-                     <div className="flex items-center gap-1.5 text-gray-700">
-                        <Calendar className="w-3 h-3 text-indigo-500" />
-                        <span className="truncate max-w-[150px] block" title={attendee.formTitle}>
-                          {attendee.formTitle || 'Unknown Event'}
-                        </span>
-                     </div>
+                    <div className="flex items-center gap-1.5 text-gray-700">
+                      <Calendar className="w-3 h-3 text-indigo-500" />
+                      <span className="truncate max-w-[150px] block" title={attendee.formTitle}>
+                        {attendee.formTitle || 'Unknown Event'}
+                      </span>
+                    </div>
                   </td>
                   <td className="px-6 py-4">
                     <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700">
@@ -130,7 +305,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees }) => {
                     {format(new Date(attendee.registeredAt), 'MMM d, yyyy')}
                   </td>
                   <td className="px-6 py-4 text-right">
-                    <button 
+                    <button
                       onClick={() => setSelectedAttendee(attendee)}
                       className="text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 p-2 rounded-lg transition"
                       title="View Details"
@@ -144,121 +319,310 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees }) => {
           </tbody>
         </table>
       </div>
-      
-      <div className="px-6 py-4 border-t border-gray-100 bg-gray-50 text-xs text-gray-500 flex justify-between">
-         <span>Showing {filtered.length} records</span>
-         {activeTab === 'test' && <span className="text-orange-600 font-medium">Test Data Mode</span>}
+
+      {/* Pagination Footer */}
+      <div className="px-6 py-4 border-t border-gray-100 bg-gray-50 flex items-center justify-between">
+        <div className="text-xs text-gray-500">
+          Showing {filtered.length > 0 ? startIndex + 1 : 0} to {Math.min(startIndex + itemsPerPage, filtered.length)} of {filtered.length} records
+        </div>
+
+        {totalPages > 1 && (
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+              disabled={currentPage === 1}
+              className="p-1 rounded bg-white border border-gray-200 disabled:opacity-50"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <span className="px-3 text-xs font-medium text-gray-700">Page {currentPage} of {totalPages}</span>
+            <button
+              onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+              disabled={currentPage === totalPages}
+              className="p-1 rounded bg-white border border-gray-200 disabled:opacity-50"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Detail Modal */}
       {selectedAttendee && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
-            <div className="p-6 border-b border-gray-100 flex justify-between items-start">
-              <div>
-                <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-                  {selectedAttendee.name}
-                  {selectedAttendee.isTest && (
-                    <span className="px-2 py-0.5 bg-orange-100 text-orange-700 text-xs rounded-full font-medium">TEST</span>
-                  )}
-                </h3>
-                <p className="text-sm text-gray-500">{selectedAttendee.email}</p>
+            <div className="p-6 border-b border-gray-100 flex justify-between items-start bg-slate-50">
+              <div className="flex items-center gap-3">
+                <div className="bg-indigo-600 p-2.5 rounded-xl shadow-lg shadow-indigo-200">
+                  <User className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                    {selectedAttendee.name}
+                    {selectedAttendee.isTest && (
+                      <span className="px-2 py-0.5 bg-orange-100 text-orange-700 text-xs rounded-full font-medium border border-orange-200">TEST</span>
+                    )}
+                  </h3>
+                  <p className="text-sm text-gray-500 font-medium">{selectedAttendee.email}</p>
+                </div>
               </div>
-              <button 
-                onClick={() => setSelectedAttendee(null)}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    setEditData(selectedAttendee);
+                    setIsEditing(true);
+                  }}
+                  className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition"
+                  title="Edit Attendee"
+                >
+                  <Edit3 className="w-5 h-5" />
+                </button>
+                <button
+                  onClick={() => handleDeleteAttendee(selectedAttendee.id)}
+                  className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition"
+                  title="Delete Attendee"
+                >
+                  <Trash2 className="w-5 h-5" />
+                </button>
+                <button
+                  onClick={() => { setSelectedAttendee(null); setIsEditing(false); }}
+                  className="text-gray-400 hover:text-gray-600 p-1.5 rounded-full hover:bg-white"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6">
+              {isEditing ? (
+                <div className="space-y-6 animate-fade-in-up">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-gray-400 uppercase">Full Name</label>
+                      <input
+                        className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                        value={editData.name || ''}
+                        onChange={e => setEditData({ ...editData, name: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-gray-400 uppercase">Email Address</label>
+                      <input
+                        className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                        value={editData.email || ''}
+                        onChange={e => setEditData({ ...editData, email: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-gray-400 uppercase">Ticket Type</label>
+                      <input
+                        className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                        value={editData.ticketType || ''}
+                        onChange={e => setEditData({ ...editData, ticketType: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-gray-400 uppercase">Payment Status</label>
+                      <select
+                        className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                        value={editData.paymentStatus || ''}
+                        onChange={e => setEditData({ ...editData, paymentStatus: e.target.value as any })}
+                      >
+                        <option value="free">Free</option>
+                        <option value="paid">Paid</option>
+                        <option value="pending">Pending</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      id="checkInStatus"
+                      className="rounded text-indigo-600 focus:ring-indigo-500"
+                      checked={!!editData.checkedInAt}
+                      onChange={e => setEditData({ ...editData, checkedInAt: e.target.checked ? new Date().toISOString() : null })}
+                    />
+                    <label htmlFor="checkInStatus" className="text-gray-700 font-medium">Mark as Checked In</label>
+                  </div>
+                  <div className="flex gap-3 pt-4 border-t border-gray-100">
+                    <button
+                      onClick={() => setIsEditing(false)}
+                      className="flex-1 py-2.5 border border-gray-200 rounded-lg font-medium text-gray-600 hover:bg-gray-50 transition"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => handleUpdateAttendee(selectedAttendee.id, editData)}
+                      className="flex-1 py-2.5 bg-indigo-600 text-white rounded-lg font-bold hover:bg-indigo-700 transition shadow-lg shadow-indigo-900/20"
+                    >
+                      Save Changes
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  <div className="flex flex-col items-center space-y-6">
+                    <div className="bg-white p-4 border border-gray-200 rounded-2xl shadow-sm">
+                      <QRCode value={selectedAttendee.qrPayload} size={180} />
+                    </div>
+                    <div className="w-full space-y-3">
+                      <div className="bg-slate-50 p-3 rounded-xl flex justify-between items-center text-sm">
+                        <span className="text-slate-500 font-medium">Status</span>
+                        {selectedAttendee.checkedInAt ? (
+                          <span className="text-green-600 font-bold flex items-center gap-1.5 bg-green-50 px-2 py-0.5 rounded-full">
+                            <CheckCircle className="w-3.5 h-3.5" /> Checked In
+                          </span>
+                        ) : (
+                          <span className="text-slate-500 font-medium bg-slate-200 px-2 py-0.5 rounded-full">Not Checked In</span>
+                        )}
+                      </div>
+                      <div className="bg-slate-50 p-3 rounded-xl flex justify-between items-center text-sm">
+                        <span className="text-slate-500 font-medium">Payment</span>
+                        <span className={`font-bold capitalize px-2 py-0.5 rounded-full flex items-center gap-1.5 ${selectedAttendee.paymentStatus === 'paid' ? 'bg-green-50 text-green-600' : 'bg-slate-200 text-slate-700'
+                          }`}>
+                          {selectedAttendee.paymentStatus || 'Free'}
+                        </span>
+                      </div>
+                      <button
+                        onClick={handleResendEmail}
+                        disabled={resending}
+                        className="w-full py-3 bg-white border border-indigo-200 text-indigo-600 rounded-xl font-bold hover:bg-indigo-50 transition flex items-center justify-center gap-2"
+                      >
+                        <Mail className="w-4 h-4" /> {resending ? 'Sending...' : 'Resend Ticket Email'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-6">
+                    <div>
+                      <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.1em] mb-4">Registration Details</h4>
+                      <div className="space-y-4">
+                        <div className="group">
+                          <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Registration ID</label>
+                          <div className="text-xs font-mono bg-slate-100 px-3 py-2 rounded-lg text-slate-600 select-all border border-slate-200">
+                            {selectedAttendee.id}
+                          </div>
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Ticket Type</label>
+                          <div className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full bg-indigo-500"></div> {selectedAttendee.ticketType}
+                          </div>
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Event Name</label>
+                          <div className="text-sm font-medium text-slate-700">{selectedAttendee.formTitle}</div>
+                        </div>
+                        <div className="flex gap-4">
+                          <div className="flex-1">
+                            <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Registered</label>
+                            <div className="text-xs text-slate-900 font-medium">{format(new Date(selectedAttendee.registeredAt), 'PPP')}</div>
+                          </div>
+                          {selectedAttendee.checkedInAt && (
+                            <div className="flex-1">
+                              <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Checked In</label>
+                              <div className="text-xs text-green-600 font-bold">{format(new Date(selectedAttendee.checkedInAt), 'p')}</div>
+                            </div>
+                          )}
+                        </div>
+                        {(selectedAttendee.invoiceId || selectedAttendee.transactionId) && (
+                          <div className="pt-4 mt-4 border-t border-slate-100 space-y-3">
+                            {selectedAttendee.invoiceId && (
+                              <div>
+                                <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Invoice ID</label>
+                                <div className="text-xs font-medium text-slate-700">{selectedAttendee.invoiceId}</div>
+                              </div>
+                            )}
+                            {selectedAttendee.transactionId && (
+                              <div>
+                                <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1 text-blue-600">PayPal Transaction</label>
+                                <div className="text-xs font-mono font-medium text-blue-700 select-all">{selectedAttendee.transactionId}</div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {selectedAttendee.answers && Object.keys(selectedAttendee.answers).length > 0 && (
+                      <div className="animate-fade-in">
+                        <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.1em] mb-4 pt-4 border-t border-slate-100">Form Responses</h4>
+                        <div className="space-y-3 max-h-48 overflow-y-auto pr-2 custom-scrollbar">
+                          {Object.entries(selectedAttendee.answers).map(([key, val]) => (
+                            <div key={key} className="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                              <span className="text-[10px] font-bold text-slate-400 block mb-1 uppercase truncate">{key.replace('field_', '').replace(/_/g, ' ')}</span>
+                              <span className="text-xs text-slate-900 font-semibold block">
+                                {Array.isArray(val) ? val.join(', ') : String(val)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Export Selection Modal */}
+      {showExportModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col">
+            <div className="p-6 border-b border-gray-100 flex justify-between items-center">
+              <div className="flex items-center gap-3">
+                <div className="bg-indigo-50 p-2 rounded-lg">
+                  <FileSpreadsheet className="w-6 h-6 text-indigo-600" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-gray-900">Export Attendees</h3>
+                  <p className="text-sm text-gray-500">Choose which fields to include in your CSV.</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowExportModal(false)}
                 className="text-gray-400 hover:text-gray-600 p-1 rounded-full hover:bg-gray-100"
               >
                 <X className="w-6 h-6" />
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                {/* Left Column: Ticket & QR */}
-                <div className="flex flex-col items-center space-y-6">
-                   <div className="bg-white p-4 border border-gray-200 rounded-xl shadow-sm">
-                      <QRCode value={selectedAttendee.qrPayload} size={180} />
-                   </div>
-                   <div className="w-full space-y-3">
-                      <div className="bg-gray-50 p-3 rounded-lg flex justify-between items-center text-sm">
-                        <span className="text-gray-500">Status</span>
-                        {selectedAttendee.checkedInAt ? (
-                          <span className="text-green-600 font-bold flex items-center gap-1">
-                             <CheckCircle className="w-4 h-4" /> Checked In
-                          </span>
-                        ) : (
-                          <span className="text-gray-500 font-medium">Not Checked In</span>
-                        )}
-                      </div>
-                      <div className="bg-gray-50 p-3 rounded-lg flex justify-between items-center text-sm">
-                        <span className="text-gray-500">Payment</span>
-                        <span className={`font-bold capitalize ${
-                          selectedAttendee.paymentStatus === 'paid' ? 'text-green-600' : 'text-gray-700'
-                        }`}>
-                          {selectedAttendee.paymentStatus || 'Free'}
-                        </span>
-                      </div>
-                      <button 
-                        onClick={handleResendEmail}
-                        disabled={resending}
-                        className="w-full py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition flex items-center justify-center gap-2"
-                      >
-                         <Mail className="w-4 h-4" /> {resending ? 'Sending...' : 'Resend Ticket Email'}
-                      </button>
-                   </div>
-                </div>
+            <div className="p-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {Object.entries(fieldLabels).map(([key, label]) => (
+                  <button
+                    key={key}
+                    onClick={() => toggleField(key)}
+                    className={`flex items-center justify-between p-3 rounded-lg border transition-all text-sm ${exportFields[key]
+                      ? 'border-indigo-200 bg-indigo-50/50 text-indigo-700 font-medium'
+                      : 'border-gray-100 bg-gray-50 text-gray-500 hover:border-gray-200'
+                      }`}
+                  >
+                    <span>{label}</span>
+                    {exportFields[key] ? (
+                      <Check className="w-4 h-4" />
+                    ) : (
+                      <div className="w-4 h-4 rounded-full border border-gray-300" />
+                    )}
+                  </button>
+                ))}
+              </div>
 
-                {/* Right Column: Details */}
-                <div className="space-y-6">
-                   <div>
-                     <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Registration Details</h4>
-                     <div className="space-y-3">
-                        <div className="group">
-                           <label className="text-xs text-gray-500 block mb-1">Registration ID</label>
-                           <div className="text-sm font-mono bg-gray-50 px-2 py-1 rounded text-gray-700 select-all">
-                             {selectedAttendee.id}
-                           </div>
-                        </div>
-                        <div>
-                           <label className="text-xs text-gray-500 block mb-1">Ticket Type</label>
-                           <div className="text-sm font-medium text-gray-900 flex items-center gap-2">
-                             <Tag className="w-4 h-4 text-indigo-500" /> {selectedAttendee.ticketType}
-                           </div>
-                        </div>
-                        <div>
-                           <label className="text-xs text-gray-500 block mb-1">Event</label>
-                           <div className="text-sm text-gray-900">{selectedAttendee.formTitle}</div>
-                        </div>
-                        <div>
-                           <label className="text-xs text-gray-500 block mb-1">Registered At</label>
-                           <div className="text-sm text-gray-900">{format(new Date(selectedAttendee.registeredAt), 'PPpp')}</div>
-                        </div>
-                        {selectedAttendee.invoiceId && (
-                          <div>
-                            <label className="text-xs text-gray-500 block mb-1">Invoice ID</label>
-                            <div className="text-sm font-mono text-gray-700">{selectedAttendee.invoiceId}</div>
-                          </div>
-                        )}
-                     </div>
-                   </div>
-
-                   {/* Custom Answers */}
-                   {selectedAttendee.answers && Object.keys(selectedAttendee.answers).length > 0 && (
-                     <div>
-                       <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 pt-4 border-t border-gray-100">Form Responses</h4>
-                       <div className="space-y-3 max-h-40 overflow-y-auto pr-2">
-                          {Object.entries(selectedAttendee.answers).map(([key, val]) => (
-                             <div key={key}>
-                               <span className="text-xs text-gray-500 block mb-0.5 capitalize">{key.replace('field_', '').replace(/_/g, ' ')}</span>
-                               <span className="text-sm text-gray-900 block bg-gray-50 px-2 py-1.5 rounded">
-                                 {Array.isArray(val) ? val.join(', ') : String(val)}
-                               </span>
-                             </div>
-                          ))}
-                       </div>
-                     </div>
-                   )}
-                </div>
+              <div className="mt-8 flex gap-3">
+                <button
+                  onClick={() => setShowExportModal(false)}
+                  className="flex-1 py-3 border border-gray-200 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleExportCSV}
+                  className="flex-1 py-3 bg-indigo-600 text-white rounded-lg font-bold hover:bg-indigo-700 transition shadow-lg shadow-indigo-900/20 flex items-center justify-center gap-2"
+                >
+                  <Download className="w-5 h-5" /> Download CSV
+                </button>
               </div>
             </div>
           </div>

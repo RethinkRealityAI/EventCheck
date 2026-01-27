@@ -10,6 +10,8 @@ export interface Attendee {
   qrPayload: string; // The signed/secure string inside the QR
   paymentStatus?: 'paid' | 'pending' | 'free';
   invoiceId?: string;
+  transactionId?: string;
+  paymentAmount?: string;
   answers?: Record<string, any>; // Store custom form answers
   isTest?: boolean; // Flag to identify preview/test submissions
 }
@@ -52,6 +54,7 @@ export interface FormField {
     fieldId: string;
     value: string;
   };
+  validation?: 'string' | 'int';
 }
 
 export interface Form {
@@ -65,16 +68,32 @@ export interface Form {
   settings?: {
     ticketPrice?: number;
     currency?: string;
+    showQrOnSuccess?: boolean;
+    showTicketButtonOnSuccess?: boolean;
+    successTitle?: string;
+    successHeaderColor?: string;
+    successFooterColor?: string;
+    successIconColor?: string;
+    // Form Visuals
+    formHeaderColor?: string;
+    formBackgroundColor?: string;
+    formBackgroundImage?: string;
+    formAccentColor?: string; // For buttons, etc.
+    formTitleColor?: string;
+    formDescriptionColor?: string;
   };
+  pdfSettings?: Partial<PdfSettings>; // Per-form PDF overrides
 }
 
 export interface PdfSettings {
   enabled: boolean;
   logoUrl: string;
+  eventTitle?: string;
   organizationName: string;
   organizationInfo: string; // Tax ID, Address, etc.
   primaryColor: string;
   footerText: string;
+  backgroundImage?: string; // Base64 of background image
 }
 
 export interface AppSettings {
@@ -85,13 +104,15 @@ export interface AppSettings {
   smtpPort: string;
   smtpUser: string;
   smtpPass: string;
-  
+
   // Ticket Email
   emailHeaderLogo: string;
+  emailHeaderColor: string;
+  emailFooterColor: string;
   emailSubject: string;
   emailBodyTemplate: string; // HTML supported
   emailFooterText: string;
-  
+
   // Invitation Email
   emailInvitationSubject: string;
   emailInvitationBody: string; // HTML supported
@@ -108,18 +129,21 @@ export const DEFAULT_SETTINGS: AppSettings = {
   smtpPort: '587',
   smtpUser: '',
   smtpPass: '',
-  
-  emailHeaderLogo: 'https://via.placeholder.com/300x80?text=Event+Logo',
+
+  emailHeaderLogo: '',
+  emailHeaderColor: '#f8fafc',
+  emailFooterColor: '#f8fafc',
   emailSubject: 'Your Event Ticket & Invoice',
   emailBodyTemplate: '<p>Hi <strong>{{name}}</strong>,</p><p>Thank you for registering for <strong>{{event}}</strong>!</p><p>Attached is your official PDF ticket. Please present the QR code at the entrance.</p><p>Invoice ID: {{invoiceId}}<br>Amount Paid: {{amount}}</p><p>See you there!</p>',
   emailFooterText: '© 2025 Event Organizers Inc. All rights reserved.',
-  
+
   emailInvitationSubject: 'You are invited!',
   emailInvitationBody: '<p>Hi there,</p><p>We would love for you to join us at <strong>{{event}}</strong>.</p><p>Please click the link below to register:</p><p><a href="{{link}}" style="color: #4F46E5;">Register Now</a></p><p>Best regards,<br>The Team</p>',
 
   pdfSettings: {
     enabled: true,
-    logoUrl: 'https://via.placeholder.com/150x50?text=LOGO',
+    logoUrl: '',
+    eventTitle: '',
     organizationName: 'Event Organizers Inc.',
     organizationInfo: '123 Event Street, City, Country\nTax ID: 12-3456789',
     primaryColor: '#4F46E5', // Indigo-600

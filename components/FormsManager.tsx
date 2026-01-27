@@ -3,19 +3,25 @@ import { Plus, Edit3, Trash2, Globe, Code, ExternalLink, Copy, Check } from 'luc
 import { Link } from 'react-router-dom';
 import { Form } from '../types';
 import { getForms, saveForm, deleteForm } from '../services/storageService';
+import { useNotifications } from './NotificationSystem';
 
 const FormsManager: React.FC = () => {
   const [forms, setForms] = useState<Form[]>([]);
   const [showEmbedModal, setShowEmbedModal] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const { showNotification } = useNotifications();
 
   useEffect(() => {
-    setForms(getForms());
+    const fetch = async () => {
+      const data = await getForms();
+      setForms(data);
+    };
+    fetch();
   }, []);
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     const newForm: Form = {
-      id: `evt_${Date.now()}`,
+      id: crypto.randomUUID(),
       title: 'New Event Registration',
       description: 'Enter event details here...',
       createdAt: new Date().toISOString(),
@@ -25,14 +31,18 @@ const FormsManager: React.FC = () => {
         { id: 'f_email', type: 'email', label: 'Email Address', required: true }
       ]
     };
-    saveForm(newForm);
-    setForms(getForms());
+    await saveForm(newForm);
+    const updatedForms = await getForms();
+    setForms(updatedForms);
+    showNotification('New form created successfully', 'success');
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (confirm('Are you sure you want to delete this form? All associated data might lose context.')) {
-      deleteForm(id);
-      setForms(getForms());
+      await deleteForm(id);
+      const updatedForms = await getForms();
+      setForms(updatedForms);
+      showNotification('Form deleted successfully', 'info');
     }
   };
 
@@ -44,6 +54,7 @@ const FormsManager: React.FC = () => {
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
     setCopied(true);
+    showNotification('Embed code copied to clipboard', 'success');
     setTimeout(() => setCopied(false), 2000);
   };
 
@@ -54,7 +65,7 @@ const FormsManager: React.FC = () => {
           <h2 className="text-2xl font-bold text-gray-900">Event Forms</h2>
           <p className="text-gray-500">Create and manage registration forms for your events.</p>
         </div>
-        <button 
+        <button
           onClick={handleCreate}
           className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition font-medium"
         >
@@ -67,9 +78,8 @@ const FormsManager: React.FC = () => {
           <div key={form.id} className="bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow flex flex-col">
             <div className="p-6 flex-1">
               <div className="flex justify-between items-start mb-4">
-                <div className={`px-2 py-1 rounded text-xs font-semibold uppercase tracking-wide ${
-                  form.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
-                }`}>
+                <div className={`px-2 py-1 rounded text-xs font-semibold uppercase tracking-wide ${form.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
+                  }`}>
                   {form.status}
                 </div>
                 <div className="text-xs text-gray-400">
@@ -79,25 +89,25 @@ const FormsManager: React.FC = () => {
               <h3 className="text-lg font-bold text-gray-900 mb-1">{form.title}</h3>
               <p className="text-sm text-gray-500 line-clamp-2 mb-4">{form.description}</p>
             </div>
-            
+
             <div className="p-4 bg-gray-50 border-t border-gray-100 rounded-b-xl flex justify-between items-center">
               <div className="flex gap-2">
-                <Link 
-                  to={`/admin/builder/${form.id}`} 
+                <Link
+                  to={`/admin/builder/${form.id}`}
                   className="p-2 text-gray-600 hover:text-indigo-600 hover:bg-white rounded-lg transition"
                   title="Edit Builder"
                 >
                   <Edit3 className="w-5 h-5" />
                 </Link>
-                <button 
+                <button
                   onClick={() => setShowEmbedModal(form.id)}
                   className="p-2 text-gray-600 hover:text-indigo-600 hover:bg-white rounded-lg transition"
                   title="Get Embed Code"
                 >
                   <Code className="w-5 h-5" />
                 </button>
-                <Link 
-                  to={`/form/${form.id}`} 
+                <Link
+                  to={`/form/${form.id}`}
                   target="_blank"
                   className="p-2 text-gray-600 hover:text-green-600 hover:bg-white rounded-lg transition"
                   title="View Public Page"
@@ -105,7 +115,7 @@ const FormsManager: React.FC = () => {
                   <ExternalLink className="w-5 h-5" />
                 </Link>
               </div>
-              <button 
+              <button
                 onClick={() => handleDelete(form.id)}
                 className="p-2 text-gray-400 hover:text-red-600 hover:bg-white rounded-lg transition"
               >
@@ -114,12 +124,12 @@ const FormsManager: React.FC = () => {
             </div>
           </div>
         ))}
-        
+
         {forms.length === 0 && (
           <div className="col-span-full py-12 text-center border-2 border-dashed border-gray-200 rounded-xl">
-             <Globe className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-             <p className="text-gray-500">No forms created yet.</p>
-             <button onClick={handleCreate} className="text-indigo-600 font-medium mt-2">Create your first form</button>
+            <Globe className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+            <p className="text-gray-500">No forms created yet.</p>
+            <button onClick={handleCreate} className="text-indigo-600 font-medium mt-2">Create your first form</button>
           </div>
         )}
       </div>
@@ -140,7 +150,7 @@ const FormsManager: React.FC = () => {
                 <code className="text-green-400 text-xs break-all font-mono">
                   {getEmbedCode(showEmbedModal)}
                 </code>
-                <button 
+                <button
                   onClick={() => copyToClipboard(getEmbedCode(showEmbedModal))}
                   className="absolute top-2 right-2 p-2 bg-white/10 hover:bg-white/20 text-white rounded transition"
                 >
@@ -149,7 +159,7 @@ const FormsManager: React.FC = () => {
               </div>
             </div>
             <div className="p-4 bg-gray-50 text-right">
-              <button 
+              <button
                 onClick={() => setShowEmbedModal(null)}
                 className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg font-medium hover:bg-gray-300 transition"
               >

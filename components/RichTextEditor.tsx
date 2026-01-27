@@ -14,11 +14,11 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({ value, onChange, classN
   // Sync value to innerHTML only when not focused or empty to prevent cursor jumping
   useEffect(() => {
     if (editorRef.current && editorRef.current.innerHTML !== value) {
-       // Only update if significantly different to avoid cursor reset issues
-       // A simple check: if focused, don't update from props to avoid conflict
-       if (document.activeElement !== editorRef.current) {
-         editorRef.current.innerHTML = value;
-       }
+      // Only update if significantly different to avoid cursor reset issues
+      // A simple check: if focused, don't update from props to avoid conflict
+      if (document.activeElement !== editorRef.current) {
+        editorRef.current.innerHTML = value;
+      }
     }
   }, [value]);
 
@@ -72,8 +72,8 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({ value, onChange, classN
         <ToolbarButton icon={Italic} action={() => exec('italic')} title="Italic" />
         <ToolbarButton icon={Underline} action={() => exec('underline')} title="Underline" />
         <div className="w-px h-4 bg-gray-300 mx-1" />
-        <select 
-          onChange={(e) => changeFontSize(e.target.value)} 
+        <select
+          onChange={(e) => changeFontSize(e.target.value)}
           className="text-xs border-gray-200 rounded px-1 py-1 text-gray-600 focus:outline-none cursor-pointer"
         >
           <option value="3">Normal</option>
@@ -89,16 +89,15 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({ value, onChange, classN
         <ToolbarButton icon={LinkIcon} action={addLink} title="Insert Link" />
         <ToolbarButton icon={Image} action={addImage} title="Insert Image" />
       </div>
-      
+
       <div
         ref={editorRef}
         contentEditable
         onInput={handleInput}
         className="flex-1 p-4 outline-none prose prose-sm max-w-none overflow-y-auto min-h-[150px]"
-        dangerouslySetInnerHTML={{ __html: value }}
       />
       {value === '' && placeholder && (
-         <div className="absolute top-[52px] left-4 text-gray-300 pointer-events-none text-sm">{placeholder}</div>
+        <div className="absolute top-[52px] left-4 text-gray-300 pointer-events-none text-sm">{placeholder}</div>
       )}
     </div>
   );

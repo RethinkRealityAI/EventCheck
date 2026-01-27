@@ -9,21 +9,27 @@ const ManualTicketTool: React.FC = () => {
   const [attendees, setAttendees] = useState<Attendee[]>([]);
   const [selectedAttendee, setSelectedAttendee] = useState<Attendee | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  
+
   // New user form state
   const [formData, setFormData] = useState({ firstName: '', lastName: '', email: '' });
-  
+
   const [loading, setLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
   const [settings, setSettings] = useState<AppSettings | null>(null);
 
   useEffect(() => {
-    setAttendees(getAttendees());
-    setSettings(getSettings());
+    const fetch = async () => {
+      const attendeeData = await getAttendees();
+      setAttendees(attendeeData);
+
+      const settingsData = await getSettings();
+      setSettings(settingsData);
+    };
+    fetch();
   }, []);
 
-  const filteredAttendees = attendees.filter(a => 
-    a.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+  const filteredAttendees = attendees.filter(a =>
+    a.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     a.email.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
@@ -31,9 +37,9 @@ const ManualTicketTool: React.FC = () => {
     e.preventDefault();
     setLoading(true);
     setSuccessMsg('');
-    
+
     // Create new attendee manually
-    const id = Math.random().toString(36).substr(2, 9).toUpperCase();
+    const id = crypto.randomUUID();
     const newAttendee: Attendee = {
       id,
       formId: 'manual',
@@ -46,12 +52,13 @@ const ManualTicketTool: React.FC = () => {
     };
 
     // Simulate async
-    setTimeout(() => {
-        saveAttendee(newAttendee);
-        setAttendees(getAttendees()); // refresh list
-        setSelectedAttendee(newAttendee);
-        setLoading(false);
-        setSuccessMsg('Ticket Generated Successfully');
+    setTimeout(async () => {
+      await saveAttendee(newAttendee);
+      const updatedAttendees = await getAttendees();
+      setAttendees(updatedAttendees); // refresh list
+      setSelectedAttendee(newAttendee);
+      setLoading(false);
+      setSuccessMsg('Ticket Generated Successfully');
     }, 600);
   };
 
@@ -59,7 +66,7 @@ const ManualTicketTool: React.FC = () => {
     if (!selectedAttendee) return;
     setLoading(true);
     setSuccessMsg('');
-    
+
     setTimeout(() => {
       setLoading(false);
       setSuccessMsg(`Email sent to ${selectedAttendee.email}`);
@@ -71,18 +78,18 @@ const ManualTicketTool: React.FC = () => {
       <div className="space-y-6">
         {/* Toggle */}
         <div className="bg-white p-1 rounded-lg border border-gray-200 inline-flex shadow-sm">
-           <button 
-             onClick={() => { setMode('existing'); setSelectedAttendee(null); setSuccessMsg(''); }}
-             className={`px-4 py-2 text-sm font-medium rounded-md transition ${mode === 'existing' ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-50'}`}
-           >
-             Existing Attendee
-           </button>
-           <button 
-             onClick={() => { setMode('new'); setSelectedAttendee(null); setSuccessMsg(''); }}
-             className={`px-4 py-2 text-sm font-medium rounded-md transition ${mode === 'new' ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-50'}`}
-           >
-             Issue New Ticket
-           </button>
+          <button
+            onClick={() => { setMode('existing'); setSelectedAttendee(null); setSuccessMsg(''); }}
+            className={`px-4 py-2 text-sm font-medium rounded-md transition ${mode === 'existing' ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-50'}`}
+          >
+            Existing Attendee
+          </button>
+          <button
+            onClick={() => { setMode('new'); setSelectedAttendee(null); setSuccessMsg(''); }}
+            className={`px-4 py-2 text-sm font-medium rounded-md transition ${mode === 'new' ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-50'}`}
+          >
+            Issue New Ticket
+          </button>
         </div>
 
         {/* Existing User Search */}
@@ -91,7 +98,7 @@ const ManualTicketTool: React.FC = () => {
             <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
               <Search className="w-5 h-5 text-indigo-600" /> Find Registered User
             </h3>
-            <input 
+            <input
               type="text"
               placeholder="Search by name or email..."
               className="w-full px-4 py-3 border border-gray-300 rounded-lg mb-4 focus:ring-2 focus:ring-indigo-500 outline-none"
@@ -100,14 +107,13 @@ const ManualTicketTool: React.FC = () => {
             />
             <div className="flex-1 overflow-y-auto space-y-2 pr-2">
               {filteredAttendees.map(att => (
-                <div 
+                <div
                   key={att.id}
                   onClick={() => { setSelectedAttendee(att); setSuccessMsg(''); }}
-                  className={`p-3 rounded-lg border cursor-pointer transition ${
-                    selectedAttendee?.id === att.id 
-                    ? 'border-indigo-500 bg-indigo-50 ring-1 ring-indigo-500' 
+                  className={`p-3 rounded-lg border cursor-pointer transition ${selectedAttendee?.id === att.id
+                    ? 'border-indigo-500 bg-indigo-50 ring-1 ring-indigo-500'
                     : 'border-gray-100 hover:border-gray-300 hover:bg-gray-50'
-                  }`}
+                    }`}
                 >
                   <p className="font-medium text-gray-900">{att.name}</p>
                   <p className="text-xs text-gray-500">{att.email}</p>
@@ -122,7 +128,7 @@ const ManualTicketTool: React.FC = () => {
         {/* New User Form */}
         {mode === 'new' && (
           <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-             <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
+            <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
               <User className="w-5 h-5 text-indigo-600" /> Manual Entry Details
             </h3>
             <form onSubmit={handleCreateNew} className="space-y-4">
@@ -130,18 +136,18 @@ const ManualTicketTool: React.FC = () => {
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">First Name</label>
                   <input required type="text" className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
-                    value={formData.firstName} onChange={e => setFormData({...formData, firstName: e.target.value})} />
+                    value={formData.firstName} onChange={e => setFormData({ ...formData, firstName: e.target.value })} />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Last Name</label>
                   <input required type="text" className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
-                    value={formData.lastName} onChange={e => setFormData({...formData, lastName: e.target.value})} />
+                    value={formData.lastName} onChange={e => setFormData({ ...formData, lastName: e.target.value })} />
                 </div>
               </div>
               <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                  <input required type="email" className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
-                    value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} />
+                <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                <input required type="email" className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
+                  value={formData.email} onChange={e => setFormData({ ...formData, email: e.target.value })} />
               </div>
               <button type="submit" disabled={loading} className="w-full py-3 bg-gray-900 text-white rounded-lg font-medium hover:bg-gray-800 transition flex justify-center items-center gap-2">
                 {loading ? <Loader2 className="animate-spin w-4 h-4" /> : <RefreshCw className="w-4 h-4" />}
@@ -162,7 +168,7 @@ const ManualTicketTool: React.FC = () => {
                 {selectedAttendee.paymentStatus === 'paid' ? 'PAID' : 'STANDARD'}
               </span>
             </div>
-            
+
             <div className="flex justify-center mb-6">
               <QRCodeSVG value={selectedAttendee.qrPayload} size={180} />
             </div>
@@ -174,12 +180,12 @@ const ManualTicketTool: React.FC = () => {
             </div>
 
             {successMsg && (
-               <div className="mb-4 bg-green-50 text-green-700 p-2 rounded-lg text-sm text-center font-medium flex items-center justify-center gap-2 animate-fade-in">
-                 <Check className="w-4 h-4" /> {successMsg}
-               </div>
+              <div className="mb-4 bg-green-50 text-green-700 p-2 rounded-lg text-sm text-center font-medium flex items-center justify-center gap-2 animate-fade-in">
+                <Check className="w-4 h-4" /> {successMsg}
+              </div>
             )}
 
-            <button 
+            <button
               onClick={handleResend}
               disabled={loading}
               className="w-full py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition flex items-center justify-center gap-2"
@@ -193,7 +199,7 @@ const ManualTicketTool: React.FC = () => {
             <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
               <QrCode className="w-10 h-10 text-gray-300" />
             </div>
-            <p>Select an attendee or create a new one<br/>to generate a QR code ticket.</p>
+            <p>Select an attendee or create a new one<br />to generate a QR code ticket.</p>
           </div>
         )}
       </div>

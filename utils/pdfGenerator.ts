@@ -1,110 +1,165 @@
 import jsPDF from 'jspdf';
-import QRCode from 'qrcode.react';
 import { Attendee, AppSettings } from '../types';
 
 export const generateTicketPDF = (attendee: Attendee, settings: AppSettings): jsPDF => {
   const doc = new jsPDF();
   const pdfConfig = settings.pdfSettings;
   const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
   const primaryColor = pdfConfig.primaryColor || '#4F46E5';
+
+  // --- Background Image Handling ---
+  if (pdfConfig.backgroundImage && pdfConfig.backgroundImage.length > 50) {
+    try {
+      const format = pdfConfig.backgroundImage.includes('image/jpeg') ? 'JPEG' : 'PNG';
+      // Add image covering the entire page
+      doc.addImage(pdfConfig.backgroundImage, format, 0, 0, pageWidth, pageHeight, undefined, 'FAST');
+
+      // REMOVED BLUR/OVERLAY as requested
+    } catch (e) {
+      console.error("PDF Background Error:", e);
+    }
+  }
 
   // --- Header Background ---
   doc.setFillColor(primaryColor);
-  doc.rect(0, 0, pageWidth, 40, 'F');
+  doc.rect(0, 0, pageWidth, 50, 'F');
 
-  // --- Organization Name ---
+  let headerTextX = 20;
+
+  // --- Logo Handling (Left Side) ---
+  if (pdfConfig.logoUrl && pdfConfig.logoUrl.length > 50) {
+    try {
+      const format = pdfConfig.logoUrl.includes('image/jpeg') ? 'JPEG' : 'PNG';
+      doc.addImage(pdfConfig.logoUrl, format, 15, 12, 25, 25, undefined, 'FAST');
+      headerTextX = 45;
+    } catch (e) {
+      console.error("PDF Logo Error:", e);
+    }
+  }
+
+  // --- Organization Info (Right Side) ---
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  doc.text(pdfConfig.organizationName.toUpperCase(), pageWidth - 15, 18, { align: 'right' });
+
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'normal');
+  const orgInfoLines = pdfConfig.organizationInfo.split('\n');
+  doc.text(orgInfoLines, pageWidth - 15, 24, { align: 'right' });
+
+  // --- Event Title ---
+  const displayTitle = pdfConfig.eventTitle || attendee.formTitle || 'Event Registration';
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(22);
   doc.setFont('helvetica', 'bold');
-  doc.text(pdfConfig.organizationName, 20, 20);
+  doc.text(displayTitle, headerTextX, 30);
 
-  // --- Event Title (Sub-header) ---
-  doc.setFontSize(14);
-  doc.setFont('helvetica', 'normal');
-  doc.text(`Event: ${attendee.formTitle || 'Event Registration'}`, 20, 32);
-
-  // --- Main Content Area ---
-  doc.setTextColor(30, 30, 30);
-  doc.setFontSize(10);
-  
-  // Organization Details (Top Right)
-  const orgInfoLines = pdfConfig.organizationInfo.split('\n');
-  doc.setFontSize(10);
-  doc.setTextColor(255, 255, 255);
-  doc.text(orgInfoLines, pageWidth - 20, 15, { align: 'right' });
-
-  // --- Ticket Details Box ---
-  // Draw a border
+  // --- Main Ticket Body Box ---
+  const bodyStartY = 70;
   doc.setDrawColor(200, 200, 200);
-  doc.setLineWidth(0.5);
-  doc.roundedRect(20, 55, pageWidth - 40, 120, 3, 3);
+  doc.setFillColor(255, 255, 255);
+  doc.roundedRect(20, bodyStartY, pageWidth - 40, 110, 3, 3);
 
-  // Attendee Name
-  doc.setTextColor(0, 0, 0);
-  doc.setFontSize(12);
-  doc.text("Attendee Name:", 30, 75);
-  doc.setFontSize(18);
-  doc.setFont('helvetica', 'bold');
-  doc.text(attendee.name, 30, 85);
+  doc.setFillColor(primaryColor);
+  doc.roundedRect(20, bodyStartY, 4, 110, 3, 3, 'F');
 
-  // Ticket Type
-  doc.setFontSize(12);
-  doc.setFont('helvetica', 'normal');
-  doc.text("Ticket Type:", 30, 100);
-  doc.setFontSize(14);
-  doc.text(attendee.ticketType, 30, 108);
+  // --- QR Code ---
+  const qrBoxSize = 45;
+  const qrX = pageWidth - 20 - qrBoxSize - 10;
+  const qrY = bodyStartY + 10;
 
-  // Invoice / ID
-  doc.setFontSize(12);
-  doc.text("Ticket ID:", 30, 123);
-  doc.setFontSize(14);
-  doc.text(attendee.id, 30, 131);
-
-  if (attendee.invoiceId) {
-    doc.setFontSize(12);
-    doc.text("Invoice #:", 100, 123);
-    doc.setFontSize(14);
-    doc.text(attendee.invoiceId, 100, 131);
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(attendee.qrPayload)}`;
+  try {
+    doc.addImage(qrUrl, 'PNG', qrX, qrY, qrBoxSize, qrBoxSize);
+    doc.setFontSize(9);
+    doc.setTextColor(primaryColor);
+    doc.text("SCAN FOR ENTRY", qrX + qrBoxSize / 2, qrY + qrBoxSize + 5, { align: 'center' });
+  } catch (e) {
+    doc.setDrawColor(primaryColor);
+    doc.rect(qrX, qrY, qrBoxSize, qrBoxSize);
+    doc.text("QR ERROR", qrX, qrY + 20);
   }
 
-  // --- QR Code Generation ---
-  // We need to generate a QR Code as an image URI
-  // Create a temporary canvas
-  const canvas = document.createElement('canvas');
-  // Use a library or custom logic? 
-  // Since we don't have node canvas, we rely on the DOM being present (which it is)
-  // But inside this function, we can't easily use the React Component.
-  // We will use a lightweight logic or assumes this runs in browser where we can create an image.
-  
-  // Actually, to keep it robust without heavy deps inside this util, 
-  // we will create a QR URL using a public API or a base64 from a hidden canvas if possible.
-  // But wait, `qrcode.react` renders to canvas. We can't use it easily here non-reactively.
-  // We will use a simple external QR generator API for the PDF or rely on the `jsqr` if it had generation (it doesn't).
-  // Strategy: Use a reliable QR code API for the PDF image to ensure it works without complex canvas hacks.
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(attendee.qrPayload)}`;
-  
-  // NOTE: Loading image into PDF from URL might have CORS issues if not handled.
-  // Ideally we use a base64 passed in. But for this demo, let's try to add a placeholder box
-  // OR simply draw a box saying "QR Code". 
-  
-  // BETTER APPROACH: We can't easily fetch images synchronously.
-  // Let's draw a placeholder rectangle for the QR code to keep it robust 
-  // OR we can try to use a data URI if we had one.
-  
-  // Let's assume for this "World-class" demo, we want a real QR.
-  // We will simply draw a box for now to avoid async/CORS complexities in this synchronous util function,
-  // but label it clearly.
-  
-  doc.setDrawColor(0, 0, 0);
-  doc.rect(pageWidth - 80, 70, 40, 40);
-  doc.setFontSize(8);
-  doc.text("Scan at Entry", pageWidth - 60, 115, { align: 'center' });
-  doc.text("(QR Code Placeholder)", pageWidth - 60, 90, { align: 'center' });
-  
-  // Footer
-  doc.setTextColor(100, 100, 100);
+  // --- Attendee Details ---
+  let currentY = bodyStartY + 20;
+  const labelX = 35;
+
+  doc.setTextColor(150, 150, 150);
   doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  doc.text("ATTENDEE", labelX, currentY);
+
+  currentY += 8;
+  doc.setTextColor(30, 30, 30);
+  doc.setFontSize(20);
+  doc.text(attendee.name, labelX, currentY);
+
+  currentY += 15;
+  doc.setTextColor(150, 150, 150);
+  doc.setFontSize(10);
+  doc.text("TICKET TYPE", labelX, currentY);
+
+  currentY += 6;
+  doc.setTextColor(30, 30, 30);
+  doc.setFontSize(14);
+  doc.text(attendee.ticketType, labelX, currentY);
+
+  currentY += 15;
+  doc.setTextColor(150, 150, 150);
+  doc.setFontSize(10);
+  doc.text("REGISTRATION ID", labelX, currentY);
+
+  currentY += 6;
+  doc.setTextColor(30, 30, 30);
+  doc.setFontSize(12);
+  doc.setFont('courier', 'normal');
+  doc.text(attendee.id, labelX, currentY);
+
+  if (attendee.transactionId) {
+    currentY += 6;
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100, 100, 100);
+    doc.text(`Transaction: ${attendee.transactionId}`, labelX, currentY);
+  }
+
+  currentY += 15;
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(150, 150, 150);
+  doc.setFontSize(10);
+  doc.text("DATE", labelX, currentY);
+
+  currentY += 6;
+  doc.setTextColor(30, 30, 30);
+  doc.setFontSize(12);
+  doc.text(formatDate(attendee.registeredAt), labelX, currentY);
+
+  if (attendee.transactionId) {
+    const payY = bodyStartY + 110 - 15;
+    doc.setFontSize(9);
+    doc.setTextColor(primaryColor);
+    doc.text(`Paid via PayPal (${attendee.paymentAmount || 'Paid'})`, labelX, payY);
+  }
+
+  // --- Footer ---
+  doc.setTextColor(150, 150, 150);
+  doc.setFontSize(8);
   doc.text(pdfConfig.footerText, pageWidth / 2, 280, { align: 'center' });
+  doc.text("Generated by EventCheck", pageWidth / 2, 285, { align: 'center' });
 
   return doc;
+};
+
+const formatDate = (dateStr: string) => {
+  try {
+    return new Date(dateStr).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+  } catch (e) {
+    return dateStr;
+  }
 };

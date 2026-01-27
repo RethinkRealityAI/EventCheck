@@ -23,16 +23,16 @@ const WebhookSimulator: React.FC<WebhookSimulatorProps> = ({ onRegister }) => {
 
     // Simulate Network Latency
     setTimeout(() => {
-      const submissionID = Math.random().toString(36).substr(2, 9);
+      const submissionID = crypto.randomUUID();
       const newAttendee = {
         id: submissionID,
         name: `${formData.firstName} ${formData.lastName}`,
         email: formData.email,
         ticketType: formData.ticketType,
       };
-      
+
       onRegister(newAttendee);
-      
+
       // We reconstruct the full attendee object here just for the preview
       setLastTicket({
         ...newAttendee,
@@ -40,7 +40,7 @@ const WebhookSimulator: React.FC<WebhookSimulatorProps> = ({ onRegister }) => {
         checkedInAt: null,
         qrPayload: JSON.stringify({ id: submissionID, action: 'checkin' })
       });
-      
+
       setLoading(false);
     }, 1500);
   };
@@ -59,7 +59,7 @@ const WebhookSimulator: React.FC<WebhookSimulatorProps> = ({ onRegister }) => {
             <h2 className="font-semibold text-lg">Jotform Webhook Simulator</h2>
           </div>
           <p className="text-sm text-gray-500">
-            In a real scenario, Jotform sends a POST request to your backend. 
+            In a real scenario, Jotform sends a POST request to your backend.
             This form simulates receiving that payload.
           </p>
         </div>
@@ -68,43 +68,43 @@ const WebhookSimulator: React.FC<WebhookSimulatorProps> = ({ onRegister }) => {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">First Name</label>
-              <input 
-                type="text" 
+              <input
+                type="text"
                 required
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
                 value={formData.firstName}
-                onChange={e => setFormData({...formData, firstName: e.target.value})}
+                onChange={e => setFormData({ ...formData, firstName: e.target.value })}
               />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Last Name</label>
-              <input 
-                type="text" 
+              <input
+                type="text"
                 required
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
                 value={formData.lastName}
-                onChange={e => setFormData({...formData, lastName: e.target.value})}
+                onChange={e => setFormData({ ...formData, lastName: e.target.value })}
               />
             </div>
           </div>
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Email Address</label>
-            <input 
-              type="email" 
+            <input
+              type="email"
               required
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
               value={formData.email}
-              onChange={e => setFormData({...formData, email: e.target.value})}
+              onChange={e => setFormData({ ...formData, email: e.target.value })}
             />
           </div>
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Ticket Type</label>
-            <select 
+            <select
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
               value={formData.ticketType}
-              onChange={e => setFormData({...formData, ticketType: e.target.value})}
+              onChange={e => setFormData({ ...formData, ticketType: e.target.value })}
             >
               <option>General Admission</option>
               <option>VIP Admission</option>
@@ -113,8 +113,8 @@ const WebhookSimulator: React.FC<WebhookSimulatorProps> = ({ onRegister }) => {
             </select>
           </div>
 
-          <button 
-            type="submit" 
+          <button
+            type="submit"
             disabled={loading}
             className="w-full py-3 bg-gray-900 text-white rounded-lg font-medium hover:bg-gray-800 transition flex justify-center items-center gap-2"
           >
@@ -135,17 +135,17 @@ const WebhookSimulator: React.FC<WebhookSimulatorProps> = ({ onRegister }) => {
             </div>
             <h3 className="text-xl font-bold text-gray-900 mb-1">Registration Complete</h3>
             <p className="text-gray-500 text-sm mb-6">Automated email ready to send.</p>
-            
+
             <div className="border-t border-b border-dashed border-gray-300 py-6 mb-6">
               <div className="flex justify-center mb-4">
-                 <QRCode value={lastTicket.qrPayload} size={160} />
+                <QRCode value={lastTicket.qrPayload} size={160} />
               </div>
               <p className="text-lg font-bold text-gray-900">{lastTicket.name}</p>
               <p className="text-sm text-indigo-600 font-medium">{lastTicket.ticketType}</p>
               <p className="text-xs text-gray-400 mt-2 font-mono">ID: {lastTicket.id}</p>
             </div>
 
-            <button 
+            <button
               onClick={handleSendEmail}
               className="w-full py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition"
             >
