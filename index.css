@@ -1,6 +1,4 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
 /* Custom Scrollbar Styles from previous HTML styles */
 .custom-scrollbar::-webkit-scrollbar {
@@ -38,6 +36,7 @@
     opacity: 0;
     transform: translateY(10px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -49,9 +48,12 @@
 }
 
 @keyframes bounce-slow {
-  0%, 100% {
+
+  0%,
+  100% {
     transform: translateY(-5%);
   }
+
   50% {
     transform: translateY(5%);
   }
