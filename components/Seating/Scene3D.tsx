@@ -44,7 +44,7 @@ function SimpleGrid() {
     const divisions = 20;
     const step = size / divisions;
     const half = size / 2;
-    const lines: JSX.Element[] = [];
+    const lines: React.JSX.Element[] = [];
 
     for (let i = 0; i <= divisions; i++) {
         const pos = -half + i * step;

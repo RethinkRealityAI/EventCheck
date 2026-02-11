@@ -158,6 +158,14 @@ export default function SeatingConfigurator() {
         setLoading(false);
     };
 
+    // Update selected table
+    const updateSelectedTable = (updates: Partial<SeatingTable>) => {
+        if (!selectedTableId) return;
+        setTables(prev => prev.map(t =>
+            t.id === selectedTableId ? { ...t, ...updates } : t
+        ));
+    };
+
     // Save All
     const handleSave = async () => {
         if (!activeConfigId) return;
