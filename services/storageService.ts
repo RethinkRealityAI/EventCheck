@@ -1,4 +1,4 @@
-import { Attendee, Form, AppSettings, DEFAULT_SETTINGS, FormField, PdfSettings } from '../types';
+import { Attendee, Form, AppSettings, DEFAULT_SETTINGS, FormField, PdfSettings, SeatingTable, SeatingConfiguration, SeatingAssignment } from '../types';
 import { supabase } from './supabaseClient';
 import { Database } from './database.types';
 
@@ -7,6 +7,11 @@ type AttendeeInsert = Database['public']['Tables']['attendees']['Insert'];
 type FormRow = Database['public']['Tables']['forms']['Row'];
 type FormInsert = Database['public']['Tables']['forms']['Insert'];
 type AppSettingsRow = Database['public']['Tables']['app_settings']['Row'];
+
+type SeatingConfigurationRow = Database['public']['Tables']['seating_configurations']['Row'];
+type SeatingConfigurationInsert = Database['public']['Tables']['seating_configurations']['Insert'];
+type SeatingAssignmentRow = Database['public']['Tables']['seating_assignments']['Row'];
+type SeatingAssignmentInsert = Database['public']['Tables']['seating_assignments']['Insert'];
 
 // --- Attendees ---
 export const getAttendees = async (): Promise<Attendee[]> => {
@@ -65,6 +70,12 @@ export const updateAttendee = async (id: string, updates: Partial<Attendee>): Pr
   if (updates.paymentAmount !== undefined) dbUpdates.payment_amount = updates.paymentAmount;
   if (updates.isTest !== undefined) dbUpdates.is_test = updates.isTest;
   if (updates.answers !== undefined) dbUpdates.answers = updates.answers;
+  if (updates.donatedSeats !== undefined) dbUpdates.donation_amount = updates.donatedSeats;
+  if (updates.dietaryPreferences !== undefined) dbUpdates.dietary_preferences = updates.dietaryPreferences;
+  if (updates.primaryAttendeeId !== undefined) dbUpdates.primary_attendee_id = updates.primaryAttendeeId;
+  if (updates.isPrimary !== undefined) dbUpdates.is_primary = updates.isPrimary;
+  if (updates.assignedTableId !== undefined) dbUpdates.assigned_table_id = updates.assignedTableId;
+  if (updates.assignedSeat !== undefined) dbUpdates.assigned_seat = updates.assignedSeat;
 
   const { error } = await supabase
     .from('attendees')
@@ -253,7 +264,13 @@ function mapAttendeeFromDb(db: AttendeeRow): Attendee {
     transactionId: db.transaction_id || undefined,
     paymentAmount: db.payment_amount || undefined,
     answers: (db.answers as Record<string, any>) || {},
-    isTest: db.is_test || false
+    isTest: db.is_test || false,
+    donatedSeats: db.donation_amount || 0,
+    dietaryPreferences: db.dietary_preferences || undefined,
+    primaryAttendeeId: db.primary_attendee_id || undefined,
+    isPrimary: db.is_primary ?? true,
+    assignedTableId: db.assigned_table_id || null,
+    assignedSeat: db.assigned_seat ?? null
   };
 }
 
@@ -273,7 +290,14 @@ function mapAttendeeToDb(a: Attendee): AttendeeInsert {
     transaction_id: a.transactionId,
     payment_amount: a.paymentAmount,
     answers: a.answers,
-    is_test: a.isTest
+    is_test: a.isTest,
+    donation_amount: a.donatedSeats || 0,
+    donation_details: null,
+    dietary_preferences: a.dietaryPreferences || null,
+    primary_attendee_id: a.primaryAttendeeId || null,
+    is_primary: a.isPrimary ?? true,
+    assigned_table_id: a.assignedTableId || null,
+    assigned_seat: a.assignedSeat ?? null
   };
 }
 
@@ -299,5 +323,231 @@ function mapFormToDb(f: Form): FormInsert {
     settings: f.settings as any,
     thank_you_message: f.thankYouMessage,
     fields: f.fields as any
+  };
+}
+
+// --- Seating Configurations ---
+export const getSeatingConfigurations = async (formId: string): Promise<SeatingConfiguration[]> => {
+  const { data, error } = await supabase
+    .from('seating_configurations')
+    .select('*')
+    .eq('form_id', formId)
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    console.error("Failed to load seating configurations", error);
+    return [];
+  }
+
+  return (data || []).map(mapSeatingConfigFromDb);
+};
+
+export const saveSeatingConfiguration = async (config: SeatingConfiguration): Promise<void> => {
+  const dbRecord = mapSeatingConfigToDb(config);
+  const { error } = await supabase
+    .from('seating_configurations')
+    .upsert(dbRecord);
+
+  if (error) console.error("Failed to save seating configuration", error);
+};
+
+export const deleteSeatingConfiguration = async (id: string): Promise<void> => {
+  const { error } = await supabase
+    .from('seating_configurations')
+    .delete()
+    .eq('id', id);
+
+  if (error) console.error("Failed to delete seating configuration", error);
+};
+
+function mapSeatingConfigFromDb(db: SeatingConfigurationRow): SeatingConfiguration {
+  return {
+    id: db.id,
+    formId: db.form_id,
+    name: db.name,
+    createdAt: db.created_at
+  };
+}
+
+function mapSeatingConfigToDb(c: SeatingConfiguration): SeatingConfigurationInsert {
+  return {
+    id: c.id,
+    form_id: c.formId,
+    name: c.name
+  };
+}
+
+// --- Seating Tables ---
+type SeatingTableRow = Database['public']['Tables']['seating_tables']['Row'];
+type SeatingTableInsert = Database['public']['Tables']['seating_tables']['Insert'];
+
+export const getSeatingTables = async (formId: string, configurationId?: string | null): Promise<SeatingTable[]> => {
+  let query = supabase.from('seating_tables').select('*').eq('form_id', formId);
+
+  if (configurationId) {
+    query = query.eq('configuration_id', configurationId);
+  } else {
+    query = query.is('configuration_id', null);
+  }
+
+  const { data, error } = await query.order('name', { ascending: true });
+
+  if (error) {
+    console.error("Failed to load seating tables", error);
+    return [];
+  }
+
+  return (data || []).map(mapSeatingTableFromDb);
+};
+
+export const saveSeatingTable = async (table: SeatingTable): Promise<void> => {
+  const dbRecord = mapSeatingTableToDb(table);
+  const { error } = await supabase
+    .from('seating_tables')
+    .upsert(dbRecord);
+
+  if (error) console.error("Failed to save seating table", error);
+};
+
+export const saveSeatingTables = async (tables: SeatingTable[], formId: string, configurationId?: string | null): Promise<void> => {
+  const dbTables = tables.map(t => mapSeatingTableToDb({ ...t, configurationId }));
+
+  // 1. Get existing table IDs for this form and configuration
+  let query = supabase.from('seating_tables').select('id').eq('form_id', formId);
+  if (configurationId) {
+    query = query.eq('configuration_id', configurationId);
+  } else {
+    query = query.is('configuration_id', null);
+  }
+
+  const { data: existing } = await query;
+  const existingIds = existing?.map(r => r.id) || [];
+  const currentIds = tables.map(t => t.id);
+
+  // 2. Identify tables to delete
+  const toDelete = existingIds.filter(id => !currentIds.includes(id));
+
+  if (toDelete.length > 0) {
+    await supabase.from('seating_tables').delete().in('id', toDelete);
+  }
+
+  // 3. Upsert current tables
+  const { error } = await supabase
+    .from('seating_tables')
+    .upsert(dbTables);
+
+  if (error) console.error("Failed to save seating tables", error);
+};
+
+export const deleteSeatingTable = async (id: string): Promise<void> => {
+  const { error } = await supabase
+    .from('seating_tables')
+    .delete()
+    .eq('id', id);
+
+  if (error) console.error("Failed to delete seating table", error);
+};
+
+export const deleteAllSeatingTables = async (formId: string): Promise<void> => {
+  const { error } = await supabase
+    .from('seating_tables')
+    .delete()
+    .eq('form_id', formId);
+
+  if (error) console.error("Failed to delete all seating tables", error);
+};
+
+function mapSeatingTableFromDb(db: SeatingTableRow): SeatingTable {
+  return {
+    id: db.id,
+    formId: db.form_id,
+    configurationId: db.configuration_id,
+    name: db.name,
+    capacity: db.capacity,
+    shape: db.shape as 'round' | 'rect',
+    x: db.x,
+    z: db.z,
+    rotation: db.rotation,
+    color: db.color,
+    vip: db.vip,
+    notes: db.notes,
+    createdAt: db.created_at
+  };
+}
+
+function mapSeatingTableToDb(t: SeatingTable): SeatingTableInsert {
+  return {
+    id: t.id,
+    form_id: t.formId,
+    configuration_id: t.configurationId || null,
+    name: t.name,
+    capacity: t.capacity,
+    shape: t.shape,
+    x: t.x,
+    z: t.z,
+    rotation: t.rotation,
+    color: t.color,
+    vip: t.vip,
+    notes: t.notes
+  };
+}
+
+// --- Seating Assignments ---
+export const getSeatingAssignments = async (configurationId: string): Promise<SeatingAssignment[]> => {
+  const { data, error } = await supabase
+    .from('seating_assignments')
+    .select('*')
+    .eq('configuration_id', configurationId);
+
+  if (error) {
+    console.error("Failed to load seating assignments", error);
+    return [];
+  }
+
+  return (data || []).map(mapSeatingAssignmentFromDb);
+};
+
+export const saveSeatingAssignments = async (assignments: SeatingAssignment[], configurationId: string): Promise<void> => {
+  const dbRecords = assignments.map(mapSeatingAssignmentToDb);
+
+  // 1. Delete all existing assignments for this configuration
+  await supabase.from('seating_assignments').delete().eq('configuration_id', configurationId);
+
+  // 2. Insert new ones
+  if (dbRecords.length > 0) {
+    const { error } = await supabase
+      .from('seating_assignments')
+      .insert(dbRecords);
+
+    if (error) console.error("Failed to save seating assignments", error);
+  }
+};
+
+export const deleteSeatingAssignment = async (id: string): Promise<void> => {
+  const { error } = await supabase
+    .from('seating_assignments')
+    .delete()
+    .eq('id', id);
+
+  if (error) console.error("Failed to delete seating assignment", error);
+};
+
+function mapSeatingAssignmentFromDb(db: SeatingAssignmentRow): SeatingAssignment {
+  return {
+    id: db.id,
+    configurationId: db.configuration_id,
+    attendeeId: db.attendee_id,
+    tableId: db.table_id,
+    seatNumber: db.seat_number
+  };
+}
+
+function mapSeatingAssignmentToDb(a: SeatingAssignment): SeatingAssignmentInsert {
+  return {
+    id: a.id,
+    configuration_id: a.configurationId,
+    attendee_id: a.attendeeId,
+    table_id: a.tableId,
+    seat_number: a.seatNumber
   };
 }

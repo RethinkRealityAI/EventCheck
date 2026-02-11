@@ -26,6 +26,13 @@ export type Database = {
                     payment_amount: string | null
                     answers: Json | null
                     is_test: boolean | null
+                    donation_amount: number
+                    donation_details: Json | null
+                    dietary_preferences: string | null
+                    primary_attendee_id: string | null
+                    is_primary: boolean
+                    assigned_table_id: string | null
+                    assigned_seat: number | null
                 }
                 Insert: {
                     id: string
@@ -43,6 +50,13 @@ export type Database = {
                     payment_amount?: string | null
                     answers?: Json | null
                     is_test?: boolean | null
+                    donation_amount?: number
+                    donation_details?: Json | null
+                    dietary_preferences?: string | null
+                    primary_attendee_id?: string | null
+                    is_primary?: boolean
+                    assigned_table_id?: string | null
+                    assigned_seat?: number | null
                 }
                 Update: {
                     id?: string
@@ -60,6 +74,13 @@ export type Database = {
                     payment_amount?: string | null
                     answers?: Json | null
                     is_test?: boolean | null
+                    donation_amount?: number
+                    donation_details?: Json | null
+                    dietary_preferences?: string | null
+                    primary_attendee_id?: string | null
+                    is_primary?: boolean
+                    assigned_table_id?: string | null
+                    assigned_seat?: number | null
                 }
             }
             forms: {
@@ -151,6 +172,99 @@ export type Database = {
                     email_invitation_subject?: string | null
                     email_invitation_body?: string | null
                     pdf_settings?: Json | null
+                }
+            }
+            seating_tables: {
+                Row: {
+                    id: string
+                    form_id: string
+                    name: string
+                    capacity: number
+                    shape: string
+                    x: number
+                    z: number
+                    rotation: number
+                    color: string | null
+                    vip: boolean
+                    notes: string | null
+                    configuration_id: string | null
+                    created_at: string
+                }
+                Insert: {
+                    id?: string
+                    form_id: string
+                    name: string
+                    capacity?: number
+                    shape?: string
+                    x?: number
+                    z?: number
+                    rotation?: number
+                    color?: string | null
+                    vip?: boolean
+                    notes?: string | null
+                    configuration_id?: string | null
+                    created_at?: string
+                }
+                Update: {
+                    id?: string
+                    form_id?: string
+                    name?: string
+                    capacity?: number
+                    shape?: string
+                    x?: number
+                    z?: number
+                    rotation?: number
+                    color?: string | null
+                    vip?: boolean
+                    notes?: string | null
+                    configuration_id?: string | null
+                    created_at?: string
+                }
+            }
+            seating_configurations: {
+                Row: {
+                    id: string
+                    form_id: string
+                    name: string
+                    created_at: string
+                }
+                Insert: {
+                    id?: string
+                    form_id: string
+                    name: string
+                    created_at?: string
+                }
+                Update: {
+                    id?: string
+                    form_id?: string
+                    name?: string
+                    created_at?: string
+                }
+            }
+            seating_assignments: {
+                Row: {
+                    id: string
+                    configuration_id: string
+                    attendee_id: string
+                    table_id: string
+                    seat_number: number
+                    created_at: string
+                }
+                Insert: {
+                    id?: string
+                    configuration_id: string
+                    attendee_id: string
+                    table_id: string
+                    seat_number: number
+                    created_at?: string
+                }
+                Update: {
+                    id?: string
+                    configuration_id?: string
+                    attendee_id?: string
+                    table_id?: string
+                    seat_number?: number
+                    created_at?: string
                 }
             }
         }

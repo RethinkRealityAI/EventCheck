@@ -25,7 +25,15 @@ const PublicRegistration = () => {
   const [ticketQuantities, setTicketQuantities] = useState<Record<string, number>>({});
   const [promoCode, setPromoCode] = useState('');
   const [appliedPromo, setAppliedPromo] = useState<{ code: string, value: number, type: 'percent' | 'fixed' } | null>(null);
+
   const [paymentTotal, setPaymentTotal] = useState(0);
+
+  // Donation State (seat-based — donating extra tickets for others)
+  const [donateOption, setDonateOption] = useState('no');
+  const [donatedSeats, setDonatedSeats] = useState(0);
+
+  // Guest State
+  const [guests, setGuests] = useState<Array<{ name: string, email: string, dietary: string }>>([]);
 
   useEffect(() => {
     const fetch = async () => {
@@ -41,25 +49,44 @@ const PublicRegistration = () => {
 
   const ticketField = form?.fields.find(f => f.type === 'ticket');
 
-  useEffect(() => {
-    if (ticketField && ticketField.ticketConfig) {
-      let subtotal = 0;
-      ticketField.ticketConfig.items.forEach(item => {
-        const qty = ticketQuantities[item.id] || 0;
-        subtotal += item.price * qty;
-      });
-
-      let discount = 0;
-      if (appliedPromo) {
-        if (appliedPromo.type === 'percent') {
-          discount = subtotal * (appliedPromo.value / 100);
-        } else {
-          discount = appliedPromo.value;
-        }
-      }
-      setPaymentTotal(Math.max(0, subtotal - discount));
+  // Compute ticket subtotal separately for display on payment page
+  const ticketSubtotal = (() => {
+    if (!ticketField?.ticketConfig) return 0;
+    let subtotal = 0;
+    ticketField.ticketConfig.items.forEach(item => {
+      const qty = ticketQuantities[item.id] || 0;
+      subtotal += item.price * qty;
+    });
+    let discount = 0;
+    if (appliedPromo) {
+      discount = appliedPromo.type === 'percent'
+        ? subtotal * (appliedPromo.value / 100)
+        : appliedPromo.value;
     }
-  }, [ticketField, ticketQuantities, appliedPromo]);
+    return Math.max(0, subtotal - discount);
+  })();
+
+  useEffect(() => {
+    setPaymentTotal(ticketSubtotal);
+  }, [ticketSubtotal]);
+
+  // Resize guest array when ticket quantities change
+  useEffect(() => {
+    if (!ticketField?.ticketConfig) return;
+    const totalTickets: number = (Object.values(ticketQuantities) as number[]).reduce((a, b) => a + b, 0);
+    setGuests(prev => {
+      if (prev.length === totalTickets) return prev;
+      const newGuests = [...prev];
+      if (newGuests.length < totalTickets) {
+        for (let i = newGuests.length; i < totalTickets; i++) {
+          newGuests.push({ name: '', email: '', dietary: '' });
+        }
+      } else {
+        newGuests.length = totalTickets;
+      }
+      return newGuests;
+    });
+  }, [ticketField, ticketQuantities]);
 
   const isVisible = (field: FormField) => {
     if (!field.conditional?.enabled || !field.conditional.fieldId) return true;
@@ -156,12 +183,16 @@ const PublicRegistration = () => {
       if (parts.length > 0) ticketTypeSummary = parts.join(', ');
     }
 
+    // Purchaser name/email from form fields (always preserved as primary)
+    const purchaserName = nameField ? answers[nameField.id] : 'Guest';
+    const purchaserEmail = emailField ? answers[emailField.id] : 'unknown@example.com';
+
     const newAttendee: Attendee = {
       id: submissionId,
       formId: form.id,
       formTitle: form.title,
-      name: nameField ? answers[nameField.id] : 'Guest',
-      email: emailField ? answers[emailField.id] : 'unknown@example.com',
+      name: purchaserName,
+      email: purchaserEmail,
       ticketType: ticketTypeSummary,
       registeredAt: new Date().toISOString(),
       answers: answers,
@@ -169,15 +200,54 @@ const PublicRegistration = () => {
       invoiceId,
       transactionId,
       paymentAmount,
+      isPrimary: true,
       qrPayload: JSON.stringify({ id: submissionId, invoiceId, formId: form.id, action: 'checkin' })
     };
 
+    // Add dietary preferences for the primary attendee from guest slot 0
+    if (ticketField?.ticketConfig?.enableGuestDetails && guests.length > 0 && guests[0].dietary) {
+      newAttendee.dietaryPreferences = guests[0].dietary;
+    }
+
+    // Add Donated Seats Info
+    if (ticketField?.ticketConfig?.enableDonations && donatedSeats > 0) {
+      newAttendee.donatedSeats = donatedSeats;
+    }
+
     await saveAttendee(newAttendee);
     setGeneratedTicket(newAttendee);
+
+    // Save Guests
+    if (ticketField?.ticketConfig?.enableGuestDetails && guests.length > 1) {
+      const guestPromises = guests.slice(1).map(async (g, index) => {
+        const guestId = crypto.randomUUID();
+        const guestAttendee: Attendee = {
+          id: guestId,
+          formId: form.id!,
+          formTitle: form.title!,
+          name: g.name || `Guest ${index + 2}`,
+          email: g.email || 'unknown@example.com',
+          dietaryPreferences: g.dietary,
+          ticketType: 'Guest Ticket',
+          registeredAt: new Date().toISOString(),
+          answers: {},
+          paymentStatus,
+          paymentAmount: '0',
+          invoiceId,
+          transactionId,
+          isPrimary: false,
+          primaryAttendeeId: newAttendee.id,
+          qrPayload: JSON.stringify({ id: guestId, invoiceId, formId: form.id, action: 'checkin' })
+        };
+        return saveAttendee(guestAttendee);
+      });
+      await Promise.all(guestPromises);
+    }
+
     setLoading(false);
     setStep('success');
 
-    // Generate Preview URL for Modal
+    // Generate Preview URL for Modal (Primary Ticket)
     if (settings) {
       const doc = generateTicketPDF(newAttendee, settings, form);
       setPreviewPdfUrl(doc.output('bloburl').toString());
@@ -359,6 +429,97 @@ const PublicRegistration = () => {
                       </div>
                     )}
 
+                    {/* Donation and Guest Sections */}
+                    {field.ticketConfig?.enableDonations && (
+                      <div className="mb-4 pt-4 border-t border-gray-200">
+                        <div className="font-bold text-gray-800 mb-1">Donate Extra Seats</div>
+                        <p className="text-xs text-gray-500 mb-3">Would you like to purchase additional seats and donate them so others can attend?</p>
+                        <div className="flex gap-4 mb-3">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input type="radio" checked={donateOption === 'no'} onChange={() => { setDonateOption('no'); setDonatedSeats(0); }} className="text-indigo-600 focus:ring-indigo-500" />
+                            <span className="text-sm">No thanks</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input type="radio" checked={donateOption === 'yes'} onChange={() => setDonateOption('yes')} className="text-indigo-600 focus:ring-indigo-500" />
+                            <span className="text-sm">Yes, I'd like to donate seats</span>
+                          </label>
+                        </div>
+
+                        {donateOption === 'yes' && (
+                          <div className="bg-emerald-50 p-3 rounded-lg border border-emerald-200">
+                            <label className="block text-xs font-bold text-emerald-700 uppercase mb-1">How many extra seats would you like to donate?</label>
+                            <select
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+                              value={donatedSeats}
+                              onChange={e => setDonatedSeats(Math.max(0, parseInt(e.target.value) || 0))}
+                            >
+                              {[...Array(11)].map((_, i) => <option key={i} value={i}>{i} seat{i !== 1 ? 's' : ''}</option>)}
+                            </select>
+                            <p className="text-[11px] text-emerald-600 mt-2">These seats will be made available for individuals who may not otherwise be able to attend.</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {field.ticketConfig?.enableGuestDetails && guests.length > 0 && (
+                      <div className="mb-4 pt-4 border-t border-gray-200">
+                        <div className="font-bold text-gray-800 mb-2">Guest Details</div>
+                        <p className="text-xs text-gray-500 mb-4">Please provide details for each ticket holder.</p>
+
+                        <div className="space-y-3">
+                          {guests.map((g, i) => (
+                            <div key={i} className="bg-gray-50 p-3 rounded-lg border border-gray-200">
+                              <div className="text-xs font-bold text-gray-400 uppercase mb-2">Ticket #{i + 1}</div>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
+                                <input
+                                  type="text" placeholder="Guest Name"
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+                                  value={g.name}
+                                  onChange={e => {
+                                    const newGuests = [...guests];
+                                    newGuests[i].name = e.target.value;
+                                    setGuests(newGuests);
+                                  }}
+                                />
+                                <input
+                                  type="email" placeholder="Guest Email"
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+                                  value={g.email}
+                                  onChange={e => {
+                                    const newGuests = [...guests];
+                                    newGuests[i].email = e.target.value;
+                                    setGuests(newGuests);
+                                  }}
+                                />
+                              </div>
+                              <input
+                                type="text" placeholder="Dietary Restrictions (Optional)"
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+                                value={g.dietary}
+                                onChange={e => {
+                                  const newGuests = [...guests];
+                                  newGuests[i].dietary = e.target.value;
+                                  setGuests(newGuests);
+                                }}
+                              />
+                              {i === 0 && (
+                                <button type="button" onClick={() => {
+                                  const nameField = form.fields.find(f => f.type === 'text' || f.label.toLowerCase().includes('name'));
+                                  const emailField = form.fields.find(f => f.type === 'email' || f.label.toLowerCase().includes('email'));
+                                  const newGuests = [...guests];
+                                  if (nameField) newGuests[0].name = answers[nameField.id] || '';
+                                  if (emailField) newGuests[0].email = answers[emailField.id] || '';
+                                  setGuests(newGuests);
+                                }} className="text-xs text-indigo-600 font-bold mt-2 hover:underline">
+                                  Same as Purchaser
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     {/* Totals */}
                     <div className="pt-4 border-t border-gray-200 flex justify-between items-center">
                       <span className="text-sm font-bold text-gray-700">Total:</span>
@@ -451,12 +612,18 @@ const PublicRegistration = () => {
           <div className="bg-gray-50 p-4 rounded-xl mb-8 border border-gray-100">
             <div className="flex justify-between items-center mb-2">
               <span className="text-gray-600">Ticket(s) Subtotal</span>
-              <span className="font-medium text-gray-900">{paymentTotal.toFixed(2)} {ticketField?.ticketConfig?.currency}</span>
+              <span className="font-medium text-gray-900">{ticketSubtotal.toFixed(2)} {ticketField?.ticketConfig?.currency}</span>
             </div>
             {appliedPromo && (
               <div className="flex justify-between items-center text-sm text-green-600 border-t border-gray-200 pt-2 mt-2">
                 <span>Promo ({appliedPromo.code})</span>
                 <span>Applied</span>
+              </div>
+            )}
+            {donatedSeats > 0 && (
+              <div className="flex justify-between items-center text-sm text-emerald-600 border-t border-gray-200 pt-2 mt-2">
+                <span>Donated Seats</span>
+                <span>{donatedSeats} seat{donatedSeats !== 1 ? 's' : ''}</span>
               </div>
             )}
             <div className="flex justify-between items-center text-lg font-bold text-indigo-600 border-t border-gray-200 pt-3 mt-3">

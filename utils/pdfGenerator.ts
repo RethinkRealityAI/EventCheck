@@ -68,12 +68,14 @@ export const generateTicketPDF = (
 
   // --- Main Ticket Body Box ---
   const bodyStartY = 70;
+  const hasDonation = attendee.donatedSeats && attendee.donatedSeats > 0;
+  const bodyHeight = hasDonation ? 140 : 110;
   doc.setDrawColor(200, 200, 200);
   doc.setFillColor(255, 255, 255);
-  doc.roundedRect(20, bodyStartY, pageWidth - 40, 110, 3, 3);
+  doc.roundedRect(20, bodyStartY, pageWidth - 40, bodyHeight, 3, 3);
 
   doc.setFillColor(primaryColor);
-  doc.roundedRect(20, bodyStartY, 4, 110, 3, 3, 'F');
+  doc.roundedRect(20, bodyStartY, 4, bodyHeight, 3, 3, 'F');
 
   // --- QR Code ---
   const qrBoxSize = 45;
@@ -147,10 +149,24 @@ export const generateTicketPDF = (
   doc.text(formatDate(attendee.registeredAt), labelX, currentY);
 
   if (attendee.transactionId) {
-    const payY = bodyStartY + 110 - 15;
+    const payY = bodyStartY + bodyHeight - 15;
     doc.setFontSize(9);
     doc.setTextColor(primaryColor);
     doc.text(`Paid via PayPal (${attendee.paymentAmount || 'Paid'})`, labelX, payY);
+  }
+
+  // --- Donated Seats Info (inside the box when present) ---
+  if (hasDonation) {
+    currentY += 15;
+    doc.setTextColor(150, 150, 150);
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.text("DONATED SEATS", labelX, currentY);
+
+    currentY += 6;
+    doc.setTextColor(30, 30, 30);
+    doc.setFontSize(14);
+    doc.text(`${attendee.donatedSeats} seat${(attendee.donatedSeats || 0) !== 1 ? 's' : ''}`, labelX, currentY);
   }
 
   // --- Footer ---

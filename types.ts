@@ -14,6 +14,47 @@ export interface Attendee {
   paymentAmount?: string;
   answers?: Record<string, any>; // Store custom form answers
   isTest?: boolean; // Flag to identify preview/test submissions
+  // Donation & Guest Fields
+  donatedSeats?: number; // Number of extra seats donated for others
+  dietaryPreferences?: string; // e.g. "Vegetarian", "Vegan", etc.
+  primaryAttendeeId?: string; // If this is a guest, link to purchaser
+  isPrimary?: boolean; // Defaults to true
+  // Seating Assignment
+  assignedTableId?: string | null;
+  assignedSeat?: number | null;
+}
+
+export interface SeatingConfiguration {
+  id: string;
+  formId: string;
+  name: string;
+  createdAt: string;
+}
+
+export interface SeatingAssignment {
+  id: string;
+  configurationId: string;
+  attendeeId: string;
+  tableId: string;
+  seatNumber: number;
+}
+
+export interface SeatingTable {
+  id: string;
+  formId: string;
+  configurationId?: string | null;
+  name: string;
+  capacity: number;
+  shape: 'round' | 'rect';
+  x: number;
+  z: number;
+  rotation: number;
+  color?: string | null;
+  vip: boolean;
+  notes?: string | null;
+  createdAt: string;
+  // Computed client-side - not stored
+  guests?: Attendee[];
 }
 
 export type ScanStatus = 'idle' | 'scanning' | 'success' | 'error' | 'already_checked_in';
@@ -39,6 +80,8 @@ export interface TicketConfig {
   currency: string;
   items: TicketItem[];
   promoCodes: PromoCode[];
+  enableDonations?: boolean;
+  enableGuestDetails?: boolean;
 }
 
 export interface FormField {
@@ -125,7 +168,7 @@ export interface AppSettings {
 
 export const DEFAULT_SETTINGS: AppSettings = {
   paypalClientId: '',
-  currency: 'USD',
+  currency: 'CAD',
   ticketPrice: 0,
   smtpHost: 'smtp.example.com',
   smtpPort: '587',

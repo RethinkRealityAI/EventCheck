@@ -116,7 +116,7 @@ const FormBuilder: React.FC = () => {
          required: type === 'ticket',
          options: ['select', 'radio', 'checkbox'].includes(type) ? ['Option 1', 'Option 2'] : undefined,
          ticketConfig: type === 'ticket' ? {
-            currency: 'USD',
+            currency: 'CAD',
             items: [
                { id: `tix_${Date.now()}`, name: 'General Admission', price: 10, inventory: 100, maxPerOrder: 5 }
             ],
@@ -126,7 +126,7 @@ const FormBuilder: React.FC = () => {
 
       // Initialize/Ensure settings defaults
       if (!form.settings) {
-         updateFormMetadata({ settings: { currency: 'USD', showQrOnSuccess: true, showTicketButtonOnSuccess: true } });
+         updateFormMetadata({ settings: { currency: 'CAD', showQrOnSuccess: true, showTicketButtonOnSuccess: true } });
       }
 
       setForm({ ...form, fields: [...form.fields, newField] });
@@ -817,6 +817,39 @@ const FormBuilder: React.FC = () => {
                                                       </button>
                                                    </div>
                                                 </div>
+
+                                                <div className="pt-6 border-t border-indigo-100 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                                   <label className="flex items-center gap-3 p-3 bg-white border border-indigo-100 rounded-lg cursor-pointer hover:border-indigo-300 transition shadow-sm">
+                                                      <input
+                                                         type="checkbox"
+                                                         className="w-5 h-5 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500"
+                                                         checked={editingField.ticketConfig.enableDonations || false}
+                                                         onChange={e => setEditingField({
+                                                            ...editingField,
+                                                            ticketConfig: { ...editingField.ticketConfig!, enableDonations: e.target.checked }
+                                                         })}
+                                                      />
+                                                      <div>
+                                                         <span className="block text-sm font-bold text-gray-900">Enable Donations</span>
+                                                         <span className="block text-xs text-gray-500">Allow users to donate extra.</span>
+                                                      </div>
+                                                   </label>
+                                                   <label className="flex items-center gap-3 p-3 bg-white border border-indigo-100 rounded-lg cursor-pointer hover:border-indigo-300 transition shadow-sm">
+                                                      <input
+                                                         type="checkbox"
+                                                         className="w-5 h-5 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500"
+                                                         checked={editingField.ticketConfig.enableGuestDetails || false}
+                                                         onChange={e => setEditingField({
+                                                            ...editingField,
+                                                            ticketConfig: { ...editingField.ticketConfig!, enableGuestDetails: e.target.checked }
+                                                         })}
+                                                      />
+                                                      <div>
+                                                         <span className="block text-sm font-bold text-gray-900">Guest Details</span>
+                                                         <span className="block text-xs text-gray-500">Collect info for each guest.</span>
+                                                      </div>
+                                                   </label>
+                                                </div>
                                              </div>
                                           )}
 
@@ -1476,6 +1509,42 @@ const FormBuilder: React.FC = () => {
                                              <span className="text-gray-600">Total Price</span>
                                              <span className="text-xl text-indigo-700">{previewPaymentTotal} {field.ticketConfig?.currency}</span>
                                           </div>
+
+                                          {/* Donation Preview */}
+                                          {field.ticketConfig?.enableDonations && (
+                                             <div className="mt-4 pt-4 border-t border-gray-200">
+                                                <div className="font-bold text-gray-800 mb-1 text-sm">Donate Extra Seats</div>
+                                                <p className="text-xs text-gray-500 mb-2">Would you like to purchase additional seats and donate them so others can attend?</p>
+                                                <div className="flex gap-3 mb-2">
+                                                   <label className="flex items-center gap-1.5 cursor-pointer">
+                                                      <input type="radio" checked readOnly className="text-indigo-600" />
+                                                      <span className="text-xs">No thanks</span>
+                                                   </label>
+                                                   <label className="flex items-center gap-1.5 cursor-pointer">
+                                                      <input type="radio" readOnly className="text-indigo-600" />
+                                                      <span className="text-xs">Yes, I'd like to donate seats</span>
+                                                   </label>
+                                                </div>
+                                             </div>
+                                          )}
+
+                                          {/* Guest Details Preview */}
+                                          {field.ticketConfig?.enableGuestDetails && (
+                                             <div className="mt-4 pt-4 border-t border-gray-200">
+                                                <div className="font-bold text-gray-800 mb-1 text-sm">Guest Details</div>
+                                                <p className="text-xs text-gray-500 mb-3">Please provide details for each ticket holder.</p>
+                                                <div className="bg-white p-3 rounded-lg border border-gray-200">
+                                                   <div className="text-[10px] font-bold text-gray-400 uppercase mb-2">Ticket #1</div>
+                                                   <div className="grid grid-cols-2 gap-2 mb-2">
+                                                      <input type="text" placeholder="Full Name" className="px-2 py-1.5 border border-gray-200 rounded text-xs bg-gray-50" disabled />
+                                                      <input type="email" placeholder="Email Address" className="px-2 py-1.5 border border-gray-200 rounded text-xs bg-gray-50" disabled />
+                                                   </div>
+                                                   <select className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs bg-gray-50" disabled>
+                                                      <option>Dietary Preference</option>
+                                                   </select>
+                                                </div>
+                                             </div>
+                                          )}
                                        </div>
                                     ) : field.type === 'boolean' ? (
                                        <div className="flex items-center justify-between p-4 rounded-xl border border-gray-100 hover:bg-gray-50 transition cursor-pointer"

@@ -24,8 +24,10 @@ const WebhookSimulator: React.FC<WebhookSimulatorProps> = ({ onRegister }) => {
     // Simulate Network Latency
     setTimeout(() => {
       const submissionID = crypto.randomUUID();
-      const newAttendee = {
+      const newAttendee: Omit<Attendee, 'registeredAt' | 'checkedInAt' | 'qrPayload'> = {
         id: submissionID,
+        formId: 'webhook-sim',
+        formTitle: 'Webhook Simulator',
         name: `${formData.firstName} ${formData.lastName}`,
         email: formData.email,
         ticketType: formData.ticketType,
@@ -39,7 +41,7 @@ const WebhookSimulator: React.FC<WebhookSimulatorProps> = ({ onRegister }) => {
         registeredAt: new Date().toISOString(),
         checkedInAt: null,
         qrPayload: JSON.stringify({ id: submissionID, action: 'checkin' })
-      });
+      } as Attendee);
 
       setLoading(false);
     }, 1500);

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { HashRouter, Routes, Route, Link, useLocation, Navigate, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, QrCode, ClipboardList, LogOut, Settings as SettingsIcon, ExternalLink, Menu, X, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
+import { LayoutDashboard, QrCode, ClipboardList, LogOut, Settings as SettingsIcon, ExternalLink, Menu, X, ChevronLeft, ChevronRight, Loader2, Rows3 } from 'lucide-react';
 import ManualTicketTool from './components/ManualTicketTool';
 import AttendeeList from './components/AttendeeList';
 import Scanner from './components/Scanner';
@@ -8,6 +8,7 @@ import FormsManager from './components/FormsManager';
 import FormBuilder from './components/FormBuilder';
 import Settings from './components/Settings';
 import PublicRegistration from './components/PublicRegistration';
+import SeatingConfigurator from './components/Seating/SeatingConfigurator';
 import { NotificationProvider } from './components/NotificationSystem';
 import { Attendee } from './types';
 import { getAttendees, checkInAttendee } from './services/storageService';
@@ -35,29 +36,74 @@ const NavLink = ({ to, icon: Icon, children, collapsed }: { to: string, icon: an
 
 const DashboardStats = ({ attendees }: { attendees: Attendee[] }) => {
   const total = attendees.length;
+  const primaryAttendees = attendees.filter(a => a.isPrimary !== false);
+  const guestCount = attendees.filter(a => a.isPrimary === false).length;
   const checkedIn = attendees.filter(a => a.checkedInAt).length;
   const percentage = total === 0 ? 0 : Math.round((checkedIn / total) * 100);
 
+  const totalDonatedSeats = primaryAttendees.reduce((acc, curr) => acc + (Number(curr.donatedSeats) || 0), 0);
+  const recentDonors = primaryAttendees
+    .filter(a => (a.donatedSeats || 0) > 0)
+    .sort((a, b) => new Date(b.registeredAt).getTime() - new Date(a.registeredAt).getTime())
+    .slice(0, 5);
+
   return (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-      <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-        <h3 className="text-gray-500 text-sm font-medium mb-2">Total Registrations</h3>
-        <p className="text-4xl font-bold text-gray-900">{total}</p>
-      </div>
-      <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-        <h3 className="text-gray-500 text-sm font-medium mb-2">Live Attendance</h3>
-        <div className="flex items-baseline gap-2">
-          <p className="text-4xl font-bold text-indigo-600">{checkedIn}</p>
-          <span className="text-sm text-gray-400">/ {total}</span>
+    <div className="space-y-8 mb-8">
+      {/* Stats Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+          <h3 className="text-gray-500 text-sm font-medium mb-2">Total Registrations</h3>
+          <p className="text-4xl font-bold text-gray-900">{primaryAttendees.length}</p>
+          {guestCount > 0 && <p className="text-xs text-gray-400 mt-1">+ {guestCount} guest ticket{guestCount !== 1 ? 's' : ''}</p>}
         </div>
-        <div className="w-full bg-gray-100 rounded-full h-1.5 mt-3">
-          <div className="bg-indigo-600 h-1.5 rounded-full" style={{ width: `${percentage}%` }}></div>
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+          <h3 className="text-gray-500 text-sm font-medium mb-2">Live Attendance</h3>
+          <div className="flex items-baseline gap-2">
+            <p className="text-4xl font-bold text-indigo-600">{checkedIn}</p>
+            <span className="text-sm text-gray-400">/ {total}</span>
+          </div>
+          <div className="w-full bg-gray-100 rounded-full h-1.5 mt-3">
+            <div className="bg-indigo-600 h-1.5 rounded-full" style={{ width: `${percentage}%` }}></div>
+          </div>
+        </div>
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+          <h3 className="text-gray-500 text-sm font-medium mb-2">Check-in Rate</h3>
+          <p className="text-4xl font-bold text-gray-900">{percentage}%</p>
+        </div>
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+          <h3 className="text-gray-500 text-sm font-medium mb-2">Donated Seats</h3>
+          <p className="text-4xl font-bold text-emerald-600">{totalDonatedSeats}</p>
+          <p className="text-xs text-gray-400 mt-1">seats donated for others</p>
         </div>
       </div>
-      <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-        <h3 className="text-gray-500 text-sm font-medium mb-2">Check-in Rate</h3>
-        <p className="text-4xl font-bold text-gray-900">{percentage}%</p>
-      </div>
+
+      {/* Recent Seat Donors List */}
+      {recentDonors.length > 0 && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+          <div className="px-6 py-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+            <h3 className="font-bold text-gray-800">Recent Seat Donors</h3>
+            <Link to="/admin" className="text-xs text-indigo-600 font-bold hover:underline">View All</Link>
+          </div>
+          <div className="divide-y divide-gray-100">
+            {recentDonors.map(d => (
+              <div key={d.id} className="p-4 flex justify-between items-center hover:bg-gray-50 transition">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center font-bold text-xs">
+                    🪑
+                  </div>
+                  <div>
+                    <div className="font-bold text-gray-900 text-sm">{d.name}</div>
+                    <div className="text-xs text-gray-500">{new Date(d.registeredAt).toLocaleDateString()}</div>
+                  </div>
+                </div>
+                <div className="text-emerald-600 font-bold">
+                  +{d.donatedSeats} seat{(d.donatedSeats || 0) !== 1 ? 's' : ''}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -171,6 +217,7 @@ const AdminLayout = () => {
         <nav className="flex-1 px-3 space-y-2 mt-4 lg:mt-2 overflow-y-auto overflow-x-hidden custom-scrollbar">
           <NavLink to="/admin" icon={LayoutDashboard} collapsed={isSidebarCollapsed && !isSidebarPinned}>Dashboard</NavLink>
           <NavLink to="/admin/forms" icon={ClipboardList} collapsed={isSidebarCollapsed && !isSidebarPinned}>Manage Forms</NavLink>
+          <NavLink to="/admin/seating" icon={Rows3} collapsed={isSidebarCollapsed && !isSidebarPinned}>Seating Chart</NavLink>
           <NavLink to="/admin/generate-qr" icon={QrCode} collapsed={isSidebarCollapsed && !isSidebarPinned}>Generate QR</NavLink>
           <NavLink to="/admin/settings" icon={SettingsIcon} collapsed={isSidebarCollapsed && !isSidebarPinned}>Settings</NavLink>
 
@@ -226,6 +273,7 @@ const AdminLayout = () => {
               </>
             } />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/seating" element={<SeatingConfigurator />} />
           </Routes>
         </div>
       </main>

@@ -8,13 +8,22 @@ export const generateEmailHtml = (settings: AppSettings, template: string, atten
   const invoiceId = attendee?.invoiceId || 'N/A';
   const amount = settings.ticketPrice.toString();
 
-  const body = template
+  let body = template
     .replace(/{{name}}/g, name)
     .replace(/{{event}}/g, formTitle)
     .replace(/{{id}}/g, id)
     .replace(/{{invoiceId}}/g, invoiceId)
     .replace(/{{amount}}/g, amount)
     .replace(/{{link}}/g, '#register-link'); // TODO: Add real registration/management link if available
+
+  if (attendee?.donatedSeats && attendee.donatedSeats > 0) {
+    body += `
+      <div style="margin-top: 24px; padding-top: 24px; border-top: 1px dashed #e5e7eb;">
+        <h3 style="margin: 0 0 8px; font-size: 16px; color: #111827;">🪑 Seat Donation</h3>
+        <p style="margin: 0; color: #4b5563;">Thank you for generously donating <strong>${attendee.donatedSeats} seat${attendee.donatedSeats !== 1 ? 's' : ''}</strong> for others to attend.</p>
+      </div>
+    `;
+  }
 
   const headerColor = settings.emailHeaderColor || '#f8fafc';
   const footerColor = settings.emailFooterColor || '#f8fafc';

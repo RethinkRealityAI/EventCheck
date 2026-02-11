@@ -15,7 +15,7 @@ interface AttendeeListProps {
 
 const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, isLoading = false }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState<'live' | 'test'>('live');
+  const [activeTab, setActiveTab] = useState<'live' | 'test' | 'donated'>('live');
   const [selectedAttendee, setSelectedAttendee] = useState<Attendee | null>(null);
   const [resending, setResending] = useState(false);
   const { showNotification } = useNotifications();
@@ -42,7 +42,10 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, isLoading = fals
     invoiceId: true,
     transactionId: true,
     paymentAmount: true,
-    formTitle: true
+    formTitle: true,
+    donatedSeats: true,
+    dietaryPreferences: true,
+    isPrimary: true
   });
 
   const fieldLabels: Record<string, string> = {
@@ -56,7 +59,10 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, isLoading = fals
     invoiceId: 'Invoice ID',
     transactionId: 'PayPal Transaction ID',
     paymentAmount: 'Amount Paid',
-    formTitle: 'Event Title'
+    formTitle: 'Event Title',
+    donatedSeats: 'Donated Seats',
+    dietaryPreferences: 'Dietary Preferences',
+    isPrimary: 'Primary / Guest'
   };
 
   // Filter logic
@@ -67,7 +73,10 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, isLoading = fals
       a.id.toLowerCase().includes(searchTerm.toLowerCase());
 
     const isTest = !!a.isTest;
-    const matchesTab = activeTab === 'test' ? isTest : !isTest;
+    let matchesTab = false;
+    if (activeTab === 'test') matchesTab = isTest;
+    else if (activeTab === 'donated') matchesTab = !isTest && (a.donatedSeats || 0) > 0;
+    else matchesTab = !isTest;
 
     const matchesStatus = statusFilter === 'all'
       ? true
@@ -79,6 +88,9 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, isLoading = fals
 
     return matchesSearch && matchesTab && matchesStatus && matchesPayment;
   });
+
+  // Count donated seats for badge
+  const totalDonatedCount = attendees.filter(a => !a.isTest && (a.donatedSeats || 0) > 0).length;
 
   // Pagination Logic
   const totalPages = Math.ceil(filtered.length / itemsPerPage);
@@ -176,6 +188,13 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, isLoading = fals
                 className={`px-3 py-1 text-xs font-medium rounded-md transition ${activeTab === 'test' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
               >
                 Test
+              </button>
+              <button
+                onClick={() => { setActiveTab('donated'); setCurrentPage(1); }}
+                className={`px-3 py-1 text-xs font-medium rounded-md transition flex items-center gap-1 ${activeTab === 'donated' ? 'bg-white text-emerald-600 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
+              >
+                🪑 Donated
+                {totalDonatedCount > 0 && <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{totalDonatedCount}</span>}
               </button>
             </div>
           </div>
@@ -284,7 +303,15 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, isLoading = fals
               paginatedItems.map((attendee) => (
                 <tr key={attendee.id} className="hover:bg-gray-50 transition">
                   <td className="px-6 py-4">
-                    <div className="font-medium text-gray-900">{attendee.name}</div>
+                    <div className="flex items-center gap-2">
+                      <div className="font-medium text-gray-900">{attendee.name}</div>
+                      {attendee.isPrimary === false && (
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-700">GUEST</span>
+                      )}
+                      {(attendee.donatedSeats || 0) > 0 && (
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-700">🪑 {attendee.donatedSeats}</span>
+                      )}
+                    </div>
                     <div className="text-gray-400 text-xs">{attendee.email}</div>
                   </td>
                   <td className="px-6 py-4">
@@ -548,6 +575,35 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, isLoading = fals
                                 <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1 text-blue-600">PayPal Transaction</label>
                                 <div className="text-xs font-mono font-medium text-blue-700 select-all">{selectedAttendee.transactionId}</div>
                               </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Donated Seats Info */}
+                        {selectedAttendee.donatedSeats && selectedAttendee.donatedSeats > 0 && (
+                          <div className="pt-4 mt-4 border-t border-slate-100 space-y-3">
+                            <div>
+                              <label className="text-[10px] font-bold text-emerald-600 uppercase block mb-1">Donated Seats</label>
+                              <div className="text-sm font-bold text-emerald-700">{selectedAttendee.donatedSeats} seat{selectedAttendee.donatedSeats !== 1 ? 's' : ''}</div>
+                              <div className="text-xs text-slate-500 mt-1">Extra tickets donated for others to attend</div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Dietary Preferences */}
+                        {selectedAttendee.dietaryPreferences && (
+                          <div className="pt-4 mt-4 border-t border-slate-100">
+                            <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Dietary Preferences</label>
+                            <div className="text-sm text-slate-700">{selectedAttendee.dietaryPreferences}</div>
+                          </div>
+                        )}
+
+                        {/* Guest badge */}
+                        {selectedAttendee.isPrimary === false && (
+                          <div className="pt-4 mt-4 border-t border-slate-100">
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-50 text-purple-700">Guest Ticket</span>
+                            {selectedAttendee.primaryAttendeeId && (
+                              <span className="text-[10px] text-slate-400 ml-2">Linked to: {selectedAttendee.primaryAttendeeId.substring(0, 8)}...</span>
                             )}
                           </div>
                         )}
