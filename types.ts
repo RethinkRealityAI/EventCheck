@@ -74,6 +74,7 @@ export interface TicketItem {
   price: number;
   inventory: number; // 0 for unlimited
   maxPerOrder: number;
+  seats?: number; // Number of seats this ticket represents (e.g. 8 for a table)
 }
 
 export interface TicketConfig {

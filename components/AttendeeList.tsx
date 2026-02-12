@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Attendee } from '../types';
-import { CheckCircle, Clock, Search, Calendar, Eye, X, Mail, Tag, User, Download, FileSpreadsheet, Settings as SettingsIcon, Check, MoreVertical, Trash2, Edit3, ChevronLeft, ChevronRight, Filter, AlertCircle } from 'lucide-react';
+import { LayoutDashboard, Users, ChevronDown, ChevronRight, UserPlus, CheckCircle, Clock, Search, Calendar, Eye, X, Mail, Tag, User, Download, FileSpreadsheet, Settings as SettingsIcon, Check, MoreVertical, Trash2, Edit3, ChevronLeft, Filter, AlertCircle, Loader2, Copy, ChevronsDown, ChevronsRight } from 'lucide-react';
 import { format } from 'date-fns';
 import QRCode from 'react-qr-code';
 import { updateAttendee, deleteAttendee, getSettings } from '../services/storageService';
@@ -15,7 +15,7 @@ interface AttendeeListProps {
 
 const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, isLoading = false }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState<'live' | 'test' | 'donated'>('live');
+  const [activeTab, setActiveTab] = useState<'live' | 'test' | 'donated' | 'tables'>('live');
   const [selectedAttendee, setSelectedAttendee] = useState<Attendee | null>(null);
   const [resending, setResending] = useState(false);
   const { showNotification } = useNotifications();
@@ -26,6 +26,13 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, isLoading = fals
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
+
+  // Collapsed state for tables
+  const [expandedTables, setExpandedTables] = useState<Record<string, boolean>>({});
+
+  const toggleTable = (id: string) => {
+    setExpandedTables(prev => ({ ...prev, [id]: !prev[id] }));
+  };
 
   // Advanced Filter State
   const [statusFilter, setStatusFilter] = useState<'all' | 'checked-in' | 'pending'>('all');
@@ -97,6 +104,44 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, isLoading = fals
   const startIndex = (currentPage - 1) * itemsPerPage;
   const paginatedItems = filtered.slice(startIndex, startIndex + itemsPerPage);
 
+  // Grouping Logic for "Tables" view
+  const groupedByTable = React.useMemo(() => {
+    // Only group live (non-test) attendees for tables view
+    const liveAttendees = attendees.filter(a => !a.isTest);
+    const tables: Record<string, { primary: Attendee, guests: Attendee[] }> = {};
+
+    // First pass: find all primaries
+    liveAttendees.forEach(a => {
+      if (a.isPrimary !== false) {
+        tables[a.id] = { primary: a, guests: [] };
+      }
+    });
+
+    // Second pass: associate guests
+    liveAttendees.forEach(a => {
+      if (a.isPrimary === false && a.primaryAttendeeId && tables[a.primaryAttendeeId]) {
+        tables[a.primaryAttendeeId].guests.push(a);
+      }
+    });
+
+    // Filter by search if active
+    let result = Object.values(tables);
+    if (searchTerm) {
+      const lowerSearch = searchTerm.toLowerCase();
+      result = result.filter(t =>
+        t.primary.name.toLowerCase().includes(lowerSearch) ||
+        t.primary.email.toLowerCase().includes(lowerSearch) ||
+        t.guests.some(g => (g.name || '').toLowerCase().includes(lowerSearch) || (g.email || '').toLowerCase().includes(lowerSearch))
+      );
+    }
+
+    return result.sort((a, b) => b.primary.registeredAt.localeCompare(a.primary.registeredAt));
+  }, [attendees, searchTerm]);
+
+  // Pagination for Tables
+  const totalTablePages = Math.ceil(groupedByTable.length / itemsPerPage);
+  const paginatedTables = groupedByTable.slice(startIndex, startIndex + itemsPerPage);
+
   const handleResendEmail = async () => {
     if (!selectedAttendee) return;
     setResending(true);
@@ -125,6 +170,23 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, isLoading = fals
       setSelectedAttendee(null);
       showNotification('Registration deleted', 'info');
     }
+  };
+
+  const handleExpandAll = () => {
+    const allIds: Record<string, boolean> = {};
+    paginatedTables.forEach(t => allIds[t.primary.id] = true);
+    setExpandedTables(prev => ({ ...prev, ...allIds }));
+  };
+
+  const handleCollapseAll = () => {
+    setExpandedTables({});
+  };
+
+  const handleCopyGuestLink = (e: React.MouseEvent, formId: string, primaryId: string) => {
+    e.stopPropagation();
+    const url = `${window.location.origin}/register/${formId}?guestRef=${primaryId}`;
+    navigator.clipboard.writeText(url);
+    showNotification("Guest registration link copied to clipboard!", 'success');
   };
 
   const toggleField = (field: string) => {
@@ -196,6 +258,12 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, isLoading = fals
                 🪑 Donated
                 {totalDonatedCount > 0 && <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{totalDonatedCount}</span>}
               </button>
+              <button
+                onClick={() => { setActiveTab('tables'); setCurrentPage(1); }}
+                className={`px-3 py-1 text-xs font-medium rounded-md transition flex items-center gap-1 ${activeTab === 'tables' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
+              >
+                <LayoutDashboard className="w-3 h-3" /> Tables
+              </button>
             </div>
           </div>
 
@@ -234,136 +302,298 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, isLoading = fals
         </div>
 
         {/* Filters Row */}
-        <div className="flex flex-wrap items-center gap-4 text-sm bg-slate-50 p-3 rounded-lg border border-slate-100">
-          <div className="flex items-center gap-2 text-slate-500">
-            <Filter className="w-4 h-4" />
-            <span className="font-medium">Filters:</span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span className="text-slate-400">Attendance:</span>
-            <select
-              value={statusFilter}
-              onChange={e => { setStatusFilter(e.target.value as any); setCurrentPage(1); }}
-              className="bg-transparent font-medium text-slate-700 outline-none cursor-pointer"
+        {activeTab === 'tables' ? (
+          <div className="flex flex-wrap items-center gap-2 text-sm bg-slate-50 p-3 rounded-lg border border-slate-100">
+            <button
+              onClick={handleExpandAll}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-md text-slate-600 hover:text-indigo-600 hover:border-indigo-200 transition shadow-sm"
             >
-              <option value="all">All Status</option>
-              <option value="checked-in">Checked In</option>
-              <option value="pending">Pending</option>
-            </select>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span className="text-slate-400">Payment:</span>
-            <select
-              value={paymentFilter}
-              onChange={e => { setPaymentFilter(e.target.value as any); setCurrentPage(1); }}
-              className="bg-transparent font-medium text-slate-700 outline-none cursor-pointer"
+              <ChevronsDown className="w-4 h-4" /> Expand All
+            </button>
+            <button
+              onClick={handleCollapseAll}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-md text-slate-600 hover:text-indigo-600 hover:border-indigo-200 transition shadow-sm"
             >
-              <option value="all">All Payments</option>
-              <option value="paid">Paid Only</option>
-              <option value="free">Free Only</option>
-              <option value="pending">Pending Payments</option>
-            </select>
+              <ChevronsRight className="w-4 h-4" /> Collapse All
+            </button>
+            <div className="h-6 w-px bg-slate-200 mx-2"></div>
+            <span className="text-slate-400 text-xs font-medium">
+              Showing {paginatedTables.length} table{paginatedTables.length !== 1 ? 's' : ''} on this page
+            </span>
           </div>
-        </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-4 text-sm bg-slate-50 p-3 rounded-lg border border-slate-100">
+            <div className="flex items-center gap-2 text-slate-500">
+              <Filter className="w-4 h-4" />
+              <span className="font-medium">Filters:</span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-slate-400">Attendance:</span>
+              <select
+                value={statusFilter}
+                onChange={e => { setStatusFilter(e.target.value as any); setCurrentPage(1); }}
+                className="bg-transparent font-medium text-slate-700 outline-none cursor-pointer"
+              >
+                <option value="all">All Status</option>
+                <option value="checked-in">Checked In</option>
+                <option value="pending">Pending</option>
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-slate-400">Payment:</span>
+              <select
+                value={paymentFilter}
+                onChange={e => { setPaymentFilter(e.target.value as any); setCurrentPage(1); }}
+                className="bg-transparent font-medium text-slate-700 outline-none cursor-pointer"
+              >
+                <option value="all">All Payments</option>
+                <option value="paid">Paid Only</option>
+                <option value="free">Free Only</option>
+                <option value="pending">Pending Payments</option>
+              </select>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Table */}
-      <div className="overflow-x-auto flex-1">
-        <table className="w-full text-left text-sm text-gray-600">
-          <thead className="bg-gray-50 text-gray-900 font-medium">
-            <tr>
-              <th className="px-6 py-3">Name</th>
-              <th className="px-6 py-3">Event/Form</th>
-              <th className="px-6 py-3">Ticket Type</th>
-              <th className="px-6 py-3">Status</th>
-              <th className="px-6 py-3">Registered</th>
-              <th className="px-6 py-3 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
+      {/* Table Content */}
+      <div className="overflow-x-auto flex-1 custom-scrollbar">
+        {activeTab === 'tables' ? (
+          <div className="divide-y divide-gray-100">
             {isLoading ? (
-              <tr>
-                <td colSpan={6} className="px-6 py-12 text-center text-gray-400">
-                  <div className="flex flex-col items-center justify-center gap-2">
-                    <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
-                    <p className="text-sm font-medium">Loading attendees...</p>
-                  </div>
-                </td>
-              </tr>
-            ) : paginatedItems.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="px-6 py-12 text-center text-gray-400">
-                  <User className="w-12 h-12 mx-auto mb-3 text-gray-200" />
-                  <p>No attendees match your filters.</p>
-                </td>
-              </tr>
+              <div className="p-12 text-center text-gray-400">
+                <Loader2 className="w-8 h-8 mx-auto mb-2 animate-spin text-indigo-500" />
+                <p>Loading table view...</p>
+              </div>
+            ) : paginatedTables.length === 0 ? (
+              <div className="p-12 text-center text-gray-400">
+                <Users className="w-12 h-12 mx-auto mb-3 text-gray-200" />
+                <p>No tables found matching your search.</p>
+              </div>
             ) : (
-              paginatedItems.map((attendee) => (
-                <tr key={attendee.id} className="hover:bg-gray-50 transition">
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-2">
-                      <div className="font-medium text-gray-900">{attendee.name}</div>
-                      {attendee.isPrimary === false && (
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-700">GUEST</span>
-                      )}
-                      {(attendee.donatedSeats || 0) > 0 && (
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-700">🪑 {attendee.donatedSeats}</span>
-                      )}
+              paginatedTables.map(({ primary, guests }) => (
+                <div key={primary.id} className="bg-white group transition-all">
+                  <div
+                    onClick={() => toggleTable(primary.id)}
+                    className="p-4 flex items-center justify-between cursor-pointer hover:bg-gray-50 transition-colors"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                        <LayoutDashboard className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-gray-900 flex items-center gap-2">
+                          Table: {primary.name}
+                          <span className="text-[10px] font-black uppercase tracking-widest text-gray-400 bg-gray-100 px-2 py-0.5 rounded">
+                            {guests.length + 1} Seat{(guests.length + 1) !== 1 ? 's' : ''}
+                          </span>
+                        </h4>
+                        <div className="text-xs text-gray-500 flex items-center gap-1">
+                          <Mail className="w-3 h-3" /> {primary.email}
+                        </div>
+                      </div>
                     </div>
-                    <div className="text-gray-400 text-xs">{attendee.email}</div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-1.5 text-gray-700">
-                      <Calendar className="w-3 h-3 text-indigo-500" />
-                      <span className="truncate max-w-[150px] block" title={attendee.formTitle}>
-                        {attendee.formTitle || 'Unknown Event'}
-                      </span>
+                    <div className="flex items-center gap-6">
+                      <div className="hidden sm:flex flex-col items-end">
+                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-tight">Status</span>
+                        <div className="flex items-center gap-1.5">
+                          <div className={`w-2 h-2 rounded-full ${primary.checkedInAt ? 'bg-green-500' : 'bg-amber-400'}`}></div>
+                          <span className="text-xs font-bold text-gray-700">
+                            {guests.filter(g => g.checkedInAt).length + (primary.checkedInAt ? 1 : 0)} / {guests.length + 1} Checked In
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        onClick={(e) => handleCopyGuestLink(e, primary.formId, primary.id)}
+                        className="p-2 text-gray-400 hover:text-indigo-600 transition-colors hidden sm:block"
+                        title="Copy Guest Invite Link"
+                      >
+                        <Copy className="w-4 h-4" />
+                      </button>
+                      <button className="p-2 text-gray-400 hover:text-indigo-600 transition-colors">
+                        {expandedTables[primary.id] ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
+                      </button>
                     </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700">
-                      {attendee.ticketType}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    {attendee.checkedInAt ? (
-                      <span className="flex items-center gap-1.5 text-green-600 font-medium">
-                        <CheckCircle className="w-4 h-4" /> Checked In
-                      </span>
-                    ) : (
-                      <span className="flex items-center gap-1.5 text-gray-400">
-                        <Clock className="w-4 h-4" /> Pending
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-6 py-4 text-gray-500 font-mono text-xs">
-                    {format(new Date(attendee.registeredAt), 'MMM d, yyyy')}
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <button
-                      onClick={() => setSelectedAttendee(attendee)}
-                      className="text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 p-2 rounded-lg transition"
-                      title="View Details"
-                    >
-                      <Eye className="w-4 h-4" />
-                    </button>
-                  </td>
-                </tr>
+                  </div>
+
+                  {expandedTables[primary.id] && (
+                    <div className="px-4 pb-4 animate-in slide-in-from-top-2 duration-300">
+                      <div className="bg-slate-50 rounded-xl border border-slate-100 overflow-hidden shadow-inner">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-slate-100 text-slate-500 font-bold uppercase tracking-wider">
+                            <tr>
+                              <th className="px-4 py-3">Attendee</th>
+                              <th className="px-4 py-3">Role</th>
+                              <th className="px-4 py-3">Ticket Type</th>
+                              <th className="px-4 py-3 text-center">Status</th>
+                              <th className="px-4 py-3 text-right pr-6">Details</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {/* Primary Purchaser */}
+                            <tr className="bg-white/50 hover:bg-white transition-colors">
+                              <td className="px-4 py-3">
+                                <div className="font-bold text-gray-900">{primary.name}</div>
+                                <div className="text-gray-400">{primary.email}</div>
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-black uppercase tracking-tight bg-indigo-100 text-indigo-700 border border-indigo-200">Purchaser</span>
+                              </td>
+                              <td className="px-4 py-3 text-gray-500">{primary.ticketType}</td>
+                              <td className="px-4 py-3 text-center">
+                                {primary.checkedInAt ? (
+                                  <Check className="w-4 h-4 text-green-500 mx-auto" strokeWidth={3} />
+                                ) : (
+                                  <Clock className="w-3.5 h-3.5 text-slate-300 mx-auto" />
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-right pr-6">
+                                <button onClick={() => setSelectedAttendee(primary)} className="text-indigo-600 hover:underline font-bold">View</button>
+                              </td>
+                            </tr>
+                            {/* Guests */}
+                            {guests.map((g, idx) => (
+                              <tr key={g.id} className="bg-white/30 hover:bg-white transition-colors">
+                                <td className="px-4 py-3">
+                                  <div className="font-bold text-gray-900">{g.name || `Guest #${idx + 1}`}</div>
+                                  <div className="text-gray-400">{g.email || 'No email provided'}</div>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-black uppercase tracking-tight bg-purple-100 text-purple-700 border border-purple-200">Guest</span>
+                                </td>
+                                <td className="px-4 py-3 text-gray-500 italic">{g.ticketType}</td>
+                                <td className="px-4 py-3 text-center">
+                                  {g.checkedInAt ? (
+                                    <Check className="w-4 h-4 text-green-500 mx-auto" strokeWidth={3} />
+                                  ) : (
+                                    <Clock className="w-3.5 h-3.5 text-slate-300 mx-auto" />
+                                  )}
+                                </td>
+                                <td className="px-4 py-3 text-right pr-6">
+                                  <button onClick={() => setSelectedAttendee(g)} className="text-indigo-600 hover:underline font-bold">View</button>
+                                </td>
+                              </tr>
+                            ))}
+                            {guests.length === 0 && (
+                              <tr>
+                                <td colSpan={5} className="px-4 py-8 text-center text-slate-400 italic bg-white/20">
+                                  <div className="flex flex-col items-center gap-1">
+                                    <UserPlus className="w-5 h-5 opacity-20" />
+                                    <span>No guests registered yet via sharing link.</span>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </div>
               ))
             )}
-          </tbody>
-        </table>
+          </div>
+        ) : (
+          <table className="w-full text-left text-sm text-gray-600">
+            <thead className="bg-gray-50 text-gray-900 font-medium">
+              <tr>
+                <th className="px-6 py-3">Name</th>
+                <th className="px-6 py-3">Event/Form</th>
+                <th className="px-6 py-3">Ticket Type</th>
+                <th className="px-6 py-3">Status</th>
+                <th className="px-6 py-3">Registered</th>
+                <th className="px-6 py-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {isLoading ? (
+                <tr>
+                  <td colSpan={6} className="px-6 py-12 text-center text-gray-400">
+                    <div className="flex flex-col items-center justify-center gap-2">
+                      <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
+                      <p className="text-sm font-medium">Loading attendees...</p>
+                    </div>
+                  </td>
+                </tr>
+              ) : paginatedItems.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-6 py-12 text-center text-gray-400">
+                    <User className="w-12 h-12 mx-auto mb-3 text-gray-200" />
+                    <p>No attendees match your filters.</p>
+                  </td>
+                </tr>
+              ) : (
+                paginatedItems.map((attendee) => (
+                  <tr key={attendee.id} className="hover:bg-gray-50 transition">
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-2">
+                        <div className="font-medium text-gray-900">{attendee.name}</div>
+                        {attendee.isPrimary === false && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-700">GUEST</span>
+                        )}
+                        {(attendee.donatedSeats || 0) > 0 && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-700">🪑 {attendee.donatedSeats}</span>
+                        )}
+                      </div>
+                      <div className="text-gray-400 text-xs">{attendee.email}</div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-1.5 text-gray-700">
+                        <Calendar className="w-3 h-3 text-indigo-500" />
+                        <span className="truncate max-w-[150px] block" title={attendee.formTitle}>
+                          {attendee.formTitle || 'Unknown Event'}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700">
+                        {attendee.ticketType}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      {attendee.checkedInAt ? (
+                        <span className="flex items-center gap-1.5 text-green-600 font-medium">
+                          <CheckCircle className="w-4 h-4" /> Checked In
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1.5 text-gray-400">
+                          <Clock className="w-4 h-4" /> Pending
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 text-gray-500 font-mono text-xs">
+                      {format(new Date(attendee.registeredAt), 'MMM d, yyyy')}
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <button
+                        onClick={() => setSelectedAttendee(attendee)}
+                        className="text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 p-2 rounded-lg transition"
+                        title="View Details"
+                      >
+                        <Eye className="w-4 h-4" />
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        )}
       </div>
 
       {/* Pagination Footer */}
       <div className="px-6 py-4 border-t border-gray-100 bg-gray-50 flex items-center justify-between">
         <div className="text-xs text-gray-500">
-          Showing {filtered.length > 0 ? startIndex + 1 : 0} to {Math.min(startIndex + itemsPerPage, filtered.length)} of {filtered.length} records
+          {activeTab === 'tables' ? (
+            <>Showing {groupedByTable.length > 0 ? startIndex + 1 : 0} to {Math.min(startIndex + itemsPerPage, groupedByTable.length)} of {groupedByTable.length} tables</>
+          ) : (
+            <>Showing {filtered.length > 0 ? startIndex + 1 : 0} to {Math.min(startIndex + itemsPerPage, filtered.length)} of {filtered.length} records</>
+          )}
         </div>
 
-        {totalPages > 1 && (
+        {((activeTab === 'tables' ? totalTablePages : totalPages) > 1) && (
           <div className="flex items-center gap-1">
             <button
               onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
@@ -372,10 +602,10 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, isLoading = fals
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
-            <span className="px-3 text-xs font-medium text-gray-700">Page {currentPage} of {totalPages}</span>
+            <span className="px-3 text-xs font-medium text-gray-700">Page {currentPage} of {activeTab === 'tables' ? totalTablePages : totalPages}</span>
             <button
-              onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-              disabled={currentPage === totalPages}
+              onClick={() => setCurrentPage(prev => Math.min((activeTab === 'tables' ? totalTablePages : totalPages), prev + 1))}
+              disabled={currentPage === (activeTab === 'tables' ? totalTablePages : totalPages)}
               className="p-1 rounded bg-white border border-gray-200 disabled:opacity-50"
             >
               <ChevronRight className="w-4 h-4" />
@@ -603,7 +833,16 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, isLoading = fals
                           <div className="pt-4 mt-4 border-t border-slate-100">
                             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-50 text-purple-700">Guest Ticket</span>
                             {selectedAttendee.primaryAttendeeId && (
-                              <span className="text-[10px] text-slate-400 ml-2">Linked to: {selectedAttendee.primaryAttendeeId.substring(0, 8)}...</span>
+                              <button
+                                onClick={() => {
+                                  setActiveTab('tables');
+                                  setSearchTerm(selectedAttendee.primaryAttendeeId || '');
+                                  setSelectedAttendee(null);
+                                }}
+                                className="text-[10px] text-indigo-500 ml-2 hover:underline hover:text-indigo-700 font-medium"
+                              >
+                                Linked to: {selectedAttendee.primaryAttendeeId.substring(0, 8)}...
+                              </button>
                             )}
                           </div>
                         )}

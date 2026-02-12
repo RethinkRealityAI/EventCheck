@@ -161,6 +161,32 @@ export const getFormById = async (id: string): Promise<Form | undefined> => {
   return mapFormFromDb(data);
 };
 
+export const getAttendee = async (id: string): Promise<Attendee | undefined> => {
+  const { data, error } = await supabase
+    .from('attendees')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (error) return undefined;
+  return mapAttendeeFromDb(data);
+};
+
+export const getGuestsByPrimaryId = async (primaryId: string): Promise<Attendee[]> => {
+  const { data, error } = await supabase
+    .from('attendees')
+    .select('*')
+    .eq('primary_attendee_id', primaryId)
+    .order('registered_at', { ascending: true });
+
+  if (error) {
+    console.error("Failed to load guests by primary ID", error);
+    return [];
+  }
+
+  return (data || []).map(mapAttendeeFromDb);
+};
+
 export const saveForm = async (form: Form): Promise<void> => {
   const dbRecord = mapFormToDb(form);
   const { error } = await supabase

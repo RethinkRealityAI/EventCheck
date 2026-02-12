@@ -35,6 +35,9 @@ const FormBuilder: React.FC = () => {
    const [previewStep, setPreviewStep] = useState<'form' | 'payment' | 'success'>('form');
    const [previewAnswers, setPreviewAnswers] = useState<Record<string, any>>({});
    const [previewTicketQuantities, setPreviewTicketQuantities] = useState<Record<string, number>>({});
+   const [previewDonateOption, setPreviewDonateOption] = useState<'no' | 'yes'>('no');
+   const [previewDonatedSeats, setPreviewDonatedSeats] = useState(0);
+   const [previewGuests, setPreviewGuests] = useState<Array<{ name: string, email: string, dietary: string }>>([]);
    const [previewPaymentTotal, setPreviewPaymentTotal] = useState<number>(0);
    const [previewLoading, setPreviewLoading] = useState(false);
    const [previewError, setPreviewError] = useState('');
@@ -55,16 +58,33 @@ const FormBuilder: React.FC = () => {
       }
    }, [formId, navigate]);
 
-   // Recalculate totals for preview
+   // Recalculate totals and guests for preview
    useEffect(() => {
       if (activeTab === 'preview' && form) {
          const ticketField = form.fields.find(f => f.type === 'ticket');
          if (ticketField && ticketField.ticketConfig) {
             let total = 0;
+            let totalSeats = 0;
             ticketField.ticketConfig.items.forEach(item => {
-               total += (item.price * (previewTicketQuantities[item.id] || 0));
+               const qty = previewTicketQuantities[item.id] || 0;
+               total += (item.price * qty);
+               totalSeats += (qty * (item.seats || 1));
             });
             setPreviewPaymentTotal(total);
+
+            // Update preview guests array size
+            setPreviewGuests(prev => {
+               if (prev.length === totalSeats) return prev;
+               const next = [...prev];
+               if (next.length < totalSeats) {
+                  for (let i = next.length; i < totalSeats; i++) {
+                     next.push({ name: '', email: '', dietary: 'no' });
+                  }
+               } else {
+                  next.length = totalSeats;
+               }
+               return next;
+            });
          }
       }
    }, [previewTicketQuantities, activeTab, form]);
@@ -170,7 +190,8 @@ const FormBuilder: React.FC = () => {
          name: 'New Ticket Type',
          price: 0,
          inventory: 100,
-         maxPerOrder: 10
+         maxPerOrder: 10,
+         seats: 1
       };
       setEditingField({
          ...editingField,
@@ -753,12 +774,26 @@ const FormBuilder: React.FC = () => {
                                                                <X className="w-3 h-3" />
                                                             </button>
                                                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                                               <div>
-                                                                  <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Name</label>
-                                                                  <input type="text" placeholder="General Admission" className="w-full text-xs p-2 rounded border border-gray-200 outline-none focus:ring-1 focus:ring-indigo-500 transition"
-                                                                     value={item.name} onChange={e => updateTicketItem(i, { name: e.target.value })} />
+                                                               <div className="space-y-4">
+                                                                  <div>
+                                                                     <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Name</label>
+                                                                     <input type="text" placeholder="General Admission" className="w-full text-xs p-2 rounded border border-gray-200 outline-none focus:ring-1 focus:ring-indigo-500 transition"
+                                                                        value={item.name} onChange={e => updateTicketItem(i, { name: e.target.value })} />
+                                                                  </div>
+                                                                  <div className="grid grid-cols-2 gap-2">
+                                                                     <div>
+                                                                        <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Seats / Table</label>
+                                                                        <input type="number" placeholder="1" className="w-full text-xs p-2 rounded border border-gray-200 outline-none focus:ring-1 focus:ring-indigo-500 transition"
+                                                                           value={item.seats || 1} onChange={e => updateTicketItem(i, { seats: parseInt(e.target.value) })} />
+                                                                     </div>
+                                                                     <div>
+                                                                        <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Max / Order</label>
+                                                                        <input type="number" placeholder="5" className="w-full text-xs p-2 rounded border border-gray-200 outline-none focus:ring-1 focus:ring-indigo-500 transition"
+                                                                           value={item.maxPerOrder} onChange={e => updateTicketItem(i, { maxPerOrder: parseInt(e.target.value) })} />
+                                                                     </div>
+                                                                  </div>
                                                                </div>
-                                                               <div className="grid grid-cols-2 gap-2">
+                                                               <div className="grid grid-cols-2 gap-2 h-fit">
                                                                   <div>
                                                                      <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Price</label>
                                                                      <input type="number" placeholder="0" className="w-full text-xs p-2 rounded border border-gray-200 outline-none focus:ring-1 focus:ring-indigo-500 transition"

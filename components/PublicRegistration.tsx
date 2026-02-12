@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { getFormById, getSettings, saveAttendee } from '../services/storageService';
+import { getFormById, getSettings, saveAttendee, getAttendee, getGuestsByPrimaryId } from '../services/storageService';
 import { FormField, AppSettings, Attendee, Form } from '../types';
-import { Loader2, Check, AlertCircle, Download, Calendar, Tag, CreditCard, ArrowRight, X, Eye, MapPin } from 'lucide-react';
+import { Loader2, Check, AlertCircle, Download, Calendar, Tag, CreditCard, ArrowRight, X, Eye, MapPin, UserPlus, Info } from 'lucide-react';
 import { useNotifications } from './NotificationSystem';
-import { useParams } from 'react-router-dom';
+import { useParams, useLocation } from 'react-router-dom';
 import { generateTicketPDF } from '../utils/pdfGenerator';
 import { PayPalScriptProvider, PayPalButtons } from "@paypal/react-paypal-js";
 
@@ -34,18 +34,62 @@ const PublicRegistration = () => {
 
   // Guest State
   const [guests, setGuests] = useState<Array<{ name: string, email: string, dietary: string }>>([]);
+  const [skipGuestDetails, setSkipGuestDetails] = useState(false);
+
+  // Guest Mode State (when registering from a link)
+  const location = useLocation();
+  const searchParams = new URLSearchParams(location.search);
+  const guestRef = searchParams.get('ref');
+  const [mode, setMode] = useState<'purchaser' | 'guest'>((guestRef ? 'guest' : 'purchaser') as 'purchaser' | 'guest');
+  const [fetchedPrimaryAttendee, setFetchedPrimaryAttendee] = useState<Attendee | null>(null);
+  const [remainingSeats, setRemainingSeats] = useState<number>(0);
+  const [isTableFull, setIsTableFull] = useState(false);
 
   useEffect(() => {
     const fetch = async () => {
+      setLoading(true);
       if (formId) {
         const formData = await getFormById(formId);
         setForm(formData || null);
       }
       const settingsData = await getSettings();
       setSettings(settingsData);
+
+      // Handle Guest Mode (Referral Link)
+      if (guestRef && formId) {
+        const primary = await getAttendee(guestRef);
+        if (primary && primary.formId === formId) {
+          setFetchedPrimaryAttendee(primary);
+
+          // Calculate remaining seats
+          const existingGuests = await getGuestsByPrimaryId(primary.id);
+          // Find the ticket the primary attendee purchased to know total seats
+          const primaryFormData = await getFormById(primary.formId);
+          const ticketField = primaryFormData?.fields.find(f => f.type === 'ticket');
+          // This is a bit complex because we don't store exactly which ticket ID they bought in a standalone field,
+          // but we have ticketType string. Let's assume we can match it or use a default.
+          // Better yet, we can store total seats in the attendee record? 
+          // For now, let's look for a ticket that matches primary.ticketType.
+          const ticketItem = ticketField?.ticketConfig?.items.find(item => item.name === primary.ticketType);
+          const totalSeats = ticketItem?.seats || 1;
+          const currentCount = existingGuests.length + 1; // +1 for primary
+          const remaining = totalSeats - currentCount;
+
+          setRemainingSeats(remaining);
+          setIsTableFull(remaining <= 0);
+          setMode('guest');
+
+          // Pre-fill a guest slot for the link-based registrant
+          setGuests([{ name: '', email: '', dietary: 'no' }]);
+        } else {
+          showNotification('Invalid or expired guest registration link.', 'error');
+          setMode('purchaser');
+        }
+      }
+      setLoading(false);
     };
     fetch();
-  }, [formId]);
+  }, [formId, guestRef]);
 
   const ticketField = form?.fields.find(f => f.type === 'ticket');
 
@@ -72,14 +116,18 @@ const PublicRegistration = () => {
 
   // Resize guest array when ticket quantities change
   useEffect(() => {
-    if (!ticketField?.ticketConfig) return;
-    const totalTickets: number = (Object.values(ticketQuantities) as number[]).reduce((a, b) => a + b, 0);
+    if (!ticketField?.ticketConfig || mode === 'guest') return;
+    const totalTickets: number = ticketField.ticketConfig.items.reduce((acc: number, item) => {
+      const qty = ticketQuantities[item.id] || 0;
+      return acc + (qty * (item.seats || 1));
+    }, 0);
+
     setGuests(prev => {
       if (prev.length === totalTickets) return prev;
       const newGuests = [...prev];
       if (newGuests.length < totalTickets) {
         for (let i = newGuests.length; i < totalTickets; i++) {
-          newGuests.push({ name: '', email: '', dietary: '' });
+          newGuests.push({ name: '', email: '', dietary: 'no' });
         }
       } else {
         newGuests.length = totalTickets;
@@ -124,6 +172,8 @@ const PublicRegistration = () => {
 
   const validate = () => {
     if (!form) return false;
+
+    // Check custom fields
     for (const field of form.fields) {
       if (isVisible(field) && field.required && !answers[field.id] && field.type !== 'ticket') {
         setError(`Please fill in ${field.label}`);
@@ -137,10 +187,23 @@ const PublicRegistration = () => {
       }
     }
 
-    if (ticketField && ticketField.required) {
-      const totalQty = Object.values(ticketQuantities).reduce((a: number, b: number) => a + b, 0);
-      if (totalQty === 0) {
-        setError("Please select at least one ticket.");
+    if (mode === 'purchaser') {
+      if (ticketField && ticketField.required) {
+        const totalQty = Object.values(ticketQuantities).reduce((a: number, b: number) => a + b, 0);
+        if (totalQty === 0) {
+          setError("Please select at least one ticket.");
+          return false;
+        }
+      }
+    } else {
+      if (isTableFull) {
+        setError("This table is already at full capacity.");
+        return false;
+      }
+      // In guest mode, we always need Name and Email in the "Guest details" section
+      // But those are managed by the guests array state, not necessarily the main form fields.
+      if (guests.length === 0 || !guests[0].name || !guests[0].email) {
+        setError("Please provide your name and email address.");
         return false;
       }
     }
@@ -165,9 +228,36 @@ const PublicRegistration = () => {
     if (!form) return;
     setLoading(true);
 
-    // Generate a valid UUID for Supabase
     const submissionId = crypto.randomUUID();
     const invoiceId = `INV-${Math.random().toString(10).substr(2, 6)}`;
+
+    if (mode === 'guest' && fetchedPrimaryAttendee) {
+      const g = guests[0];
+      const guestAttendee: Attendee = {
+        id: submissionId,
+        formId: form.id,
+        formTitle: form.title,
+        name: g.name,
+        email: g.email,
+        dietaryPreferences: g.dietary === 'yes' ? 'Vegetarian' : '',
+        ticketType: `Guest of ${fetchedPrimaryAttendee.name}`,
+        registeredAt: new Date().toISOString(),
+        answers: answers,
+        paymentStatus: 'free',
+        isPrimary: false,
+        primaryAttendeeId: fetchedPrimaryAttendee.id,
+        qrPayload: JSON.stringify({ id: submissionId, invoiceId, formId: form.id, action: 'checkin' })
+      };
+      await saveAttendee(guestAttendee);
+      setGeneratedTicket(guestAttendee);
+      setLoading(false);
+      setStep('success');
+      if (settings) {
+        const doc = generateTicketPDF(guestAttendee, settings, form);
+        setPreviewPdfUrl(doc.output('bloburl').toString());
+      }
+      return;
+    }
 
     const emailField = form.fields.find(f => f.type === 'email' || f.label.toLowerCase().includes('email'));
     const nameField = form.fields.find(f => f.type === 'text' || f.label.toLowerCase().includes('name'));
@@ -206,7 +296,7 @@ const PublicRegistration = () => {
 
     // Add dietary preferences for the primary attendee from guest slot 0
     if (ticketField?.ticketConfig?.enableGuestDetails && guests.length > 0 && guests[0].dietary) {
-      newAttendee.dietaryPreferences = guests[0].dietary;
+      newAttendee.dietaryPreferences = guests[0].dietary === 'yes' ? 'Vegetarian' : '';
     }
 
     // Add Donated Seats Info
@@ -217,8 +307,8 @@ const PublicRegistration = () => {
     await saveAttendee(newAttendee);
     setGeneratedTicket(newAttendee);
 
-    // Save Guests
-    if (ticketField?.ticketConfig?.enableGuestDetails && guests.length > 1) {
+    // Save Guests (only if not skipped)
+    if (ticketField?.ticketConfig?.enableGuestDetails && guests.length > 1 && !skipGuestDetails) {
       const guestPromises = guests.slice(1).map(async (g, index) => {
         const guestId = crypto.randomUUID();
         const guestAttendee: Attendee = {
@@ -227,7 +317,7 @@ const PublicRegistration = () => {
           formTitle: form.title!,
           name: g.name || `Guest ${index + 2}`,
           email: g.email || 'unknown@example.com',
-          dietaryPreferences: g.dietary,
+          dietaryPreferences: g.dietary === 'yes' ? 'Vegetarian' : '',
           ticketType: 'Guest Ticket',
           registeredAt: new Date().toISOString(),
           answers: {},
@@ -353,6 +443,27 @@ const PublicRegistration = () => {
               </div>
             )}
 
+            {mode === 'guest' && fetchedPrimaryAttendee && (
+              <div className="bg-indigo-50 border border-indigo-200 p-4 rounded-xl flex gap-3 animate-in slide-in-from-top-4">
+                <UserPlus className="w-5 h-5 text-indigo-600 flex-shrink-0" />
+                <div>
+                  <div className="font-bold text-indigo-900 text-sm italic mb-1">Guest Registration</div>
+                  <p className="text-xs text-indigo-700 leading-relaxed">
+                    You've been invited to join <strong>{fetchedPrimaryAttendee.name}'s</strong> table.
+                    {remainingSeats > 0 ? (
+                      <span className="block mt-1 font-medium bg-indigo-100 w-fit px-2 py-0.5 rounded-full text-[10px] uppercase tracking-wider">
+                        {remainingSeats} seat{remainingSeats !== 1 ? 's' : ''} left
+                      </span>
+                    ) : (
+                      <span className="text-red-600 font-bold block mt-1 bg-red-50 px-2 py-0.5 rounded-full text-[10px] uppercase w-fit">
+                        This table is currently full
+                      </span>
+                    )}
+                  </p>
+                </div>
+              </div>
+            )}
+
             {form.fields.map(field => isVisible(field) && (
               <div key={field.id}>
                 {field.type !== 'ticket' && (
@@ -385,71 +496,75 @@ const PublicRegistration = () => {
                       <span className="text-xs text-gray-500">Select your tickets below</span>
                     </div>
 
-                    <div className="space-y-4 mb-6">
-                      {field.ticketConfig?.items.map(item => (
-                        <div key={item.id} className="flex items-center justify-between bg-white p-3 rounded-lg border border-gray-100 shadow-sm">
-                          <div>
-                            <div className="font-bold text-gray-800">{item.name}</div>
-                            <div className="text-xs text-gray-500">{item.price > 0 ? `${item.price} ${field.ticketConfig?.currency}` : 'Free'}</div>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <label className="text-xs text-gray-400 uppercase font-bold">Qty</label>
-                            <select
-                              className="bg-gray-50 border border-gray-200 rounded px-2 py-1 text-sm focus:ring-indigo-500"
-                              value={ticketQuantities[item.id] || 0}
-                              onChange={e => handleQuantityChange(item.id, parseInt(e.target.value))}
-                            >
-                              {[...Array((item.maxPerOrder || 5) + 1)].map((_, i) => (
-                                <option key={i} value={i}>{i}</option>
-                              ))}
-                            </select>
-                          </div>
+                    {mode === 'purchaser' && (
+                      <>
+                        <div className="space-y-4 mb-6">
+                          {field.ticketConfig?.items.map(item => (
+                            <div key={item.id} className="flex items-center justify-between bg-white p-3 rounded-lg border border-gray-100 shadow-sm">
+                              <div>
+                                <div className="font-bold text-gray-800">{item.name}</div>
+                                <div className="text-xs text-gray-500">{item.price > 0 ? `${item.price} ${field.ticketConfig?.currency}` : 'Free'}</div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <label className="text-xs text-gray-400 uppercase font-bold">Qty</label>
+                                <select
+                                  className="bg-gray-50 border border-gray-200 rounded px-2 py-1 text-sm focus:ring-indigo-500"
+                                  value={ticketQuantities[item.id] || 0}
+                                  onChange={e => handleQuantityChange(item.id, parseInt(e.target.value))}
+                                >
+                                  {[...Array((item.maxPerOrder || 5) + 1)].map((_, i) => (
+                                    <option key={i} value={i}>{i}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
 
-                    {/* Promo Code */}
-                    <div className="flex gap-2 mb-2">
-                      <input
-                        type="text" placeholder="Promo Code"
-                        className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                        value={promoCode}
-                        onChange={e => setPromoCode(e.target.value)}
-                      />
-                      <button
-                        type="button" onClick={applyPromo}
-                        className="px-4 py-2 bg-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-300"
-                      >
-                        Apply
-                      </button>
-                    </div>
-                    {appliedPromo && (
-                      <div className="text-xs text-green-600 flex items-center gap-1 mb-2">
-                        <Tag className="w-3 h-3" /> Code applied: {appliedPromo.code}
-                      </div>
+                        {/* Promo Code */}
+                        <div className="flex gap-2 mb-2">
+                          <input
+                            type="text" placeholder="Promo Code"
+                            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                            value={promoCode}
+                            onChange={e => setPromoCode(e.target.value)}
+                          />
+                          <button
+                            type="button" onClick={applyPromo}
+                            className="px-4 py-2 bg-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-300"
+                          >
+                            Apply
+                          </button>
+                        </div>
+                        {appliedPromo && (
+                          <div className="text-xs text-green-600 flex items-center gap-1 mb-2">
+                            <Tag className="w-3 h-3" /> Code applied: {appliedPromo.code}
+                          </div>
+                        )}
+                      </>
                     )}
 
                     {/* Donation and Guest Sections */}
-                    {field.ticketConfig?.enableDonations && (
-                      <div className="mb-4 pt-4 border-t border-gray-200">
+                    {mode === 'purchaser' && field.ticketConfig?.enableDonations && field.ticketConfig.items.some(item => (ticketQuantities[item.id] > 0) && (item.seats || 1) > 1) && (
+                      <div className="mb-4 pt-4 border-t border-gray-200 animate-in slide-in-from-top-2">
                         <div className="font-bold text-gray-800 mb-1">Donate Extra Seats</div>
-                        <p className="text-xs text-gray-500 mb-3">Would you like to purchase additional seats and donate them so others can attend?</p>
+                        <p className="text-xs text-gray-500 mb-3">Are you donating any seats at this table?</p>
                         <div className="flex gap-4 mb-3">
-                          <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="radio" checked={donateOption === 'no'} onChange={() => { setDonateOption('no'); setDonatedSeats(0); }} className="text-indigo-600 focus:ring-indigo-500" />
-                            <span className="text-sm">No thanks</span>
+                          <label className="flex items-center gap-2 cursor-pointer group">
+                            <input type="radio" value="no" name="donateOption" checked={donateOption === 'no'} onChange={() => { setDonateOption('no'); setDonatedSeats(0); }} className="w-4 h-4 text-indigo-600 focus:ring-indigo-500" />
+                            <span className="text-sm font-medium text-gray-700 group-hover:text-indigo-600">No thanks</span>
                           </label>
-                          <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="radio" checked={donateOption === 'yes'} onChange={() => setDonateOption('yes')} className="text-indigo-600 focus:ring-indigo-500" />
-                            <span className="text-sm">Yes, I'd like to donate seats</span>
+                          <label className="flex items-center gap-2 cursor-pointer group">
+                            <input type="radio" value="yes" name="donateOption" checked={donateOption === 'yes'} onChange={() => setDonateOption('yes')} className="w-4 h-4 text-indigo-600 focus:ring-indigo-500" />
+                            <span className="text-sm font-medium text-gray-700 group-hover:text-indigo-600">Yes, I'd like to donate seats</span>
                           </label>
                         </div>
 
                         {donateOption === 'yes' && (
-                          <div className="bg-emerald-50 p-3 rounded-lg border border-emerald-200">
-                            <label className="block text-xs font-bold text-emerald-700 uppercase mb-1">How many extra seats would you like to donate?</label>
+                          <div className="bg-emerald-50 p-3 rounded-lg border border-emerald-200 animate-in zoom-in-95 duration-200">
+                            <label className="block text-xs font-bold text-emerald-700 uppercase mb-1.5 flex items-center gap-2">How many seats would you like to donate? <Check className="w-3 h-3" /> </label>
                             <select
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-emerald-500"
                               value={donatedSeats}
                               onChange={e => setDonatedSeats(Math.max(0, parseInt(e.target.value) || 0))}
                             >
@@ -463,70 +578,111 @@ const PublicRegistration = () => {
 
                     {field.ticketConfig?.enableGuestDetails && guests.length > 0 && (
                       <div className="mb-4 pt-4 border-t border-gray-200">
-                        <div className="font-bold text-gray-800 mb-2">Guest Details</div>
-                        <p className="text-xs text-gray-500 mb-4">Please provide details for each ticket holder.</p>
-
-                        <div className="space-y-3">
-                          {guests.map((g, i) => (
-                            <div key={i} className="bg-gray-50 p-3 rounded-lg border border-gray-200">
-                              <div className="text-xs font-bold text-gray-400 uppercase mb-2">Ticket #{i + 1}</div>
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
-                                <input
-                                  type="text" placeholder="Guest Name"
-                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
-                                  value={g.name}
-                                  onChange={e => {
-                                    const newGuests = [...guests];
-                                    newGuests[i].name = e.target.value;
-                                    setGuests(newGuests);
-                                  }}
-                                />
-                                <input
-                                  type="email" placeholder="Guest Email"
-                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
-                                  value={g.email}
-                                  onChange={e => {
-                                    const newGuests = [...guests];
-                                    newGuests[i].email = e.target.value;
-                                    setGuests(newGuests);
-                                  }}
-                                />
-                              </div>
-                              <input
-                                type="text" placeholder="Dietary Restrictions (Optional)"
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
-                                value={g.dietary}
-                                onChange={e => {
-                                  const newGuests = [...guests];
-                                  newGuests[i].dietary = e.target.value;
-                                  setGuests(newGuests);
-                                }}
-                              />
-                              {i === 0 && (
-                                <button type="button" onClick={() => {
-                                  const nameField = form.fields.find(f => f.type === 'text' || f.label.toLowerCase().includes('name'));
-                                  const emailField = form.fields.find(f => f.type === 'email' || f.label.toLowerCase().includes('email'));
-                                  const newGuests = [...guests];
-                                  if (nameField) newGuests[0].name = answers[nameField.id] || '';
-                                  if (emailField) newGuests[0].email = answers[emailField.id] || '';
-                                  setGuests(newGuests);
-                                }} className="text-xs text-indigo-600 font-bold mt-2 hover:underline">
-                                  Same as Purchaser
-                                </button>
-                              )}
-                            </div>
-                          ))}
+                        <div className="flex justify-between items-start mb-2">
+                          <div className="font-bold text-gray-800">Guest Details</div>
+                          {mode === 'purchaser' && guests.length > 1 && (
+                            <label className="flex items-center gap-2 cursor-pointer group">
+                              <input type="checkbox" checked={skipGuestDetails} onChange={e => setSkipGuestDetails(e.target.checked)} className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-gray-300 transition" />
+                              <span className="text-[10px] font-bold text-gray-400 group-hover:text-indigo-600 uppercase tracking-widest transition-colors">Skip for now</span>
+                            </label>
+                          )}
                         </div>
+
+                        <p className="text-xs text-gray-500 mb-4 leading-relaxed">
+                          {mode === 'guest' ? "Please confirm your registration details." : "Please provide details for each ticket holder."}
+                        </p>
+
+                        {(mode === 'guest' && isTableFull) ? (
+                          <div className="bg-red-50 border border-red-100 p-4 rounded-xl flex gap-3 text-red-700 animate-in zoom-in-95">
+                            <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                            <p className="text-xs font-bold uppercase tracking-widest">Registrations are closed for this table as it has reached its full capacity.</p>
+                          </div>
+                        ) : skipGuestDetails ? (
+                          <div className="bg-amber-50 border border-amber-100 p-4 rounded-xl flex gap-3 animate-in zoom-in-95 duration-300">
+                            <Info className="w-5 h-5 text-amber-600 flex-shrink-0" />
+                            <p className="text-xs text-amber-800 leading-relaxed italic">
+                              No problem! You can skip providing your guest names right now. After purchase, you can email your guest list to <a href="mailto:gala@sicklecellanemia.ca" className="font-bold underline hover:text-amber-900">gala@sicklecellanemia.ca</a> or use the unique guest registration link found on your ticket to invite them.
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="space-y-3">
+                            {guests.map((g, i) => (mode === 'purchaser' || i === 0) && (
+                              <div key={i} className={`bg-gray-50 p-4 rounded-xl border border-gray-200 shadow-sm transition-all ${mode === 'guest' ? 'ring-2 ring-indigo-500 bg-white ring-offset-2' : ''}`}>
+                                <div className="text-[10px] font-black text-gray-400 uppercase mb-3 flex justify-between">
+                                  <span>{mode === 'guest' ? "Your Details" : `Ticket #${i + 1}`}</span>
+                                  {(mode === 'purchaser' && i === 0) && <span className="text-indigo-500">Purchaser</span>}
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
+                                  <input
+                                    type="text" placeholder="Guest Name"
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+                                    value={g.name}
+                                    onChange={e => {
+                                      const newGuests = [...guests];
+                                      newGuests[i].name = e.target.value;
+                                      setGuests(newGuests);
+                                    }}
+                                  />
+                                  <input
+                                    type="email" placeholder="Guest Email"
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+                                    value={g.email}
+                                    onChange={e => {
+                                      const newGuests = [...guests];
+                                      newGuests[i].email = e.target.value;
+                                      setGuests(newGuests);
+                                    }}
+                                  />
+                                </div>
+                                <div className="flex items-center justify-between mt-1">
+                                  <span className="text-[10px] font-bold text-gray-500 uppercase">Vegetarian?</span>
+                                  <div className="flex gap-4">
+                                    <label className="flex items-center gap-1.5 cursor-pointer">
+                                      <input type="radio" name={`veg-${i}`} checked={g.dietary === 'no'} onChange={() => {
+                                        const newGuests = [...guests];
+                                        newGuests[i].dietary = 'no';
+                                        setGuests(newGuests);
+                                      }} className="w-3.5 h-3.5 text-indigo-600 focus:ring-indigo-500" />
+                                      <span className="text-xs text-gray-600">No</span>
+                                    </label>
+                                    <label className="flex items-center gap-1.5 cursor-pointer">
+                                      <input type="radio" name={`veg-${i}`} checked={g.dietary === 'yes'} onChange={() => {
+                                        const newGuests = [...guests];
+                                        newGuests[i].dietary = 'yes';
+                                        setGuests(newGuests);
+                                      }} className="w-3.5 h-3.5 text-indigo-600 focus:ring-indigo-500" />
+                                      <span className="text-xs text-gray-600">Yes</span>
+                                    </label>
+                                  </div>
+                                </div>
+                                {i === 0 && (
+                                  <button type="button" onClick={() => {
+                                    const nameField = form.fields.find(f => f.type === 'text' || f.label.toLowerCase().includes('name'));
+                                    const emailField = form.fields.find(f => f.type === 'email' || f.label.toLowerCase().includes('email'));
+                                    const newGuests = [...guests];
+                                    if (nameField) newGuests[0].name = answers[nameField.id] || '';
+                                    if (emailField) newGuests[0].email = answers[emailField.id] || '';
+                                    setGuests(newGuests);
+                                  }} className="text-xs text-indigo-600 font-bold mt-2 hover:underline">
+                                    Same as Purchaser
+                                  </button>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
 
                     {/* Totals */}
-                    <div className="pt-4 border-t border-gray-200 flex justify-between items-center">
-                      <span className="text-sm font-bold text-gray-700">Total:</span>
-                      <span className="text-xl font-bold text-indigo-700">
-                        {paymentTotal.toFixed(2)} {field.ticketConfig?.currency}
-                      </span>
-                    </div>
+                    {mode === 'purchaser' && (
+                      <div className="pt-4 border-t border-gray-200 flex justify-between items-center">
+                        <span className="text-sm font-bold text-gray-700">Total:</span>
+                        <span className="text-xl font-bold text-indigo-700">
+                          {paymentTotal.toFixed(2)} {field.ticketConfig?.currency}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 ) : field.type === 'radio' ? (
                   <div className="space-y-2 mt-2">
@@ -750,6 +906,38 @@ const PublicRegistration = () => {
                     <Download className="w-5 h-5 inline mr-2" /> Download PDF Ticket
                   </button>
                 )}
+              </div>
+            )}
+
+            {/* Guest Registration Link Section */}
+            {generatedTicket.isPrimary && mode === 'purchaser' && (
+              <div className="mt-8 p-6 bg-indigo-50 rounded-2xl border border-indigo-100 text-left animate-in fade-in slide-in-from-bottom-4 duration-700">
+                <div className="flex items-center gap-2 mb-4">
+                  <UserPlus className="w-5 h-5 text-indigo-600" />
+                  <h3 className="font-bold text-indigo-900">Manage Your Guests</h3>
+                </div>
+                <p className="text-sm text-indigo-800/80 mb-4 leading-relaxed">
+                  You can share this unique registration link with your guests so they can provide their own details (name, email, and dietary preferences):
+                </p>
+                <div className="flex gap-2">
+                  <div className="flex-1 bg-white p-3 rounded-xl border border-indigo-200 text-[11px] font-mono text-indigo-600 break-all select-all">
+                    {`${window.location.origin}${window.location.pathname}?ref=${generatedTicket.id}`}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}?ref=${generatedTicket.id}`);
+                      showNotification('Link copied to clipboard!', 'success');
+                    }}
+                    className="p-3 bg-white border border-indigo-200 rounded-xl hover:bg-indigo-50 transition"
+                    title="Copy Link"
+                  >
+                    <Download className="w-4 h-4 text-indigo-600 rotate-180" />
+                  </button>
+                </div>
+                <p className="text-[11px] text-indigo-500 mt-3 italic">
+                  * This link will automatically expire once all seats at your table are filled.
+                </p>
               </div>
             )}
 
