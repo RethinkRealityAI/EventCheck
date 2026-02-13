@@ -89,6 +89,19 @@ const FormBuilder: React.FC = () => {
       }
    }, [previewTicketQuantities, activeTab, form]);
 
+   // Sync editingField changes to form state immediately
+   useEffect(() => {
+      if (editingField) {
+         setForm(prev => {
+            if (!prev) return prev;
+            return {
+               ...prev,
+               fields: prev.fields.map(f => f.id === editingField.id ? editingField : f)
+            };
+         });
+      }
+   }, [editingField]);
+
    const save = async () => {
       if (form) {
          await saveForm(form);
@@ -158,6 +171,7 @@ const FormBuilder: React.FC = () => {
       if (!form) return;
       if (confirm('Delete this field?')) {
          setForm({ ...form, fields: form.fields.filter(f => f.id !== id) });
+         if (editingField?.id === id) setEditingField(null);
          showNotification('Field removed', 'info');
       }
    };
@@ -173,14 +187,7 @@ const FormBuilder: React.FC = () => {
       setForm({ ...form, fields: newFields });
    };
 
-   const saveFieldUpdates = (updated: FormField) => {
-      if (!form) return;
-      setForm(prev => {
-         if (!prev) return prev;
-         return { ...prev, fields: prev.fields.map(f => f.id === updated.id ? updated : f) };
-      });
-      setEditingField(null);
-   };
+
 
    // --- Ticket Helpers ---
    const addTicketItem = () => {
@@ -885,12 +892,72 @@ const FormBuilder: React.FC = () => {
                                                       </div>
                                                    </label>
                                                 </div>
+
+                                                {editingField.ticketConfig.enableDonations && (
+                                                   <div className="pt-4 border-t border-indigo-100 animate-in slide-in-from-top-2 duration-300 space-y-4">
+                                                      <h5 className="text-xs font-bold text-indigo-900 uppercase tracking-widest flex items-center gap-2">
+                                                         <Settings className="w-3 h-3" /> Donation Settings
+                                                      </h5>
+                                                      <div>
+                                                         <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Section Title</label>
+                                                         <input
+                                                            type="text"
+                                                            className="w-full text-xs p-2 rounded border border-gray-200 outline-none focus:ring-1 focus:ring-indigo-500 transition"
+                                                            placeholder="Donate Extra Seats"
+                                                            value={editingField.ticketConfig.donationSectionTitle || ''}
+                                                            onChange={e => setEditingField({
+                                                               ...editingField,
+                                                               ticketConfig: { ...editingField.ticketConfig!, donationSectionTitle: e.target.value }
+                                                            })}
+                                                         />
+                                                      </div>
+                                                      <div>
+                                                         <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Description / Prompt</label>
+                                                         <input
+                                                            type="text"
+                                                            className="w-full text-xs p-2 rounded border border-gray-200 outline-none focus:ring-1 focus:ring-indigo-500 transition"
+                                                            placeholder="Are you donating any seats at this table?"
+                                                            value={editingField.ticketConfig.donationSectionDescription || ''}
+                                                            onChange={e => setEditingField({
+                                                               ...editingField,
+                                                               ticketConfig: { ...editingField.ticketConfig!, donationSectionDescription: e.target.value }
+                                                            })}
+                                                         />
+                                                      </div>
+                                                      <div>
+                                                         <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Question Label</label>
+                                                         <input
+                                                            type="text"
+                                                            className="w-full text-xs p-2 rounded border border-gray-200 outline-none focus:ring-1 focus:ring-indigo-500 transition"
+                                                            placeholder="How many seats would you like to donate?"
+                                                            value={editingField.ticketConfig.donationQuestionLabel || ''}
+                                                            onChange={e => setEditingField({
+                                                               ...editingField,
+                                                               ticketConfig: { ...editingField.ticketConfig!, donationQuestionLabel: e.target.value }
+                                                            })}
+                                                         />
+                                                      </div>
+                                                      <div>
+                                                         <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Help Text</label>
+                                                         <input
+                                                            type="text"
+                                                            className="w-full text-xs p-2 rounded border border-gray-200 outline-none focus:ring-1 focus:ring-indigo-500 transition"
+                                                            placeholder="These seats will be made available for individuals who may not otherwise be able to attend."
+                                                            value={editingField.ticketConfig.donationHelpText || ''}
+                                                            onChange={e => setEditingField({
+                                                               ...editingField,
+                                                               ticketConfig: { ...editingField.ticketConfig!, donationHelpText: e.target.value }
+                                                            })}
+                                                         />
+                                                      </div>
+                                                   </div>
+                                                )}
                                              </div>
                                           )}
 
                                           <div className="flex justify-end pt-2">
                                              <button
-                                                onClick={() => saveFieldUpdates(editingField)}
+                                                onClick={() => setEditingField(null)}
                                                 className="px-4 py-2 bg-gray-900 text-white text-xs rounded-md font-medium hover:bg-gray-800"
                                              >
                                                 Done
@@ -1548,8 +1615,8 @@ const FormBuilder: React.FC = () => {
                                           {/* Donation Preview */}
                                           {field.ticketConfig?.enableDonations && (
                                              <div className="mt-4 pt-4 border-t border-gray-200">
-                                                <div className="font-bold text-gray-800 mb-1 text-sm">Donate Extra Seats</div>
-                                                <p className="text-xs text-gray-500 mb-2">Would you like to purchase additional seats and donate them so others can attend?</p>
+                                                <div className="font-bold text-gray-800 mb-1 text-sm">{field.ticketConfig?.donationSectionTitle || 'Donate Extra Seats'}</div>
+                                                <p className="text-xs text-gray-500 mb-2">{field.ticketConfig?.donationSectionDescription || 'Are you donating any seats at this table?'}</p>
                                                 <div className="flex gap-3 mb-2">
                                                    <label className="flex items-center gap-1.5 cursor-pointer">
                                                       <input type="radio" checked readOnly className="text-indigo-600" />

@@ -83,6 +83,11 @@ export interface TicketConfig {
   promoCodes: PromoCode[];
   enableDonations?: boolean;
   enableGuestDetails?: boolean;
+  // Donation Text Customization
+  donationSectionTitle?: string;
+  donationSectionDescription?: string;
+  donationQuestionLabel?: string;
+  donationHelpText?: string;
 }
 
 export interface FormField {

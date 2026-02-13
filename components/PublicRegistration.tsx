@@ -547,8 +547,8 @@ const PublicRegistration = () => {
                     {/* Donation and Guest Sections */}
                     {mode === 'purchaser' && field.ticketConfig?.enableDonations && field.ticketConfig.items.some(item => (ticketQuantities[item.id] > 0) && (item.seats || 1) > 1) && (
                       <div className="mb-4 pt-4 border-t border-gray-200 animate-in slide-in-from-top-2">
-                        <div className="font-bold text-gray-800 mb-1">Donate Extra Seats</div>
-                        <p className="text-xs text-gray-500 mb-3">Are you donating any seats at this table?</p>
+                        <div className="font-bold text-gray-800 mb-1">{field.ticketConfig?.donationSectionTitle || 'Donate Extra Seats'}</div>
+                        <p className="text-xs text-gray-500 mb-3">{field.ticketConfig?.donationSectionDescription || 'Are you donating any seats at this table?'}</p>
                         <div className="flex gap-4 mb-3">
                           <label className="flex items-center gap-2 cursor-pointer group">
                             <input type="radio" value="no" name="donateOption" checked={donateOption === 'no'} onChange={() => { setDonateOption('no'); setDonatedSeats(0); }} className="w-4 h-4 text-indigo-600 focus:ring-indigo-500" />
@@ -562,7 +562,7 @@ const PublicRegistration = () => {
 
                         {donateOption === 'yes' && (
                           <div className="bg-emerald-50 p-3 rounded-lg border border-emerald-200 animate-in zoom-in-95 duration-200">
-                            <label className="block text-xs font-bold text-emerald-700 uppercase mb-1.5 flex items-center gap-2">How many seats would you like to donate? <Check className="w-3 h-3" /> </label>
+                            <label className="block text-xs font-bold text-emerald-700 uppercase mb-1.5 flex items-center gap-2">{field.ticketConfig?.donationQuestionLabel || 'How many seats would you like to donate?'} <Check className="w-3 h-3" /> </label>
                             <select
                               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-emerald-500"
                               value={donatedSeats}
@@ -570,7 +570,7 @@ const PublicRegistration = () => {
                             >
                               {[...Array(11)].map((_, i) => <option key={i} value={i}>{i} seat{i !== 1 ? 's' : ''}</option>)}
                             </select>
-                            <p className="text-[11px] text-emerald-600 mt-2">These seats will be made available for individuals who may not otherwise be able to attend.</p>
+                            <p className="text-[11px] text-emerald-600 mt-2">{field.ticketConfig?.donationHelpText || 'These seats will be made available for individuals who may not otherwise be able to attend.'}</p>
                           </div>
                         )}
                       </div>
