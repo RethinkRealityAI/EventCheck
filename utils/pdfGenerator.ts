@@ -155,18 +155,26 @@ export const generateTicketPDF = (
     doc.text(`Paid via PayPal (${attendee.paymentAmount || 'Paid'})`, labelX, payY);
   }
 
-  // --- Donated Seats Info (inside the box when present) ---
+  // --- Donated Seats/Tables Info (inside the box when present) ---
   if (hasDonation) {
     currentY += 15;
     doc.setTextColor(150, 150, 150);
     doc.setFontSize(10);
     doc.setFont('helvetica', 'bold');
-    doc.text("DONATED SEATS", labelX, currentY);
 
-    currentY += 6;
-    doc.setTextColor(30, 30, 30);
-    doc.setFontSize(14);
-    doc.text(`${attendee.donatedSeats} seat${(attendee.donatedSeats || 0) !== 1 ? 's' : ''}`, labelX, currentY);
+    if (attendee.donationType === 'table' && (attendee.donatedTables || 0) > 0) {
+      doc.text("DONATED TABLES", labelX, currentY);
+      currentY += 6;
+      doc.setTextColor(30, 30, 30);
+      doc.setFontSize(14);
+      doc.text(`${attendee.donatedTables} table${(attendee.donatedTables || 0) !== 1 ? 's' : ''} (${attendee.donatedSeats} seat${(attendee.donatedSeats || 0) !== 1 ? 's' : ''})`, labelX, currentY);
+    } else {
+      doc.text("DONATED SEATS", labelX, currentY);
+      currentY += 6;
+      doc.setTextColor(30, 30, 30);
+      doc.setFontSize(14);
+      doc.text(`${attendee.donatedSeats} seat${(attendee.donatedSeats || 0) !== 1 ? 's' : ''}`, labelX, currentY);
+    }
   }
 
   // --- Footer ---

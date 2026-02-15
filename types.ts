@@ -15,6 +15,8 @@ export interface Attendee {
   answers?: Record<string, any>; // Store custom form answers
   isTest?: boolean; // Flag to identify preview/test submissions
   // Donation & Guest Fields
+  donationType?: 'none' | 'table' | 'seats'; // What kind of donation was made
+  donatedTables?: number; // Number of full tables donated
   donatedSeats?: number; // Number of extra seats donated for others
   dietaryPreferences?: string; // e.g. "Vegetarian", "Vegan", etc.
   primaryAttendeeId?: string; // If this is a guest, link to purchaser

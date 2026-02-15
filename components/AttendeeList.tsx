@@ -51,6 +51,8 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, isLoading = fals
     paymentAmount: true,
     formTitle: true,
     donatedSeats: true,
+    donatedTables: true,
+    donationType: true,
     dietaryPreferences: true,
     isPrimary: true
   });
@@ -68,6 +70,8 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, isLoading = fals
     paymentAmount: 'Amount Paid',
     formTitle: 'Event Title',
     donatedSeats: 'Donated Seats',
+    donatedTables: 'Donated Tables',
+    donationType: 'Donation Type',
     dietaryPreferences: 'Dietary Preferences',
     isPrimary: 'Primary / Guest'
   };
@@ -82,7 +86,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, isLoading = fals
     const isTest = !!a.isTest;
     let matchesTab = false;
     if (activeTab === 'test') matchesTab = isTest;
-    else if (activeTab === 'donated') matchesTab = !isTest && (a.donatedSeats || 0) > 0;
+    else if (activeTab === 'donated') matchesTab = !isTest && ((a.donatedSeats || 0) > 0 || (a.donatedTables || 0) > 0);
     else matchesTab = !isTest;
 
     const matchesStatus = statusFilter === 'all'
@@ -97,7 +101,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, isLoading = fals
   });
 
   // Count donated seats for badge
-  const totalDonatedCount = attendees.filter(a => !a.isTest && (a.donatedSeats || 0) > 0).length;
+  const totalDonatedCount = attendees.filter(a => !a.isTest && ((a.donatedSeats || 0) > 0 || (a.donatedTables || 0) > 0)).length;
 
   // Pagination Logic
   const totalPages = Math.ceil(filtered.length / itemsPerPage);
@@ -533,8 +537,13 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, isLoading = fals
                         {attendee.isPrimary === false && (
                           <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-700">GUEST</span>
                         )}
-                        {(attendee.donatedSeats || 0) > 0 && (
-                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-700">🪑 {attendee.donatedSeats}</span>
+                        {((attendee.donatedSeats || 0) > 0 || (attendee.donatedTables || 0) > 0) && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-700">
+                            {attendee.donationType === 'table' && (attendee.donatedTables || 0) > 0
+                              ? `🪑 ${attendee.donatedTables} tbl (${attendee.donatedSeats})`
+                              : `🪑 ${attendee.donatedSeats}`
+                            }
+                          </span>
                         )}
                       </div>
                       <div className="text-gray-400 text-xs">{attendee.email}</div>
@@ -809,13 +818,25 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, isLoading = fals
                           </div>
                         )}
 
-                        {/* Donated Seats Info */}
-                        {selectedAttendee.donatedSeats && selectedAttendee.donatedSeats > 0 && (
+                        {/* Donated Seats/Tables Info */}
+                        {((selectedAttendee.donatedSeats && selectedAttendee.donatedSeats > 0) || (selectedAttendee.donatedTables && selectedAttendee.donatedTables > 0)) && (
                           <div className="pt-4 mt-4 border-t border-slate-100 space-y-3">
                             <div>
-                              <label className="text-[10px] font-bold text-emerald-600 uppercase block mb-1">Donated Seats</label>
-                              <div className="text-sm font-bold text-emerald-700">{selectedAttendee.donatedSeats} seat{selectedAttendee.donatedSeats !== 1 ? 's' : ''}</div>
-                              <div className="text-xs text-slate-500 mt-1">Extra tickets donated for others to attend</div>
+                              <label className="text-[10px] font-bold text-emerald-600 uppercase block mb-1">
+                                {selectedAttendee.donationType === 'table' ? 'Donated Tables' : 'Donated Seats'}
+                              </label>
+                              <div className="text-sm font-bold text-emerald-700">
+                                {selectedAttendee.donationType === 'table' && (selectedAttendee.donatedTables || 0) > 0
+                                  ? `${selectedAttendee.donatedTables} table${(selectedAttendee.donatedTables || 0) !== 1 ? 's' : ''} (${selectedAttendee.donatedSeats} seat${(selectedAttendee.donatedSeats || 0) !== 1 ? 's' : ''})`
+                                  : `${selectedAttendee.donatedSeats} seat${(selectedAttendee.donatedSeats || 0) !== 1 ? 's' : ''}`
+                                }
+                              </div>
+                              <div className="text-xs text-slate-500 mt-1">
+                                {selectedAttendee.donationType === 'table'
+                                  ? 'Full table(s) donated for others to attend'
+                                  : 'Extra tickets donated for others to attend'
+                                }
+                              </div>
                             </div>
                           </div>
                         )}

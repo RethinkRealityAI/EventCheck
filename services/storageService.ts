@@ -71,6 +71,9 @@ export const updateAttendee = async (id: string, updates: Partial<Attendee>): Pr
   if (updates.isTest !== undefined) dbUpdates.is_test = updates.isTest;
   if (updates.answers !== undefined) dbUpdates.answers = updates.answers;
   if (updates.donatedSeats !== undefined) dbUpdates.donation_amount = updates.donatedSeats;
+  if (updates.donationType !== undefined || updates.donatedTables !== undefined) {
+    dbUpdates.donation_details = { donationType: updates.donationType || 'none', donatedTables: updates.donatedTables || 0 } as any;
+  }
   if (updates.dietaryPreferences !== undefined) dbUpdates.dietary_preferences = updates.dietaryPreferences;
   if (updates.primaryAttendeeId !== undefined) dbUpdates.primary_attendee_id = updates.primaryAttendeeId;
   if (updates.isPrimary !== undefined) dbUpdates.is_primary = updates.isPrimary;
@@ -275,6 +278,7 @@ export const clearData = async (): Promise<void> => {
 
 // --- Mapping Helpers ---
 function mapAttendeeFromDb(db: AttendeeRow): Attendee {
+  const donationDetails = (db.donation_details as any) || {};
   return {
     id: db.id,
     formId: db.form_id,
@@ -291,6 +295,8 @@ function mapAttendeeFromDb(db: AttendeeRow): Attendee {
     paymentAmount: db.payment_amount || undefined,
     answers: (db.answers as Record<string, any>) || {},
     isTest: db.is_test || false,
+    donationType: donationDetails.donationType || 'none',
+    donatedTables: donationDetails.donatedTables || 0,
     donatedSeats: db.donation_amount || 0,
     dietaryPreferences: db.dietary_preferences || undefined,
     primaryAttendeeId: db.primary_attendee_id || undefined,
@@ -318,7 +324,7 @@ function mapAttendeeToDb(a: Attendee): AttendeeInsert {
     answers: a.answers,
     is_test: a.isTest,
     donation_amount: a.donatedSeats || 0,
-    donation_details: null,
+    donation_details: { donationType: a.donationType || 'none', donatedTables: a.donatedTables || 0 } as any,
     dietary_preferences: a.dietaryPreferences || null,
     primary_attendee_id: a.primaryAttendeeId || null,
     is_primary: a.isPrimary ?? true,

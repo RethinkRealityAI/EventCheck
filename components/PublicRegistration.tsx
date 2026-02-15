@@ -29,8 +29,9 @@ const PublicRegistration = () => {
   const [paymentTotal, setPaymentTotal] = useState(0);
 
   // Donation State (seat-based — donating extra tickets for others)
-  const [donateOption, setDonateOption] = useState('no');
+  const [donateOption, setDonateOption] = useState<'no' | 'table' | 'seats'>('no');
   const [donatedSeats, setDonatedSeats] = useState(0);
+  const [donatedTables, setDonatedTables] = useState(0);
 
   // Guest State
   const [guests, setGuests] = useState<Array<{ name: string, email: string, dietary: string }>>([]);
@@ -299,8 +300,10 @@ const PublicRegistration = () => {
       newAttendee.dietaryPreferences = guests[0].dietary === 'yes' ? 'Vegetarian' : '';
     }
 
-    // Add Donated Seats Info
-    if (ticketField?.ticketConfig?.enableDonations && donatedSeats > 0) {
+    // Add Donated Seats/Tables Info
+    if (ticketField?.ticketConfig?.enableDonations && (donatedSeats > 0 || donatedTables > 0)) {
+      newAttendee.donationType = donateOption === 'no' ? 'none' : donateOption;
+      newAttendee.donatedTables = donatedTables;
       newAttendee.donatedSeats = donatedSeats;
     }
 
@@ -547,20 +550,69 @@ const PublicRegistration = () => {
                     {/* Donation and Guest Sections */}
                     {mode === 'purchaser' && field.ticketConfig?.enableDonations && field.ticketConfig.items.some(item => (ticketQuantities[item.id] > 0) && (item.seats || 1) > 1) && (
                       <div className="mb-4 pt-4 border-t border-gray-200 animate-in slide-in-from-top-2">
-                        <div className="font-bold text-gray-800 mb-1">{field.ticketConfig?.donationSectionTitle || 'Donate Extra Seats'}</div>
-                        <p className="text-xs text-gray-500 mb-3">{field.ticketConfig?.donationSectionDescription || 'Are you donating any seats at this table?'}</p>
-                        <div className="flex gap-4 mb-3">
+                        <div className="font-bold text-gray-800 mb-1">{field.ticketConfig?.donationSectionTitle || 'Donate a Table or Seats'}</div>
+                        <p className="text-xs text-gray-500 mb-3">{field.ticketConfig?.donationSectionDescription || 'Are you donating this table or any seats?'}</p>
+                        <div className="flex flex-wrap gap-3 mb-3">
                           <label className="flex items-center gap-2 cursor-pointer group">
-                            <input type="radio" value="no" name="donateOption" checked={donateOption === 'no'} onChange={() => { setDonateOption('no'); setDonatedSeats(0); }} className="w-4 h-4 text-indigo-600 focus:ring-indigo-500" />
+                            <input type="radio" value="no" name="donateOption" checked={donateOption === 'no'} onChange={() => { setDonateOption('no'); setDonatedSeats(0); setDonatedTables(0); }} className="w-4 h-4 text-indigo-600 focus:ring-indigo-500" />
                             <span className="text-sm font-medium text-gray-700 group-hover:text-indigo-600">No thanks</span>
                           </label>
                           <label className="flex items-center gap-2 cursor-pointer group">
-                            <input type="radio" value="yes" name="donateOption" checked={donateOption === 'yes'} onChange={() => setDonateOption('yes')} className="w-4 h-4 text-indigo-600 focus:ring-indigo-500" />
-                            <span className="text-sm font-medium text-gray-700 group-hover:text-indigo-600">Yes, I'd like to donate seats</span>
+                            <input type="radio" value="table" name="donateOption" checked={donateOption === 'table'} onChange={() => {
+                              setDonateOption('table');
+                              // Auto-calculate: 1 table donated by default
+                              const tableItem = field.ticketConfig!.items.find(item => (ticketQuantities[item.id] > 0) && (item.seats || 1) > 1);
+                              const seatsPerTable = tableItem?.seats || 8;
+                              setDonatedTables(1);
+                              setDonatedSeats(seatsPerTable);
+                            }} className="w-4 h-4 text-emerald-600 focus:ring-emerald-500" />
+                            <span className="text-sm font-medium text-gray-700 group-hover:text-emerald-600">Table</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer group">
+                            <input type="radio" value="seats" name="donateOption" checked={donateOption === 'seats'} onChange={() => { setDonateOption('seats'); setDonatedTables(0); setDonatedSeats(0); }} className="w-4 h-4 text-emerald-600 focus:ring-emerald-500" />
+                            <span className="text-sm font-medium text-gray-700 group-hover:text-emerald-600">Seats</span>
                           </label>
                         </div>
 
-                        {donateOption === 'yes' && (
+                        {donateOption === 'table' && (() => {
+                          // Calculate total tables purchased (sum of quantities for table-type tickets)
+                          const tableItems = field.ticketConfig!.items.filter(item => (ticketQuantities[item.id] > 0) && (item.seats || 1) > 1);
+                          const totalTablesPurchased = tableItems.reduce((acc, item) => acc + (ticketQuantities[item.id] || 0), 0);
+                          const seatsPerTable = tableItems[0]?.seats || 8;
+
+                          return (
+                            <div className="bg-emerald-50 p-4 rounded-lg border border-emerald-200 animate-in zoom-in-95 duration-200">
+                              {totalTablesPurchased > 1 ? (
+                                <>
+                                  <label className="block text-xs font-bold text-emerald-700 uppercase mb-1.5 flex items-center gap-2">
+                                    How many tables would you like to donate? <Check className="w-3 h-3" />
+                                  </label>
+                                  <select
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-emerald-500"
+                                    value={donatedTables}
+                                    onChange={e => {
+                                      const tables = Math.max(0, parseInt(e.target.value) || 0);
+                                      setDonatedTables(tables);
+                                      setDonatedSeats(tables * seatsPerTable);
+                                    }}
+                                  >
+                                    {[...Array(totalTablesPurchased + 1)].map((_, i) => (
+                                      <option key={i} value={i}>{i} table{i !== 1 ? 's' : ''} ({i * seatsPerTable} seats)</option>
+                                    ))}
+                                  </select>
+                                </>
+                              ) : (
+                                <div className="flex items-center gap-2 text-sm font-bold text-emerald-700">
+                                  <Check className="w-4 h-4" />
+                                  Donating 1 table ({seatsPerTable} seats)
+                                </div>
+                              )}
+                              <p className="text-[11px] text-emerald-600 mt-2">{field.ticketConfig?.donationHelpText || 'These seats will be made available for individuals who may not otherwise be able to attend.'}</p>
+                            </div>
+                          );
+                        })()}
+
+                        {donateOption === 'seats' && (
                           <div className="bg-emerald-50 p-3 rounded-lg border border-emerald-200 animate-in zoom-in-95 duration-200">
                             <label className="block text-xs font-bold text-emerald-700 uppercase mb-1.5 flex items-center gap-2">{field.ticketConfig?.donationQuestionLabel || 'How many seats would you like to donate?'} <Check className="w-3 h-3" /> </label>
                             <select
@@ -776,10 +828,10 @@ const PublicRegistration = () => {
                 <span>Applied</span>
               </div>
             )}
-            {donatedSeats > 0 && (
+            {(donatedSeats > 0 || donatedTables > 0) && (
               <div className="flex justify-between items-center text-sm text-emerald-600 border-t border-gray-200 pt-2 mt-2">
-                <span>Donated Seats</span>
-                <span>{donatedSeats} seat{donatedSeats !== 1 ? 's' : ''}</span>
+                <span>{donateOption === 'table' ? 'Donated Tables' : 'Donated Seats'}</span>
+                <span>{donateOption === 'table' ? `${donatedTables} table${donatedTables !== 1 ? 's' : ''} (${donatedSeats} seats)` : `${donatedSeats} seat${donatedSeats !== 1 ? 's' : ''}`}</span>
               </div>
             )}
             <div className="flex justify-between items-center text-lg font-bold text-indigo-600 border-t border-gray-200 pt-3 mt-3">

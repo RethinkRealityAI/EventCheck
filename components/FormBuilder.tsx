@@ -1615,16 +1615,20 @@ const FormBuilder: React.FC = () => {
                                           {/* Donation Preview */}
                                           {field.ticketConfig?.enableDonations && (
                                              <div className="mt-4 pt-4 border-t border-gray-200">
-                                                <div className="font-bold text-gray-800 mb-1 text-sm">{field.ticketConfig?.donationSectionTitle || 'Donate Extra Seats'}</div>
-                                                <p className="text-xs text-gray-500 mb-2">{field.ticketConfig?.donationSectionDescription || 'Are you donating any seats at this table?'}</p>
-                                                <div className="flex gap-3 mb-2">
+                                                <div className="font-bold text-gray-800 mb-1 text-sm">{field.ticketConfig?.donationSectionTitle || 'Donate a Table or Seats'}</div>
+                                                <p className="text-xs text-gray-500 mb-2">{field.ticketConfig?.donationSectionDescription || 'Are you donating this table or any seats?'}</p>
+                                                <div className="flex flex-wrap gap-3 mb-2">
                                                    <label className="flex items-center gap-1.5 cursor-pointer">
                                                       <input type="radio" checked readOnly className="text-indigo-600" />
                                                       <span className="text-xs">No thanks</span>
                                                    </label>
                                                    <label className="flex items-center gap-1.5 cursor-pointer">
-                                                      <input type="radio" readOnly className="text-indigo-600" />
-                                                      <span className="text-xs">Yes, I'd like to donate seats</span>
+                                                      <input type="radio" readOnly className="text-emerald-600" />
+                                                      <span className="text-xs">Table</span>
+                                                   </label>
+                                                   <label className="flex items-center gap-1.5 cursor-pointer">
+                                                      <input type="radio" readOnly className="text-emerald-600" />
+                                                      <span className="text-xs">Seats</span>
                                                    </label>
                                                 </div>
                                              </div>

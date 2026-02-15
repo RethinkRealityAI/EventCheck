@@ -42,8 +42,9 @@ const DashboardStats = ({ attendees }: { attendees: Attendee[] }) => {
   const percentage = total === 0 ? 0 : Math.round((checkedIn / total) * 100);
 
   const totalDonatedSeats = primaryAttendees.reduce((acc, curr) => acc + (Number(curr.donatedSeats) || 0), 0);
+  const totalDonatedTables = primaryAttendees.reduce((acc, curr) => acc + (Number(curr.donatedTables) || 0), 0);
   const recentDonors = primaryAttendees
-    .filter(a => (a.donatedSeats || 0) > 0)
+    .filter(a => (a.donatedSeats || 0) > 0 || (a.donatedTables || 0) > 0)
     .sort((a, b) => new Date(b.registeredAt).getTime() - new Date(a.registeredAt).getTime())
     .slice(0, 5);
 
@@ -73,7 +74,9 @@ const DashboardStats = ({ attendees }: { attendees: Attendee[] }) => {
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
           <h3 className="text-gray-500 text-sm font-medium mb-2">Donated Seats</h3>
           <p className="text-4xl font-bold text-emerald-600">{totalDonatedSeats}</p>
-          <p className="text-xs text-gray-400 mt-1">seats donated for others</p>
+          <p className="text-xs text-gray-400 mt-1">
+            {totalDonatedTables > 0 ? `${totalDonatedTables} table${totalDonatedTables !== 1 ? 's' : ''} · ${totalDonatedSeats} seat${totalDonatedSeats !== 1 ? 's' : ''} donated` : `seats donated for others`}
+          </p>
         </div>
       </div>
 
@@ -97,7 +100,10 @@ const DashboardStats = ({ attendees }: { attendees: Attendee[] }) => {
                   </div>
                 </div>
                 <div className="text-emerald-600 font-bold">
-                  +{d.donatedSeats} seat{(d.donatedSeats || 0) !== 1 ? 's' : ''}
+                  {d.donationType === 'table' && (d.donatedTables || 0) > 0
+                    ? `+${d.donatedTables} table${(d.donatedTables || 0) !== 1 ? 's' : ''} (${d.donatedSeats} seats)`
+                    : `+${d.donatedSeats} seat${(d.donatedSeats || 0) !== 1 ? 's' : ''}`
+                  }
                 </div>
               </div>
             ))}
