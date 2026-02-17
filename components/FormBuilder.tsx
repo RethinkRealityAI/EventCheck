@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, MoveUp, MoveDown, Settings, Save, ArrowLeft, X, Ticket, MessageSquare, Layout, CreditCard, Tag, Eye, AlertCircle, ArrowRight, Loader2, Check, RefreshCw, FileText, Download, ChevronRight, ChevronLeft, MapPin, CheckSquare } from 'lucide-react';
+import { Plus, Trash2, MoveUp, MoveDown, Settings, Save, ArrowLeft, X, Ticket, MessageSquare, Layout, CreditCard, Tag, Eye, AlertCircle, ArrowRight, Check, FileText, Download, ChevronRight, ChevronLeft, MapPin, CheckSquare } from 'lucide-react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import QRCode from 'react-qr-code';
-import { FormField, FieldType, Form, PromoCode, TicketItem, Attendee } from '../types';
-import { getFormById, saveForm, saveAttendee } from '../services/storageService';
+import { FormField, FieldType, Form, PromoCode, TicketItem } from '../types';
+import { getFormById, saveForm } from '../services/storageService';
 import { useNotifications } from './NotificationSystem';
 import RichTextEditor from './RichTextEditor';
+import FormPreview from './FormPreview';
 
 const FIELD_TYPES: { type: FieldType, label: string, icon?: any }[] = [
    { type: 'text', label: 'Short Text' },
@@ -31,17 +32,7 @@ const FormBuilder: React.FC = () => {
    const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
    const [sidebarPinned, setSidebarPinned] = useState(true);
 
-   // Preview State
-   const [previewStep, setPreviewStep] = useState<'form' | 'payment' | 'success'>('form');
-   const [previewAnswers, setPreviewAnswers] = useState<Record<string, any>>({});
-   const [previewTicketQuantities, setPreviewTicketQuantities] = useState<Record<string, number>>({});
-   const [previewDonateOption, setPreviewDonateOption] = useState<'no' | 'yes'>('no');
-   const [previewDonatedSeats, setPreviewDonatedSeats] = useState(0);
-   const [previewGuests, setPreviewGuests] = useState<Array<{ name: string, email: string, dietary: string }>>([]);
-   const [previewPaymentTotal, setPreviewPaymentTotal] = useState<number>(0);
-   const [previewLoading, setPreviewLoading] = useState(false);
-   const [previewError, setPreviewError] = useState('');
-   const [lastGeneratedAttendee, setLastGeneratedAttendee] = useState<Attendee | null>(null);
+
    const { showNotification } = useNotifications();
 
    useEffect(() => {
@@ -58,36 +49,7 @@ const FormBuilder: React.FC = () => {
       }
    }, [formId, navigate]);
 
-   // Recalculate totals and guests for preview
-   useEffect(() => {
-      if (activeTab === 'preview' && form) {
-         const ticketField = form.fields.find(f => f.type === 'ticket');
-         if (ticketField && ticketField.ticketConfig) {
-            let total = 0;
-            let totalSeats = 0;
-            ticketField.ticketConfig.items.forEach(item => {
-               const qty = previewTicketQuantities[item.id] || 0;
-               total += (item.price * qty);
-               totalSeats += (qty * (item.seats || 1));
-            });
-            setPreviewPaymentTotal(total);
 
-            // Update preview guests array size
-            setPreviewGuests(prev => {
-               if (prev.length === totalSeats) return prev;
-               const next = [...prev];
-               if (next.length < totalSeats) {
-                  for (let i = next.length; i < totalSeats; i++) {
-                     next.push({ name: '', email: '', dietary: 'no' });
-                  }
-               } else {
-                  next.length = totalSeats;
-               }
-               return next;
-            });
-         }
-      }
-   }, [previewTicketQuantities, activeTab, form]);
 
    // Sync editingField changes to form state immediately
    useEffect(() => {
@@ -259,95 +221,7 @@ const FormBuilder: React.FC = () => {
       });
    };
 
-   // --- Preview Logic ---
-   const isFieldVisibleInPreview = (field: FormField) => {
-      if (!field.conditional?.enabled || !field.conditional.fieldId) return true;
-      const targetValue = previewAnswers[field.conditional.fieldId];
-      if (targetValue === undefined || targetValue === null) return false;
-      if (Array.isArray(targetValue)) {
-         return targetValue.includes(field.conditional.value);
-      }
-      if (typeof targetValue === 'boolean') {
-         return String(targetValue) === field.conditional.value;
-      }
-      return String(targetValue) === field.conditional.value;
-   };
 
-   const handlePreviewSubmit = (e: React.FormEvent) => {
-      e.preventDefault();
-      if (!form) return;
-
-      // Basic validation
-      let isValid = true;
-      for (const field of form.fields) {
-         if (isFieldVisibleInPreview(field) && field.required && !previewAnswers[field.id] && field.type !== 'ticket') {
-            isValid = false;
-         }
-      }
-      const ticketField = form.fields.find(f => f.type === 'ticket');
-      if (ticketField && ticketField.required) {
-         const totalQty = Object.values(previewTicketQuantities).reduce((a: number, b: number) => a + b, 0);
-         if (totalQty === 0) isValid = false;
-      }
-
-      if (!isValid) {
-         setPreviewError('Please fill in all required fields in the preview.');
-         return;
-      }
-      setPreviewError('');
-
-      if (previewPaymentTotal > 0) {
-         setPreviewStep('payment');
-      } else {
-         finalizePreview();
-      }
-   };
-
-   const finalizePreview = () => {
-      if (!form) return;
-      setPreviewLoading(true);
-
-      setTimeout(async () => {
-         const submissionId = crypto.randomUUID();
-         const emailField = form.fields.find(f => f.type === 'email');
-         const nameField = form.fields.find(f => f.type === 'text');
-
-         const ticketSummary = Object.entries(previewTicketQuantities)
-            .filter(([_, qty]: [string, number]) => qty > 0)
-            .map(([id, qty]) => {
-               const item = form.fields.find(f => f.type === 'ticket')?.ticketConfig?.items.find(i => i.id === id);
-               return item ? `${item.name} x${qty}` : '';
-            }).join(', ') || 'Preview Ticket';
-
-         const newAttendee: Attendee = {
-            id: submissionId,
-            formId: form.id,
-            formTitle: `${form.title}`,
-            name: nameField ? previewAnswers[nameField.id] : 'Test User',
-            email: emailField ? previewAnswers[emailField.id] : 'test@example.com',
-            ticketType: ticketSummary,
-            registeredAt: new Date().toISOString(),
-            paymentStatus: previewPaymentTotal > 0 ? 'paid' : 'free',
-            qrPayload: JSON.stringify({ id: submissionId, isTest: true }),
-            isTest: true,
-            answers: previewAnswers
-         };
-
-         await saveAttendee(newAttendee);
-         setLastGeneratedAttendee(newAttendee);
-         setPreviewLoading(false);
-         setPreviewStep('success');
-      }, 1500);
-   };
-
-   const resetPreview = () => {
-      setPreviewStep('form');
-      setPreviewAnswers({});
-      setPreviewTicketQuantities({});
-      setPreviewPaymentTotal(0);
-      setPreviewError('');
-      setLastGeneratedAttendee(null);
-   };
 
    if (!form) return <div className="p-8">Loading...</div>;
 
@@ -1516,273 +1390,7 @@ const FormBuilder: React.FC = () => {
             )}
 
             {activeTab === 'preview' && (
-               <div className="flex-1 bg-gray-100 overflow-y-auto pt-2 lg:pt-4 px-4 lg:px-6 flex justify-center pb-20 custom-scrollbar">
-                  <div className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl h-[75vh] flex flex-col overflow-hidden transform transition-all">
-                     {/* Preview Header */}
-                     <div className="bg-indigo-600 p-6">
-                        <h2 className="text-2xl font-bold text-white">{form.title}</h2>
-                        <p className="text-indigo-100 mt-1">{form.description}</p>
-                     </div>
-
-                     {/* Preview Content */}
-                     <div className="p-6 lg:p-8 overflow-y-auto custom-scrollbar flex-1">
-                        {previewStep === 'form' && (
-                           <form onSubmit={handlePreviewSubmit} className="space-y-6">
-                              {previewError && (
-                                 <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm flex items-center gap-2">
-                                    <AlertCircle className="w-4 h-4" /> {previewError}
-                                 </div>
-                              )}
-                              {form.fields.map(field => isFieldVisibleInPreview(field) && (
-                                 <div key={field.id}>
-                                    {field.type !== 'ticket' && (
-                                       <label className="block text-sm font-medium text-gray-700 mb-1">
-                                          {field.label} {field.required && <span className="text-red-500">*</span>}
-                                       </label>
-                                    )}
-                                    {/* Component-based render for preview */}
-                                    {field.type === 'textarea' ? (
-                                       <textarea className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition" rows={3}
-                                          value={previewAnswers[field.id] || ''}
-                                          placeholder={field.placeholder}
-                                          onChange={e => setPreviewAnswers({ ...previewAnswers, [field.id]: e.target.value })}
-                                       />
-                                    ) : field.type === 'select' ? (
-                                       <select
-                                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition bg-white"
-                                          value={previewAnswers[field.id] || ''}
-                                          onChange={e => setPreviewAnswers({ ...previewAnswers, [field.id]: e.target.value })}
-                                       >
-                                          <option value="">Select an option</option>
-                                          {field.options?.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-                                       </select>
-                                    ) : field.type === 'radio' ? (
-                                       <div className="space-y-2">
-                                          {field.options?.map(opt => (
-                                             <label key={opt} className="flex items-center gap-3 p-3 rounded-lg border border-gray-100 hover:bg-gray-50 cursor-pointer transition">
-                                                <input type="radio" name={field.id} value={opt}
-                                                   checked={previewAnswers[field.id] === opt}
-                                                   onChange={e => setPreviewAnswers({ ...previewAnswers, [field.id]: e.target.value })}
-                                                   className="w-4 h-4 text-indigo-600 focus:ring-indigo-500"
-                                                />
-                                                <span className="text-sm text-gray-700">{opt}</span>
-                                             </label>
-                                          ))}
-                                       </div>
-                                    ) : field.type === 'checkbox' ? (
-                                       <div className="space-y-2">
-                                          {field.options?.map(opt => (
-                                             <label key={opt} className="flex items-center gap-3 p-3 rounded-lg border border-gray-100 hover:bg-gray-50 cursor-pointer transition">
-                                                <input type="checkbox" value={opt}
-                                                   checked={(previewAnswers[field.id] || []).includes(opt)}
-                                                   onChange={e => {
-                                                      const current = previewAnswers[field.id] || [];
-                                                      const next = e.target.checked
-                                                         ? [...current, opt]
-                                                         : current.filter((v: string) => v !== opt);
-                                                      setPreviewAnswers({ ...previewAnswers, [field.id]: next });
-                                                   }}
-                                                   className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
-                                                />
-                                                <span className="text-sm text-gray-700">{opt}</span>
-                                             </label>
-                                          ))}
-                                       </div>
-                                    ) : field.type === 'ticket' ? (
-                                       <div className="bg-gray-50 p-6 rounded-xl border border-gray-200">
-                                          <h4 className="font-bold text-gray-900 mb-4 flex items-center gap-2">
-                                             <Ticket className="w-5 h-5 text-indigo-600" /> {field.label}
-                                          </h4>
-                                          {field.ticketConfig?.items.map(item => (
-                                             <div key={item.id} className="flex justify-between items-center mb-4 last:mb-0 pb-4 last:pb-0 border-b border-gray-100 last:border-0">
-                                                <div>
-                                                   <div className="text-sm font-bold text-gray-800">{item.name}</div>
-                                                   <div className="text-xs text-gray-500">{item.price} {field.ticketConfig?.currency}</div>
-                                                </div>
-                                                <select className="border rounded-lg px-2 py-1 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
-                                                   value={previewTicketQuantities[item.id] || 0}
-                                                   onChange={e => setPreviewTicketQuantities({ ...previewTicketQuantities, [item.id]: parseInt(e.target.value) })}
-                                                >
-                                                   {[...Array(item.maxPerOrder + 1)].map((_, i) => <option key={i} value={i}>{i}</option>)}
-                                                </select>
-                                             </div>
-                                          ))}
-                                          <div className="mt-4 pt-4 border-t border-gray-200 flex justify-between items-center font-bold">
-                                             <span className="text-gray-600">Total Price</span>
-                                             <span className="text-xl text-indigo-700">{previewPaymentTotal} {field.ticketConfig?.currency}</span>
-                                          </div>
-
-                                          {/* Donation Preview */}
-                                          {field.ticketConfig?.enableDonations && (
-                                             <div className="mt-4 pt-4 border-t border-gray-200">
-                                                <div className="font-bold text-gray-800 mb-1 text-sm">{field.ticketConfig?.donationSectionTitle || 'Donate a Table or Seats'}</div>
-                                                <p className="text-xs text-gray-500 mb-2">{field.ticketConfig?.donationSectionDescription || 'Are you donating this table or any seats?'}</p>
-                                                <div className="flex flex-wrap gap-3 mb-2">
-                                                   <label className="flex items-center gap-1.5 cursor-pointer">
-                                                      <input type="radio" checked readOnly className="text-indigo-600" />
-                                                      <span className="text-xs">No thanks</span>
-                                                   </label>
-                                                   <label className="flex items-center gap-1.5 cursor-pointer">
-                                                      <input type="radio" readOnly className="text-emerald-600" />
-                                                      <span className="text-xs">Table</span>
-                                                   </label>
-                                                   <label className="flex items-center gap-1.5 cursor-pointer">
-                                                      <input type="radio" readOnly className="text-emerald-600" />
-                                                      <span className="text-xs">Seats</span>
-                                                   </label>
-                                                </div>
-                                             </div>
-                                          )}
-
-                                          {/* Guest Details Preview */}
-                                          {field.ticketConfig?.enableGuestDetails && (
-                                             <div className="mt-4 pt-4 border-t border-gray-200">
-                                                <div className="font-bold text-gray-800 mb-1 text-sm">Guest Details</div>
-                                                <p className="text-xs text-gray-500 mb-3">Please provide details for each ticket holder.</p>
-                                                <div className="bg-white p-3 rounded-lg border border-gray-200">
-                                                   <div className="text-[10px] font-bold text-gray-400 uppercase mb-2">Ticket #1</div>
-                                                   <div className="grid grid-cols-2 gap-2 mb-2">
-                                                      <input type="text" placeholder="Full Name" className="px-2 py-1.5 border border-gray-200 rounded text-xs bg-gray-50" disabled />
-                                                      <input type="email" placeholder="Email Address" className="px-2 py-1.5 border border-gray-200 rounded text-xs bg-gray-50" disabled />
-                                                   </div>
-                                                   <select className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs bg-gray-50" disabled>
-                                                      <option>Dietary Preference</option>
-                                                   </select>
-                                                </div>
-                                             </div>
-                                          )}
-                                       </div>
-                                    ) : field.type === 'boolean' ? (
-                                       <div className="flex items-center justify-between p-4 rounded-xl border border-gray-100 hover:bg-gray-50 transition cursor-pointer"
-                                          onClick={() => setPreviewAnswers({ ...previewAnswers, [field.id]: !previewAnswers[field.id] })}
-                                       >
-                                          <span className="text-sm font-medium text-gray-700">{field.label}</span>
-                                          <div className={`w-12 h-6 rounded-full relative transition-colors duration-200 ${previewAnswers[field.id] ? 'bg-indigo-600' : 'bg-gray-200'}`}>
-                                             <div className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform duration-200 ${previewAnswers[field.id] ? 'translate-x-6' : ''}`}></div>
-                                          </div>
-                                       </div>
-                                    ) : field.type === 'address' ? (
-                                       <div className="relative">
-                                          <MapPin className="absolute left-3 top-3 w-4 h-4 text-gray-400" />
-                                          <input type="text"
-                                             className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition"
-                                             value={previewAnswers[field.id] || ''}
-                                             placeholder={field.placeholder || 'Enter address...'}
-                                             onChange={e => setPreviewAnswers({ ...previewAnswers, [field.id]: e.target.value })}
-                                          />
-                                       </div>
-                                    ) : (
-                                       <input type={field.type === 'number' ? 'number' : field.type === 'email' ? 'email' : field.type === 'phone' ? 'tel' : 'text'}
-                                          inputMode={field.type === 'text' && field.validation === 'int' ? 'numeric' : undefined}
-                                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition"
-                                          value={previewAnswers[field.id] || ''}
-                                          placeholder={field.placeholder || (field.type === 'text' && field.validation === 'int' ? 'Numbers only...' : '')}
-                                          onChange={e => setPreviewAnswers({ ...previewAnswers, [field.id]: e.target.value })}
-                                       />
-                                    )}
-                                 </div>
-                              ))}
-                              <button type="submit" className="w-full py-3 bg-indigo-600 text-white rounded-lg font-bold hover:bg-indigo-700 transition">
-                                 {previewPaymentTotal > 0 ? 'Proceed to Payment' : 'Submit Registration'}
-                              </button>
-                           </form>
-                        )}
-
-                        {previewStep === 'payment' && (
-                           <div className="text-center py-8">
-                              <CreditCard className="w-12 h-12 text-indigo-600 mx-auto mb-4" />
-                              <h3 className="text-xl font-bold text-gray-900 mb-2">Payment Preview</h3>
-                              <p className="text-gray-500 mb-6">Total due: {previewPaymentTotal} {form.fields.find(f => f.type === 'ticket')?.ticketConfig?.currency}</p>
-                              <button onClick={finalizePreview} disabled={previewLoading} className="w-full py-3 bg-yellow-400 text-blue-900 font-bold rounded-lg flex justify-center items-center gap-2">
-                                 {previewLoading ? <Loader2 className="animate-spin" /> : 'Pay with PayPal'}
-                              </button>
-                              <button onClick={() => setPreviewStep('form')} className="mt-4 text-sm text-gray-500 underline">Back</button>
-                           </div>
-                        )}
-
-                        {previewStep === 'success' && (
-                           <div className="text-center pb-8 animate-fade-in flex flex-col items-center">
-                              <div
-                                 className="w-full h-48 mb-8 flex flex-col items-center justify-center text-white"
-                                 style={{ backgroundColor: form.settings?.successHeaderColor || '#4F46E5' }}
-                              >
-                                 <div
-                                    className="w-20 h-20 rounded-full flex items-center justify-center mb-4 shadow-lg animate-bounce-slow"
-                                    style={{ backgroundColor: 'rgba(255,255,255,0.2)', backdropFilter: 'blur(8px)' }}
-                                 >
-                                    <Check className="w-10 h-10 text-white" style={{ color: form.settings?.successIconColor || '#10B981' }} />
-                                 </div>
-                                 <h3 className="text-3xl font-bold px-4" style={{ color: form.settings?.successIconColor || '#10B981' }}>
-                                    {form.settings?.successTitle || 'Registration Confirmed!'}
-                                 </h3>
-                              </div>
-
-                              <div className="px-8 w-full">
-                                 <div className="mb-8 prose prose-sm max-w-none text-left bg-white p-6 rounded-xl border border-gray-200 mx-auto w-full shadow-sm">
-                                    {form.thankYouMessage ? (
-                                       <div dangerouslySetInnerHTML={{ __html: form.thankYouMessage }} />
-                                    ) : (
-                                       <p className="text-center text-gray-500">Thank you for registering! Please keep your ticket handy.</p>
-                                    )}
-                                 </div>
-
-                                 {/* Ticket & QR Simulation */}
-                                 {(form.settings?.showQrOnSuccess !== false) && (
-                                    <div
-                                       className="border border-gray-200 rounded-2xl p-8 shadow-md mb-8 max-w-sm mx-auto relative overflow-hidden transform transition hover:scale-[1.02] duration-300"
-                                       style={{ backgroundColor: form.settings?.successFooterColor || '#F9FAFB' }}
-                                    >
-                                       <div
-                                          className="absolute top-0 left-0 w-full h-1"
-                                          style={{ backgroundColor: form.settings?.successHeaderColor || '#4F46E5', opacity: 0.3 }}
-                                       ></div>
-                                       <h4 className="font-bold text-xl text-gray-900 mb-1">{form.title}</h4>
-                                       <p className="text-xs text-gray-500 mb-6 uppercase tracking-widest font-semibold">{new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
-
-                                       <div className="bg-white p-3 rounded-2xl inline-block mb-6 shadow-sm border border-gray-100">
-                                          <QRCode value={lastGeneratedAttendee?.qrPayload || JSON.stringify({ id: 'TEST-8X29B', isTest: true })} size={160} />
-                                       </div>
-
-                                       <div className="text-sm font-mono bg-white p-3 rounded-xl border border-gray-200 text-gray-700 mb-6 flex justify-between items-center">
-                                          <span className="text-gray-400 text-[10px] uppercase font-bold">Ticket ID</span>
-                                          <span className="font-bold">#{lastGeneratedAttendee?.id || 'TEST-8X29B'}</span>
-                                       </div>
-
-                                       {(form.settings?.showTicketButtonOnSuccess !== false) && (
-                                          <button
-                                             className="w-full py-3 bg-indigo-50 text-indigo-700 rounded-xl text-sm font-bold hover:bg-indigo-100 flex items-center justify-center gap-2 transition"
-                                             style={{ color: form.settings?.successIconColor || '#10B981' }}
-                                          >
-                                             <Download className="w-5 h-5" /> Download PDF Ticket
-                                          </button>
-                                       )}
-                                    </div>
-                                 )}
-
-                                 {/* Fallback button if QR card is hidden but button is shown */}
-                                 {(form.settings?.showQrOnSuccess === false && form.settings?.showTicketButtonOnSuccess !== false) && (
-                                    <button
-                                       className="w-full max-w-sm mx-auto py-4 rounded-xl text-base font-bold flex items-center justify-center gap-2 border shadow-sm transition mb-8"
-                                       style={{
-                                          backgroundColor: (form.settings?.successHeaderColor || '#4F46E5') + '10',
-                                          color: form.settings?.successIconColor || '#10B981',
-                                          borderColor: (form.settings?.successHeaderColor || '#4F46E5') + '30'
-                                       }}
-                                    >
-                                       <Download className="w-5 h-5" /> Download PDF Ticket
-                                    </button>
-                                 )}
-
-
-                                 <button onClick={resetPreview} className="px-8 py-3 bg-gray-900 text-white rounded-xl font-bold hover:shadow-xl hover:-translate-y-0.5 transition active:scale-95 mb-8">
-                                    Test Another Response
-                                 </button>
-                              </div>
-                           </div>
-                        )}
-                     </div>
-                  </div>
-               </div>
+               <FormPreview form={form} />
             )}
          </div>
       </div>

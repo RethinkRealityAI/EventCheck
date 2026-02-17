@@ -188,7 +188,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, isLoading = fals
 
   const handleCopyGuestLink = (e: React.MouseEvent, formId: string, primaryId: string) => {
     e.stopPropagation();
-    const url = `${window.location.origin}/register/${formId}?guestRef=${primaryId}`;
+    const url = `${window.location.origin}/#/form/${formId}?ref=${primaryId}`;
     navigator.clipboard.writeText(url);
     showNotification("Guest registration link copied to clipboard!", 'success');
   };

@@ -37,6 +37,7 @@ const PublicRegistration = () => {
   // Guest State
   const [guests, setGuests] = useState<Array<{ name: string, email: string, dietary: string }>>([]);
   const [skipGuestDetails, setSkipGuestDetails] = useState(false);
+  const [isFirstGuestPurchaser, setIsFirstGuestPurchaser] = useState(true);
 
   // Guest Mode State (when registering from a link)
   const location = useLocation();
@@ -164,6 +165,28 @@ const PublicRegistration = () => {
       return newGuests;
     });
   }, [ticketField, ticketQuantities]);
+
+  // Sync first guest with purchaser details if enabled
+  useEffect(() => {
+    if (!form || mode === 'guest') return;
+
+    if (isFirstGuestPurchaser && guests.length > 0) {
+      const nameField = form.fields.find(f => f.type === 'text' || f.label.toLowerCase().includes('name'));
+      const emailField = form.fields.find(f => f.type === 'email' || f.label.toLowerCase().includes('email'));
+
+      const newName = nameField ? (answers[nameField.id] || '') : '';
+      const newEmail = emailField ? (answers[emailField.id] || '') : '';
+
+      // Only update if different to avoid infinite loops
+      if (guests[0].name !== newName || guests[0].email !== newEmail) {
+        setGuests(prev => {
+          const newGuests = [...prev];
+          newGuests[0] = { ...newGuests[0], name: newName, email: newEmail };
+          return newGuests;
+        });
+      }
+    }
+  }, [answers, isFirstGuestPurchaser, guests.length, form, mode]);
 
   const isVisible = (field: FormField) => {
     if (!field.conditional?.enabled || !field.conditional.fieldId) return true;
@@ -323,8 +346,14 @@ const PublicRegistration = () => {
     }
 
     // Purchaser name/email from form fields (always preserved as primary)
-    const purchaserName = nameField ? answers[nameField.id] : 'Guest';
-    const purchaserEmail = emailField ? answers[emailField.id] : 'unknown@example.com';
+    let purchaserName = nameField ? answers[nameField.id] : 'Guest';
+    let purchaserEmail = emailField ? answers[emailField.id] : 'unknown@example.com';
+
+    // If the user explicitly edited the first guest (Purchaser), use those details instead
+    if (mode === 'purchaser' && !isFirstGuestPurchaser && guests.length > 0) {
+      purchaserName = guests[0].name || purchaserName;
+      purchaserEmail = guests[0].email || purchaserEmail;
+    }
 
     const newAttendee: Attendee = {
       id: submissionId,
@@ -416,7 +445,7 @@ const PublicRegistration = () => {
           // can resolve remaining seats properly.
           if (settings) {
             const registrationUrl = isPlaceholder
-              ? `${window.location.origin}${window.location.pathname}?ref=${newAttendee.id}`
+              ? `${window.location.origin}/#/form/${form.id}?ref=${newAttendee.id}`
               : undefined;
             const guestDoc = generateTicketPDF(guestAttendee, settings, form, registrationUrl);
             guestTickets.push({ name: guestName, attendee: guestAttendee, pdf: guestDoc });
@@ -802,64 +831,82 @@ const PublicRegistration = () => {
                           <div className="space-y-3">
                             {guests.map((g, i) => (mode === 'purchaser' || i === 0) && (
                               <div key={i} className={`bg-gray-50 p-4 rounded-xl border border-gray-200 shadow-sm transition-all ${mode === 'guest' ? 'ring-2 ring-indigo-500 bg-white ring-offset-2' : ''}`}>
-                                <div className="text-[10px] font-black text-gray-400 uppercase mb-3 flex justify-between">
+                                <div className="text-[10px] font-black text-gray-400 uppercase mb-3 flex justify-between items-center">
                                   <span>{mode === 'guest' ? "Your Details" : `Ticket #${i + 1}`}</span>
-                                  {(mode === 'purchaser' && i === 0) && <span className="text-indigo-500">Purchaser</span>}
+                                  {(mode === 'purchaser' && i === 0) && <span className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded text-[10px] font-bold">Purchaser</span>}
                                 </div>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
-                                  <input
-                                    type="text" placeholder="Guest Name"
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
-                                    value={g.name}
-                                    onChange={e => {
-                                      const newGuests = [...guests];
-                                      newGuests[i].name = e.target.value;
-                                      setGuests(newGuests);
-                                    }}
-                                  />
-                                  <input
-                                    type="email" placeholder="Guest Email"
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
-                                    value={g.email}
-                                    onChange={e => {
-                                      const newGuests = [...guests];
-                                      newGuests[i].email = e.target.value;
-                                      setGuests(newGuests);
-                                    }}
-                                  />
-                                </div>
-                                <div className="flex items-center justify-between mt-1">
-                                  <span className="text-[10px] font-bold text-gray-500 uppercase">Vegetarian?</span>
-                                  <div className="flex gap-4">
-                                    <label className="flex items-center gap-1.5 cursor-pointer">
-                                      <input type="radio" name={`veg-${i}`} checked={g.dietary === 'no'} onChange={() => {
-                                        const newGuests = [...guests];
-                                        newGuests[i].dietary = 'no';
-                                        setGuests(newGuests);
-                                      }} className="w-3.5 h-3.5 text-indigo-600 focus:ring-indigo-500" />
-                                      <span className="text-xs text-gray-600">No</span>
-                                    </label>
-                                    <label className="flex items-center gap-1.5 cursor-pointer">
-                                      <input type="radio" name={`veg-${i}`} checked={g.dietary === 'yes'} onChange={() => {
-                                        const newGuests = [...guests];
-                                        newGuests[i].dietary = 'yes';
-                                        setGuests(newGuests);
-                                      }} className="w-3.5 h-3.5 text-indigo-600 focus:ring-indigo-500" />
-                                      <span className="text-xs text-gray-600">Yes</span>
-                                    </label>
+
+                                {mode === 'purchaser' && i === 0 && isFirstGuestPurchaser ? (
+                                  <div className="mb-2">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
+                                      <div className="bg-gray-100 text-gray-500 px-3 py-2 border border-gray-200 rounded-lg text-sm cursor-not-allowed select-none italic">
+                                        {g.name || (form.fields.find(f => f.label.toLowerCase().includes('name')) ? '(Name from above)' : 'Purchaser Name')}
+                                      </div>
+                                      <div className="bg-gray-100 text-gray-500 px-3 py-2 border border-gray-200 rounded-lg text-sm cursor-not-allowed select-none italic">
+                                        {g.email || (form.fields.find(f => f.label.toLowerCase().includes('email')) ? '(Email from above)' : 'Purchaser Email')}
+                                      </div>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => setIsFirstGuestPurchaser(false)}
+                                      className="text-xs text-indigo-600 font-bold hover:underline flex items-center gap-1"
+                                    >
+                                      Change to guest
+                                    </button>
                                   </div>
-                                </div>
-                                {i === 0 && (
-                                  <button type="button" onClick={() => {
-                                    const nameField = form.fields.find(f => f.type === 'text' || f.label.toLowerCase().includes('name'));
-                                    const emailField = form.fields.find(f => f.type === 'email' || f.label.toLowerCase().includes('email'));
-                                    const newGuests = [...guests];
-                                    if (nameField) newGuests[0].name = answers[nameField.id] || '';
-                                    if (emailField) newGuests[0].email = answers[emailField.id] || '';
-                                    setGuests(newGuests);
-                                  }} className="text-xs text-indigo-600 font-bold mt-2 hover:underline">
-                                    Same as Purchaser
-                                  </button>
+                                ) : (
+                                  <>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
+                                      <input
+                                        type="text" placeholder="Guest Name"
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+                                        value={g.name}
+                                        onChange={e => {
+                                          const newGuests = [...guests];
+                                          newGuests[i].name = e.target.value;
+                                          setGuests(newGuests);
+                                        }}
+                                      />
+                                      <input
+                                        type="email" placeholder="Guest Email"
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+                                        value={g.email}
+                                        onChange={e => {
+                                          const newGuests = [...guests];
+                                          newGuests[i].email = e.target.value;
+                                          setGuests(newGuests);
+                                        }}
+                                      />
+                                    </div>
+
+                                    <div className="flex items-center justify-between mt-1">
+                                      <span className="text-[10px] font-bold text-gray-500 uppercase">Vegetarian?</span>
+                                      <div className="flex gap-4">
+                                        <label className="flex items-center gap-1.5 cursor-pointer">
+                                          <input type="radio" name={`veg-${i}`} checked={g.dietary === 'no'} onChange={() => {
+                                            const newGuests = [...guests];
+                                            newGuests[i].dietary = 'no';
+                                            setGuests(newGuests);
+                                          }} className="w-3.5 h-3.5 text-indigo-600 focus:ring-indigo-500" />
+                                          <span className="text-xs text-gray-600">No</span>
+                                        </label>
+                                        <label className="flex items-center gap-1.5 cursor-pointer">
+                                          <input type="radio" name={`veg-${i}`} checked={g.dietary === 'yes'} onChange={() => {
+                                            const newGuests = [...guests];
+                                            newGuests[i].dietary = 'yes';
+                                            setGuests(newGuests);
+                                          }} className="w-3.5 h-3.5 text-indigo-600 focus:ring-indigo-500" />
+                                          <span className="text-xs text-gray-600">Yes</span>
+                                        </label>
+                                      </div>
+                                    </div>
+
+                                    {mode === 'purchaser' && i === 0 && !isFirstGuestPurchaser && (
+                                      <button type="button" onClick={() => setIsFirstGuestPurchaser(true)} className="text-xs text-gray-400 font-medium mt-2 hover:text-gray-600">
+                                        Cancel (Use Purchaser Details)
+                                      </button>
+                                    )}
+                                  </>
                                 )}
                               </div>
                             ))}

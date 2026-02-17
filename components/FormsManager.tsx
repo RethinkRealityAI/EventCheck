@@ -47,7 +47,7 @@ const FormsManager: React.FC = () => {
   };
 
   const getEmbedCode = (formId: string) => {
-    const url = `${window.location.origin}${window.location.pathname}#/form/${formId}`;
+    const url = `${window.location.origin}/#/form/${formId}`;
     return `<iframe src="${url}" width="100%" height="800px" frameborder="0" style="border:none; overflow:hidden;"></iframe>`;
   };
 

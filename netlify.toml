@@ -16,6 +16,6 @@
   [headers.values]
     # Remove X-Frame-Options DENY to allow embedding
     # Use CSP frame-ancestors instead for modern control
-    Content-Security-Policy = "frame-ancestors 'self' https://www.sicklecellanemia.ca https://sicklecellanemia.ca;"
+    Content-Security-Policy = "frame-ancestors *;"
     X-XSS-Protection = "1; mode=block"
     Referrer-Policy = "strict-origin-when-cross-origin"
