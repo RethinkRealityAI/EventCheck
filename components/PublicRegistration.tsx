@@ -6,6 +6,7 @@ import { useNotifications } from './NotificationSystem';
 import { useParams, useLocation } from 'react-router-dom';
 import { generateTicketPDF } from '../utils/pdfGenerator';
 import { PayPalScriptProvider, PayPalButtons } from "@paypal/react-paypal-js";
+import { sendTicketEmail, arrayBufferToBase64 } from '../services/smtpService';
 
 const PublicRegistration = () => {
   const { formId } = useParams<{ formId: string }>();
@@ -58,22 +59,49 @@ const PublicRegistration = () => {
 
       // Handle Guest Mode (Referral Link)
       if (guestRef && formId) {
-        const primary = await getAttendee(guestRef);
-        if (primary && primary.formId === formId) {
-          setFetchedPrimaryAttendee(primary);
+        let refAttendee = await getAttendee(guestRef);
 
-          // Calculate remaining seats
-          const existingGuests = await getGuestsByPrimaryId(primary.id);
-          // Find the ticket the primary attendee purchased to know total seats
-          const primaryFormData = await getFormById(primary.formId);
+        // If the ref points to a placeholder guest (not primary), resolve up to the actual primary purchaser
+        let actualPrimary = refAttendee;
+        if (refAttendee && !refAttendee.isPrimary && refAttendee.primaryAttendeeId) {
+          actualPrimary = await getAttendee(refAttendee.primaryAttendeeId);
+        }
+
+        if (actualPrimary && actualPrimary.isPrimary && actualPrimary.formId === formId) {
+          setFetchedPrimaryAttendee(actualPrimary);
+
+          // Calculate remaining seats from the primary attendee's purchase
+          const existingGuests = await getGuestsByPrimaryId(actualPrimary.id);
+          const primaryFormData = await getFormById(actualPrimary.formId);
           const ticketField = primaryFormData?.fields.find(f => f.type === 'ticket');
-          // This is a bit complex because we don't store exactly which ticket ID they bought in a standalone field,
-          // but we have ticketType string. Let's assume we can match it or use a default.
-          // Better yet, we can store total seats in the attendee record? 
-          // For now, let's look for a ticket that matches primary.ticketType.
-          const ticketItem = ticketField?.ticketConfig?.items.find(item => item.name === primary.ticketType);
-          const totalSeats = ticketItem?.seats || 1;
-          const currentCount = existingGuests.length + 1; // +1 for primary
+
+          // Parse the ticket type summary to find matching items and calculate total seats
+          let totalSeats = 1;
+          if (ticketField?.ticketConfig) {
+            // The primary's ticketType is a summary like "Table x2, VIP x1"
+            // We need to reverse-parse or find all items with seats > 1
+            // Best approach: sum up seats from all items matching the ticketType parts
+            const ticketTypeParts = actualPrimary.ticketType.split(', ');
+            totalSeats = 0;
+            for (const part of ticketTypeParts) {
+              const match = part.match(/^(.+?)\s*x(\d+)$/);
+              if (match) {
+                const itemName = match[1].trim();
+                const qty = parseInt(match[2], 10);
+                const item = ticketField.ticketConfig.items.find(i => i.name === itemName);
+                totalSeats += qty * (item?.seats || 1);
+              }
+            }
+            // Subtract donated seats
+            totalSeats -= (actualPrimary.donatedSeats || 0);
+            if (totalSeats < 1) totalSeats = 1;
+          }
+
+          // Count only non-placeholder guests (those who have a real email, not the purchaser's)
+          const filledGuests = existingGuests.filter(g =>
+            g.name && !g.name.includes('Guest Ticket #')
+          ).length;
+          const currentCount = filledGuests + 1; // +1 for primary
           const remaining = totalSeats - currentCount;
 
           setRemainingSeats(remaining);
@@ -234,8 +262,21 @@ const PublicRegistration = () => {
 
     if (mode === 'guest' && fetchedPrimaryAttendee) {
       const g = guests[0];
+
+      // Determine if the ref points to an existing placeholder that should be updated
+      const refParam = new URLSearchParams(window.location.search).get('ref');
+      let existingRecord: Attendee | undefined;
+      if (refParam) {
+        existingRecord = await getAttendee(refParam);
+      }
+
+      // If the ref points directly to a placeholder guest, update it in-place
+      // preserving the original QR code and invoice for check-in consistency
+      const isUpdatingPlaceholder = existingRecord && !existingRecord.isPrimary;
+      const recordId = isUpdatingPlaceholder ? existingRecord!.id : submissionId;
+
       const guestAttendee: Attendee = {
-        id: submissionId,
+        id: recordId,
         formId: form.id,
         formTitle: form.title,
         name: g.name,
@@ -247,13 +288,20 @@ const PublicRegistration = () => {
         paymentStatus: 'free',
         isPrimary: false,
         primaryAttendeeId: fetchedPrimaryAttendee.id,
-        qrPayload: JSON.stringify({ id: submissionId, invoiceId, formId: form.id, action: 'checkin' })
+        // Preserve original QR payload so the check-in QR code stays valid
+        qrPayload: isUpdatingPlaceholder
+          ? existingRecord!.qrPayload
+          : JSON.stringify({ id: recordId, invoiceId: fetchedPrimaryAttendee.invoiceId || invoiceId, formId: form.id, action: 'checkin' }),
+        // Preserve original invoiceId from the purchase
+        invoiceId: isUpdatingPlaceholder ? existingRecord!.invoiceId : (fetchedPrimaryAttendee.invoiceId || invoiceId),
       };
+
       await saveAttendee(guestAttendee);
       setGeneratedTicket(guestAttendee);
       setLoading(false);
       setStep('success');
       if (settings) {
+        // No registration URL for already-registered guests
         const doc = generateTicketPDF(guestAttendee, settings, form);
         setPreviewPdfUrl(doc.output('bloburl').toString());
       }
@@ -310,37 +358,131 @@ const PublicRegistration = () => {
     await saveAttendee(newAttendee);
     setGeneratedTicket(newAttendee);
 
-    // Save Guests (only if not skipped)
-    if (ticketField?.ticketConfig?.enableGuestDetails && guests.length > 1 && !skipGuestDetails) {
-      const guestPromises = guests.slice(1).map(async (g, index) => {
-        const guestId = crypto.randomUUID();
-        const guestAttendee: Attendee = {
-          id: guestId,
-          formId: form.id!,
-          formTitle: form.title!,
-          name: g.name || `Guest ${index + 2}`,
-          email: g.email || 'unknown@example.com',
-          dietaryPreferences: g.dietary === 'yes' ? 'Vegetarian' : '',
-          ticketType: 'Guest Ticket',
-          registeredAt: new Date().toISOString(),
-          answers: {},
-          paymentStatus,
-          paymentAmount: '0',
-          invoiceId,
-          transactionId,
-          isPrimary: false,
-          primaryAttendeeId: newAttendee.id,
-          qrPayload: JSON.stringify({ id: guestId, invoiceId, formId: form.id, action: 'checkin' })
-        };
-        return saveAttendee(guestAttendee);
+    // Save Guests (Placeholders or named) — only for table-type tickets (seats > 1)
+    if (ticketField?.ticketConfig) {
+      // Calculate total seats purchased
+      const totalSeats = ticketField.ticketConfig.items.reduce((acc, item) => {
+        const qty = ticketQuantities[item.id] || 0;
+        return acc + (qty * (item.seats || 1));
+      }, 0);
+
+      // Subtract donations
+      const seatsToGenerate = Math.max(1, totalSeats - (donatedSeats || 0));
+
+      // Check if any purchased ticket is a table-type (seats > 1)
+      // Only generate guest placeholders for tables, not individual tickets
+      const hasTableTickets = ticketField.ticketConfig.items.some(item => {
+        const qty = ticketQuantities[item.id] || 0;
+        return qty > 0 && (item.seats || 1) > 1;
       });
-      await Promise.all(guestPromises);
+
+      const guestPromises = [];
+      const guestTickets: { name: string, attendee: Attendee, pdf: any }[] = [];
+
+      // Only generate guest records if this is a table purchase
+      if (hasTableTickets && seatsToGenerate > 1) {
+        for (let i = 1; i < seatsToGenerate; i++) {
+          const guestId = crypto.randomUUID();
+          const g = (guests && guests[i]) ? guests[i] : null;
+
+          // If they provided guest names and emails, use them.
+          // Otherwise, create a placeholder: "Guest of [Purchaser] - Ticket #N"
+          const isPlaceholder = !g || !g.name || !g.email;
+          const guestName = !isPlaceholder ? g!.name : `${purchaserName} - Guest Ticket #${i + 1}`;
+          const guestEmail = !isPlaceholder ? g!.email : (purchaserEmail || 'unknown@example.com');
+
+          const guestAttendee: Attendee = {
+            id: guestId,
+            formId: form.id!,
+            formTitle: form.title!,
+            name: guestName,
+            email: guestEmail,
+            dietaryPreferences: g?.dietary === 'yes' ? 'Vegetarian' : '',
+            ticketType: `Guest of ${purchaserName}`,
+            registeredAt: new Date().toISOString(),
+            answers: {},
+            paymentStatus,
+            paymentAmount: '0',
+            invoiceId,
+            transactionId,
+            isPrimary: false,
+            primaryAttendeeId: newAttendee.id,
+            qrPayload: JSON.stringify({ id: guestId, invoiceId, formId: form.id, action: 'checkin' })
+          };
+          guestPromises.push(saveAttendee(guestAttendee));
+
+          // Generate PDF for this guest
+          // Registration URL always points to the PRIMARY attendee so the guest flow
+          // can resolve remaining seats properly.
+          if (settings) {
+            const registrationUrl = isPlaceholder
+              ? `${window.location.origin}${window.location.pathname}?ref=${newAttendee.id}`
+              : undefined;
+            const guestDoc = generateTicketPDF(guestAttendee, settings, form, registrationUrl);
+            guestTickets.push({ name: guestName, attendee: guestAttendee, pdf: guestDoc });
+          }
+        }
+        await Promise.all(guestPromises);
+      }
+
+      // --- SMTP Email Integration ---
+      if (settings && settings.smtpUser && settings.smtpPass) {
+        try {
+          const attachments = [];
+
+          // Primary Ticket PDF
+          const primaryDoc = generateTicketPDF(newAttendee, settings, form);
+          attachments.push({
+            filename: `${purchaserName}_Ticket.pdf`,
+            content: arrayBufferToBase64(primaryDoc.output('arraybuffer')),
+            contentType: 'application/pdf'
+          });
+
+          // Guest Ticket PDFs
+          for (const gt of guestTickets) {
+            attachments.push({
+              filename: `${gt.name.replace(/[^a-zA-Z0-9 ]/g, '_')}_Ticket.pdf`,
+              content: arrayBufferToBase64(gt.pdf.output('arraybuffer')),
+              contentType: 'application/pdf'
+            });
+          }
+
+          // Send all tickets to the purchaser
+          await sendTicketEmail(settings, {
+            to: purchaserEmail,
+            subject: `Your Tickets for ${form.title}`,
+            name: purchaserName,
+            message: `Thank you for your purchase! Attached ${attachments.length === 1 ? 'is your ticket' : `are your ${attachments.length} tickets`}.${guestTickets.length > 0 ? ` We've included ${guestTickets.length} guest ticket${guestTickets.length !== 1 ? 's' : ''}. Please forward them to your guests or have them scan the registration QR code on their ticket to provide their details.` : ''}`,
+            attachments
+          });
+
+          // Also email individual named guests directly
+          for (const gt of guestTickets) {
+            if (gt.attendee.email && gt.attendee.email !== purchaserEmail && gt.attendee.email !== 'unknown@example.com') {
+              await sendTicketEmail(settings, {
+                to: gt.attendee.email,
+                subject: `Your Ticket for ${form.title}`,
+                name: gt.attendee.name,
+                message: `You've been registered for ${form.title} by ${purchaserName}. Attached is your ticket.`,
+                attachments: [{
+                  filename: `${gt.attendee.name.replace(/[^a-zA-Z0-9 ]/g, '_')}_Ticket.pdf`,
+                  content: arrayBufferToBase64(gt.pdf.output('arraybuffer')),
+                  contentType: 'application/pdf'
+                }]
+              });
+            }
+          }
+        } catch (emailError) {
+          console.error("Failed to send emails via SMTP:", emailError);
+          // Don't block registration on email failure
+        }
+      }
     }
 
     setLoading(false);
     setStep('success');
 
-    // Generate Preview URL for Modal (Primary Ticket)
+    // Generate Preview URL (Primary Ticket)
     if (settings) {
       const doc = generateTicketPDF(newAttendee, settings, form);
       setPreviewPdfUrl(doc.output('bloburl').toString());

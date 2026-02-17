@@ -225,9 +225,13 @@ const Settings: React.FC = () => {
     }
   };
 
-  const handlePdfPreview = () => {
+  const handlePdfPreview = (previewAsGuest = false) => {
     if (dummyAttendee) {
-      const doc = generateTicketPDF(dummyAttendee, settings);
+      const attendeeForPreview = previewAsGuest
+        ? { ...dummyAttendee, isPrimary: false, name: `Guest of ${dummyAttendee.name}`, ticketType: `Guest of ${dummyAttendee.name}` }
+        : dummyAttendee;
+      const registrationUrl = previewAsGuest ? `https://example.com/register/form-1?ref=${dummyAttendee.id}` : undefined;
+      const doc = generateTicketPDF(attendeeForPreview, settings, undefined, registrationUrl);
       window.open(doc.output('bloburl'), '_blank');
     }
   };
@@ -537,9 +541,14 @@ const Settings: React.FC = () => {
             <div className="space-y-6 animate-fade-in-up p-4">
               <div className="flex justify-between items-start">
                 <h3 className="text-lg font-bold text-gray-900">PDF Ticket Customization</h3>
-                <button onClick={handlePdfPreview} className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-700 rounded-lg font-medium hover:bg-indigo-100 transition shadow-sm border border-indigo-100">
-                  <Eye className="w-4 h-4" /> Preview PDF
-                </button>
+                <div className="flex gap-2">
+                  <button onClick={() => handlePdfPreview(false)} className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-700 rounded-lg font-medium hover:bg-indigo-100 transition shadow-sm border border-indigo-100">
+                    <Eye className="w-4 h-4" /> Preview PDF
+                  </button>
+                  <button onClick={() => handlePdfPreview(true)} className="flex items-center gap-2 px-4 py-2 bg-red-50 text-red-700 rounded-lg font-medium hover:bg-red-100 transition shadow-sm border border-red-100">
+                    <Eye className="w-4 h-4" /> Preview Guest Ticket
+                  </button>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

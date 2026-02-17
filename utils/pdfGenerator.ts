@@ -4,7 +4,8 @@ import { Attendee, AppSettings, Form } from '../types';
 export const generateTicketPDF = (
   attendee: Attendee,
   settings: AppSettings,
-  form?: Form
+  form?: Form,
+  registrationUrl?: string
 ): jsPDF => {
   const doc = new jsPDF();
 
@@ -17,15 +18,14 @@ export const generateTicketPDF = (
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const primaryColor = pdfConfig.primaryColor || '#4F46E5';
+  // Guest placeholder tickets get a distinct accent color for the left bar
+  const accentColor = (!attendee.isPrimary && registrationUrl) ? '#C8262A' : primaryColor;
 
   // --- Background Image Handling ---
   if (pdfConfig.backgroundImage && pdfConfig.backgroundImage.length > 50) {
     try {
       const format = pdfConfig.backgroundImage.includes('image/jpeg') ? 'JPEG' : 'PNG';
-      // Add image covering the entire page
       doc.addImage(pdfConfig.backgroundImage, format, 0, 0, pageWidth, pageHeight, undefined, 'FAST');
-
-      // REMOVED BLUR/OVERLAY as requested
     } catch (e) {
       console.error("PDF Background Error:", e);
     }
@@ -69,15 +69,17 @@ export const generateTicketPDF = (
   // --- Main Ticket Body Box ---
   const bodyStartY = 70;
   const hasDonation = attendee.donatedSeats && attendee.donatedSeats > 0;
-  const bodyHeight = hasDonation ? 140 : 110;
+  const isPlaceholder = registrationUrl && registrationUrl.length > 0;
+  const bodyHeight = isPlaceholder ? 160 : (hasDonation ? 140 : 110);
+
   doc.setDrawColor(200, 200, 200);
   doc.setFillColor(255, 255, 255);
   doc.roundedRect(20, bodyStartY, pageWidth - 40, bodyHeight, 3, 3);
 
-  doc.setFillColor(primaryColor);
+  doc.setFillColor(accentColor);
   doc.roundedRect(20, bodyStartY, 4, bodyHeight, 3, 3, 'F');
 
-  // --- QR Code ---
+  // --- QR Code (ENTRY) ---
   const qrBoxSize = 45;
   const qrX = pageWidth - 20 - qrBoxSize - 10;
   const qrY = bodyStartY + 10;
@@ -92,6 +94,30 @@ export const generateTicketPDF = (
     doc.setDrawColor(primaryColor);
     doc.rect(qrX, qrY, qrBoxSize, qrBoxSize);
     doc.text("QR ERROR", qrX, qrY + 20);
+  }
+
+  // --- REGISTRATION QR CODE (If placeholder) ---
+  if (isPlaceholder) {
+    const regQrBoxSize = 30;
+    const regQrX = qrX + (qrBoxSize - regQrBoxSize) / 2;
+    const regQrY = qrY + qrBoxSize + 25;
+
+    doc.setFillColor(243, 244, 246); // Light gray highlight
+    doc.roundedRect(qrX - 5, regQrY - 10, qrBoxSize + 10, regQrBoxSize + 30, 2, 2, 'F');
+
+    const regQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(registrationUrl!)}`;
+    try {
+      doc.addImage(regQrUrl, 'PNG', regQrX, regQrY, regQrBoxSize, regQrBoxSize);
+      doc.setFontSize(8);
+      doc.setTextColor(30, 30, 30);
+      doc.setFont('helvetica', 'bold');
+      doc.text("TO REGISTER", regQrX + regQrBoxSize / 2, regQrY - 3, { align: 'center' });
+      doc.setFontSize(7);
+      doc.setFont('helvetica', 'normal');
+      doc.text(["To make signing smoother,", "please register using", "this QR code."], regQrX + regQrBoxSize / 2, regQrY + regQrBoxSize + 4, { align: 'center' });
+    } catch (e) {
+      console.error("Reg QR Error", e);
+    }
   }
 
   // --- Attendee Details ---
