@@ -477,47 +477,6 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
                                                                                     </button>
                                                                                 </div>
                                                                             ) : (
-                                                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
-                                                                                    <input
-                                                                                        type="text" placeholder="Guest Name"
-                                                                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
-                                                                                        value={g.name}
-                                                                                        onChange={e => {
-                                                                                            const newGuests = [...previewGuests];
-                                                                                            newGuests[i].name = e.target.value;
-                                                                                            setPreviewGuests(newGuests);
-                                                                                        }}
-                                                                                    />
-                                                                                    <input
-                                                                                        type="email" placeholder="Guest Email"
-                                                                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
-                                                                                        value={g.email}
-                                                                                        onChange={e => {
-                                                                                            const newGuests = [...previewGuests];
-                                                                                            newGuests[i].email = e.target.value;
-                                                                                            setPreviewGuests(newGuests);
-                                                                                        }}
-                                                                                    />
-                                                                                </div>
-
-                                                                                <div className="flex items-center justify-between mt-1">
-                                                                                    <span className="text-[10px] font-bold text-gray-500 uppercase">Vegetarian?</span>
-                                                                                    <div className="flex gap-4">
-                                                                                        <label className="flex items-center gap-1.5 cursor-pointer">
-                                                                                            <input type="radio" name={`preview-veg-${i}`} checked={g.dietary === 'no'} onChange={() => {
-                                                                                                const newGuests = [...previewGuests];
-                                                                                                newGuests[i].dietary = 'no';
-                                                                                                setPreviewGuests(newGuests);
-                                                                                            }} className="w-3.5 h-3.5 text-indigo-600 focus:ring-indigo-500" />
-                                                                                            <span className="text-xs text-gray-600">No</span>
-                                                                                        </label>
-                                                                                        <label className="flex items-center gap-1.5 cursor-pointer">
-                                                                                            <input type="radio" name={`preview-veg-${i}`} checked={g.dietary === 'yes'} onChange={() => {
-                                                                                                const newGuests = [...previewGuests];
-                                                                                                newGuests[i].dietary = 'yes';
-                                                                                                setPreviewGuests(newGuests);
-                                                                                            }} className="w-3.5 h-3.5 text-indigo-600 focus:ring-indigo-500" />
-                                                                                            <span className="text-xs text-gray-600">Yes</span>
                                                                                 <>
                                                                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
                                                                                         <input
