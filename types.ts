@@ -134,6 +134,8 @@ export interface Form {
     formDescriptionColor?: string;
     formTitle?: string; // Override the form title on the registration page
     submitButtonText?: string; // Customize submit button text
+    transparentBackground?: boolean;
+    cardBackgroundImage?: string;
   };
   pdfSettings?: Partial<PdfSettings>; // Per-form PDF overrides
 }

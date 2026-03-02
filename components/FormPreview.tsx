@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { Ticket, CreditCard, Tag, Eye, AlertCircle, ArrowRight, Loader2, Check, RefreshCw, Download, MapPin, CheckSquare } from 'lucide-react';
 import QRCode from 'react-qr-code';
 import { FormField, Form, Attendee } from '../types';
-import { saveAttendee } from '../services/storageService';
+import { saveAttendee, getSettings } from '../services/storageService';
 import { useNotifications } from './NotificationSystem';
+import { generateTicketPDF } from '../utils/pdfGenerator';
+import { sendTicketEmail, arrayBufferToBase64 } from '../services/smtpService';
 
 interface FormPreviewProps {
     form: Form;
@@ -28,6 +30,16 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
     const [previewLoading, setPreviewLoading] = useState(false);
     const [previewError, setPreviewError] = useState('');
     const [lastGeneratedAttendee, setLastGeneratedAttendee] = useState<Attendee | null>(null);
+    const [appSettings, setAppSettings] = useState<any>(null);
+
+    // Fetch app settings for SMTP and PDF generation
+    useEffect(() => {
+        const fetchSettings = async () => {
+            const settings = await getSettings();
+            setAppSettings(settings);
+        };
+        fetchSettings();
+    }, []);
 
     // Recalculate totals and guests whenever ticket quantities, form, or promo changes
     useEffect(() => {
@@ -131,6 +143,25 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
         }
     };
 
+    const handlePreviewQuantityChange = (itemId: string, qty: number) => {
+        setPreviewTicketQuantities(prev => {
+            const next = { ...prev, [itemId]: qty };
+            // Sync to answers for conditional logic
+            const selectedIds = Object.entries(next)
+                .filter(([_, q]) => q > 0)
+                .map(([id]) => id);
+
+            const ticketField = form.fields.find(f => f.type === 'ticket');
+            if (ticketField) {
+                setPreviewAnswers(prevAnswers => ({
+                    ...prevAnswers,
+                    [ticketField.id]: selectedIds
+                }));
+            }
+            return next;
+        });
+    };
+
     const applyPreviewPromo = () => {
         const ticketField = form.fields.find(f => f.type === 'ticket');
         if (!ticketField?.ticketConfig?.promoCodes) return;
@@ -150,22 +181,36 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
         setTimeout(async () => {
             const submissionId = crypto.randomUUID();
             const invoiceId = `INV-${Math.random().toString(10).substr(2, 6)}`;
-            const emailField = form.fields.find(f => f.type === 'email');
-            const nameField = form.fields.find(f => f.type === 'text');
+            const emailField = form.fields.find(f => f.type === 'email' || f.label.toLowerCase().includes('email'));
+            const nameField = form.fields.find(f => f.type === 'text' || f.label.toLowerCase().includes('name'));
 
-            const ticketSummary = Object.entries(previewTicketQuantities)
-                .filter(([_, qty]: [string, number]) => qty > 0)
-                .map(([id, qty]) => {
-                    const item = form.fields.find(f => f.type === 'ticket')?.ticketConfig?.items.find(i => i.id === id);
-                    return item ? `${item.name} x${qty}` : '';
-                }).join(', ') || 'Preview Ticket';
+            const ticketField = form.fields.find(f => f.type === 'ticket');
+            let ticketSummary = 'Preview Ticket';
+            if (ticketField && ticketField.ticketConfig) {
+                const parts: string[] = [];
+                ticketField.ticketConfig.items.forEach(item => {
+                    const qty = previewTicketQuantities[item.id] || 0;
+                    if (qty > 0) parts.push(`${item.name} x${qty}`);
+                });
+                if (parts.length > 0) ticketSummary = parts.join(', ');
+            }
+
+            // Purchaser name/email
+            let purchaserName = nameField ? previewAnswers[nameField.id] : 'Test User';
+            let purchaserEmail = emailField ? previewAnswers[emailField.id] : 'test@example.com';
+
+            // If the user explicitly edited the first guest (Purchaser), use those details instead
+            if (!previewIsFirstGuestPurchaser && previewGuests.length > 0) {
+                purchaserName = previewGuests[0].name || purchaserName;
+                purchaserEmail = previewGuests[0].email || purchaserEmail;
+            }
 
             const newAttendee: Attendee = {
                 id: submissionId,
                 formId: form.id,
                 formTitle: `${form.title}`,
-                name: nameField ? previewAnswers[nameField.id] : 'Test User',
-                email: emailField ? previewAnswers[emailField.id] : 'test@example.com',
+                name: purchaserName,
+                email: purchaserEmail,
                 ticketType: ticketSummary,
                 registeredAt: new Date().toISOString(),
                 paymentStatus: previewPaymentTotal > 0 ? 'paid' : 'free',
@@ -177,7 +222,6 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
             };
 
             // Add donation info
-            const ticketField = form.fields.find(f => f.type === 'ticket');
             if (ticketField?.ticketConfig?.enableDonations && (previewDonatedSeats > 0 || previewDonatedTables > 0)) {
                 newAttendee.donationType = previewDonateOption === 'no' ? 'none' : previewDonateOption;
                 newAttendee.donatedTables = previewDonatedTables;
@@ -191,10 +235,103 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
 
             await saveAttendee(newAttendee);
             setLastGeneratedAttendee(newAttendee);
+
+            // --- Handle Guest Records (One-to-One with PublicRegistration) ---
+            const guestTickets: { name: string, attendee: Attendee, pdf: any }[] = [];
+            if (ticketField?.ticketConfig) {
+                const totalSeats = ticketField.ticketConfig.items.reduce((acc, item) => {
+                    const qty = previewTicketQuantities[item.id] || 0;
+                    return acc + (qty * (item.seats || 1));
+                }, 0);
+
+                const seatsToGenerate = Math.max(1, totalSeats - (previewDonatedSeats || 0));
+                const hasTableTickets = ticketField.ticketConfig.items.some(item => {
+                    const qty = previewTicketQuantities[item.id] || 0;
+                    return qty > 0 && (item.seats || 1) > 1;
+                });
+
+                if (hasTableTickets && seatsToGenerate > 1) {
+                    const guestPromises = [];
+                    for (let i = 1; i < seatsToGenerate; i++) {
+                        const guestId = crypto.randomUUID();
+                        const g = previewGuests[i];
+                        const isPlaceholder = !g || !g.name || !g.email;
+                        const guestName = !isPlaceholder ? g.name : `${purchaserName} - Guest Ticket #${i + 1}`;
+                        const guestEmail = !isPlaceholder ? g.email : (purchaserEmail || 'test@example.com');
+
+                        const guestAttendee: Attendee = {
+                            id: guestId,
+                            formId: form.id,
+                            formTitle: form.title,
+                            name: guestName,
+                            email: guestEmail,
+                            dietaryPreferences: g?.dietary === 'yes' ? 'Vegetarian' : '',
+                            ticketType: `Guest of ${purchaserName}`,
+                            registeredAt: new Date().toISOString(),
+                            answers: {},
+                            paymentStatus: newAttendee.paymentStatus,
+                            invoiceId,
+                            isPrimary: false,
+                            isTest: true,
+                            primaryAttendeeId: newAttendee.id,
+                            qrPayload: JSON.stringify({ id: guestId, invoiceId, formId: form.id, action: 'checkin' })
+                        };
+                        guestPromises.push(saveAttendee(guestAttendee));
+
+                        if (appSettings) {
+                            const registrationUrl = isPlaceholder
+                                ? `${window.location.origin}/#/form/${form.id}?ref=${newAttendee.id}`
+                                : undefined;
+                            const guestDoc = generateTicketPDF(guestAttendee, appSettings, form, registrationUrl);
+                            guestTickets.push({ name: guestName, attendee: guestAttendee, pdf: guestDoc });
+                        }
+                    }
+                    await Promise.all(guestPromises);
+                }
+            }
+
+            // --- SMTP Email Integration (One-to-One with PublicRegistration) ---
+            if (appSettings && appSettings.smtpUser && appSettings.smtpPass) {
+                try {
+                    const attachments = [];
+                    const primaryDoc = generateTicketPDF(newAttendee, appSettings, form);
+                    attachments.push({
+                        filename: `${purchaserName}_Ticket.pdf`,
+                        content: arrayBufferToBase64(primaryDoc.output('arraybuffer')),
+                        contentType: 'application/pdf'
+                    });
+
+                    for (const gt of guestTickets) {
+                        attachments.push({
+                            filename: `${gt.name.replace(/[^a-zA-Z0-9 ]/g, '_')}_Ticket.pdf`,
+                            content: arrayBufferToBase64(gt.pdf.output('arraybuffer')),
+                            contentType: 'application/pdf'
+                        });
+                    }
+
+                    await sendTicketEmail(appSettings, {
+                        to: purchaserEmail,
+                        subject: `[PREVIEW] Your Tickets for ${form.title}`,
+                        name: purchaserName,
+                        message: `This is a test registration from the form preview. Attached ${attachments.length === 1 ? 'is your ticket' : `are your ${attachments.length} tickets`}.${guestTickets.length > 0 ? ` We've included ${guestTickets.length} guest ticket${guestTickets.length !== 1 ? 's' : ''}.` : ''}`,
+                        attachments
+                    });
+                } catch (emailError) {
+                    console.error("Failed to send preview emails:", emailError);
+                }
+            }
+
             setPreviewLoading(false);
             setPreviewStep('success');
-            showNotification('Test registration created successfully!', 'success');
+            showNotification('Test registration created and email sent!', 'success');
         }, 1500);
+    };
+
+    const downloadPdf = () => {
+        if (lastGeneratedAttendee && appSettings) {
+            const doc = generateTicketPDF(lastGeneratedAttendee, appSettings, form);
+            doc.save(`${lastGeneratedAttendee.name}_Ticket.pdf`);
+        }
     };
 
     const resetPreview = () => {
@@ -223,7 +360,7 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
                 <div
                     className="w-full rounded-2xl shadow-2xl flex flex-col relative"
                     style={{
-                        backgroundColor: form.settings?.formBackgroundColor || '#F3F4F6',
+                        backgroundColor: form.settings?.transparentBackground ? 'transparent' : (form.settings?.formBackgroundColor || '#F3F4F6'),
                         backgroundImage: form.settings?.formBackgroundImage ? `url(${form.settings.formBackgroundImage})` : 'none',
                         backgroundSize: 'cover',
                         backgroundPosition: 'center'
@@ -236,7 +373,14 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
 
                     {previewStep === 'form' && (
                         <div className="relative z-10 flex flex-col items-center py-8 px-4">
-                            <div className="max-w-xl w-full bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl overflow-hidden border border-white/20">
+                            <div
+                                className="max-w-xl w-full bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl overflow-hidden border border-white/20"
+                                style={form.settings?.cardBackgroundImage ? {
+                                    backgroundImage: `url(${form.settings.cardBackgroundImage})`,
+                                    backgroundSize: 'cover',
+                                    backgroundPosition: 'center'
+                                } : {}}
+                            >
                                 {/* Header — matches PublicRegistration */}
                                 <div
                                     className="px-8 py-8 text-center"
@@ -314,7 +458,7 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
                                                                     <select
                                                                         className="bg-gray-50 border border-gray-200 rounded px-2 py-1 text-sm focus:ring-indigo-500"
                                                                         value={previewTicketQuantities[item.id] || 0}
-                                                                        onChange={e => setPreviewTicketQuantities({ ...previewTicketQuantities, [item.id]: parseInt(e.target.value) })}
+                                                                        onChange={e => handlePreviewQuantityChange(item.id, parseInt(e.target.value))}
                                                                     >
                                                                         {[...Array((item.maxPerOrder || 5) + 1)].map((_, i) => (
                                                                             <option key={i} value={i}>{i}</option>
@@ -533,235 +677,237 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
                                                                         </div>
                                                                     ))}
                                                                 </div>
-                                                                            )}
-                                                                        </div>
-                                                                    )}
+                                                            )}
+                                                        </div>
+                                                    )}
 
-                                                                    {/* Totals */}
-                                                                    <div className="pt-4 border-t border-gray-200 flex justify-between items-center">
-                                                                        <span className="text-sm font-bold text-gray-700">Total:</span>
-                                                                        <span className="text-xl font-bold text-indigo-700">
-                                                                            {previewPaymentTotal.toFixed(2)} {field.ticketConfig?.currency}
-                                                                        </span>
-                                                                    </div>
-                                                                </div>
+                                                    {/* Totals */}
+                                                    <div className="pt-4 border-t border-gray-200 flex justify-between items-center">
+                                                        <span className="text-sm font-bold text-gray-700">Total:</span>
+                                                        <span className="text-xl font-bold text-indigo-700">
+                                                            {previewPaymentTotal.toFixed(2)} {field.ticketConfig?.currency}
+                                                        </span>
+                                                    </div>
+                                                </div>
 
-                                                                /* Radio */
-                                                            ) : field.type === 'radio' ? (
-                                                            <div className="space-y-2 mt-2">
-                                                                {field.options?.map(opt => (
-                                                                    <label key={opt} className="flex items-center gap-2 cursor-pointer">
-                                                                        <input type="radio" name={`preview-${field.id}`} value={opt}
-                                                                            checked={previewAnswers[field.id] === opt}
-                                                                            onChange={e => setPreviewAnswers({ ...previewAnswers, [field.id]: e.target.value })}
-                                                                            className="text-indigo-600 focus:ring-indigo-500"
-                                                                        />
-                                                                        <span className="text-sm text-gray-700">{opt}</span>
-                                                                    </label>
-                                                                ))}
-                                                            </div>
+                                                /* Radio */
+                                            ) : field.type === 'radio' ? (
+                                                <div className="space-y-2 mt-2">
+                                                    {field.options?.map(opt => (
+                                                        <label key={opt} className="flex items-center gap-2 cursor-pointer">
+                                                            <input type="radio" name={`preview-${field.id}`} value={opt}
+                                                                checked={previewAnswers[field.id] === opt}
+                                                                onChange={e => setPreviewAnswers({ ...previewAnswers, [field.id]: e.target.value })}
+                                                                className="text-indigo-600 focus:ring-indigo-500"
+                                                            />
+                                                            <span className="text-sm text-gray-700">{opt}</span>
+                                                        </label>
+                                                    ))}
+                                                </div>
 
                                                 /* Checkbox */
-                                                            ) : field.type === 'checkbox' ? (
-                                                            <div className="space-y-2 mt-2">
-                                                                {field.options?.map(opt => (
-                                                                    <label key={opt} className="flex items-center gap-2 cursor-pointer">
-                                                                        <input type="checkbox" value={opt}
-                                                                            checked={(previewAnswers[field.id] || []).includes(opt)}
-                                                                            onChange={e => {
-                                                                                const current = previewAnswers[field.id] || [];
-                                                                                const next = e.target.checked
-                                                                                    ? [...current, opt]
-                                                                                    : current.filter((v: string) => v !== opt);
-                                                                                setPreviewAnswers({ ...previewAnswers, [field.id]: next });
-                                                                            }}
-                                                                            className="text-indigo-600 focus:ring-indigo-500"
-                                                                        />
-                                                                        <span className="text-sm text-gray-700">{opt}</span>
-                                                                    </label>
-                                                                ))}
-                                                            </div>
+                                            ) : field.type === 'checkbox' ? (
+                                                <div className="space-y-2 mt-2">
+                                                    {field.options?.map(opt => (
+                                                        <label key={opt} className="flex items-center gap-2 cursor-pointer">
+                                                            <input type="checkbox" value={opt}
+                                                                checked={(previewAnswers[field.id] || []).includes(opt)}
+                                                                onChange={e => {
+                                                                    const current = previewAnswers[field.id] || [];
+                                                                    const next = e.target.checked
+                                                                        ? [...current, opt]
+                                                                        : current.filter((v: string) => v !== opt);
+                                                                    setPreviewAnswers({ ...previewAnswers, [field.id]: next });
+                                                                }}
+                                                                className="text-indigo-600 focus:ring-indigo-500"
+                                                            />
+                                                            <span className="text-sm text-gray-700">{opt}</span>
+                                                        </label>
+                                                    ))}
+                                                </div>
 
                                                 /* Boolean Toggle */
-                                                            ) : field.type === 'boolean' ? (
-                                                            <div className="flex items-center justify-between p-4 rounded-xl border border-gray-100 hover:bg-gray-50 transition cursor-pointer"
-                                                                onClick={() => setPreviewAnswers({ ...previewAnswers, [field.id]: !previewAnswers[field.id] })}
-                                                            >
-                                                                <span className="text-sm font-medium text-gray-700">{field.label}</span>
-                                                                <div className={`w-12 h-6 rounded-full relative transition-colors duration-200 ${previewAnswers[field.id] ? 'bg-indigo-600' : 'bg-gray-200'}`}>
-                                                                    <div className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform duration-200 ${previewAnswers[field.id] ? 'translate-x-6' : ''}`}></div>
-                                                                </div>
-                                                            </div>
+                                            ) : field.type === 'boolean' ? (
+                                                <div className="flex items-center justify-between p-4 rounded-xl border border-gray-100 hover:bg-gray-50 transition cursor-pointer"
+                                                    onClick={() => setPreviewAnswers({ ...previewAnswers, [field.id]: !previewAnswers[field.id] })}
+                                                >
+                                                    <span className="text-sm font-medium text-gray-700">{field.label}</span>
+                                                    <div className={`w-12 h-6 rounded-full relative transition-colors duration-200 ${previewAnswers[field.id] ? 'bg-indigo-600' : 'bg-gray-200'}`}>
+                                                        <div className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform duration-200 ${previewAnswers[field.id] ? 'translate-x-6' : ''}`}></div>
+                                                    </div>
+                                                </div>
 
                                                 /* Default: text, email, phone, number, address */
-                                                            ) : (
-                                                            <div className="relative">
-                                                                {field.type === 'address' && <MapPin className="absolute left-3 top-3 w-4 h-4 text-gray-400" />}
-                                                                <input
-                                                                    type={field.type === 'number' ? 'number' : field.type === 'email' ? 'email' : field.type === 'phone' ? 'tel' : 'text'}
-                                                                    inputMode={field.type === 'text' && field.validation === 'int' ? 'numeric' : undefined}
-                                                                    className={`w-full ${field.type === 'address' ? 'pl-10' : 'px-3'} py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition`}
-                                                                    placeholder={field.placeholder}
-                                                                    value={previewAnswers[field.id] || ''}
-                                                                    onChange={e => setPreviewAnswers({ ...previewAnswers, [field.id]: e.target.value })}
-                                                                />
-                                                            </div>
+                                            ) : (
+                                                <div className="relative">
+                                                    {field.type === 'address' && <MapPin className="absolute left-3 top-3 w-4 h-4 text-gray-400" />}
+                                                    <input
+                                                        type={field.type === 'number' ? 'number' : field.type === 'email' ? 'email' : field.type === 'phone' ? 'tel' : 'text'}
+                                                        inputMode={field.type === 'text' && field.validation === 'int' ? 'numeric' : undefined}
+                                                        className={`w-full ${field.type === 'address' ? 'pl-10' : 'px-3'} py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition`}
+                                                        placeholder={field.placeholder}
+                                                        value={previewAnswers[field.id] || ''}
+                                                        onChange={e => setPreviewAnswers({ ...previewAnswers, [field.id]: e.target.value })}
+                                                    />
+                                                </div>
                                             )}
-                                                        </div>
-                                                    ))}
+                                        </div>
+                                    ))}
 
-                                                    {/* Submit Button — matches PublicRegistration */}
-                                                    <div className="pt-4">
-                                                        <button
-                                                            type="submit"
-                                                            className="w-full py-4 text-white rounded-xl font-black uppercase tracking-widest transition shadow-lg flex justify-center items-center gap-2 transform hover:scale-[1.02] active:scale-95"
-                                                            style={{ backgroundColor: form.settings?.formAccentColor || '#4F46E5' }}
-                                                        >
-                                                            {(ticketField && previewPaymentTotal > 0) ? (
-                                                                <>Proceed to Payment <ArrowRight className="w-5 h-5" /></>
-                                                            ) : (form.settings?.submitButtonText || 'Register Now')}
-                                                        </button>
-                                                    </div>
-                                                </form>
+                                    {/* Submit Button — matches PublicRegistration */}
+                                    <div className="pt-4">
+                                        <button
+                                            type="submit"
+                                            className="w-full py-4 text-white rounded-xl font-black uppercase tracking-widest transition shadow-lg flex justify-center items-center gap-2 transform hover:scale-[1.02] active:scale-95"
+                                            style={{ backgroundColor: form.settings?.formAccentColor || '#4F46E5' }}
+                                        >
+                                            {(ticketField && previewPaymentTotal > 0) ? (
+                                                <>Proceed to Payment <ArrowRight className="w-5 h-5" /></>
+                                            ) : (form.settings?.submitButtonText || 'Register Now')}
+                                        </button>
+                                    </div>
+                                </form>
                             </div>
                         </div>
                     )}
 
-                            {previewStep === 'payment' && (
-                                <div className="relative z-10 flex justify-center py-8 px-4">
-                                    <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 text-center">
-                                        <h2 className="text-2xl font-bold text-gray-900 mb-2">Secure Payment</h2>
-                                        <p className="text-gray-500 mb-8">Complete your purchase to receive your ticket.</p>
+                    {previewStep === 'payment' && (
+                        <div className="relative z-10 flex justify-center py-8 px-4">
+                            <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 text-center">
+                                <h2 className="text-2xl font-bold text-gray-900 mb-2">Secure Payment</h2>
+                                <p className="text-gray-500 mb-8">Complete your purchase to receive your ticket.</p>
 
-                                        <div className="bg-gray-50 p-4 rounded-xl mb-8 border border-gray-100">
-                                            <div className="flex justify-between items-center mb-2">
-                                                <span className="text-gray-600">Ticket(s) Subtotal</span>
-                                                <span className="font-medium text-gray-900">{previewPaymentTotal.toFixed(2)} {ticketField?.ticketConfig?.currency}</span>
-                                            </div>
-                                            {previewAppliedPromo && (
-                                                <div className="flex justify-between items-center text-sm text-green-600 border-t border-gray-200 pt-2 mt-2">
-                                                    <span>Promo ({previewAppliedPromo.code})</span>
-                                                    <span>Applied</span>
-                                                </div>
-                                            )}
-                                            {(previewDonatedSeats > 0 || previewDonatedTables > 0) && (
-                                                <div className="flex justify-between items-center text-sm text-emerald-600 border-t border-gray-200 pt-2 mt-2">
-                                                    <span>{previewDonateOption === 'table' ? 'Donated Tables' : 'Donated Seats'}</span>
-                                                    <span>{previewDonateOption === 'table' ? `${previewDonatedTables} table${previewDonatedTables !== 1 ? 's' : ''} (${previewDonatedSeats} seats)` : `${previewDonatedSeats} seat${previewDonatedSeats !== 1 ? 's' : ''}`}</span>
-                                                </div>
-                                            )}
-                                            <div className="flex justify-between items-center text-lg font-bold text-indigo-600 border-t border-gray-200 pt-3 mt-3">
-                                                <span>Total Due</span>
-                                                <span>{previewPaymentTotal.toFixed(2)} {ticketField?.ticketConfig?.currency}</span>
-                                            </div>
+                                <div className="bg-gray-50 p-4 rounded-xl mb-8 border border-gray-100">
+                                    <div className="flex justify-between items-center mb-2">
+                                        <span className="text-gray-600">Ticket(s) Subtotal</span>
+                                        <span className="font-medium text-gray-900">{previewPaymentTotal.toFixed(2)} {ticketField?.ticketConfig?.currency}</span>
+                                    </div>
+                                    {previewAppliedPromo && (
+                                        <div className="flex justify-between items-center text-sm text-green-600 border-t border-gray-200 pt-2 mt-2">
+                                            <span>Promo ({previewAppliedPromo.code})</span>
+                                            <span>Applied</span>
                                         </div>
-
-                                        <button onClick={finalizePreview} disabled={previewLoading} className="w-full py-3 bg-yellow-400 text-blue-900 font-bold rounded-lg flex justify-center items-center gap-2">
-                                            {previewLoading ? <Loader2 className="animate-spin" /> : 'Simulate PayPal Payment'}
-                                        </button>
-                                        <button onClick={() => setPreviewStep('form')} className="mt-4 text-sm text-gray-500 underline">Back</button>
+                                    )}
+                                    {(previewDonatedSeats > 0 || previewDonatedTables > 0) && (
+                                        <div className="flex justify-between items-center text-sm text-emerald-600 border-t border-gray-200 pt-2 mt-2">
+                                            <span>{previewDonateOption === 'table' ? 'Donated Tables' : 'Donated Seats'}</span>
+                                            <span>{previewDonateOption === 'table' ? `${previewDonatedTables} table${previewDonatedTables !== 1 ? 's' : ''} (${previewDonatedSeats} seats)` : `${previewDonatedSeats} seat${previewDonatedSeats !== 1 ? 's' : ''}`}</span>
+                                        </div>
+                                    )}
+                                    <div className="flex justify-between items-center text-lg font-bold text-indigo-600 border-t border-gray-200 pt-3 mt-3">
+                                        <span>Total Due</span>
+                                        <span>{previewPaymentTotal.toFixed(2)} {ticketField?.ticketConfig?.currency}</span>
                                     </div>
                                 </div>
-                            )}
 
-                            {previewStep === 'success' && (
-                                <div className="relative z-10 flex justify-center py-8 px-4">
-                                    <div className="max-w-xl w-full bg-white rounded-2xl shadow-xl overflow-hidden animate-fade-in">
-                                        {/* Success Banner — matches PublicRegistration */}
+                                <button onClick={finalizePreview} disabled={previewLoading} className="w-full py-3 bg-yellow-400 text-blue-900 font-bold rounded-lg flex justify-center items-center gap-2">
+                                    {previewLoading ? <Loader2 className="animate-spin" /> : 'Simulate PayPal Payment'}
+                                </button>
+                                <button onClick={() => setPreviewStep('form')} className="mt-4 text-sm text-gray-500 underline">Back</button>
+                            </div>
+                        </div>
+                    )}
+
+                    {previewStep === 'success' && (
+                        <div className="relative z-10 flex justify-center py-8 px-4">
+                            <div className="max-w-xl w-full bg-white rounded-2xl shadow-xl overflow-hidden animate-fade-in">
+                                {/* Success Banner — matches PublicRegistration */}
+                                <div
+                                    className="w-full h-48 flex flex-col items-center justify-center text-white"
+                                    style={{ backgroundColor: form.settings?.successHeaderColor || '#4F46E5' }}
+                                >
+                                    <div
+                                        className="w-20 h-20 rounded-full flex items-center justify-center mb-4 shadow-lg animate-bounce-slow"
+                                        style={{ backgroundColor: 'rgba(255,255,255,0.2)', backdropFilter: 'blur(8px)' }}
+                                    >
+                                        <Check className="w-10 h-10 text-white" style={{ color: form.settings?.successIconColor || '#10B981' }} />
+                                    </div>
+                                    <h3 className="text-3xl font-black px-4" style={{ color: form.settings?.successIconColor || '#10B981' }}>
+                                        {form.settings?.successTitle || 'Registration Confirmed!'}
+                                    </h3>
+                                </div>
+
+                                <div className="p-8 text-center">
+                                    {/* Thank You Message */}
+                                    {form.thankYouMessage ? (
                                         <div
-                                            className="w-full h-48 flex flex-col items-center justify-center text-white"
-                                            style={{ backgroundColor: form.settings?.successHeaderColor || '#4F46E5' }}
+                                            className="prose prose-sm max-w-none text-gray-600 mb-6"
+                                            dangerouslySetInnerHTML={{ __html: form.thankYouMessage }}
+                                        />
+                                    ) : (
+                                        <>
+                                            <h2 className="text-2xl font-bold text-gray-900 mb-2">You're going!</h2>
+                                            <p className="text-gray-500 mb-6">A confirmation email with your ticket has been sent to <span className="font-semibold">{lastGeneratedAttendee?.email || 'test@example.com'}</span>.</p>
+                                        </>
+                                    )}
+
+                                    {/* QR Code Card */}
+                                    {(form.settings?.showQrOnSuccess !== false) && (
+                                        <div
+                                            className="border border-gray-200 rounded-2xl p-8 shadow-md mb-8 max-w-sm mx-auto relative overflow-hidden transform transition hover:scale-[1.02] duration-300"
+                                            style={{ backgroundColor: form.settings?.successFooterColor || '#F9FAFB' }}
                                         >
                                             <div
-                                                className="w-20 h-20 rounded-full flex items-center justify-center mb-4 shadow-lg animate-bounce-slow"
-                                                style={{ backgroundColor: 'rgba(255,255,255,0.2)', backdropFilter: 'blur(8px)' }}
-                                            >
-                                                <Check className="w-10 h-10 text-white" style={{ color: form.settings?.successIconColor || '#10B981' }} />
+                                                className="absolute top-0 left-0 w-full h-1"
+                                                style={{ backgroundColor: form.settings?.successHeaderColor || '#4F46E5', opacity: 0.3 }}
+                                            ></div>
+                                            <h4 className="font-bold text-xl text-gray-900 mb-1">{form.title}</h4>
+                                            <p className="text-xs text-gray-500 mb-6 uppercase tracking-widest font-semibold">{new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
+
+                                            <div className="bg-white p-3 rounded-2xl inline-block mb-6 shadow-sm border border-gray-100">
+                                                <QRCode value={lastGeneratedAttendee?.qrPayload || JSON.stringify({ id: 'TEST-8X29B', isTest: true })} size={160} />
                                             </div>
-                                            <h3 className="text-3xl font-black px-4" style={{ color: form.settings?.successIconColor || '#10B981' }}>
-                                                {form.settings?.successTitle || 'Registration Confirmed!'}
-                                            </h3>
-                                        </div>
 
-                                        <div className="p-8 text-center">
-                                            {/* Thank You Message */}
-                                            {form.thankYouMessage ? (
-                                                <div
-                                                    className="prose prose-sm max-w-none text-gray-600 mb-6"
-                                                    dangerouslySetInnerHTML={{ __html: form.thankYouMessage }}
-                                                />
-                                            ) : (
-                                                <>
-                                                    <h2 className="text-2xl font-bold text-gray-900 mb-2">You're going!</h2>
-                                                    <p className="text-gray-500 mb-6">A confirmation email with your ticket has been sent to <span className="font-semibold">{lastGeneratedAttendee?.email || 'test@example.com'}</span>.</p>
-                                                </>
-                                            )}
+                                            <div className="text-sm font-mono bg-white p-3 rounded-xl border border-gray-200 text-gray-700 mb-6 flex justify-between items-center">
+                                                <span className="text-gray-400 text-[10px] uppercase font-bold">Ticket ID</span>
+                                                <span className="font-bold">#{lastGeneratedAttendee?.id || 'TEST-8X29B'}</span>
+                                            </div>
 
-                                            {/* QR Code Card */}
-                                            {(form.settings?.showQrOnSuccess !== false) && (
-                                                <div
-                                                    className="border border-gray-200 rounded-2xl p-8 shadow-md mb-8 max-w-sm mx-auto relative overflow-hidden transform transition hover:scale-[1.02] duration-300"
-                                                    style={{ backgroundColor: form.settings?.successFooterColor || '#F9FAFB' }}
-                                                >
-                                                    <div
-                                                        className="absolute top-0 left-0 w-full h-1"
-                                                        style={{ backgroundColor: form.settings?.successHeaderColor || '#4F46E5', opacity: 0.3 }}
-                                                    ></div>
-                                                    <h4 className="font-bold text-xl text-gray-900 mb-1">{form.title}</h4>
-                                                    <p className="text-xs text-gray-500 mb-6 uppercase tracking-widest font-semibold">{new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
-
-                                                    <div className="bg-white p-3 rounded-2xl inline-block mb-6 shadow-sm border border-gray-100">
-                                                        <QRCode value={lastGeneratedAttendee?.qrPayload || JSON.stringify({ id: 'TEST-8X29B', isTest: true })} size={160} />
-                                                    </div>
-
-                                                    <div className="text-sm font-mono bg-white p-3 rounded-xl border border-gray-200 text-gray-700 mb-6 flex justify-between items-center">
-                                                        <span className="text-gray-400 text-[10px] uppercase font-bold">Ticket ID</span>
-                                                        <span className="font-bold">#{lastGeneratedAttendee?.id || 'TEST-8X29B'}</span>
-                                                    </div>
-
-                                                    {(form.settings?.showTicketButtonOnSuccess !== false) && (
-                                                        <button
-                                                            className="w-full py-4 text-white rounded-xl text-sm font-black uppercase tracking-widest shadow-lg transition transform hover:scale-[1.02]"
-                                                            style={{ backgroundColor: form.settings?.successHeaderColor || '#4F46E5' }}
-                                                        >
-                                                            <Download className="w-5 h-5 inline mr-2" /> Download PDF Ticket
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            )}
-
-                                            {/* Fallback button if QR card is hidden but button is shown */}
-                                            {(form.settings?.showQrOnSuccess === false && form.settings?.showTicketButtonOnSuccess !== false) && (
+                                            {(form.settings?.showTicketButtonOnSuccess !== false) && (
                                                 <button
-                                                    className="w-full max-w-sm mx-auto py-4 rounded-xl text-base font-bold flex items-center justify-center gap-2 border shadow-sm transition mb-8"
-                                                    style={{
-                                                        backgroundColor: (form.settings?.successHeaderColor || '#4F46E5') + '10',
-                                                        color: form.settings?.successIconColor || '#10B981',
-                                                        borderColor: (form.settings?.successHeaderColor || '#4F46E5') + '30'
-                                                    }}
+                                                    onClick={downloadPdf}
+                                                    className="w-full py-4 text-white rounded-xl text-sm font-black uppercase tracking-widest shadow-lg transition transform hover:scale-[1.02]"
+                                                    style={{ backgroundColor: form.settings?.successHeaderColor || '#4F46E5' }}
                                                 >
-                                                    <Download className="w-5 h-5" /> Download PDF Ticket
+                                                    <Download className="w-5 h-5 inline mr-2" /> Download PDF Ticket
                                                 </button>
                                             )}
-
-                                            <button onClick={resetPreview} className="px-8 py-3 bg-gray-900 text-white rounded-xl font-bold hover:shadow-xl hover:-translate-y-0.5 transition active:scale-95 mb-8">
-                                                Test Another Response
-                                            </button>
                                         </div>
-                                    </div>
+                                    )}
+
+                                    {/* Fallback button if QR card is hidden but button is shown */}
+                                    {(form.settings?.showQrOnSuccess === false && form.settings?.showTicketButtonOnSuccess !== false) && (
+                                        <button
+                                            onClick={downloadPdf}
+                                            className="w-full max-w-sm mx-auto py-4 rounded-xl text-base font-bold flex items-center justify-center gap-2 border shadow-sm transition mb-8"
+                                            style={{
+                                                backgroundColor: (form.settings?.successHeaderColor || '#4F46E5') + '10',
+                                                color: form.settings?.successIconColor || '#10B981',
+                                                borderColor: (form.settings?.successHeaderColor || '#4F46E5') + '30'
+                                            }}
+                                        >
+                                            <Download className="w-5 h-5" /> Download PDF Ticket
+                                        </button>
+                                    )}
+
+                                    <button onClick={resetPreview} className="px-8 py-3 bg-gray-900 text-white rounded-xl font-bold hover:shadow-xl hover:-translate-y-0.5 transition active:scale-95 mb-8">
+                                        Test Another Response
+                                    </button>
                                 </div>
-                            )}
+                            </div>
                         </div>
+                    )}
+                </div>
 
                 {/* Preview Mode Badge */}
-                    <div className="text-center mt-4">
-                        <span className="inline-flex items-center gap-2 px-4 py-2 bg-white rounded-full text-[10px] font-bold text-gray-400 border border-gray-200 uppercase tracking-widest shadow-sm">
-                            <Eye className="w-3 h-3" /> Live Preview — Matches Registration Page
-                        </span>
-                    </div>
+                <div className="text-center mt-4">
+                    <span className="inline-flex items-center gap-2 px-4 py-2 bg-white rounded-full text-[10px] font-bold text-gray-400 border border-gray-200 uppercase tracking-widest shadow-sm">
+                        <Eye className="w-3 h-3" /> Live Preview — Matches Registration Page
+                    </span>
                 </div>
             </div>
-            );
+        </div>
+    );
 };
 
-            export default FormPreview;
+export default FormPreview;

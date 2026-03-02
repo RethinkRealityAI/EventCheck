@@ -7,6 +7,7 @@ import { useParams, useLocation } from 'react-router-dom';
 import { generateTicketPDF } from '../utils/pdfGenerator';
 import { PayPalScriptProvider, PayPalButtons } from "@paypal/react-paypal-js";
 import { sendTicketEmail, arrayBufferToBase64 } from '../services/smtpService';
+import QRCode from 'react-qr-code';
 
 const PublicRegistration = () => {
   const { formId } = useParams<{ formId: string }>();
@@ -207,7 +208,21 @@ const PublicRegistration = () => {
   };
 
   const handleQuantityChange = (itemId: string, qty: number) => {
-    setTicketQuantities(prev => ({ ...prev, [itemId]: qty }));
+    setTicketQuantities(prev => {
+      const next = { ...prev, [itemId]: qty };
+      // Sync to answers for conditional logic
+      const selectedIds = Object.entries(next)
+        .filter(([_, q]) => q > 0)
+        .map(([id]) => id);
+
+      if (ticketField) {
+        setAnswers(prevAnswers => ({
+          ...prevAnswers,
+          [ticketField.id]: selectedIds
+        }));
+      }
+      return next;
+    });
   };
 
   const applyPromo = () => {
@@ -565,7 +580,7 @@ const PublicRegistration = () => {
     <div
       className="min-h-screen py-12 px-4 sm:px-6 lg:px-8 flex flex-col items-center relative"
       style={{
-        backgroundColor: form.settings?.formBackgroundColor || '#F3F4F6',
+        backgroundColor: form.settings?.transparentBackground ? 'transparent' : (form.settings?.formBackgroundColor || '#F3F4F6'),
         backgroundImage: form.settings?.formBackgroundImage ? `url(${form.settings.formBackgroundImage})` : 'none',
         backgroundSize: 'cover',
         backgroundPosition: 'center',
@@ -591,7 +606,14 @@ const PublicRegistration = () => {
       )}
 
       {step === 'form' && (
-        <div className="max-w-xl w-full bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl overflow-hidden relative z-10 border border-white/20">
+        <div
+          className="max-w-xl w-full bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl overflow-hidden relative z-10 border border-white/20"
+          style={form.settings?.cardBackgroundImage ? {
+            backgroundImage: `url(${form.settings.cardBackgroundImage})`,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center'
+          } : {}}
+        >
           <div
             className="px-8 py-8 text-center"
             style={{ backgroundColor: form.settings?.formHeaderColor || '#4F46E5' }}
@@ -1127,10 +1149,7 @@ const PublicRegistration = () => {
                 <p className="text-xs text-gray-500 mb-6 uppercase tracking-widest font-semibold">{new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
 
                 <div className="bg-white p-3 rounded-2xl inline-block mb-6 shadow-sm border border-gray-100">
-                  {/* We simulate the QR here like in preview */}
-                  <div className="w-40 h-40 bg-gray-100 rounded-xl flex items-center justify-center">
-                    <Check className="w-12 h-12 text-gray-300" />
-                  </div>
+                  <QRCode value={generatedTicket.qrPayload} size={160} />
                 </div>
 
                 <div className="text-sm font-mono bg-white p-3 rounded-xl border border-gray-200 text-gray-700 mb-6 flex justify-between items-center">

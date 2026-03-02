@@ -71,7 +71,7 @@ const FormBuilder: React.FC = () => {
       }
    };
 
-   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'background' | 'logo') => {
+   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'background' | 'logo' | 'card_background') => {
       const file = e.target.files?.[0];
       if (!file || !form) return;
 
@@ -80,6 +80,8 @@ const FormBuilder: React.FC = () => {
          const base64String = reader.result as string;
          if (type === 'background') {
             updateFormMetadata({ settings: { ...form.settings, formBackgroundImage: base64String } });
+         } else if (type === 'card_background') {
+            updateFormMetadata({ settings: { ...form.settings, cardBackgroundImage: base64String } });
          } else {
             updateFormMetadata({ pdfSettings: { ...form.pdfSettings, logoUrl: base64String } });
          }
@@ -960,7 +962,7 @@ const FormBuilder: React.FC = () => {
                                     </div>
 
                                     <div>
-                                       <label className="block text-sm font-bold text-gray-700 mb-2">Background Image</label>
+                                       <label className="block text-sm font-bold text-gray-700 mb-2">Page Background Image</label>
                                        <div className="flex items-center gap-3">
                                           {form.settings?.formBackgroundImage ? (
                                              <div className="relative group">
@@ -981,9 +983,51 @@ const FormBuilder: React.FC = () => {
                                           )}
                                           <div className="flex-1">
                                              <p className="text-xs text-gray-500 leading-relaxed italic">
-                                                Upload a high-resolution image to be used as the background for your registration page. Recommended size: 1920x1080px.
+                                                Background for the entire registration page.
                                              </p>
                                           </div>
+                                       </div>
+                                    </div>
+
+                                    <div>
+                                       <label className="block text-sm font-bold text-gray-700 mb-2">Form Card Background Image</label>
+                                       <div className="flex items-center gap-3">
+                                          {form.settings?.cardBackgroundImage ? (
+                                             <div className="relative group">
+                                                <img src={form.settings.cardBackgroundImage} alt="Card Background" className="w-24 h-14 object-cover rounded-lg border border-indigo-100 shadow-sm" />
+                                                <button
+                                                   onClick={() => updateFormMetadata({ settings: { ...form.settings, cardBackgroundImage: undefined } })}
+                                                   className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition shadow-lg"
+                                                >
+                                                   <X className="w-2.5 h-2.5" />
+                                                </button>
+                                             </div>
+                                          ) : (
+                                             <label className="w-24 h-14 border border-dashed border-gray-300 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-indigo-400 hover:bg-indigo-50 transition group">
+                                                <Plus className="w-4 h-4 text-gray-400 group-hover:text-indigo-500" />
+                                                <span className="text-[9px] font-bold text-gray-400 group-hover:text-indigo-500 mt-0.5 uppercase">Upload</span>
+                                                <input type="file" className="hidden" accept="image/*" onChange={(e) => handleImageUpload(e, 'card_background')} />
+                                             </label>
+                                          )}
+                                          <div className="flex-1">
+                                             <p className="text-[10px] text-gray-500 leading-relaxed italic">
+                                                Background image for the form card.
+                                             </p>
+                                          </div>
+                                       </div>
+                                    </div>
+
+                                    <div className="bg-indigo-50/50 p-4 rounded-xl border border-indigo-100 flex items-center justify-between cursor-pointer group mb-6"
+                                       onClick={() => updateFormMetadata({ settings: { ...form.settings, transparentBackground: !form.settings?.transparentBackground } })}
+                                    >
+                                       <div className="flex flex-col">
+                                          <span className="text-sm font-bold text-gray-800 group-hover:text-indigo-700 transition">Transparent Page Background</span>
+                                          <span className="text-xs text-gray-500">Enable this if you are embedding the form in another website.</span>
+                                       </div>
+                                       <div
+                                          className={`w-12 h-6 rounded-full relative transition-colors duration-200 ${form.settings?.transparentBackground ? 'bg-indigo-600' : 'bg-gray-300'}`}
+                                       >
+                                          <div className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform duration-200 ${form.settings?.transparentBackground ? 'translate-x-6' : ''}`}></div>
                                        </div>
                                     </div>
 
