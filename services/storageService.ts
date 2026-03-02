@@ -1,4 +1,4 @@
-import { Attendee, Form, AppSettings, DEFAULT_SETTINGS, FormField, PdfSettings, SeatingTable, SeatingConfiguration, SeatingAssignment } from '../types';
+import { Attendee, Form, AppSettings, DEFAULT_SETTINGS, FormField, PdfSettings, SeatingTable, SeatingConfiguration, SeatingAssignment, SceneElement, SceneElementType, Custom3DModel } from '../types';
 import { supabase } from './supabaseClient';
 import { Database } from './database.types';
 
@@ -12,6 +12,12 @@ type SeatingConfigurationRow = Database['public']['Tables']['seating_configurati
 type SeatingConfigurationInsert = Database['public']['Tables']['seating_configurations']['Insert'];
 type SeatingAssignmentRow = Database['public']['Tables']['seating_assignments']['Row'];
 type SeatingAssignmentInsert = Database['public']['Tables']['seating_assignments']['Insert'];
+
+type SceneElementRow = Database['public']['Tables']['scene_elements']['Row'];
+type SceneElementInsert = Database['public']['Tables']['scene_elements']['Insert'];
+
+type Custom3DModelRow = Database['public']['Tables']['custom_3d_models']['Row'];
+type Custom3DModelInsert = Database['public']['Tables']['custom_3d_models']['Insert'];
 
 // --- Attendees ---
 export const getAttendees = async (): Promise<Attendee[]> => {
@@ -79,6 +85,7 @@ export const updateAttendee = async (id: string, updates: Partial<Attendee>): Pr
   if (updates.isPrimary !== undefined) dbUpdates.is_primary = updates.isPrimary;
   if (updates.assignedTableId !== undefined) dbUpdates.assigned_table_id = updates.assignedTableId;
   if (updates.assignedSeat !== undefined) dbUpdates.assigned_seat = updates.assignedSeat;
+  if (updates.guestType !== undefined) dbUpdates.guest_type = updates.guestType || null;
 
   const { error } = await supabase
     .from('attendees')
@@ -302,7 +309,8 @@ function mapAttendeeFromDb(db: AttendeeRow): Attendee {
     primaryAttendeeId: db.primary_attendee_id || undefined,
     isPrimary: db.is_primary ?? true,
     assignedTableId: db.assigned_table_id || null,
-    assignedSeat: db.assigned_seat ?? null
+    assignedSeat: db.assigned_seat ?? null,
+    guestType: (db.guest_type as Attendee['guestType']) || undefined
   };
 }
 
@@ -329,7 +337,8 @@ function mapAttendeeToDb(a: Attendee): AttendeeInsert {
     primary_attendee_id: a.primaryAttendeeId || null,
     is_primary: a.isPrimary ?? true,
     assigned_table_id: a.assignedTableId || null,
-    assigned_seat: a.assignedSeat ?? null
+    assigned_seat: a.assignedSeat ?? null,
+    guest_type: a.guestType || null
   };
 }
 
@@ -581,5 +590,183 @@ function mapSeatingAssignmentToDb(a: SeatingAssignment): SeatingAssignmentInsert
     attendee_id: a.attendeeId,
     table_id: a.tableId,
     seat_number: a.seatNumber
+  };
+}
+
+// --- Scene Elements ---
+export const getSceneElements = async (configurationId: string): Promise<SceneElement[]> => {
+  const { data, error } = await supabase
+    .from('scene_elements')
+    .select('*')
+    .eq('configuration_id', configurationId)
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    console.error("Failed to load scene elements", error);
+    return [];
+  }
+
+  return (data || []).map(mapSceneElementFromDb);
+};
+
+export const saveSceneElements = async (elements: SceneElement[], configurationId: string): Promise<void> => {
+  const dbRecords = elements.map(mapSceneElementToDb);
+
+  // 1. Get existing element IDs for this configuration
+  const { data: existing } = await supabase
+    .from('scene_elements')
+    .select('id')
+    .eq('configuration_id', configurationId);
+
+  const existingIds = existing?.map(r => r.id) || [];
+  const currentIds = elements.map(e => e.id);
+
+  // 2. Delete removed elements
+  const toDelete = existingIds.filter(id => !currentIds.includes(id));
+  if (toDelete.length > 0) {
+    await supabase.from('scene_elements').delete().in('id', toDelete);
+  }
+
+  // 3. Upsert current elements
+  if (dbRecords.length > 0) {
+    const { error } = await supabase
+      .from('scene_elements')
+      .upsert(dbRecords);
+
+    if (error) console.error("Failed to save scene elements", error);
+  }
+};
+
+export const deleteSceneElement = async (id: string): Promise<void> => {
+  const { error } = await supabase
+    .from('scene_elements')
+    .delete()
+    .eq('id', id);
+
+  if (error) console.error("Failed to delete scene element", error);
+};
+
+function mapSceneElementFromDb(db: SceneElementRow): SceneElement {
+  return {
+    id: db.id,
+    configurationId: db.configuration_id,
+    elementType: db.element_type as SceneElementType,
+    label: db.label,
+    color: db.color,
+    x: db.x,
+    y: db.y,
+    z: db.z,
+    rotationY: db.rotation_y,
+    scaleX: db.scale_x,
+    scaleY: db.scale_y,
+    scaleZ: db.scale_z,
+    createdAt: db.created_at,
+    customModelId: db.custom_model_id || undefined
+  };
+}
+
+function mapSceneElementToDb(e: SceneElement): SceneElementInsert {
+  return {
+    id: e.id,
+    configuration_id: e.configurationId,
+    element_type: e.elementType,
+    label: e.label,
+    color: e.color,
+    x: e.x,
+    y: e.y,
+    z: e.z,
+    rotation_y: e.rotationY,
+    scale_x: e.scaleX,
+    scale_y: e.scaleY,
+    scale_z: e.scaleZ,
+    custom_model_id: e.customModelId || null
+  };
+}
+
+// --- Custom 3D Models ---
+export const getCustom3DModels = async (): Promise<Custom3DModel[]> => {
+  const { data, error } = await supabase
+    .from('custom_3d_models')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error("Failed to load custom 3D models", error);
+    return [];
+  }
+
+  return (data || []).map(mapCustomModelFromDb);
+};
+
+export const uploadCustom3DModel = async (file: File): Promise<Custom3DModel | null> => {
+  const id = crypto.randomUUID();
+  const ext = file.name.split('.').pop() || 'glb';
+  const filePath = `models/${id}.${ext}`;
+
+  // 1. Upload file to Supabase Storage
+  const { error: uploadError } = await supabase
+    .storage
+    .from('3d-models')
+    .upload(filePath, file, { contentType: file.type || 'model/gltf-binary' });
+
+  if (uploadError) {
+    console.error("Failed to upload 3D model file", uploadError);
+    return null;
+  }
+
+  // 2. Save metadata to DB
+  const modelRecord: Custom3DModelInsert = {
+    id,
+    name: file.name.replace(/\.[^.]+$/, ''),
+    file_path: filePath,
+    file_size: file.size,
+  };
+
+  const { error: dbError } = await supabase
+    .from('custom_3d_models')
+    .insert(modelRecord);
+
+  if (dbError) {
+    console.error("Failed to save 3D model metadata", dbError);
+    // Clean up uploaded file
+    await supabase.storage.from('3d-models').remove([filePath]);
+    return null;
+  }
+
+  return {
+    id,
+    name: modelRecord.name,
+    filePath,
+    fileSize: file.size,
+    createdAt: new Date().toISOString(),
+  };
+};
+
+export const deleteCustom3DModel = async (model: Custom3DModel): Promise<void> => {
+  // 1. Delete from storage
+  await supabase.storage.from('3d-models').remove([model.filePath]);
+
+  // 2. Delete from DB
+  const { error } = await supabase
+    .from('custom_3d_models')
+    .delete()
+    .eq('id', model.id);
+
+  if (error) console.error("Failed to delete 3D model", error);
+};
+
+export const getModelPublicUrl = (filePath: string): string => {
+  const { data } = supabase.storage.from('3d-models').getPublicUrl(filePath);
+  return data.publicUrl;
+};
+
+function mapCustomModelFromDb(db: Custom3DModelRow): Custom3DModel {
+  return {
+    id: db.id,
+    name: db.name,
+    filePath: db.file_path,
+    fileSize: db.file_size,
+    thumbnailPath: db.thumbnail_path || undefined,
+    createdAt: db.created_at,
   };
 }

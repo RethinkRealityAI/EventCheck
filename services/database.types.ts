@@ -33,6 +33,7 @@ export type Database = {
                     is_primary: boolean
                     assigned_table_id: string | null
                     assigned_seat: number | null
+                    guest_type: string | null
                 }
                 Insert: {
                     id: string
@@ -57,6 +58,7 @@ export type Database = {
                     is_primary?: boolean
                     assigned_table_id?: string | null
                     assigned_seat?: number | null
+                    guest_type?: string | null
                 }
                 Update: {
                     id?: string
@@ -81,6 +83,7 @@ export type Database = {
                     is_primary?: boolean
                     assigned_table_id?: string | null
                     assigned_seat?: number | null
+                    guest_type?: string | null
                 }
             }
             forms: {
@@ -264,6 +267,82 @@ export type Database = {
                     attendee_id?: string
                     table_id?: string
                     seat_number?: number
+                    created_at?: string
+                }
+            }
+            scene_elements: {
+                Row: {
+                    id: string
+                    configuration_id: string
+                    element_type: string
+                    label: string
+                    color: string
+                    x: number
+                    y: number
+                    z: number
+                    rotation_y: number
+                    scale_x: number
+                    scale_y: number
+                    scale_z: number
+                    created_at: string
+                    custom_model_id?: string | null
+                }
+                Insert: {
+                    id?: string
+                    configuration_id: string
+                    element_type?: string
+                    label?: string
+                    color?: string
+                    x?: number
+                    y?: number
+                    z?: number
+                    rotation_y?: number
+                    scale_x?: number
+                    scale_y?: number
+                    scale_z?: number
+                    created_at?: string
+                    custom_model_id?: string | null
+                }
+                Update: {
+                    id?: string
+                    configuration_id?: string
+                    element_type?: string
+                    label?: string
+                    color?: string
+                    x?: number
+                    y?: number
+                    z?: number
+                    rotation_y?: number
+                    scale_x?: number
+                    scale_y?: number
+                    scale_z?: number
+                    created_at?: string
+                    custom_model_id?: string | null
+                }
+            }
+            custom_3d_models: {
+                Row: {
+                    id: string
+                    name: string
+                    file_path: string
+                    file_size: number
+                    thumbnail_path: string | null
+                    created_at: string
+                }
+                Insert: {
+                    id?: string
+                    name: string
+                    file_path: string
+                    file_size?: number
+                    thumbnail_path?: string | null
+                    created_at?: string
+                }
+                Update: {
+                    id?: string
+                    name?: string
+                    file_path?: string
+                    file_size?: number
+                    thumbnail_path?: string | null
                     created_at?: string
                 }
             }

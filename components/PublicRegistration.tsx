@@ -36,7 +36,7 @@ const PublicRegistration = () => {
   const [donatedTables, setDonatedTables] = useState(0);
 
   // Guest State
-  const [guests, setGuests] = useState<Array<{ name: string, email: string, dietary: string }>>([]);
+  const [guests, setGuests] = useState<Array<{ name: string, email: string, dietary: string, guestType: 'adult' | 'child' }>>([]);
   const [skipGuestDetails, setSkipGuestDetails] = useState(false);
   const [isFirstGuestPurchaser, setIsFirstGuestPurchaser] = useState(true);
 
@@ -111,7 +111,7 @@ const PublicRegistration = () => {
           setMode('guest');
 
           // Pre-fill a guest slot for the link-based registrant
-          setGuests([{ name: '', email: '', dietary: 'no' }]);
+          setGuests([{ name: '', email: '', dietary: 'no', guestType: 'adult' }]);
         } else {
           showNotification('Invalid or expired guest registration link.', 'error');
           setMode('purchaser');
@@ -158,7 +158,7 @@ const PublicRegistration = () => {
       const newGuests = [...prev];
       if (newGuests.length < totalTickets) {
         for (let i = newGuests.length; i < totalTickets; i++) {
-          newGuests.push({ name: '', email: '', dietary: 'no' });
+          newGuests.push({ name: '', email: '', dietary: 'no', guestType: 'adult' });
         }
       } else {
         newGuests.length = totalTickets;
@@ -320,6 +320,7 @@ const PublicRegistration = () => {
         name: g.name,
         email: g.email,
         dietaryPreferences: g.dietary === 'yes' ? 'Vegetarian' : '',
+        guestType: g.guestType || 'adult',
         ticketType: `Guest of ${fetchedPrimaryAttendee.name}`,
         registeredAt: new Date().toISOString(),
         answers: answers,
@@ -388,8 +389,13 @@ const PublicRegistration = () => {
     };
 
     // Add dietary preferences for the primary attendee from guest slot 0
-    if (ticketField?.ticketConfig?.enableGuestDetails && guests.length > 0 && guests[0].dietary) {
-      newAttendee.dietaryPreferences = guests[0].dietary === 'yes' ? 'Vegetarian' : '';
+    if (ticketField?.ticketConfig?.enableGuestDetails && guests.length > 0) {
+      if (guests[0].dietary) {
+        newAttendee.dietaryPreferences = guests[0].dietary === 'yes' ? 'Vegetarian' : '';
+      }
+      if (ticketField.ticketConfig.enableAgeGroups && guests[0].guestType) {
+        newAttendee.guestType = guests[0].guestType;
+      }
     }
 
     // Add Donated Seats/Tables Info
@@ -442,6 +448,7 @@ const PublicRegistration = () => {
             name: guestName,
             email: guestEmail,
             dietaryPreferences: g?.dietary === 'yes' ? 'Vegetarian' : '',
+            guestType: g?.guestType || 'adult',
             ticketType: `Guest of ${purchaserName}`,
             registeredAt: new Date().toISOString(),
             answers: {},
@@ -901,7 +908,7 @@ const PublicRegistration = () => {
                                       />
                                     </div>
 
-                                    <div className="flex items-center justify-between mt-1">
+                                    <div className="flex items-center justify-between mt-1 mb-2">
                                       <span className="text-[10px] font-bold text-gray-500 uppercase">Vegetarian?</span>
                                       <div className="flex gap-4">
                                         <label className="flex items-center gap-1.5 cursor-pointer">
@@ -922,6 +929,30 @@ const PublicRegistration = () => {
                                         </label>
                                       </div>
                                     </div>
+
+                                    {field.ticketConfig?.enableAgeGroups && (
+                                      <div className="flex items-center justify-between mt-1">
+                                        <span className="text-[10px] font-bold text-gray-500 uppercase">Guest Type</span>
+                                        <div className="flex gap-4">
+                                          <label className="flex items-center gap-1.5 cursor-pointer">
+                                            <input type="radio" name={`age-${i}`} checked={g.guestType === 'adult' || !g.guestType} onChange={() => {
+                                              const newGuests = [...guests];
+                                              newGuests[i].guestType = 'adult';
+                                              setGuests(newGuests);
+                                            }} className="w-3.5 h-3.5 text-indigo-600 focus:ring-indigo-500" />
+                                            <span className="text-xs text-gray-600">Adult</span>
+                                          </label>
+                                          <label className="flex items-center gap-1.5 cursor-pointer">
+                                            <input type="radio" name={`age-${i}`} checked={g.guestType === 'child'} onChange={() => {
+                                              const newGuests = [...guests];
+                                              newGuests[i].guestType = 'child';
+                                              setGuests(newGuests);
+                                            }} className="w-3.5 h-3.5 text-indigo-600 focus:ring-indigo-500" />
+                                            <span className="text-xs text-gray-600">Child</span>
+                                          </label>
+                                        </div>
+                                      </div>
+                                    )}
 
                                     {mode === 'purchaser' && i === 0 && !isFirstGuestPurchaser && (
                                       <button type="button" onClick={() => setIsFirstGuestPurchaser(true)} className="text-xs text-gray-400 font-medium mt-2 hover:text-gray-600">

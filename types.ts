@@ -21,6 +21,7 @@ export interface Attendee {
   dietaryPreferences?: string; // e.g. "Vegetarian", "Vegan", etc.
   primaryAttendeeId?: string; // If this is a guest, link to purchaser
   isPrimary?: boolean; // Defaults to true
+  guestType?: 'adult' | 'child'; // Whether this guest is an adult or child
   // Seating Assignment
   assignedTableId?: string | null;
   assignedSeat?: number | null;
@@ -39,6 +40,34 @@ export interface SeatingAssignment {
   attendeeId: string;
   tableId: string;
   seatNumber: number;
+}
+
+export type SceneElementType = 'stage' | 'booth' | 'rect-table' | 'barrier' | 'plant' | 'column' | 'dance-floor' | 'bar' | 'custom';
+
+export interface SceneElement {
+  id: string;
+  configurationId: string;
+  elementType: SceneElementType;
+  label: string;
+  color: string;
+  x: number;
+  y: number;
+  z: number;
+  rotationY: number;
+  scaleX: number;
+  scaleY: number;
+  scaleZ: number;
+  createdAt: string;
+  customModelId?: string; // References Custom3DModel.id for 'custom' type
+}
+
+export interface Custom3DModel {
+  id: string;
+  name: string;
+  filePath: string;
+  fileSize: number;
+  thumbnailPath?: string;
+  createdAt: string;
 }
 
 export interface SeatingTable {
@@ -85,6 +114,7 @@ export interface TicketConfig {
   promoCodes: PromoCode[];
   enableDonations?: boolean;
   enableGuestDetails?: boolean;
+  enableAgeGroups?: boolean; // Ask if guests are adults or children
   // Donation Text Customization
   donationSectionTitle?: string;
   donationSectionDescription?: string;

@@ -767,6 +767,21 @@ const FormBuilder: React.FC = () => {
                                                          <span className="block text-xs text-gray-500">Collect info for each guest.</span>
                                                       </div>
                                                    </label>
+                                                   <label className="flex items-center gap-3 p-3 bg-white border border-indigo-100 rounded-lg cursor-pointer hover:border-indigo-300 transition shadow-sm">
+                                                      <input
+                                                         type="checkbox"
+                                                         className="w-5 h-5 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500"
+                                                         checked={editingField.ticketConfig.enableAgeGroups || false}
+                                                         onChange={e => setEditingField({
+                                                            ...editingField,
+                                                            ticketConfig: { ...editingField.ticketConfig!, enableAgeGroups: e.target.checked }
+                                                         })}
+                                                      />
+                                                      <div>
+                                                         <span className="block text-sm font-bold text-gray-900">Age Groups</span>
+                                                         <span className="block text-xs text-gray-500">Collect Adult vs. Child for each guest.</span>
+                                                      </div>
+                                                   </label>
                                                 </div>
 
                                                 {editingField.ticketConfig.enableDonations && (

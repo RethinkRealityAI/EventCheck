@@ -377,126 +377,136 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, isLoading = fals
                 <p>No tables found matching your search.</p>
               </div>
             ) : (
-              paginatedTables.map(({ primary, guests }) => (
-                <div key={primary.id} className="bg-white group transition-all">
-                  <div
-                    onClick={() => toggleTable(primary.id)}
-                    className="p-4 flex items-center justify-between cursor-pointer hover:bg-gray-50 transition-colors"
-                  >
-                    <div className="flex items-center gap-4">
-                      <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg group-hover:bg-indigo-600 group-hover:text-white transition-colors">
-                        <LayoutDashboard className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <h4 className="font-bold text-gray-900 flex items-center gap-2">
-                          Table: {primary.name}
-                          <span className="text-[10px] font-black uppercase tracking-widest text-gray-400 bg-gray-100 px-2 py-0.5 rounded">
-                            {guests.length + 1} Seat{(guests.length + 1) !== 1 ? 's' : ''}
-                          </span>
-                        </h4>
-                        <div className="text-xs text-gray-500 flex items-center gap-1">
-                          <Mail className="w-3 h-3" /> {primary.email}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-6">
-                      <div className="hidden sm:flex flex-col items-end">
-                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-tight">Status</span>
-                        <div className="flex items-center gap-1.5">
-                          <div className={`w-2 h-2 rounded-full ${primary.checkedInAt ? 'bg-green-500' : 'bg-amber-400'}`}></div>
-                          <span className="text-xs font-bold text-gray-700">
-                            {guests.filter(g => g.checkedInAt).length + (primary.checkedInAt ? 1 : 0)} / {guests.length + 1} Checked In
-                          </span>
-                        </div>
-                      </div>
-                      <button
-                        onClick={(e) => handleCopyGuestLink(e, primary.formId, primary.id)}
-                        className="p-2 text-gray-400 hover:text-indigo-600 transition-colors hidden sm:block"
-                        title="Copy Guest Invite Link"
-                      >
-                        <Copy className="w-4 h-4" />
-                      </button>
-                      <button className="p-2 text-gray-400 hover:text-indigo-600 transition-colors">
-                        {expandedTables[primary.id] ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
-                      </button>
-                    </div>
-                  </div>
+              paginatedTables.map(({ primary, guests }) => {
+                const adultCount = guests.filter(g => g.guestType !== 'child').length + (primary.guestType !== 'child' ? 1 : 0);
+                const childCount = guests.filter(g => g.guestType === 'child').length + (primary.guestType === 'child' ? 1 : 0);
 
-                  {expandedTables[primary.id] && (
-                    <div className="px-4 pb-4 animate-in slide-in-from-top-2 duration-300">
-                      <div className="bg-slate-50 rounded-xl border border-slate-100 overflow-hidden shadow-inner">
-                        <table className="w-full text-left text-xs">
-                          <thead className="bg-slate-100 text-slate-500 font-bold uppercase tracking-wider">
-                            <tr>
-                              <th className="px-4 py-3">Attendee</th>
-                              <th className="px-4 py-3">Role</th>
-                              <th className="px-4 py-3">Ticket Type</th>
-                              <th className="px-4 py-3 text-center">Status</th>
-                              <th className="px-4 py-3 text-right pr-6">Details</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100">
-                            {/* Primary Purchaser */}
-                            <tr className="bg-white/50 hover:bg-white transition-colors">
-                              <td className="px-4 py-3">
-                                <div className="font-bold text-gray-900">{primary.name}</div>
-                                <div className="text-gray-400">{primary.email}</div>
-                              </td>
-                              <td className="px-4 py-3">
-                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-black uppercase tracking-tight bg-indigo-100 text-indigo-700 border border-indigo-200">Purchaser</span>
-                              </td>
-                              <td className="px-4 py-3 text-gray-500">{primary.ticketType}</td>
-                              <td className="px-4 py-3 text-center">
-                                {primary.checkedInAt ? (
-                                  <Check className="w-4 h-4 text-green-500 mx-auto" strokeWidth={3} />
-                                ) : (
-                                  <Clock className="w-3.5 h-3.5 text-slate-300 mx-auto" />
-                                )}
-                              </td>
-                              <td className="px-4 py-3 text-right pr-6">
-                                <button onClick={() => setSelectedAttendee(primary)} className="text-indigo-600 hover:underline font-bold">View</button>
-                              </td>
-                            </tr>
-                            {/* Guests */}
-                            {guests.map((g, idx) => (
-                              <tr key={g.id} className="bg-white/30 hover:bg-white transition-colors">
+                return (
+                  <div key={primary.id} className="bg-white group transition-all">
+                    <div
+                      onClick={() => toggleTable(primary.id)}
+                      className="p-4 flex items-center justify-between cursor-pointer hover:bg-gray-50 transition-colors"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                          <LayoutDashboard className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-gray-900 flex items-center gap-2">
+                            Table: {primary.name}
+                            <span className="text-[10px] font-black uppercase tracking-widest text-gray-400 bg-gray-100 px-2 py-0.5 rounded">
+                              {guests.length + 1} Seat{(guests.length + 1) !== 1 ? 's' : ''}
+                              {childCount > 0 ? ` (${adultCount} Adult${adultCount !== 1 ? 's' : ''}, ${childCount} Child${childCount !== 1 ? 'ren' : ''})` : ''}
+                            </span>
+                          </h4>
+                          <div className="text-xs text-gray-500 flex items-center gap-1">
+                            <Mail className="w-3 h-3" /> {primary.email}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-6">
+                        <div className="hidden sm:flex flex-col items-end">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-tight">Status</span>
+                          <div className="flex items-center gap-1.5">
+                            <div className={`w-2 h-2 rounded-full ${primary.checkedInAt ? 'bg-green-500' : 'bg-amber-400'}`}></div>
+                            <span className="text-xs font-bold text-gray-700">
+                              {guests.filter(g => g.checkedInAt).length + (primary.checkedInAt ? 1 : 0)} / {guests.length + 1} Checked In
+                            </span>
+                          </div>
+                        </div>
+                        <button
+                          onClick={(e) => handleCopyGuestLink(e, primary.formId, primary.id)}
+                          className="p-2 text-gray-400 hover:text-indigo-600 transition-colors hidden sm:block"
+                          title="Copy Guest Invite Link"
+                        >
+                          <Copy className="w-4 h-4" />
+                        </button>
+                        <button className="p-2 text-gray-400 hover:text-indigo-600 transition-colors">
+                          {expandedTables[primary.id] ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    {expandedTables[primary.id] && (
+                      <div className="px-4 pb-4 animate-in slide-in-from-top-2 duration-300">
+                        <div className="bg-slate-50 rounded-xl border border-slate-100 overflow-hidden shadow-inner">
+                          <table className="w-full text-left text-xs">
+                            <thead className="bg-slate-100 text-slate-500 font-bold uppercase tracking-wider">
+                              <tr>
+                                <th className="px-4 py-3">Attendee</th>
+                                <th className="px-4 py-3">Role</th>
+                                <th className="px-4 py-3">Ticket Type</th>
+                                <th className="px-4 py-3 text-center">Status</th>
+                                <th className="px-4 py-3 text-right pr-6">Details</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {/* Primary Purchaser */}
+                              <tr className="bg-white/50 hover:bg-white transition-colors">
                                 <td className="px-4 py-3">
-                                  <div className="font-bold text-gray-900">{g.name || `Guest #${idx + 1}`}</div>
-                                  <div className="text-gray-400">{g.email || 'No email provided'}</div>
+                                  <div className="font-bold text-gray-900">{primary.name}</div>
+                                  <div className="text-gray-400">{primary.email}</div>
                                 </td>
-                                <td className="px-4 py-3">
-                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-black uppercase tracking-tight bg-purple-100 text-purple-700 border border-purple-200">Guest</span>
+                                <td className="px-4 py-3 flex gap-1">
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-black uppercase tracking-tight bg-indigo-100 text-indigo-700 border border-indigo-200">Purchaser</span>
+                                  {primary.guestType === 'child' && <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-black uppercase tracking-tight bg-blue-100 text-blue-700 border border-blue-200">Child</span>}
+                                  {primary.guestType === 'adult' && <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-black uppercase tracking-tight bg-slate-100 text-slate-700 border border-slate-200">Adult</span>}
                                 </td>
-                                <td className="px-4 py-3 text-gray-500 italic">{g.ticketType}</td>
+                                <td className="px-4 py-3 text-gray-500">{primary.ticketType}</td>
                                 <td className="px-4 py-3 text-center">
-                                  {g.checkedInAt ? (
+                                  {primary.checkedInAt ? (
                                     <Check className="w-4 h-4 text-green-500 mx-auto" strokeWidth={3} />
                                   ) : (
                                     <Clock className="w-3.5 h-3.5 text-slate-300 mx-auto" />
                                   )}
                                 </td>
                                 <td className="px-4 py-3 text-right pr-6">
-                                  <button onClick={() => setSelectedAttendee(g)} className="text-indigo-600 hover:underline font-bold">View</button>
+                                  <button onClick={() => setSelectedAttendee(primary)} className="text-indigo-600 hover:underline font-bold">View</button>
                                 </td>
                               </tr>
-                            ))}
-                            {guests.length === 0 && (
-                              <tr>
-                                <td colSpan={5} className="px-4 py-8 text-center text-slate-400 italic bg-white/20">
-                                  <div className="flex flex-col items-center gap-1">
-                                    <UserPlus className="w-5 h-5 opacity-20" />
-                                    <span>No guests registered yet via sharing link.</span>
-                                  </div>
-                                </td>
-                              </tr>
-                            )}
-                          </tbody>
-                        </table>
+                              {/* Guests */}
+                              {guests.map((g, idx) => (
+                                <tr key={g.id} className="bg-white/30 hover:bg-white transition-colors">
+                                  <td className="px-4 py-3">
+                                    <div className="font-bold text-gray-900">{g.name || `Guest #${idx + 1}`}</div>
+                                    <div className="text-gray-400">{g.email || 'No email provided'}</div>
+                                  </td>
+                                  <td className="px-4 py-3 flex gap-1">
+                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-black uppercase tracking-tight bg-purple-100 text-purple-700 border border-purple-200">Guest</span>
+                                    {g.guestType === 'child' && <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-black uppercase tracking-tight bg-blue-100 text-blue-700 border border-blue-200">Child</span>}
+                                    {g.guestType === 'adult' && <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-black uppercase tracking-tight bg-slate-100 text-slate-700 border border-slate-200">Adult</span>}
+                                  </td>
+                                  <td className="px-4 py-3 text-gray-500 italic">{g.ticketType}</td>
+                                  <td className="px-4 py-3 text-center">
+                                    {g.checkedInAt ? (
+                                      <Check className="w-4 h-4 text-green-500 mx-auto" strokeWidth={3} />
+                                    ) : (
+                                      <Clock className="w-3.5 h-3.5 text-slate-300 mx-auto" />
+                                    )}
+                                  </td>
+                                  <td className="px-4 py-3 text-right pr-6">
+                                    <button onClick={() => setSelectedAttendee(g)} className="text-indigo-600 hover:underline font-bold">View</button>
+                                  </td>
+                                </tr>
+                              ))}
+                              {guests.length === 0 && (
+                                <tr>
+                                  <td colSpan={5} className="px-4 py-8 text-center text-slate-400 italic bg-white/20">
+                                    <div className="flex flex-col items-center gap-1">
+                                      <UserPlus className="w-5 h-5 opacity-20" />
+                                      <span>No guests registered yet via sharing link.</span>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
                       </div>
-                    </div>
-                  )}
-                </div>
-              ))
+                    )}
+                  </div>
+                )
+              })
             )}
           </div>
         ) : (
@@ -536,6 +546,12 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, isLoading = fals
                         <div className="font-medium text-gray-900">{attendee.name}</div>
                         {attendee.isPrimary === false && (
                           <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-700">GUEST</span>
+                        )}
+                        {attendee.guestType === 'child' && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-700 border border-blue-200">CHILD</span>
+                        )}
+                        {attendee.guestType === 'adult' && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">ADULT</span>
                         )}
                         {((attendee.donatedSeats || 0) > 0 || (attendee.donatedTables || 0) > 0) && (
                           <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-700">

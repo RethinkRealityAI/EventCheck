@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useCallback, Suspense, useMemo } from 'react';
-import { Eye, Rows3, Plus, Trash2, Settings, Save, Loader2, RotateCcw, Crown, FileText, Download, Layout, CheckCircle2 } from 'lucide-react';
+import React, { useState, useEffect, useCallback, Suspense, useMemo, useRef } from 'react';
+import { Eye, Rows3, Plus, Trash2, Settings, Save, Loader2, RotateCcw, Crown, FileText, Download, Layout, CheckCircle2, Box, Palette, Tag, Move, RotateCw, Maximize2, Upload, Package } from 'lucide-react';
 import Scene3D from './Scene3D';
 import GuestSidebar from './GuestSidebar';
-import { SeatingTable, Attendee, SeatingConfiguration, SeatingAssignment } from '../../types';
+import { SeatingTable, Attendee, SeatingConfiguration, SeatingAssignment, SceneElement, SceneElementType, Custom3DModel } from '../../types';
 import {
     getSeatingTables,
     saveSeatingTables,
@@ -12,10 +12,33 @@ import {
     deleteSeatingConfiguration,
     getSeatingAssignments,
     saveSeatingAssignments,
-    getForms
+    getSceneElements,
+    saveSceneElements,
+    getForms,
+    getCustom3DModels,
+    uploadCustom3DModel,
+    deleteCustom3DModel,
+    getModelPublicUrl
 } from '../../services/storageService';
 import { Form } from '../../types';
 import jsPDF from 'jspdf';
+
+const ELEMENT_TYPES: { value: SceneElementType; label: string; icon: string }[] = [
+    { value: 'stage', label: 'Stage', icon: '🎤' },
+    { value: 'booth', label: 'Booth', icon: '🪑' },
+    { value: 'rect-table', label: 'Table (Deco)', icon: '🪵' },
+    { value: 'barrier', label: 'Barrier', icon: '🚧' },
+    { value: 'plant', label: 'Plant', icon: '🌿' },
+    { value: 'column', label: 'Column', icon: '🏛️' },
+    { value: 'dance-floor', label: 'Dance Floor', icon: '💃' },
+    { value: 'bar', label: 'Bar Counter', icon: '🍸' },
+    { value: 'custom', label: 'Custom 3D', icon: '📦' },
+];
+
+const DEFAULT_COLORS: string[] = [
+    '#6366f1', '#8b5cf6', '#ec4899', '#ef4444', '#f59e0b',
+    '#22c55e', '#06b6d4', '#3b82f6', '#78716c', '#1e1b4b',
+];
 
 export default function SeatingConfigurator() {
     // Data state
@@ -26,6 +49,7 @@ export default function SeatingConfigurator() {
     const [tables, setTables] = useState<SeatingTable[]>([]);
     const [attendees, setAttendees] = useState<Attendee[]>([]);
     const [assignments, setAssignments] = useState<SeatingAssignment[]>([]);
+    const [sceneElements, setSceneElements] = useState<SceneElement[]>([]);
 
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
@@ -44,25 +68,60 @@ export default function SeatingConfigurator() {
 
     // UI state
     const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
+    const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
     const [perspective, setPerspective] = useState<'birds-eye' | '3d'>('3d');
     const [showConfig, setShowConfig] = useState(true);
     const [showGuests, setShowGuests] = useState(true);
+    const [transformMode, setTransformMode] = useState<'translate' | 'rotate' | 'scale'>('translate');
+
+    // Add hotkeys for transform mode
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
+            if (e.key === 'r' || e.key === 'R') setTransformMode('rotate');
+            if (e.key === 's' || e.key === 'S') setTransformMode('scale');
+            if (e.key === 't' || e.key === 'T' || e.key === 'g' || e.key === 'G') setTransformMode('translate');
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, []);
 
     // Configurator state
     const [tableCount, setTableCount] = useState(25);
     const [seatsPerTable, setSeatsPerTable] = useState(8);
     const [tableShape, setTableShape] = useState<'round' | 'rect'>('round');
 
-    // Load forms on init
+    // Add Element state
+    const [newElementType, setNewElementType] = useState<SceneElementType>('stage');
+    const [newElementLabel, setNewElementLabel] = useState('');
+    const [newElementColor, setNewElementColor] = useState('#6366f1');
+    const [newElementModelId, setNewElementModelId] = useState<string>('');
+
+    // Custom 3D Models
+    const [customModels, setCustomModels] = useState<Custom3DModel[]>([]);
+    const [uploading, setUploading] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
+    // Build URL map for custom models
+    const customModelUrls = useMemo(() => {
+        const map: Record<string, string> = {};
+        customModels.forEach(m => {
+            map[m.id] = getModelPublicUrl(m.filePath);
+        });
+        return map;
+    }, [customModels]);
+
+    // Load forms + custom models on init
     useEffect(() => {
-        const loadForms = async () => {
-            const f = await getForms();
+        const loadInit = async () => {
+            const [f, models] = await Promise.all([getForms(), getCustom3DModels()]);
             setForms(f);
+            setCustomModels(models);
             if (f.length > 0) {
                 setSelectedFormId(f[0].id);
             }
         };
-        loadForms();
+        loadInit();
     }, []);
 
     // Load configurations when form changes
@@ -89,20 +148,23 @@ export default function SeatingConfigurator() {
         loadConfigs();
     }, [selectedFormId]);
 
-    // Load tables + attendees + assignments when active config changes
+    // Load tables + attendees + assignments + scene elements when active config changes
     useEffect(() => {
         if (!activeConfigId || !selectedFormId) return;
         const load = async () => {
             setLoading(true);
-            const [t, a, as] = await Promise.all([
+            const [t, a, as, se] = await Promise.all([
                 getSeatingTables(selectedFormId, activeConfigId),
                 getAttendeesByForm(selectedFormId),
-                getSeatingAssignments(activeConfigId)
+                getSeatingAssignments(activeConfigId),
+                getSceneElements(activeConfigId)
             ]);
             setTables(t);
             setAttendees(a);
             setAssignments(as);
+            setSceneElements(se);
             setSelectedTableId(null);
+            setSelectedElementId(null);
             setLoading(false);
         };
         load();
@@ -155,6 +217,7 @@ export default function SeatingConfigurator() {
         setActiveConfigId(newConfig.id);
         setTables([]);
         setAssignments([]);
+        setSceneElements([]);
         setLoading(false);
     };
 
@@ -166,13 +229,101 @@ export default function SeatingConfigurator() {
         ));
     };
 
+    // Update selected element
+    const updateSelectedElement = (updates: Partial<SceneElement>) => {
+        if (!selectedElementId) return;
+        setSceneElements(prev => prev.map(e =>
+            e.id === selectedElementId ? { ...e, ...updates } : e
+        ));
+    };
+
+    // Update element by ID (from 3D transform)
+    const updateElementById = useCallback((id: string, updates: Partial<SceneElement>) => {
+        setSceneElements(prev => prev.map(e =>
+            e.id === id ? { ...e, ...updates } : e
+        ));
+    }, []);
+
+    // Handle table drag
+    const handleTableDrag = useCallback((id: string, x: number, z: number) => {
+        setTables(prev => prev.map(t =>
+            t.id === id ? { ...t, x, z } : t
+        ));
+    }, []);
+
+    // Add scene element
+    const addSceneElement = () => {
+        if (newElementType === 'custom' && !newElementModelId) return;
+        const label = newElementLabel.trim() || ELEMENT_TYPES.find(t => t.value === newElementType)?.label || 'Element';
+        const element: SceneElement = {
+            id: crypto.randomUUID(),
+            configurationId: activeConfigId,
+            elementType: newElementType,
+            label,
+            color: newElementColor,
+            x: Math.random() * 10 - 5,
+            y: 0,
+            z: Math.random() * 10 - 5,
+            rotationY: 0,
+            scaleX: 1,
+            scaleY: 1,
+            scaleZ: 1,
+            createdAt: new Date().toISOString(),
+            customModelId: newElementType === 'custom' ? newElementModelId : undefined
+        };
+        setSceneElements(prev => [...prev, element]);
+        setSelectedElementId(element.id);
+        setSelectedTableId(null);
+        setNewElementLabel('');
+    };
+
+    // Upload 3D model
+    const handleModelUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        setUploading(true);
+        const model = await uploadCustom3DModel(file);
+        if (model) {
+            setCustomModels(prev => [model, ...prev]);
+            setNewElementModelId(model.id);
+            setNewElementType('custom');
+        }
+        setUploading(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+    };
+
+    // Delete 3D model
+    const handleDeleteModel = async (model: Custom3DModel) => {
+        await deleteCustom3DModel(model);
+        setCustomModels(prev => prev.filter(m => m.id !== model.id));
+        if (newElementModelId === model.id) setNewElementModelId('');
+
+        // Remove any placed elements that rely on this model to avoid foreign key errors on save
+        setSceneElements(prev => prev.filter(e => e.customModelId !== model.id));
+
+        if (selectedElementId) {
+            const selectedElem = sceneElements.find(e => e.id === selectedElementId);
+            if (selectedElem?.customModelId === model.id) {
+                setSelectedElementId(null);
+            }
+        }
+    };
+
+    // Delete scene element
+    const deleteSelectedElement = () => {
+        if (!selectedElementId) return;
+        setSceneElements(prev => prev.filter(e => e.id !== selectedElementId));
+        setSelectedElementId(null);
+    };
+
     // Save All
     const handleSave = async () => {
         if (!activeConfigId) return;
         setSaving(true);
         await Promise.all([
             saveSeatingTables(tables, selectedFormId, activeConfigId),
-            saveSeatingAssignments(assignments, activeConfigId)
+            saveSeatingAssignments(assignments, activeConfigId),
+            saveSceneElements(sceneElements, activeConfigId)
         ]);
         setSaving(false);
     };
@@ -304,7 +455,19 @@ export default function SeatingConfigurator() {
         doc.save(`${form?.title}_${activeConfig?.name}_Seating.pdf`);
     };
 
+    // Selections
+    const handleSelectTable = useCallback((id: string) => {
+        setSelectedTableId(id);
+        setSelectedElementId(null);
+    }, []);
+
+    const handleSelectElement = useCallback((id: string | null) => {
+        setSelectedElementId(id);
+        if (id) setSelectedTableId(null);
+    }, []);
+
     const selectedTable = tables.find(t => t.id === selectedTableId);
+    const selectedElement = sceneElements.find(e => e.id === selectedElementId);
     const totalSeats = tables.reduce((sum, t) => sum + t.capacity, 0);
     const assignedCount = assignments.length;
 
@@ -370,6 +533,15 @@ export default function SeatingConfigurator() {
                             <span className="text-slate-500 uppercase font-bold text-[9px]">Assigned</span>
                             <span className="text-emerald-400 font-bold font-mono">{assignedCount}</span>
                         </div>
+                        {sceneElements.length > 0 && (
+                            <>
+                                <div className="h-6 w-px bg-slate-700" />
+                                <div className="flex flex-col">
+                                    <span className="text-slate-500 uppercase font-bold text-[9px]">Elements</span>
+                                    <span className="text-violet-400 font-bold font-mono">{sceneElements.length}</span>
+                                </div>
+                            </>
+                        )}
                     </div>
 
                     <div className="flex items-center bg-slate-800 rounded-xl p-1 border border-slate-700/50">
@@ -468,7 +640,131 @@ export default function SeatingConfigurator() {
                                 </div>
                             </div>
 
-                            {/* Table Editor */}
+                            {/* ═══ Add Scene Element ═══ */}
+                            <div className="bg-violet-600/10 rounded-2xl p-4 border border-violet-500/20">
+                                <h4 className="text-xs font-bold text-violet-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                                    <Box className="w-4 h-4" />
+                                    Add Element
+                                </h4>
+                                <div className="space-y-3">
+                                    <div>
+                                        <label className="block text-[10px] text-slate-500 font-bold uppercase mb-1">Type</label>
+                                        <select
+                                            value={newElementType}
+                                            onChange={(e) => setNewElementType(e.target.value as SceneElementType)}
+                                            className="w-full bg-slate-800/50 border border-slate-700 text-white text-sm rounded-xl px-3 py-2.5 focus:ring-2 focus:ring-violet-500"
+                                        >
+                                            {ELEMENT_TYPES.map(t => (
+                                                <option key={t.value} value={t.value}>{t.icon} {t.label}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    {newElementType === 'custom' && (
+                                        <div>
+                                            <label className="block text-[10px] text-slate-500 font-bold uppercase mb-1">3D Model</label>
+                                            {customModels.length > 0 ? (
+                                                <select
+                                                    value={newElementModelId}
+                                                    onChange={(e) => setNewElementModelId(e.target.value)}
+                                                    className="w-full bg-slate-800/50 border border-slate-700 text-white text-sm rounded-xl px-3 py-2.5 focus:ring-2 focus:ring-violet-500"
+                                                >
+                                                    <option value="">Select a model...</option>
+                                                    {customModels.map(m => (
+                                                        <option key={m.id} value={m.id}>
+                                                            {m.name} ({(m.fileSize / 1024 / 1024).toFixed(1)}MB)
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            ) : (
+                                                <p className="text-[10px] text-slate-500">No models uploaded yet. Use the library below to upload.</p>
+                                            )}
+                                        </div>
+                                    )}
+                                    <div>
+                                        <label className="block text-[10px] text-slate-500 font-bold uppercase mb-1">Label</label>
+                                        <input
+                                            type="text"
+                                            value={newElementLabel}
+                                            onChange={(e) => setNewElementLabel(e.target.value)}
+                                            placeholder={ELEMENT_TYPES.find(t => t.value === newElementType)?.label}
+                                            className="w-full bg-slate-800/50 border border-slate-700 text-white text-sm rounded-xl px-3 py-2.5 focus:ring-2 focus:ring-violet-500"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] text-slate-500 font-bold uppercase mb-2">Color</label>
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                            {DEFAULT_COLORS.map(c => (
+                                                <button
+                                                    key={c}
+                                                    onClick={() => setNewElementColor(c)}
+                                                    className={`w-6 h-6 rounded-full border-2 transition-all ${newElementColor === c ? 'border-white scale-125' : 'border-transparent hover:border-slate-500'}`}
+                                                    style={{ backgroundColor: c }}
+                                                />
+                                            ))}
+                                            <input
+                                                type="color"
+                                                value={newElementColor}
+                                                onChange={(e) => setNewElementColor(e.target.value)}
+                                                className="w-6 h-6 rounded-full border-0 cursor-pointer bg-transparent"
+                                            />
+                                        </div>
+                                    </div>
+                                    <button
+                                        onClick={addSceneElement}
+                                        disabled={!activeConfigId || (newElementType === 'custom' && !newElementModelId)}
+                                        className="w-full py-3 bg-violet-600 hover:bg-violet-700 disabled:bg-slate-700 text-white text-sm font-bold rounded-xl transition-all shadow-xl shadow-violet-600/20 active:scale-95"
+                                    >
+                                        Place Element
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* ═══ 3D Model Library ═══ */}
+                            <div className="bg-amber-600/10 rounded-2xl p-4 border border-amber-500/20">
+                                <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                                    <Package className="w-4 h-4" />
+                                    3D Model Library
+                                </h4>
+                                <input
+                                    ref={fileInputRef}
+                                    type="file"
+                                    accept=".glb,.gltf"
+                                    onChange={handleModelUpload}
+                                    className="hidden"
+                                />
+                                <button
+                                    onClick={() => fileInputRef.current?.click()}
+                                    disabled={uploading}
+                                    className="w-full flex items-center justify-center gap-2 py-2.5 mb-3 bg-amber-600/20 hover:bg-amber-600/30 disabled:bg-slate-700 text-amber-300 text-xs font-bold rounded-xl border border-amber-500/30 transition-all"
+                                >
+                                    {uploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                                    {uploading ? 'Uploading...' : 'Upload .glb / .gltf'}
+                                </button>
+                                {customModels.length > 0 ? (
+                                    <div className="space-y-1">
+                                        {customModels.map(m => (
+                                            <div key={m.id} className="flex items-center gap-2 px-3 py-2 bg-slate-800/30 rounded-lg">
+                                                <Package className="w-3 h-3 text-amber-400 flex-shrink-0" />
+                                                <span className="text-xs text-white truncate flex-1">{m.name}</span>
+                                                <span className="text-[9px] text-slate-500">{(m.fileSize / 1024 / 1024).toFixed(1)}MB</span>
+                                                <button
+                                                    onClick={() => handleDeleteModel(m)}
+                                                    className="p-1 text-red-400 hover:text-red-300 transition-colors"
+                                                    title="Delete model"
+                                                >
+                                                    <Trash2 className="w-3 h-3" />
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <p className="text-[10px] text-slate-500 text-center py-2">
+                                        Upload .glb or .gltf files to use as custom scene elements.
+                                    </p>
+                                )}
+                            </div>
+
+                            {/* ═══ Table Editor ═══ */}
                             <div className="space-y-4">
                                 <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-2">
                                     <Settings className="w-4 h-4" />
@@ -513,15 +809,130 @@ export default function SeatingConfigurator() {
                                                 <Trash2 className="w-4 h-4" />
                                             </button>
                                         </div>
+                                        <p className="text-[10px] text-slate-600 text-center">
+                                            <Move className="w-3 h-3 inline mr-1" />
+                                            Drag table in 3D view to reposition
+                                        </p>
                                     </div>
-                                ) : (
+                                ) : selectedElement ? null : (
                                     <div className="py-12 px-6 text-center border-2 border-dashed border-slate-800 rounded-3xl">
                                         <p className="text-slate-500 text-xs leading-relaxed">
-                                            Select a table in the 3D view to customize its properties.
+                                            Select a table or element in the 3D view to customize its properties.
                                         </p>
                                     </div>
                                 )}
                             </div>
+
+                            {/* ═══ Element Editor ═══ */}
+                            {selectedElement && (
+                                <div className="space-y-4">
+                                    <h4 className="text-xs font-bold text-violet-400 uppercase tracking-wider mb-2 flex items-center gap-2">
+                                        <Box className="w-4 h-4" />
+                                        Element Editor
+                                    </h4>
+                                    <div className="bg-violet-900/20 rounded-2xl p-4 border border-violet-500/20 space-y-4 animate-in fade-in slide-in-from-left-2">
+                                        <div>
+                                            <label className="block text-[10px] text-slate-500 font-bold uppercase mb-1">Label</label>
+                                            <input
+                                                type="text"
+                                                value={selectedElement.label}
+                                                onChange={(e) => updateSelectedElement({ label: e.target.value })}
+                                                className="w-full bg-slate-900/50 border border-slate-700 text-white text-sm rounded-xl px-3 py-2.5 focus:ring-2 focus:ring-violet-500"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[10px] text-slate-500 font-bold uppercase mb-1">Type</label>
+                                            <div className="text-xs text-slate-300 bg-slate-800/50 rounded-lg px-3 py-2 border border-slate-700/50 capitalize">
+                                                {ELEMENT_TYPES.find(t => t.value === selectedElement.elementType)?.icon}{' '}
+                                                {selectedElement.elementType.replace('-', ' ')}
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label className="block text-[10px] text-slate-500 font-bold uppercase mb-2">Color</label>
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                                {DEFAULT_COLORS.map(c => (
+                                                    <button
+                                                        key={c}
+                                                        onClick={() => updateSelectedElement({ color: c })}
+                                                        className={`w-6 h-6 rounded-full border-2 transition-all ${selectedElement.color === c ? 'border-white scale-125' : 'border-transparent hover:border-slate-500'}`}
+                                                        style={{ backgroundColor: c }}
+                                                    />
+                                                ))}
+                                                <input
+                                                    type="color"
+                                                    value={selectedElement.color}
+                                                    onChange={(e) => updateSelectedElement({ color: e.target.value })}
+                                                    className="w-6 h-6 rounded-full border-0 cursor-pointer bg-transparent"
+                                                />
+                                            </div>
+                                        </div>
+                                        <div className="bg-slate-800/30 rounded-xl p-3 border border-slate-700/20">
+                                            <div className="flex justify-between items-center mb-2">
+                                                <p className="text-[10px] text-slate-500 font-bold uppercase">Transform Mode</p>
+                                            </div>
+                                            <div className="grid grid-cols-3 gap-2">
+                                                <button
+                                                    onClick={() => setTransformMode('translate')}
+                                                    className={`flex flex-col items-center justify-center py-2 rounded-lg border transition-colors ${transformMode === 'translate' ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-300' : 'bg-slate-900/50 border-slate-700 text-slate-400 hover:text-white'}`}
+                                                >
+                                                    <Move className="w-4 h-4 mb-1" />
+                                                    <span className="text-[9px] font-bold uppercase tracking-wider">Move (T)</span>
+                                                </button>
+                                                <button
+                                                    onClick={() => setTransformMode('rotate')}
+                                                    className={`flex flex-col items-center justify-center py-2 rounded-lg border transition-colors ${transformMode === 'rotate' ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-300' : 'bg-slate-900/50 border-slate-700 text-slate-400 hover:text-white'}`}
+                                                >
+                                                    <RotateCw className="w-4 h-4 mb-1" />
+                                                    <span className="text-[9px] font-bold uppercase tracking-wider">Rotate (R)</span>
+                                                </button>
+                                                <button
+                                                    onClick={() => setTransformMode('scale')}
+                                                    className={`flex flex-col items-center justify-center py-2 rounded-lg border transition-colors ${transformMode === 'scale' ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-300' : 'bg-slate-900/50 border-slate-700 text-slate-400 hover:text-white'}`}
+                                                >
+                                                    <Maximize2 className="w-4 h-4 mb-1" />
+                                                    <span className="text-[9px] font-bold uppercase tracking-wider">Scale (S)</span>
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <button
+                                            onClick={deleteSelectedElement}
+                                            className="w-full flex items-center justify-center gap-2 py-2.5 text-xs font-bold rounded-xl border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-all"
+                                        >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                            Remove Element
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* ═══ Elements List ═══ */}
+                            {sceneElements.length > 0 && (
+                                <div className="space-y-2">
+                                    <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                                        <Box className="w-4 h-4" />
+                                        Scene Elements ({sceneElements.length})
+                                    </h4>
+                                    <div className="space-y-1">
+                                        {sceneElements.map(el => (
+                                            <button
+                                                key={el.id}
+                                                onClick={() => handleSelectElement(el.id)}
+                                                className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left transition-all ${selectedElementId === el.id
+                                                    ? 'bg-violet-600/20 border border-violet-500/40'
+                                                    : 'bg-slate-800/30 hover:bg-slate-800/60 border border-transparent'
+                                                    }`}
+                                            >
+                                                <div
+                                                    className="w-3 h-3 rounded-full flex-shrink-0"
+                                                    style={{ backgroundColor: el.color }}
+                                                />
+                                                <span className="text-xs font-medium text-white truncate flex-1">{el.label}</span>
+                                                <span className="text-[9px] text-slate-500 capitalize">{el.elementType.replace('-', ' ')}</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
                         {/* Layout Summary */}
@@ -535,6 +946,8 @@ export default function SeatingConfigurator() {
                                     { color: 'bg-amber-500', label: 'Partial' },
                                     { color: 'bg-emerald-500', label: 'Full' },
                                     { color: 'bg-indigo-500', label: 'VIP' },
+                                    { color: 'bg-violet-500', label: 'Element' },
+                                    { color: 'bg-green-500', label: 'Selected' },
                                 ].map(({ color, label }) => (
                                     <div key={label} className="flex items-center gap-2">
                                         <div className={`w-2 h-2 rounded-full ${color}`} />
@@ -555,7 +968,7 @@ export default function SeatingConfigurator() {
                                 <p className="text-slate-400 text-sm font-medium">Reconstructing Layout...</p>
                             </div>
                         </div>
-                    ) : tables.length === 0 ? (
+                    ) : tables.length === 0 && sceneElements.length === 0 ? (
                         <div className="absolute inset-0 flex items-center justify-center p-8">
                             <div className="text-center max-w-sm">
                                 <div className="w-20 h-20 bg-slate-900 rounded-3xl flex items-center justify-center mx-auto mb-6 border border-slate-800">
@@ -563,7 +976,7 @@ export default function SeatingConfigurator() {
                                 </div>
                                 <h3 className="text-xl font-bold text-white mb-3">No Room Layout Data</h3>
                                 <p className="text-slate-400 text-sm mb-8 leading-relaxed">
-                                    Start by selecting an event and configuration above. You can then use the generator to populate the floor plan with tables.
+                                    Start by selecting an event and configuration above. You can then use the generator to populate the floor plan with tables, or add scene elements.
                                 </p>
                                 {!showConfig && (
                                     <button
@@ -580,9 +993,16 @@ export default function SeatingConfigurator() {
                             <Scene3D
                                 tables={tables}
                                 selectedTableId={selectedTableId}
-                                onSelectTable={setSelectedTableId}
+                                onSelectTable={handleSelectTable}
                                 perspective={perspective}
                                 attendees={enhancedAttendees}
+                                sceneElements={sceneElements}
+                                selectedElementId={selectedElementId}
+                                onSelectElement={handleSelectElement}
+                                onUpdateElement={updateElementById}
+                                onTableDrag={handleTableDrag}
+                                customModelUrls={customModelUrls}
+                                transformMode={transformMode}
                             />
                         </Suspense>
                     )}
