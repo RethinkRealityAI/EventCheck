@@ -155,9 +155,12 @@ const AdminLayout = () => {
       const existingInState = attendees.find(a => a.id === parsed.id);
       if (existingInState?.checkedInAt) return 'already_checked_in';
 
-      const attendee = await checkInAttendee(parsed.id);
+      const result = await checkInAttendee(parsed.id);
 
-      if (!attendee) return 'not_found';
+      if (!result) return 'not_found';
+      if (result.alreadyCheckedIn) return 'already_checked_in';
+
+      const attendee = result.attendee;
 
       setAttendees(prev => {
         const index = prev.findIndex(a => a.id === attendee.id);

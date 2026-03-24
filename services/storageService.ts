@@ -104,7 +104,7 @@ export const deleteAttendee = async (id: string): Promise<void> => {
   if (error) console.error("Failed to delete attendee", error);
 };
 
-export const checkInAttendee = async (id: string): Promise<Attendee | null> => {
+export const checkInAttendee = async (id: string): Promise<{ attendee: Attendee, alreadyCheckedIn: boolean } | null> => {
   const { data: existing, error: fetchError } = await supabase
     .from('attendees')
     .select('*')
@@ -112,7 +112,9 @@ export const checkInAttendee = async (id: string): Promise<Attendee | null> => {
     .single();
 
   if (fetchError || !existing) return null;
-  if (existing.checked_in_at) return mapAttendeeFromDb(existing);
+  if (existing.checked_in_at) {
+    return { attendee: mapAttendeeFromDb(existing), alreadyCheckedIn: true };
+  }
 
   const { data: updated, error: updateError } = await supabase
     .from('attendees')
@@ -126,7 +128,7 @@ export const checkInAttendee = async (id: string): Promise<Attendee | null> => {
     return null;
   }
 
-  return mapAttendeeFromDb(updated);
+  return { attendee: mapAttendeeFromDb(updated), alreadyCheckedIn: false };
 };
 
 // --- Forms ---

@@ -301,17 +301,30 @@ const PublicRegistration = () => {
     if (mode === 'guest' && fetchedPrimaryAttendee) {
       const g = guests[0];
 
-      // Determine if the ref points to an existing placeholder that should be updated
+      // Determine the record to update
       const refParam = new URLSearchParams(window.location.search).get('ref');
       let existingRecord: Attendee | undefined;
+      let isUpdatingPlaceholder = false;
+
       if (refParam) {
-        existingRecord = await getAttendee(refParam);
+        const refAttendee = await getAttendee(refParam);
+        
+        // If the ref points directly to a placeholder guest, update it in-place
+        if (refAttendee && !refAttendee.isPrimary) {
+          existingRecord = refAttendee;
+          isUpdatingPlaceholder = true;
+        } else if (refAttendee && refAttendee.isPrimary) {
+          // If the ref points to the primary, find the first available placeholder under this primary
+          const primarysGuests = await getGuestsByPrimaryId(refAttendee.id);
+          const firstPlaceholder = primarysGuests.find(guest => guest.name?.includes('Guest Ticket #') || guest.email === refAttendee.email);
+          if (firstPlaceholder) {
+            existingRecord = firstPlaceholder;
+            isUpdatingPlaceholder = true;
+          }
+        }
       }
 
-      // If the ref points directly to a placeholder guest, update it in-place
-      // preserving the original QR code and invoice for check-in consistency
-      const isUpdatingPlaceholder = existingRecord && !existingRecord.isPrimary;
-      const recordId = isUpdatingPlaceholder ? existingRecord!.id : submissionId;
+      const recordId = isUpdatingPlaceholder && existingRecord ? existingRecord.id : submissionId;
 
       const guestAttendee: Attendee = {
         id: recordId,
@@ -322,17 +335,17 @@ const PublicRegistration = () => {
         dietaryPreferences: g.dietary === 'yes' ? 'Vegetarian' : '',
         guestType: g.guestType || 'adult',
         ticketType: `Guest of ${fetchedPrimaryAttendee.name}`,
-        registeredAt: new Date().toISOString(),
+        registeredAt: isUpdatingPlaceholder && existingRecord ? existingRecord.registeredAt : new Date().toISOString(),
         answers: answers,
         paymentStatus: 'free',
         isPrimary: false,
         primaryAttendeeId: fetchedPrimaryAttendee.id,
         // Preserve original QR payload so the check-in QR code stays valid
-        qrPayload: isUpdatingPlaceholder
-          ? existingRecord!.qrPayload
+        qrPayload: isUpdatingPlaceholder && existingRecord
+          ? existingRecord.qrPayload
           : JSON.stringify({ id: recordId, invoiceId: fetchedPrimaryAttendee.invoiceId || invoiceId, formId: form.id, action: 'checkin' }),
         // Preserve original invoiceId from the purchase
-        invoiceId: isUpdatingPlaceholder ? existingRecord!.invoiceId : (fetchedPrimaryAttendee.invoiceId || invoiceId),
+        invoiceId: isUpdatingPlaceholder && existingRecord ? existingRecord.invoiceId : (fetchedPrimaryAttendee.invoiceId || invoiceId),
       };
 
       await saveAttendee(guestAttendee);
@@ -419,18 +432,13 @@ const PublicRegistration = () => {
       // Subtract donations
       const seatsToGenerate = Math.max(1, totalSeats - (donatedSeats || 0));
 
-      // Check if any purchased ticket is a table-type (seats > 1)
-      // Only generate guest placeholders for tables, not individual tickets
-      const hasTableTickets = ticketField.ticketConfig.items.some(item => {
-        const qty = ticketQuantities[item.id] || 0;
-        return qty > 0 && (item.seats || 1) > 1;
-      });
+      /* Removed hasTableTickets filter to allow individual tickets to generate proper guest records too */
 
       const guestPromises = [];
       const guestTickets: { name: string, attendee: Attendee, pdf: any }[] = [];
 
-      // Only generate guest records if this is a table purchase
-      if (hasTableTickets && seatsToGenerate > 1) {
+      // Generate guest records if this purchase is for multiple seats/tickets
+      if (seatsToGenerate > 1) {
         for (let i = 1; i < seatsToGenerate; i++) {
           const guestId = crypto.randomUUID();
           const g = (guests && guests[i]) ? guests[i] : null;
