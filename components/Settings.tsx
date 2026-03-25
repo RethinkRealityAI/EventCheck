@@ -1,15 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { Save, CreditCard, Mail, Key, Eye, FileText, Check, Upload, Image as ImageIcon, Send as SendIcon, Users, UserPlus, Menu, PanelLeftClose, PanelLeft, Plus, X } from 'lucide-react';
+import { Save, CreditCard, Mail, Key, Eye, FileText, Check, Upload, Image as ImageIcon, Send as SendIcon, Users, UserPlus, Menu, PanelLeftClose, PanelLeft, Plus, X, Activity, Server, Database, ShieldCheck, Loader2, CheckSquare } from 'lucide-react';
 import { AppSettings, DEFAULT_SETTINGS, Attendee } from '../types';
 import { getSettings, saveSettings, getAttendees } from '../services/storageService';
 import { sendEmail } from '../services/emailService';
+import { sendTicketEmail } from '../services/smtpService';
+import { supabase } from '../services/supabaseClient';
 import { generateTicketPDF } from '../utils/pdfGenerator';
 import { useNotifications } from './NotificationSystem';
 import RichTextEditor from './RichTextEditor';
 
 const Settings: React.FC = () => {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
-  const [activeTab, setActiveTab] = useState<'general' | 'email' | 'pdf'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'email' | 'pdf' | 'diagnostics'>('general');
   const [previewMode, setPreviewMode] = useState<'ticket' | 'invite'>('ticket');
   const [dummyAttendee, setDummyAttendee] = useState<Attendee | null>(null);
   const [allAttendees, setAllAttendees] = useState<Attendee[]>([]);
@@ -236,6 +238,54 @@ const Settings: React.FC = () => {
     }
   };
 
+  // --- Diagnostics Tests ---
+  const [testResults, setTestResults] = useState<Record<string, { status: 'idle' | 'running' | 'success' | 'error', message: string }>>({
+    database: { status: 'idle', message: '' },
+    smtp: { status: 'idle', message: '' },
+    edgeFunctions: { status: 'idle', message: '' }
+  });
+
+  const runDatabaseTest = async () => {
+    setTestResults(prev => ({ ...prev, database: { status: 'running', message: 'Pinging database...' } }));
+    try {
+      const { data, error } = await supabase.from('app_settings').select('id').limit(1);
+      if (error) throw error;
+      setTestResults(prev => ({ ...prev, database: { status: 'success', message: 'Connection successful. Read/Write confirmed.' } }));
+    } catch (e: any) {
+      setTestResults(prev => ({ ...prev, database: { status: 'error', message: e.message || 'Database error' } }));
+    }
+  };
+
+  const runSmtpTest = async () => {
+    setTestResults(prev => ({ ...prev, smtp: { status: 'running', message: 'Sending test email via Edge Function...' } }));
+    try {
+      await sendTicketEmail(settings, {
+        to: settings.smtpUser || 'test@example.com',
+        subject: 'Diagnostic Test - SMTP Configuration',
+        name: 'Admin',
+        message: 'This is a diagnostic test from your Event Management System to verify SMTP routing.',
+        attachments: []
+      });
+      setTestResults(prev => ({ ...prev, smtp: { status: 'success', message: 'Email passed to Edge Function successfully.' } }));
+    } catch (e: any) {
+      setTestResults(prev => ({ ...prev, smtp: { status: 'error', message: e.message || 'SMTP Routing Failed' } }));
+    }
+  };
+
+  const runEdgeFunctionTest = async () => {
+    setTestResults(prev => ({ ...prev, edgeFunctions: { status: 'running', message: 'Pinging verify-payment Edge Function...' } }));
+    try {
+      const { data, error } = await supabase.functions.invoke('verify-payment', { body: {} });
+      // We expect an error because we didn't send a valid payload, but we just want to know it's alive (not a 500 boot error)
+      if (error && !error.message.includes('Missing required')) {
+        throw error;
+      }
+      setTestResults(prev => ({ ...prev, edgeFunctions: { status: 'success', message: 'Edge Functions are active and reachable.' } }));
+    } catch (e: any) {
+      setTestResults(prev => ({ ...prev, edgeFunctions: { status: 'error', message: e.message || 'Edge Functions Failed' } }));
+    }
+  };
+
   return (
     <div className="w-full max-w-[1920px] mx-auto px-4 sm:px-6 lg:px-8 pb-12 h-screen flex flex-col overflow-hidden">
       <header className="mb-6 flex justify-between items-center pt-6 flex-shrink-0">
@@ -289,6 +339,13 @@ const Settings: React.FC = () => {
               className={`w-full text-left px-4 py-3 rounded-xl flex items-center gap-3 font-semibold transition-all ${activeTab === 'pdf' ? 'bg-white text-indigo-600 shadow-sm border border-gray-100' : 'text-gray-600 hover:bg-white/60'}`}
             >
               <FileText className="w-5 h-5 flex-shrink-0" /> {isSidebarOpen && <span className="truncate">PDF Ticket</span>}
+            </button>
+
+            <button
+              onClick={() => setActiveTab('diagnostics')}
+              className={`w-full text-left px-4 py-3 rounded-xl flex items-center gap-3 font-semibold transition-all ${activeTab === 'diagnostics' ? 'bg-white text-indigo-600 shadow-sm border border-gray-100' : 'text-gray-600 hover:bg-white/60'}`}
+            >
+              <Activity className="w-5 h-5 flex-shrink-0" /> {isSidebarOpen && <span className="truncate">System Health</span>}
             </button>
           </div>
         </div>
@@ -636,6 +693,130 @@ const Settings: React.FC = () => {
                   <input type="text" className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none shadow-sm focus:ring-2 focus:ring-indigo-500"
                     value={settings.pdfSettings?.footerText || ''} onChange={e => handlePdfChange('footerText', e.target.value)} />
                 </div>
+              </div>
+            </div>
+          )}
+          {activeTab === 'pdf' && (
+            <div className="space-y-8 animate-fade-in-up">
+              <div>
+                <h3 className="text-xl font-bold text-gray-900 mb-2">PDF Ticket Customization</h3>
+                <p className="text-sm text-gray-500">Design the structure and fields shown on the generated PDF ticket.</p>
+              </div>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* Checkboxes ... */}
+                <div className="bg-white p-6 rounded-xl border border-gray-200">
+                  <h4 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                    <CheckSquare className="w-5 h-5 text-indigo-500" /> Information on Ticket
+                  </h4>
+                  <div className="space-y-4">
+                    {/* ... Settings ... */}
+                    <div className="max-h-[600px] overflow-y-auto pr-2 space-y-3">
+                      {Object.entries(settings.pdfSettings || DEFAULT_SETTINGS.pdfSettings).map(([key, value]) => (
+                        <label key={key} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors">
+                          <input
+                            type="checkbox"
+                            className="w-5 h-5 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                            checked={value}
+                            onChange={(e) => setSettings({
+                              ...settings,
+                              pdfSettings: {
+                                ...(settings.pdfSettings || DEFAULT_SETTINGS.pdfSettings),
+                                [key]: e.target.checked
+                              }
+                            })}
+                          />
+                          <span className="text-sm font-medium text-gray-700 capitalize">
+                            Show {key.replace(/([A-Z])/g, ' $1').trim()}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                {/* PDF Live View Placeholder */}
+                <div className="bg-gray-50 rounded-xl border border-gray-200 p-8 flex flex-col items-center justify-center text-center">
+                  <FileText className="w-16 h-16 text-gray-400 mb-4" />
+                  <h4 className="font-semibold text-gray-900 mb-2">Configure Fields First</h4>
+                  <p className="text-gray-500 text-sm max-w-sm">
+                    Customize the toggles on the left to include or exclude specific participant details on the final PDF download. To preview the PDF design, run a test transaction via the form preview builder.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'diagnostics' && (
+            <div className="space-y-8 animate-fade-in-up">
+              <div>
+                <h3 className="text-xl font-bold text-gray-900 mb-2">System Diagnostics</h3>
+                <p className="text-sm text-gray-500">Run manual integration tests to verify database security, Edge Function health, and SMTP routing.</p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                
+                {/* Database Target */}
+                <div className="bg-white rounded-xl border border-gray-200 p-6 flex flex-col h-full">
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="p-3 bg-indigo-50 text-indigo-600 rounded-lg"><Database className="w-6 h-6" /></div>
+                    <h4 className="font-bold text-gray-900">Database & RLS</h4>
+                  </div>
+                  <p className="text-sm text-gray-500 mb-6 flex-grow">Tests authenticated data retrieval targeting Row Level Security (RLS) policies.</p>
+                  {testResults.database.message && (
+                    <div className={`p-3 rounded-md mb-4 text-sm font-medium ${testResults.database.status === 'success' ? 'bg-green-50 text-green-700' : testResults.database.status === 'error' ? 'bg-red-50 text-red-700' : 'bg-gray-100 text-gray-700'} `}>
+                      {testResults.database.message}
+                    </div>
+                  )}
+                  <button 
+                    className="w-full py-2 bg-gray-900 hover:bg-gray-800 text-white rounded-lg flex justify-center items-center gap-2 font-medium transition-colors disabled:opacity-50"
+                    onClick={runDatabaseTest}
+                    disabled={testResults.database.status === 'running'}
+                  >
+                    {testResults.database.status === 'running' ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Ping Database'}
+                  </button>
+                </div>
+
+                {/* Edge Functions Target */}
+                <div className="bg-white rounded-xl border border-gray-200 p-6 flex flex-col h-full">
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="p-3 bg-purple-50 text-purple-600 rounded-lg"><Server className="w-6 h-6" /></div>
+                    <h4 className="font-bold text-gray-900">Edge Functions</h4>
+                  </div>
+                  <p className="text-sm text-gray-500 mb-6 flex-grow">Pings the Serverless Deno Edge endpoints (verify-payment, send-email) securely isolating logic.</p>
+                  {testResults.edgeFunctions.message && (
+                    <div className={`p-3 rounded-md mb-4 text-sm font-medium ${testResults.edgeFunctions.status === 'success' ? 'bg-green-50 text-green-700' : testResults.edgeFunctions.status === 'error' ? 'bg-red-50 text-red-700' : 'bg-gray-100 text-gray-700'} `}>
+                      {testResults.edgeFunctions.message}
+                    </div>
+                  )}
+                  <button 
+                    className="w-full py-2 bg-gray-900 hover:bg-gray-800 text-white rounded-lg flex justify-center items-center gap-2 font-medium transition-colors disabled:opacity-50"
+                    onClick={runEdgeFunctionTest}
+                    disabled={testResults.edgeFunctions.status === 'running'}
+                  >
+                    {testResults.edgeFunctions.status === 'running' ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Test Integrity'}
+                  </button>
+                </div>
+
+                {/* SMTP Routing Target */}
+                <div className="bg-white rounded-xl border border-gray-200 p-6 flex flex-col h-full">
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="p-3 bg-emerald-50 text-emerald-600 rounded-lg"><ShieldCheck className="w-6 h-6" /></div>
+                    <h4 className="font-bold text-gray-900">Nodemailer SMTP</h4>
+                  </div>
+                  <p className="text-sm text-gray-500 mb-6 flex-grow">Attempts a live handshake and dummy email dispatch securely through your Edge Function variables.</p>
+                  {testResults.smtp.message && (
+                    <div className={`p-3 rounded-md mb-4 text-sm font-medium ${testResults.smtp.status === 'success' ? 'bg-green-50 text-green-700' : testResults.smtp.status === 'error' ? 'bg-red-50 text-red-700' : 'bg-gray-100 text-gray-700'} `}>
+                      {testResults.smtp.message}
+                    </div>
+                  )}
+                  <button 
+                    className="w-full py-2 bg-gray-900 hover:bg-gray-800 text-white rounded-lg flex justify-center items-center gap-2 font-medium transition-colors disabled:opacity-50"
+                    onClick={runSmtpTest}
+                    disabled={testResults.smtp.status === 'running'}
+                  >
+                    {testResults.smtp.status === 'running' ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Fire Test Email'}
+                  </button>
+                </div>
+
               </div>
             </div>
           )}

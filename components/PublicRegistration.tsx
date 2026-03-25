@@ -316,6 +316,10 @@ const PublicRegistration = () => {
         if (refAttendee && !refAttendee.isPrimary) {
           existingRecord = refAttendee;
           isUpdatingPlaceholder = true;
+          
+          if (!existingRecord.name?.includes('Guest Ticket #') && existingRecord.email !== fetchedPrimaryAttendee.email) {
+            throw new Error("This specific ticket link has already been claimed by a guest.");
+          }
         } else if (refAttendee && refAttendee.isPrimary) {
           // If the ref points to the primary, find the first available placeholder under this primary
           const primarysGuests = await getGuestsByPrimaryId(refAttendee.id);
@@ -323,8 +327,14 @@ const PublicRegistration = () => {
           if (firstPlaceholder) {
             existingRecord = firstPlaceholder;
             isUpdatingPlaceholder = true;
+          } else {
+            throw new Error("This registration link has already been fully claimed by all available guests. There are no remaining tickets to assign.");
           }
         }
+      }
+
+      if (!isUpdatingPlaceholder || !existingRecord) {
+        throw new Error("Invalid or fully claimed registration link. We could not allocate a valid ticket for you.");
       }
 
       const recordId = isUpdatingPlaceholder && existingRecord ? existingRecord.id : submissionId;
