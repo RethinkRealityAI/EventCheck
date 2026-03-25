@@ -2,7 +2,7 @@
 // supabase functions deploy send-ticket-email
 
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
-import { SMTPClient } from 'https://deno.land/x/denomailer@1.6.0/mod.ts';
+import nodemailer from 'npm:nodemailer';
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -55,22 +55,25 @@ serve(async (req: Request) => {
     try {
         const { smtpConfig, email } = await req.json();
 
-        if (!smtpConfig?.user || !smtpConfig?.pass) {
+        const smtpHost = Deno.env.get('SMTP_HOST') || smtpConfig?.host || 'smtp.ionos.com';
+        const smtpPort = Number(Deno.env.get('SMTP_PORT') || smtpConfig?.port || 587);
+        const smtpUser = Deno.env.get('SMTP_USER') || smtpConfig?.user;
+        const smtpPass = Deno.env.get('SMTP_PASS') || smtpConfig?.pass;
+
+        if (!smtpUser || !smtpPass) {
             return new Response(
                 JSON.stringify({ error: 'SMTP credentials are not configured.' }),
                 { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
             );
         }
 
-        const client = new SMTPClient({
-            connection: {
-                hostname: smtpConfig.host || 'smtp.ionos.com',
-                port: smtpConfig.port || 587,
-                tls: false,
-                auth: {
-                    username: smtpConfig.user,
-                    password: smtpConfig.pass,
-                },
+        const transporter = nodemailer.createTransport({
+            host: smtpHost,
+            port: smtpPort,
+            secure: smtpPort === 465, // true for 465, false for other ports
+            auth: {
+                user: smtpUser,
+                pass: smtpPass,
             },
         });
 
@@ -80,22 +83,21 @@ serve(async (req: Request) => {
             content: `<p>${email.message}</p>`,
         });
 
-        // Convert base64 attachments to Uint8Array for denomailer
+        // Nodemailer accepts base64 natively
         const attachments = (email.attachments || []).map((att: { filename: string; content: string; contentType?: string }) => ({
             filename: att.filename,
-            content: Uint8Array.from(atob(att.content), (c) => c.charCodeAt(0)),
+            content: att.content,
+            encoding: 'base64',
             contentType: att.contentType || 'application/pdf',
         }));
 
-        await client.send({
-            from: `SCAGO Portal <${smtpConfig.user}>`,
+        await transporter.sendMail({
+            from: `"SCAGO Portal" <${smtpConfig.user}>`,
             to: email.to,
             subject: email.subject,
             html: html,
             attachments: attachments,
         });
-
-        await client.close();
 
         return new Response(
             JSON.stringify({ success: true }),

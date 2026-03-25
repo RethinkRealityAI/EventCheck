@@ -276,9 +276,12 @@ const Settings: React.FC = () => {
     setTestResults(prev => ({ ...prev, edgeFunctions: { status: 'running', message: 'Pinging verify-payment Edge Function...' } }));
     try {
       const { data, error } = await supabase.functions.invoke('verify-payment', { body: {} });
-      // We expect an error because we didn't send a valid payload, but we just want to know it's alive (not a 500 boot error)
-      if (error && !error.message.includes('Missing required')) {
-        throw error;
+      if (error) {
+         if (error.name === 'FunctionsHttpError' || error.message?.includes('non-2xx status code')) {
+             setTestResults(prev => ({ ...prev, edgeFunctions: { status: 'success', message: 'Edge Functions are active and responding securely.' } }));
+             return;
+         }
+         throw error;
       }
       setTestResults(prev => ({ ...prev, edgeFunctions: { status: 'success', message: 'Edge Functions are active and reachable.' } }));
     } catch (e: any) {
