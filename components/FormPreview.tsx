@@ -245,12 +245,8 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
                 }, 0);
 
                 const seatsToGenerate = Math.max(1, totalSeats - (previewDonatedSeats || 0));
-                const hasTableTickets = ticketField.ticketConfig.items.some(item => {
-                    const qty = previewTicketQuantities[item.id] || 0;
-                    return qty > 0 && (item.seats || 1) > 1;
-                });
 
-                if (hasTableTickets && seatsToGenerate > 1) {
+                if (seatsToGenerate > 1) {
                     const guestPromises = [];
                     for (let i = 1; i < seatsToGenerate; i++) {
                         const guestId = crypto.randomUUID();

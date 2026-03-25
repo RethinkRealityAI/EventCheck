@@ -55,7 +55,10 @@ export const saveAttendee = async (attendee: Attendee): Promise<void> => {
     .from('attendees')
     .upsert(dbRecord);
 
-  if (error) console.error("Failed to save attendee", error);
+  if (error) {
+    console.error("Failed to save attendee", error);
+    throw new Error(`Failed to save attendee: ${error.message}`);
+  }
 };
 
 export const updateAttendee = async (id: string, updates: Partial<Attendee>): Promise<void> => {
@@ -175,20 +178,16 @@ export const getFormById = async (id: string): Promise<Form | undefined> => {
 
 export const getAttendee = async (id: string): Promise<Attendee | undefined> => {
   const { data, error } = await supabase
-    .from('attendees')
-    .select('*')
-    .eq('id', id)
+    .rpc('get_attendee_by_id', { lookup_id: id })
     .single();
 
   if (error) return undefined;
-  return mapAttendeeFromDb(data);
+  return mapAttendeeFromDb(data as any);
 };
 
 export const getGuestsByPrimaryId = async (primaryId: string): Promise<Attendee[]> => {
   const { data, error } = await supabase
-    .from('attendees')
-    .select('*')
-    .eq('primary_attendee_id', primaryId)
+    .rpc('get_guests_by_primary', { p_id: primaryId })
     .order('registered_at', { ascending: true });
 
   if (error) {
@@ -196,7 +195,7 @@ export const getGuestsByPrimaryId = async (primaryId: string): Promise<Attendee[
     return [];
   }
 
-  return (data || []).map(mapAttendeeFromDb);
+  return ((data as any[]) || []).map(mapAttendeeFromDb);
 };
 
 export const saveForm = async (form: Form): Promise<void> => {
@@ -316,7 +315,7 @@ function mapAttendeeFromDb(db: AttendeeRow): Attendee {
   };
 }
 
-function mapAttendeeToDb(a: Attendee): AttendeeInsert {
+export function mapAttendeeToDb(a: Attendee): AttendeeInsert {
   return {
     id: a.id,
     form_id: a.formId,

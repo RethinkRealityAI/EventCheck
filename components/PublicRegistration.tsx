@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { getFormById, getSettings, saveAttendee, getAttendee, getGuestsByPrimaryId } from '../services/storageService';
+import { getFormById, getSettings, saveAttendee, getAttendee, getGuestsByPrimaryId, mapAttendeeToDb } from '../services/storageService';
 import { FormField, AppSettings, Attendee, Form } from '../types';
+import { supabase } from '../services/supabaseClient';
 import { Loader2, Check, AlertCircle, Download, Calendar, Tag, CreditCard, ArrowRight, X, Eye, MapPin, UserPlus, Info } from 'lucide-react';
 import { useNotifications } from './NotificationSystem';
 import { useParams, useLocation } from 'react-router-dom';
@@ -294,7 +295,9 @@ const PublicRegistration = () => {
   const finalizeRegistration = async (paymentStatus: 'paid' | 'free', transactionId?: string, paymentAmount?: string) => {
     if (!form) return;
     setLoading(true);
+    setError('');
 
+    try {
     const submissionId = crypto.randomUUID();
     const invoiceId = `INV-${Math.random().toString(10).substr(2, 6)}`;
 
@@ -337,7 +340,9 @@ const PublicRegistration = () => {
         ticketType: `Guest of ${fetchedPrimaryAttendee.name}`,
         registeredAt: isUpdatingPlaceholder && existingRecord ? existingRecord.registeredAt : new Date().toISOString(),
         answers: answers,
-        paymentStatus: 'free',
+        paymentStatus: isUpdatingPlaceholder && existingRecord ? existingRecord.paymentStatus : 'free',
+        transactionId: isUpdatingPlaceholder && existingRecord ? existingRecord.transactionId : undefined,
+        paymentAmount: isUpdatingPlaceholder && existingRecord ? existingRecord.paymentAmount : undefined,
         isPrimary: false,
         primaryAttendeeId: fetchedPrimaryAttendee.id,
         // Preserve original QR payload so the check-in QR code stays valid
@@ -418,10 +423,12 @@ const PublicRegistration = () => {
       newAttendee.donatedSeats = donatedSeats;
     }
 
-    await saveAttendee(newAttendee);
-    setGeneratedTicket(newAttendee);
+    const allAttendees: Attendee[] = [newAttendee];
 
-    // Save Guests (Placeholders or named) — only for table-type tickets (seats > 1)
+    // Track guest ticket PDFs for email attachments (populated below if applicable)
+    const guestTickets: { name: string, attendee: Attendee, pdf: any }[] = [];
+
+    // Save Guests (Placeholders or named) — when tickets with multiple seats are purchased
     if (ticketField?.ticketConfig) {
       // Calculate total seats purchased
       const totalSeats = ticketField.ticketConfig.items.reduce((acc, item) => {
@@ -431,11 +438,6 @@ const PublicRegistration = () => {
 
       // Subtract donations
       const seatsToGenerate = Math.max(1, totalSeats - (donatedSeats || 0));
-
-      /* Removed hasTableTickets filter to allow individual tickets to generate proper guest records too */
-
-      const guestPromises = [];
-      const guestTickets: { name: string, attendee: Attendee, pdf: any }[] = [];
 
       // Generate guest records if this purchase is for multiple seats/tickets
       if (seatsToGenerate > 1) {
@@ -468,7 +470,7 @@ const PublicRegistration = () => {
             primaryAttendeeId: newAttendee.id,
             qrPayload: JSON.stringify({ id: guestId, invoiceId, formId: form.id, action: 'checkin' })
           };
-          guestPromises.push(saveAttendee(guestAttendee));
+          allAttendees.push(guestAttendee);
 
           // Generate PDF for this guest
           // Registration URL always points to the PRIMARY attendee so the guest flow
@@ -481,60 +483,86 @@ const PublicRegistration = () => {
             guestTickets.push({ name: guestName, attendee: guestAttendee, pdf: guestDoc });
           }
         }
-        await Promise.all(guestPromises);
       }
+    }
 
-      // --- SMTP Email Integration ---
-      if (settings && settings.smtpUser && settings.smtpPass) {
-        try {
-          const attachments = [];
+    if (paymentStatus === 'paid') {
+      // Secure server-side validation and DB insert
+      const [expectedVal, expectedCurr] = paymentAmount ? paymentAmount.split(' ') : ['0', 'USD'];
+      
+      const { data, error: fnError } = await supabase.functions.invoke('verify-payment', {
+        body: {
+          paypalOrderId: transactionId, // we passed orderID here
+          attendees: allAttendees.map(mapAttendeeToDb),
+          expectedAmount: parseFloat(expectedVal) || 0,
+          expectedCurrency: expectedCurr || 'USD'
+        }
+      });
+      
+      if (fnError) throw new Error(fnError.message || 'Payment verification failed');
+      if (data?.error) throw new Error(data.error);
 
-          // Primary Ticket PDF
-          const primaryDoc = generateTicketPDF(newAttendee, settings, form);
+      // Update local object for PDF generation
+      newAttendee.paymentAmount = data.amount;
+      newAttendee.transactionId = data.transactionId;
+    } else {
+      // Free transaction - do an atomic bulk insert
+      const { error: dbError } = await supabase.from('attendees').upsert(allAttendees.map(mapAttendeeToDb));
+      if (dbError) throw new Error(`Database error: ${dbError.message}`);
+    }
+
+    setGeneratedTicket(newAttendee);
+
+    // --- SMTP Email Integration (runs for ALL registration types) ---
+    if (settings && settings.smtpUser && settings.smtpPass) {
+      try {
+        const attachments = [];
+
+        // Primary Ticket PDF
+        const primaryDoc = generateTicketPDF(newAttendee, settings, form);
+        attachments.push({
+          filename: `${purchaserName}_Ticket.pdf`,
+          content: arrayBufferToBase64(primaryDoc.output('arraybuffer')),
+          contentType: 'application/pdf'
+        });
+
+        // Guest Ticket PDFs (will be empty for single-ticket or free forms)
+        for (const gt of guestTickets) {
           attachments.push({
-            filename: `${purchaserName}_Ticket.pdf`,
-            content: arrayBufferToBase64(primaryDoc.output('arraybuffer')),
+            filename: `${gt.name.replace(/[^a-zA-Z0-9 ]/g, '_')}_Ticket.pdf`,
+            content: arrayBufferToBase64(gt.pdf.output('arraybuffer')),
             contentType: 'application/pdf'
           });
+        }
 
-          // Guest Ticket PDFs
-          for (const gt of guestTickets) {
-            attachments.push({
-              filename: `${gt.name.replace(/[^a-zA-Z0-9 ]/g, '_')}_Ticket.pdf`,
-              content: arrayBufferToBase64(gt.pdf.output('arraybuffer')),
-              contentType: 'application/pdf'
+        // Send all tickets to the purchaser
+        await sendTicketEmail(settings, {
+          to: purchaserEmail,
+          subject: `Your Tickets for ${form.title}`,
+          name: purchaserName,
+          message: `Thank you for your ${paymentStatus === 'paid' ? 'purchase' : 'registration'}! Attached ${attachments.length === 1 ? 'is your ticket' : `are your ${attachments.length} tickets`}.${guestTickets.length > 0 ? ` We've included ${guestTickets.length} guest ticket${guestTickets.length !== 1 ? 's' : ''}. Please forward them to your guests or have them scan the registration QR code on their ticket to provide their details.` : ''}`,
+          attachments
+        });
+
+        // Also email individual named guests directly
+        for (const gt of guestTickets) {
+          if (gt.attendee.email && gt.attendee.email !== purchaserEmail && gt.attendee.email !== 'unknown@example.com') {
+            await sendTicketEmail(settings, {
+              to: gt.attendee.email,
+              subject: `Your Ticket for ${form.title}`,
+              name: gt.attendee.name,
+              message: `You've been registered for ${form.title} by ${purchaserName}. Attached is your ticket.`,
+              attachments: [{
+                filename: `${gt.attendee.name.replace(/[^a-zA-Z0-9 ]/g, '_')}_Ticket.pdf`,
+                content: arrayBufferToBase64(gt.pdf.output('arraybuffer')),
+                contentType: 'application/pdf'
+              }]
             });
           }
-
-          // Send all tickets to the purchaser
-          await sendTicketEmail(settings, {
-            to: purchaserEmail,
-            subject: `Your Tickets for ${form.title}`,
-            name: purchaserName,
-            message: `Thank you for your purchase! Attached ${attachments.length === 1 ? 'is your ticket' : `are your ${attachments.length} tickets`}.${guestTickets.length > 0 ? ` We've included ${guestTickets.length} guest ticket${guestTickets.length !== 1 ? 's' : ''}. Please forward them to your guests or have them scan the registration QR code on their ticket to provide their details.` : ''}`,
-            attachments
-          });
-
-          // Also email individual named guests directly
-          for (const gt of guestTickets) {
-            if (gt.attendee.email && gt.attendee.email !== purchaserEmail && gt.attendee.email !== 'unknown@example.com') {
-              await sendTicketEmail(settings, {
-                to: gt.attendee.email,
-                subject: `Your Ticket for ${form.title}`,
-                name: gt.attendee.name,
-                message: `You've been registered for ${form.title} by ${purchaserName}. Attached is your ticket.`,
-                attachments: [{
-                  filename: `${gt.attendee.name.replace(/[^a-zA-Z0-9 ]/g, '_')}_Ticket.pdf`,
-                  content: arrayBufferToBase64(gt.pdf.output('arraybuffer')),
-                  contentType: 'application/pdf'
-                }]
-              });
-            }
-          }
-        } catch (emailError) {
-          console.error("Failed to send emails via SMTP:", emailError);
-          // Don't block registration on email failure
         }
+      } catch (emailError) {
+        console.error("Failed to send emails via SMTP:", emailError);
+        // Don't block registration on email failure
       }
     }
 
@@ -546,16 +574,20 @@ const PublicRegistration = () => {
       const doc = generateTicketPDF(newAttendee, settings, form);
       setPreviewPdfUrl(doc.output('bloburl').toString());
     }
+    } catch (registrationError: any) {
+      console.error('Registration failed:', registrationError);
+      setError(registrationError.message || 'An unexpected error occurred. Please try again.');
+      setLoading(false);
+      setStep('form');
+    }
   };
 
-  // PayPal Payment Handler
+  // PayPal Payment Handler (Secure Server-Side Capture)
   const onPayPalApprove = async (data: any, actions: any) => {
-    return actions.order.capture().then((details: any) => {
-      const transactionId = details.purchase_units[0].payments.captures[0].id;
-      const amountValue = details.purchase_units[0].payments.captures[0].amount.value;
-      const amountCurrency = details.purchase_units[0].payments.captures[0].amount.currency_code;
-      finalizeRegistration('paid', transactionId, `${amountValue} ${amountCurrency}`);
-    });
+    // We pass the orderID straight to our Edge Function for server-side verification and capture
+    const paypalOrderId = data.orderID;
+    const expectedCurrency = ticketField?.ticketConfig?.currency || "USD";
+    finalizeRegistration('paid', paypalOrderId, `${paymentTotal} ${expectedCurrency}`);
   };
 
   // Safely access env with fallback
