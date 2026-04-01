@@ -15,7 +15,8 @@ interface FormPreviewProps {
 
 const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
     const { showNotification } = useNotifications();
-    const paypalClientId = import.meta.env.VITE_PAYPAL_CLIENT_ID;
+    // Use explicitly defined Sandbox ID for the preview so it never creates a LIVE transaction that can't be captured
+    const paypalClientId = import.meta.env.VITE_PAYPAL_SANDBOX_CLIENT_ID || 'AWwuukmMn5yEGdUS-bTeaLsVyvSK5vs2PVRgdinQVgB1LOwG2ZX5wpXyOpApO5VolrpV5D_EEQsWTmw_';
 
     // Preview interaction state
     const [previewStep, setPreviewStep] = useState<'form' | 'payment' | 'success'>('form');

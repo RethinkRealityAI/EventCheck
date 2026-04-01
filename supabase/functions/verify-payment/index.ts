@@ -42,7 +42,7 @@ serve(async (req: Request) => {
     if (!paypalOrderId || !attendees || attendees.length === 0) {
       return new Response(
         JSON.stringify({ error: 'Missing required fields: paypalOrderId, attendees' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -61,7 +61,7 @@ serve(async (req: Request) => {
     if (!PAYPAL_CLIENT_ID || !PAYPAL_CLIENT_SECRET) {
       return new Response(
         JSON.stringify({ error: 'PayPal credentials not configured on server' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -79,8 +79,8 @@ serve(async (req: Request) => {
       const authError = await authResponse.text();
       console.error('PayPal auth failed:', authError);
       return new Response(
-        JSON.stringify({ error: 'Failed to authenticate with PayPal' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({ error: 'Failed to authenticate with PayPal API' }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -104,7 +104,7 @@ serve(async (req: Request) => {
           error: 'Payment was not completed or PayPal API rejected the request', 
           details: captureData.status || captureData.error_description || captureData.message || 'Unknown error' 
         }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -113,7 +113,7 @@ serve(async (req: Request) => {
     if (!capture) {
       return new Response(
         JSON.stringify({ error: 'No capture data found in PayPal response' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -125,8 +125,8 @@ serve(async (req: Request) => {
     if (expectedAmount && Math.abs(capturedAmount - expectedAmount) > 0.01) {
       console.error(`Amount mismatch: expected ${expectedAmount}, got ${capturedAmount}`);
       return new Response(
-        JSON.stringify({ error: 'Payment amount does not match expected amount' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({ error: `Payment amount does not match expected amount. Expected: ${expectedAmount}, Captured: ${capturedAmount}` }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -134,8 +134,8 @@ serve(async (req: Request) => {
     if (expectedCurrency && capturedCurrency !== expectedCurrency) {
       console.error(`Currency mismatch: expected ${expectedCurrency}, got ${capturedCurrency}`);
       return new Response(
-        JSON.stringify({ error: 'Payment currency does not match expected currency' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({ error: `Payment currency does not match. Expected: ${expectedCurrency}, Captured: ${capturedCurrency}` }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -160,7 +160,7 @@ serve(async (req: Request) => {
       console.error('Failed to save attendees:', insertError);
       return new Response(
         JSON.stringify({ error: `Database error: ${insertError.message}` }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -179,7 +179,7 @@ serve(async (req: Request) => {
     console.error('verify-payment error:', message);
     return new Response(
       JSON.stringify({ error: message }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
 });
