@@ -46,6 +46,21 @@ const FormsManager: React.FC = () => {
     }
   };
 
+  const handleDuplicate = async (form: Form) => {
+    const duplicatedForm: Form = {
+      ...form,
+      id: crypto.randomUUID(),
+      title: `${form.title} (Copy)`,
+      createdAt: new Date().toISOString(),
+      status: 'draft',
+      fields: JSON.parse(JSON.stringify(form.fields))
+    };
+    await saveForm(duplicatedForm);
+    const updatedForms = await getForms();
+    setForms(updatedForms);
+    showNotification('Form duplicated successfully', 'success');
+  };
+
   const getEmbedCode = (formId: string) => {
     const url = `${window.location.origin}/#/form/${formId}`;
     return `<iframe src="${url}" width="100%" height="800px" frameborder="0" style="border:none; overflow:hidden;"></iframe>`;
@@ -114,6 +129,13 @@ const FormsManager: React.FC = () => {
                 >
                   <ExternalLink className="w-5 h-5" />
                 </Link>
+                <button
+                  onClick={() => handleDuplicate(form)}
+                  className="p-2 text-gray-600 hover:text-blue-600 hover:bg-white rounded-lg transition"
+                  title="Duplicate Form"
+                >
+                  <Copy className="w-5 h-5" />
+                </button>
               </div>
               <button
                 onClick={() => handleDelete(form.id)}

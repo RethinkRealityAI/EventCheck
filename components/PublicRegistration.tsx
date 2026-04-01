@@ -495,39 +495,36 @@ const PublicRegistration = () => {
       }
     }
 
-    if (paymentStatus === 'paid') {
-      // Secure server-side validation and DB insert
-      const [expectedVal, expectedCurr] = paymentAmount ? paymentAmount.split(' ') : ['0', 'USD'];
-      
-      // Auto-enable sandbox backend verification when running on local or staging preview servers
-      const isSandbox = window.location.hostname === 'localhost' || window.location.hostname.includes('sandbox') || window.location.hostname.includes('test');
-      
-      const { data, error: fnError } = await supabase.functions.invoke('verify-payment', {
-        body: {
-          paypalOrderId: transactionId, // we passed orderID here
-          attendees: allAttendees.map(mapAttendeeToDb),
-          expectedAmount: parseFloat(expectedVal) || 0,
-          expectedCurrency: expectedCurr || 'USD',
-          isSandbox
-        }
-      });
-      
-      if (fnError) throw new Error(fnError.message || 'Payment verification failed');
-      if (data?.error) throw new Error(data.error);
+    // All registrations go through the edge function for server-side validation
+    const verifyBody: Record<string, any> = {
+      mode: paymentStatus,
+      formId: form.id,
+      ticketQuantities,
+      promoCode: appliedPromo?.code || undefined,
+      donatedSeats: donatedSeats || 0,
+      attendees: allAttendees.map(mapAttendeeToDb),
+    };
 
-      // Update local object for PDF generation
+    if (paymentStatus === 'paid') {
+      verifyBody.paypalOrderId = transactionId;
+    }
+
+    const { data, error: fnError } = await supabase.functions.invoke('verify-payment', {
+      body: verifyBody
+    });
+
+    if (fnError) throw new Error(fnError.message || 'Registration failed');
+    if (data?.error) throw new Error(data.error);
+
+    if (paymentStatus === 'paid') {
+      // Update local objects for PDF generation with server-verified data
       newAttendee.paymentAmount = data.amount;
       newAttendee.transactionId = data.transactionId;
-      
-      // Update local guest objects so their PDFs render properly synchronized data
+
       for (const gt of guestTickets) {
         gt.attendee.paymentAmount = data.amount;
         gt.attendee.transactionId = data.transactionId;
       }
-    } else {
-      // Free transaction - do an atomic bulk insert
-      const { error: dbError } = await supabase.from('attendees').upsert(allAttendees.map(mapAttendeeToDb));
-      if (dbError) throw new Error(`Database error: ${dbError.message}`);
     }
 
     setGeneratedTicket(newAttendee);

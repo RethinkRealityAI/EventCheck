@@ -1,0 +1,22 @@
+- generic [ref=e75]:
+  - heading "Secure Payment" [level=2] [ref=e76]
+  - paragraph [ref=e77]: Complete your purchase to receive your ticket.
+  - generic [ref=e78]:
+    - generic [ref=e79]:
+      - generic [ref=e80]: Ticket(s) Subtotal
+      - generic [ref=e81]: 150.00 CAD
+    - generic [ref=e82]:
+      - generic [ref=e83]: Total Due
+      - generic [ref=e84]: 150.00 CAD
+  - generic [ref=e85]:
+    - generic [ref=e87]:
+      - iframe [ref=e88]:
+        
+      - iframe [ref=e89]:
+        - generic [ref=f2e2]:
+          - link "PayPal" [ref=f2e4] [cursor=pointer]
+          - link "paypal paylater" [ref=f2e7] [cursor=pointer]:
+            - generic [ref=f2e9]: Pay Later
+          - link "card" [ref=f2e11] [cursor=pointer]
+    - generic [ref=e90]: "Payment Instance ID: AWwuukmMn5..."
+  - paragraph [ref=e91]: Safe and secure payments.

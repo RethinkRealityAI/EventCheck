@@ -292,33 +292,35 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
                 }
             }
 
-            if (paymentStatus === 'paid' && transactionId) {
-                const [expectedVal, expectedCurr] = (paymentAmountStr || `${previewPaymentTotal.toFixed(2)} USD`).split(' ');
-                
-                const { data, error: fnError } = await supabase.functions.invoke('verify-payment', {
-                    body: {
-                        paypalOrderId: transactionId,
-                        attendees: allAttendees.map(mapAttendeeToDb),
-                        expectedAmount: parseFloat(expectedVal) || 0,
-                        expectedCurrency: expectedCurr || ticketField?.ticketConfig?.currency || 'USD',
-                        isSandbox: true
-                    }
-                });
-                
-                if (fnError) throw new Error(fnError.message || 'Payment verification failed');
-                if (data?.error) throw new Error(data.error);
+            // All registrations go through the edge function for server-side validation
+            const verifyBody: Record<string, any> = {
+                mode: paymentStatus === 'paid' ? 'paid' : 'free',
+                formId: form.id,
+                ticketQuantities: previewTicketQuantities,
+                promoCode: previewAppliedPromo?.code || undefined,
+                donatedSeats: previewDonatedSeats || 0,
+                attendees: allAttendees.map(mapAttendeeToDb),
+            };
 
+            if (paymentStatus === 'paid' && transactionId) {
+                verifyBody.paypalOrderId = transactionId;
+            }
+
+            const { data, error: fnError } = await supabase.functions.invoke('verify-payment', {
+                body: verifyBody
+            });
+
+            if (fnError) throw new Error(fnError.message || 'Registration failed');
+            if (data?.error) throw new Error(data.error);
+
+            if (paymentStatus === 'paid') {
                 newAttendee.paymentAmount = data.amount;
                 newAttendee.transactionId = data.transactionId;
-                
+
                 for (const gt of guestTickets) {
                     gt.attendee.paymentAmount = data.amount;
                     gt.attendee.transactionId = data.transactionId;
                 }
-            } else {
-                // Free transaction - do atomic bulk insert
-                const { error: dbError } = await supabase.from('attendees').upsert(allAttendees.map(mapAttendeeToDb));
-                if (dbError) throw new Error(`Database error: ${dbError.message}`);
             }
 
             setLastGeneratedAttendee(newAttendee);
