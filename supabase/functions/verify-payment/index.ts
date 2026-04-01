@@ -226,12 +226,16 @@ serve(async (req: Request) => {
       return jsonResponse({ error: 'Missing required field: paypalOrderId for paid registration' });
     }
 
-    // Determine PayPal environment — PAYPAL_MODE overrides, otherwise auto-detect from Origin
+    // Determine PayPal environment — PAYPAL_MODE overrides, then test-mode check, then Origin auto-detect
     const paypalMode = (Deno.env.get('PAYPAL_MODE') || '').toLowerCase();
+    const allAreTest = attendees.every((a: any) => a.is_test === true);
     let useSandbox: boolean;
     if (paypalMode === 'production') {
       useSandbox = false;
     } else if (paypalMode === 'sandbox') {
+      useSandbox = true;
+    } else if (allAreTest) {
+      // FormPreview / admin test submissions always use sandbox (test records are worthless to attackers)
       useSandbox = true;
     } else {
       // Auto-detect: browser sets Origin header automatically (not spoofable in browser requests)
