@@ -237,9 +237,6 @@ function SceneObject({ element, isSelected, onClick, customModelUrl }: SceneObje
 
     return (
         <group
-            position={[element.x, element.y, element.z]}
-            rotation={[0, element.rotationY, 0]}
-            scale={[element.scaleX, element.scaleY, element.scaleZ]}
             onClick={(e) => { e.stopPropagation(); onClick(); }}
             onPointerOver={(e) => { e.stopPropagation(); setHovered(true); document.body.style.cursor = 'pointer'; }}
             onPointerOut={() => { setHovered(false); document.body.style.cursor = 'default'; }}

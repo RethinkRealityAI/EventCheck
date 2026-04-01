@@ -435,8 +435,8 @@ const PublicRegistration = () => {
 
     const allAttendees: Attendee[] = [newAttendee];
 
-    // Track guest ticket PDFs for email attachments (populated below if applicable)
-    const guestTickets: { name: string, attendee: Attendee, pdf: any }[] = [];
+    // Track guest ticket payloads for email attachments (resolved after payment verification)
+    const guestTickets: { name: string, attendee: Attendee, registrationUrl?: string }[] = [];
 
     // Save Guests (Placeholders or named) — when tickets with multiple seats are purchased
     if (ticketField?.ticketConfig) {
@@ -489,8 +489,7 @@ const PublicRegistration = () => {
             const registrationUrl = isPlaceholder
               ? `${window.location.origin}/#/form/${form.id}?ref=${newAttendee.id}`
               : undefined;
-            const guestDoc = generateTicketPDF(guestAttendee, settings, form, registrationUrl);
-            guestTickets.push({ name: guestName, attendee: guestAttendee, pdf: guestDoc });
+            guestTickets.push({ name: guestName, attendee: guestAttendee, registrationUrl });
           }
         }
       }
@@ -515,6 +514,12 @@ const PublicRegistration = () => {
       // Update local object for PDF generation
       newAttendee.paymentAmount = data.amount;
       newAttendee.transactionId = data.transactionId;
+      
+      // Update local guest objects so their PDFs render properly synchronized data
+      for (const gt of guestTickets) {
+        gt.attendee.paymentAmount = data.amount;
+        gt.attendee.transactionId = data.transactionId;
+      }
     } else {
       // Free transaction - do an atomic bulk insert
       const { error: dbError } = await supabase.from('attendees').upsert(allAttendees.map(mapAttendeeToDb));
@@ -538,9 +543,10 @@ const PublicRegistration = () => {
 
         // Guest Ticket PDFs (will be empty for single-ticket or free forms)
         for (const gt of guestTickets) {
+          const guestDoc = generateTicketPDF(gt.attendee, settings, form, gt.registrationUrl);
           attachments.push({
             filename: `${gt.name.replace(/[^a-zA-Z0-9 ]/g, '_')}_Ticket.pdf`,
-            content: arrayBufferToBase64(gt.pdf.output('arraybuffer')),
+            content: arrayBufferToBase64(guestDoc.output('arraybuffer')),
             contentType: 'application/pdf'
           });
         }
@@ -564,7 +570,7 @@ const PublicRegistration = () => {
               message: `You've been registered for ${form.title} by ${purchaserName}. Attached is your ticket.`,
               attachments: [{
                 filename: `${gt.attendee.name.replace(/[^a-zA-Z0-9 ]/g, '_')}_Ticket.pdf`,
-                content: arrayBufferToBase64(gt.pdf.output('arraybuffer')),
+                content: arrayBufferToBase64(generateTicketPDF(gt.attendee, settings, form, gt.registrationUrl).output('arraybuffer')),
                 contentType: 'application/pdf'
               }]
             });

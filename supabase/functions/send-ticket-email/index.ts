@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Follow this to deploy: https://supabase.com/docs/guides/functions
 // supabase functions deploy send-ticket-email
 

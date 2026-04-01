@@ -25,7 +25,7 @@ interface Scene3DProps {
     transformMode?: 'translate' | 'rotate' | 'scale';
 }
 
-function CameraController({ perspective }: { perspective: 'birds-eye' | '3d' }) {
+function CameraController({ perspective, orbitRef }: { perspective: 'birds-eye' | '3d', orbitRef: any }) {
     const { camera } = useThree();
 
     useEffect(() => {
@@ -40,6 +40,7 @@ function CameraController({ perspective }: { perspective: 'birds-eye' | '3d' }) 
 
     return (
         <OrbitControls
+            ref={orbitRef}
             enablePan={true}
             enableZoom={true}
             enableRotate={perspective === '3d'}
@@ -302,7 +303,7 @@ export default function Scene3D({
             <directionalLight position={[15, 25, 15]} intensity={1} />
             <pointLight position={[-10, 15, -10]} intensity={0.3} color="#818cf8" />
 
-            <CameraController perspective={perspective} />
+            <CameraController perspective={perspective} orbitRef={orbitRef} />
 
             {/* Floor */}
             <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]}>
