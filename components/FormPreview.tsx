@@ -2,7 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { Ticket, CreditCard, Tag, Eye, AlertCircle, ArrowRight, Loader2, Check, RefreshCw, Download, MapPin, CheckSquare } from 'lucide-react';
 import QRCode from 'react-qr-code';
 import { FormField, Form, Attendee } from '../types';
-import { saveAttendee, getSettings } from '../services/storageService';
+import { getSettings, saveAttendee, mapAttendeeToDb } from '../services/storageService';
+import { supabase } from '../services/supabaseClient';
+import { PayPalScriptProvider, PayPalButtons } from "@paypal/react-paypal-js";
 import { useNotifications } from './NotificationSystem';
 import { generateTicketPDF } from '../utils/pdfGenerator';
 import { sendTicketEmail, arrayBufferToBase64 } from '../services/smtpService';
@@ -13,6 +15,7 @@ interface FormPreviewProps {
 
 const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
     const { showNotification } = useNotifications();
+    const paypalClientId = import.meta.env.VITE_PAYPAL_CLIENT_ID;
 
     // Preview interaction state
     const [previewStep, setPreviewStep] = useState<'form' | 'payment' | 'success'>('form');
@@ -175,10 +178,10 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
         }
     };
 
-    const finalizePreview = () => {
+    const finalizePreview = async (transactionId?: string, paymentAmountStr?: string) => {
         setPreviewLoading(true);
 
-        setTimeout(async () => {
+        try {
             const submissionId = crypto.randomUUID();
             const invoiceId = `INV-${Math.random().toString(10).substr(2, 6)}`;
             const emailField = form.fields.find(f => f.type === 'email' || f.label.toLowerCase().includes('email'));
@@ -205,6 +208,8 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
                 purchaserEmail = previewGuests[0].email || purchaserEmail;
             }
 
+            const paymentStatus = previewPaymentTotal > 0 && transactionId ? 'paid' : previewPaymentTotal > 0 ? 'pending' : 'free';
+
             const newAttendee: Attendee = {
                 id: submissionId,
                 formId: form.id,
@@ -213,7 +218,9 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
                 email: purchaserEmail,
                 ticketType: ticketSummary,
                 registeredAt: new Date().toISOString(),
-                paymentStatus: previewPaymentTotal > 0 ? 'paid' : 'free',
+                paymentStatus,
+                transactionId,
+                paymentAmount: paymentAmountStr,
                 qrPayload: JSON.stringify({ id: submissionId, invoiceId, formId: form.id, action: 'checkin' }),
                 isTest: true,
                 isPrimary: true,
@@ -233,10 +240,9 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
                 newAttendee.dietaryPreferences = previewGuests[0].dietary === 'yes' ? 'Vegetarian' : '';
             }
 
-            await saveAttendee(newAttendee);
-            setLastGeneratedAttendee(newAttendee);
+            const allAttendees: Attendee[] = [newAttendee];
 
-            // --- Handle Guest Records (One-to-One with PublicRegistration) ---
+            // --- Handle Guest Records ---
             const guestTickets: { name: string, attendee: Attendee, pdf: any }[] = [];
             if (ticketField?.ticketConfig) {
                 const totalSeats = ticketField.ticketConfig.items.reduce((acc, item) => {
@@ -247,7 +253,6 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
                 const seatsToGenerate = Math.max(1, totalSeats - (previewDonatedSeats || 0));
 
                 if (seatsToGenerate > 1) {
-                    const guestPromises = [];
                     for (let i = 1; i < seatsToGenerate; i++) {
                         const guestId = crypto.randomUUID();
                         const g = previewGuests[i];
@@ -265,14 +270,15 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
                             ticketType: `Guest of ${purchaserName}`,
                             registeredAt: new Date().toISOString(),
                             answers: {},
-                            paymentStatus: newAttendee.paymentStatus,
+                            paymentStatus,
+                            transactionId,
                             invoiceId,
                             isPrimary: false,
                             isTest: true,
                             primaryAttendeeId: newAttendee.id,
                             qrPayload: JSON.stringify({ id: guestId, invoiceId, formId: form.id, action: 'checkin' })
                         };
-                        guestPromises.push(saveAttendee(guestAttendee));
+                        allAttendees.push(guestAttendee);
 
                         if (appSettings) {
                             const registrationUrl = isPlaceholder
@@ -282,11 +288,41 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
                             guestTickets.push({ name: guestName, attendee: guestAttendee, pdf: guestDoc });
                         }
                     }
-                    await Promise.all(guestPromises);
                 }
             }
 
-            // --- SMTP Email Integration (One-to-One with PublicRegistration) ---
+            if (paymentStatus === 'paid' && transactionId) {
+                const [expectedVal, expectedCurr] = (paymentAmountStr || `${previewPaymentTotal.toFixed(2)} USD`).split(' ');
+                
+                const { data, error: fnError } = await supabase.functions.invoke('verify-payment', {
+                    body: {
+                        paypalOrderId: transactionId,
+                        attendees: allAttendees.map(mapAttendeeToDb),
+                        expectedAmount: parseFloat(expectedVal) || 0,
+                        expectedCurrency: expectedCurr || ticketField?.ticketConfig?.currency || 'USD',
+                        isSandbox: true
+                    }
+                });
+                
+                if (fnError) throw new Error(fnError.message || 'Payment verification failed');
+                if (data?.error) throw new Error(data.error);
+
+                newAttendee.paymentAmount = data.amount;
+                newAttendee.transactionId = data.transactionId;
+                
+                for (const gt of guestTickets) {
+                    gt.attendee.paymentAmount = data.amount;
+                    gt.attendee.transactionId = data.transactionId;
+                }
+            } else {
+                // Free transaction - do atomic bulk insert
+                const { error: dbError } = await supabase.from('attendees').upsert(allAttendees.map(mapAttendeeToDb));
+                if (dbError) throw new Error(`Database error: ${dbError.message}`);
+            }
+
+            setLastGeneratedAttendee(newAttendee);
+
+            // --- SMTP Email Integration ---
             if (appSettings && appSettings.smtpUser && appSettings.smtpPass) {
                 try {
                     const attachments = [];
@@ -319,8 +355,17 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
 
             setPreviewLoading(false);
             setPreviewStep('success');
-            showNotification('Test registration created and email sent!', 'success');
-        }, 1500);
+            showNotification('Test registration created and verified via Sandbox!', 'success');
+        } catch (error: any) {
+            console.error('Preview checkout failed:', error);
+            setPreviewError(error.message || 'Payment or registration failed.');
+            setPreviewLoading(false);
+        }
+    };
+
+    const onPayPalApprovePreview = async (data: any, actions: any) => {
+        const paymentAmountStr = `${previewPaymentTotal.toFixed(2)} ${ticketField?.ticketConfig?.currency || 'USD'}`;
+        await finalizePreview(data.orderID, paymentAmountStr);
     };
 
     const downloadPdf = () => {
@@ -796,10 +841,44 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
                                     </div>
                                 </div>
 
-                                <button onClick={finalizePreview} disabled={previewLoading} className="w-full py-3 bg-yellow-400 text-blue-900 font-bold rounded-lg flex justify-center items-center gap-2">
-                                    {previewLoading ? <Loader2 className="animate-spin" /> : 'Simulate PayPal Payment'}
-                                </button>
-                                <button onClick={() => setPreviewStep('form')} className="mt-4 text-sm text-gray-500 underline">Back</button>
+                                {previewError && (
+                                    <div className="bg-red-50 text-red-600 p-3 rounded-lg flex items-center gap-2 text-sm mb-4">
+                                        <AlertCircle className="w-4 h-4" /> {previewError}
+                                    </div>
+                                )}
+
+                                {paypalClientId ? (
+                                    <PayPalScriptProvider options={{ "clientId": paypalClientId, currency: ticketField?.ticketConfig?.currency || "USD" }}>
+                                        <div className="mt-4 relative z-0">
+                                            {previewLoading && (
+                                                <div className="absolute inset-0 bg-white/80 z-10 flex items-center justify-center rounded-lg">
+                                                    <Loader2 className="w-6 h-6 animate-spin text-indigo-600" />
+                                                </div>
+                                            )}
+                                            <PayPalButtons 
+                                                style={{ layout: "vertical", color: "blue", shape: "rect" }}
+                                                createOrder={(data, actions) => {
+                                                    return actions.order.create({
+                                                        intent: "CAPTURE",
+                                                        purchase_units: [{
+                                                            amount: { 
+                                                                currency_code: ticketField?.ticketConfig?.currency || "USD", 
+                                                                value: previewPaymentTotal.toFixed(2) 
+                                                            }
+                                                        }]
+                                                    });
+                                                }}
+                                                onApprove={onPayPalApprovePreview}
+                                            />
+                                        </div>
+                                    </PayPalScriptProvider>
+                                ) : (
+                                    <div className="p-4 bg-yellow-50 text-yellow-800 rounded-lg text-sm border border-yellow-200">
+                                        PayPal is not configured. Add your Client ID to .env.local to test payments in Preview.
+                                    </div>
+                                )}
+                                
+                                <button onClick={() => setPreviewStep('form')} className="mt-4 w-full py-2 text-sm text-gray-500 hover:bg-gray-50 rounded transition border border-transparent">Back</button>
                             </div>
                         </div>
                     )}

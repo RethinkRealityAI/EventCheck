@@ -37,7 +37,7 @@ serve(async (req: Request) => {
   }
 
   try {
-    const { paypalOrderId, attendees, expectedAmount, expectedCurrency } = await req.json();
+    const { paypalOrderId, attendees, expectedAmount, expectedCurrency, isSandbox } = await req.json();
 
     if (!paypalOrderId || !attendees || attendees.length === 0) {
       return new Response(
@@ -47,11 +47,16 @@ serve(async (req: Request) => {
     }
 
     // --- Step 1: Verify payment with PayPal ---
-    const PAYPAL_CLIENT_ID = (Deno.env.get('PAYPAL_CLIENT_ID') || '').trim();
-    const PAYPAL_CLIENT_SECRET = (Deno.env.get('PAYPAL_CLIENT_SECRET') || '').trim();
+    // If frontend flags preview testing, use Sandbox keys to prevent mixing real transactions
+    const clientIdKey = isSandbox ? 'PAYPAL_SANDBOX_CLIENT_ID' : 'PAYPAL_CLIENT_ID';
+    const secretKey = isSandbox ? 'PAYPAL_SANDBOX_CLIENT_SECRET' : 'PAYPAL_CLIENT_SECRET';
+    const fallbackBaseUrl = isSandbox ? 'https://api-m.sandbox.paypal.com' : 'https://api-m.paypal.com';
+
+    const PAYPAL_CLIENT_ID = (Deno.env.get(clientIdKey) || Deno.env.get('PAYPAL_CLIENT_ID') || '').trim();
+    const PAYPAL_CLIENT_SECRET = (Deno.env.get(secretKey) || Deno.env.get('PAYPAL_CLIENT_SECRET') || '').trim();
     
-    // Default to the live production API to prevent sandbox mismatch errors in production.
-    const PAYPAL_API_BASE = Deno.env.get('PAYPAL_API_BASE') || 'https://api-m.paypal.com';
+    // Default to the correct API base
+    const PAYPAL_API_BASE = Deno.env.get('PAYPAL_API_BASE') || fallbackBaseUrl;
 
     if (!PAYPAL_CLIENT_ID || !PAYPAL_CLIENT_SECRET) {
       return new Response(

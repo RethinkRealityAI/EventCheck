@@ -499,12 +499,16 @@ const PublicRegistration = () => {
       // Secure server-side validation and DB insert
       const [expectedVal, expectedCurr] = paymentAmount ? paymentAmount.split(' ') : ['0', 'USD'];
       
+      // Auto-enable sandbox backend verification when running on local or staging preview servers
+      const isSandbox = window.location.hostname === 'localhost' || window.location.hostname.includes('sandbox') || window.location.hostname.includes('test');
+      
       const { data, error: fnError } = await supabase.functions.invoke('verify-payment', {
         body: {
           paypalOrderId: transactionId, // we passed orderID here
           attendees: allAttendees.map(mapAttendeeToDb),
           expectedAmount: parseFloat(expectedVal) || 0,
-          expectedCurrency: expectedCurr || 'USD'
+          expectedCurrency: expectedCurr || 'USD',
+          isSandbox
         }
       });
       
