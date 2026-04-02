@@ -547,14 +547,18 @@ const PublicRegistration = () => {
         });
 
         // Guest Ticket PDFs (will be empty for single-ticket or free forms)
-        for (const gt of guestTickets) {
+        guestTickets.forEach((gt, idx) => {
           const guestDoc = generateTicketPDF(gt.attendee, settings, form, gt.registrationUrl);
+          const isPlaceholder = gt.attendee.name.includes('Guest Ticket #');
+          const safeName = isPlaceholder
+            ? `Guest_${idx + 2}`
+            : gt.attendee.name.replace(/[^a-zA-Z0-9 ]/g, '_');
           attachments.push({
-            filename: `${gt.name.replace(/[^a-zA-Z0-9 ]/g, '_')}_Ticket.pdf`,
+            filename: `${safeName}_Ticket.pdf`,
             content: arrayBufferToBase64(guestDoc.output('arraybuffer')),
             contentType: 'application/pdf'
           });
-        }
+        });
 
         // Send all tickets to the purchaser
         await sendTicketEmail(settings, {
@@ -566,16 +570,22 @@ const PublicRegistration = () => {
         });
 
         // Also email individual named guests directly
-        for (const gt of guestTickets) {
+        for (let idx = 0; idx < guestTickets.length; idx++) {
+          const gt = guestTickets[idx];
           if (gt.attendee.email && gt.attendee.email !== purchaserEmail && gt.attendee.email !== 'unknown@example.com') {
+            const isPlaceholder = gt.attendee.name.includes('Guest Ticket #');
+            const safeName = isPlaceholder
+              ? `Guest_${idx + 2}`
+              : gt.attendee.name.replace(/[^a-zA-Z0-9 ]/g, '_');
+            const guestDoc = generateTicketPDF(gt.attendee, settings, form, gt.registrationUrl);
             await sendTicketEmail(settings, {
               to: gt.attendee.email,
               subject: `Your Ticket for ${form.title}`,
               name: gt.attendee.name,
-              message: `You've been registered for ${form.title} by ${purchaserName}. Attached is your ticket.`,
+              message: `You've been registered for ${form.title} by ${purchaserName}. Your ticket is attached.`,
               attachments: [{
-                filename: `${gt.attendee.name.replace(/[^a-zA-Z0-9 ]/g, '_')}_Ticket.pdf`,
-                content: arrayBufferToBase64(generateTicketPDF(gt.attendee, settings, form, gt.registrationUrl).output('arraybuffer')),
+                filename: `${safeName}_Ticket.pdf`,
+                content: arrayBufferToBase64(guestDoc.output('arraybuffer')),
                 contentType: 'application/pdf'
               }]
             });
