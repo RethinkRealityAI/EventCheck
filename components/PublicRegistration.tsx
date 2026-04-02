@@ -1199,7 +1199,8 @@ const PublicRegistration = () => {
       )}
 
       {step === 'success' && generatedTicket && (
-        <div className="max-w-xl w-full bg-white rounded-2xl shadow-xl overflow-hidden animate-fade-in-up relative z-10">
+        <div className="max-w-2xl w-full bg-white rounded-2xl shadow-xl overflow-hidden animate-fade-in-up relative z-10">
+          {/* ── Success Header ── */}
           <div
             className="w-full h-48 flex flex-col items-center justify-center text-white"
             style={{ backgroundColor: form.settings?.successHeaderColor || '#4F46E5' }}
@@ -1217,7 +1218,7 @@ const PublicRegistration = () => {
 
           <div className="p-8 text-center">
 
-            {/* Custom Thank You Message */}
+            {/* ── Custom Thank You Message ── */}
             {form.thankYouMessage ? (
               <div
                 className="prose prose-sm max-w-none text-gray-600 mb-6"
@@ -1226,10 +1227,11 @@ const PublicRegistration = () => {
             ) : (
               <>
                 <h2 className="text-2xl font-bold text-gray-900 mb-2">You're going!</h2>
-                <p className="text-gray-500 mb-6">A confirmation email with your ticket has been sent to <span className="font-semibold">{generatedTicket.email}</span>.</p>
+                <p className="text-gray-500 mb-6">A confirmation email with your ticket{guestTicketsData.length > 0 ? 's' : ''} has been sent to <span className="font-semibold">{generatedTicket.email}</span>.</p>
               </>
             )}
 
+            {/* ── Your Ticket Card ── */}
             {(form.settings?.showQrOnSuccess !== false) && (
               <div
                 className="border border-gray-200 rounded-2xl p-8 shadow-md mb-8 max-w-sm mx-auto relative overflow-hidden transform transition hover:scale-[1.02] duration-300"
@@ -1246,9 +1248,14 @@ const PublicRegistration = () => {
                   <QRCode value={generatedTicket.qrPayload} size={160} />
                 </div>
 
-                <div className="text-sm font-mono bg-white p-3 rounded-xl border border-gray-200 text-gray-700 mb-6 flex justify-between items-center">
+                <div className="text-sm font-mono bg-white p-3 rounded-xl border border-gray-200 text-gray-700 mb-4 flex justify-between items-center">
                   <span className="text-gray-400 text-[10px] uppercase font-bold">Ticket ID</span>
-                  <span className="font-bold">#{generatedTicket.id}</span>
+                  <span className="font-bold">#{generatedTicket.id.slice(0, 8)}</span>
+                </div>
+
+                <div className="text-sm font-mono bg-white p-3 rounded-xl border border-gray-200 text-gray-700 mb-6 flex justify-between items-center">
+                  <span className="text-gray-400 text-[10px] uppercase font-bold">Attendee</span>
+                  <span className="font-semibold truncate ml-4">{generatedTicket.name}</span>
                 </div>
 
                 {(form.settings?.showTicketButtonOnSuccess !== false) && (
@@ -1257,45 +1264,115 @@ const PublicRegistration = () => {
                     className="w-full py-4 text-white rounded-xl text-sm font-black uppercase tracking-widest shadow-lg transition transform hover:scale-[1.02]"
                     style={{ backgroundColor: form.settings?.successHeaderColor || '#4F46E5' }}
                   >
-                    <Download className="w-5 h-5 inline mr-2" /> Download PDF Ticket
+                    <Download className="w-5 h-5 inline mr-2" /> Download Your Ticket
                   </button>
                 )}
               </div>
             )}
 
-            {/* Guest Registration Link Section */}
-            {generatedTicket.isPrimary && mode === 'purchaser' && (
-              <div className="mt-8 p-6 bg-indigo-50 rounded-2xl border border-indigo-100 text-left animate-in fade-in slide-in-from-bottom-4 duration-700">
-                <div className="flex items-center gap-2 mb-4">
-                  <UserPlus className="w-5 h-5 text-indigo-600" />
-                  <h3 className="font-bold text-indigo-900">Manage Your Guests</h3>
-                </div>
-                <p className="text-sm text-indigo-800/80 mb-4 leading-relaxed">
-                  You can share this unique registration link with your guests so they can provide their own details (name, email, and dietary preferences):
-                </p>
-                <div className="flex gap-2">
-                  <div className="flex-1 bg-white p-3 rounded-xl border border-indigo-200 text-[11px] font-mono text-indigo-600 break-all select-all">
-                    {`${window.location.origin}${window.location.pathname}?ref=${generatedTicket.id}`}
+            {/* ── Guest Tickets Section (only if guests exist) ── */}
+            {generatedTicket.isPrimary && mode === 'purchaser' && guestTicketsData.length > 0 && (
+              <div className="mt-8 text-left">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <UserPlus className="w-5 h-5 text-indigo-600" />
+                    <h3 className="font-bold text-gray-900 text-lg">Guest Tickets ({guestTicketsData.length})</h3>
                   </div>
                   <button
                     type="button"
                     onClick={() => {
-                      navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}?ref=${generatedTicket.id}`);
-                      showNotification('Link copied to clipboard!', 'success');
+                      if (settings) {
+                        const primaryDoc = generateTicketPDF(generatedTicket, settings, form);
+                        primaryDoc.save(`${generatedTicket.name.replace(/[^a-zA-Z0-9 ]/g, '_')}_Ticket.pdf`);
+
+                        guestTicketsData.forEach((gt, idx) => {
+                          const doc = generateTicketPDF(gt.attendee, settings, form, gt.registrationUrl);
+                          const safeName = gt.attendee.name.includes('Guest Ticket #')
+                            ? `Guest_${idx + 2}`
+                            : gt.attendee.name.replace(/[^a-zA-Z0-9 ]/g, '_');
+                          doc.save(`${safeName}_Ticket.pdf`);
+                        });
+                      }
                     }}
-                    className="p-3 bg-white border border-indigo-200 rounded-xl hover:bg-indigo-50 transition"
-                    title="Copy Link"
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-indigo-700 transition"
                   >
-                    <Download className="w-4 h-4 text-indigo-600 rotate-180" />
+                    <Download className="w-4 h-4" /> Download All Tickets
                   </button>
                 </div>
-                <p className="text-[11px] text-indigo-500 mt-3 italic">
-                  * This link will automatically expire once all seats at your table are filled.
+
+                <p className="text-sm text-gray-500 mb-4">
+                  Unclaimed guests can register using the link on their ticket, or be registered manually at check-in.
                 </p>
+
+                <div className="grid gap-4">
+                  {guestTicketsData.map((gt, idx) => {
+                    const isUnclaimed = gt.attendee.name.includes('Guest Ticket #');
+                    const displayName = isUnclaimed ? `Guest #${idx + 2}` : gt.attendee.name;
+                    const safeName = isUnclaimed
+                      ? `Guest_${idx + 2}`
+                      : gt.attendee.name.replace(/[^a-zA-Z0-9 ]/g, '_');
+
+                    return (
+                      <div
+                        key={gt.attendee.id}
+                        className="bg-gray-50 border border-gray-200 rounded-xl p-4 flex items-center gap-4"
+                      >
+                        <div className="bg-white p-2 rounded-lg border border-gray-100 flex-shrink-0">
+                          <QRCode value={gt.attendee.qrPayload} size={56} />
+                        </div>
+
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="font-bold text-gray-900 truncate">{displayName}</span>
+                            {isUnclaimed ? (
+                              <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-bold rounded-full flex-shrink-0">Unclaimed</span>
+                            ) : (
+                              <span className="px-2 py-0.5 bg-green-100 text-green-700 text-[10px] font-bold rounded-full flex-shrink-0">Registered</span>
+                            )}
+                          </div>
+                          <p className="text-xs text-gray-500 font-mono">#{gt.attendee.id.slice(0, 8)}</p>
+
+                          {isUnclaimed && gt.registrationUrl && (
+                            <div className="mt-2 flex gap-2 items-center">
+                              <div className="flex-1 bg-white px-2 py-1.5 rounded border border-indigo-200 text-[10px] font-mono text-indigo-600 truncate">
+                                {gt.registrationUrl}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(gt.registrationUrl!);
+                                  showNotification('Link copied!', 'success');
+                                }}
+                                className="p-1.5 bg-white border border-indigo-200 rounded hover:bg-indigo-50 transition flex-shrink-0"
+                                title="Copy registration link"
+                              >
+                                <Download className="w-3.5 h-3.5 text-indigo-600 rotate-180" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (settings) {
+                              const doc = generateTicketPDF(gt.attendee, settings, form, gt.registrationUrl);
+                              doc.save(`${safeName}_Ticket.pdf`);
+                            }
+                          }}
+                          className="p-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition flex-shrink-0"
+                          title={`Download ${displayName} ticket`}
+                        >
+                          <Download className="w-4 h-4 text-gray-600" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
 
-            {/* Fallback Buttons if QR is hidden */}
+            {/* ── Fallback Buttons if QR is hidden ── */}
             {form.settings?.showQrOnSuccess === false && (
               <div className="flex flex-col gap-3 mb-8">
                 {form.settings?.showTicketButtonOnSuccess !== false && (
@@ -1319,7 +1396,7 @@ const PublicRegistration = () => {
 
           <button
             onClick={() => window.location.reload()}
-            className="text-gray-500 text-sm font-medium hover:text-gray-900 underline"
+            className="text-gray-500 text-sm font-medium hover:text-gray-900 underline block mx-auto mb-6"
           >
             Start New Registration
           </button>
