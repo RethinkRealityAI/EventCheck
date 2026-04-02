@@ -574,7 +574,7 @@ const PublicRegistration = () => {
           to: purchaserEmail,
           subject: `Your Tickets for ${form.title}`,
           name: purchaserName,
-          message: `Thank you for your ${paymentStatus === 'paid' ? 'purchase' : 'registration'}! Attached ${attachments.length === 1 ? 'is your ticket' : `are your ${attachments.length} tickets`}.${guestTickets.length > 0 ? ` We've included ${guestTickets.length} guest ticket${guestTickets.length !== 1 ? 's' : ''}. Please forward them to your guests or have them scan the registration QR code on their ticket to provide their details.` : ''}`,
+          message: `Thank you for your ${paymentStatus === 'paid' ? 'purchase' : 'registration'}! Attached ${attachments.length === 1 ? 'is your ticket' : `are your ${attachments.length} tickets`}.${guestTickets.length > 0 ? ` We've also included ${guestTickets.length} guest ticket${guestTickets.length !== 1 ? 's' : ''} as a backup. Named guests will receive their own ticket by email directly. For any unnamed guests, you can forward their ticket or share the registration link on it so they can provide their details.` : ''}`,
           attachments
         });
 
@@ -591,7 +591,7 @@ const PublicRegistration = () => {
               to: gt.attendee.email,
               subject: `Your Ticket for ${form.title}`,
               name: gt.attendee.name,
-              message: `You've been registered for ${form.title} by ${purchaserName}. Your ticket is attached.`,
+              message: `Great news! ${purchaserName} has registered you for ${form.title}. Your ticket is attached — please bring it with you to the event. You can scan the QR code on your ticket for entry.`,
               attachments: [{
                 filename: `${safeName}_Ticket.pdf`,
                 content: arrayBufferToBase64(guestDoc.output('arraybuffer')),
