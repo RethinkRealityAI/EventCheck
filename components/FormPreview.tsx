@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Ticket, CreditCard, Tag, Eye, AlertCircle, ArrowRight, Loader2, Check, RefreshCw, Download, MapPin, CheckSquare, UserPlus } from 'lucide-react';
+import { Ticket, CreditCard, Tag, Eye, AlertCircle, ArrowRight, Loader2, Check, RefreshCw, Download, MapPin, CheckSquare, UserPlus, Copy } from 'lucide-react';
 import QRCode from 'react-qr-code';
 import { FormField, Form, Attendee } from '../types';
 import { getSettings, saveAttendee, mapAttendeeToDb } from '../services/storageService';
@@ -1034,7 +1034,7 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
                                                         className="p-1 bg-white border border-indigo-200 rounded hover:bg-indigo-50 transition flex-shrink-0"
                                                         title="Copy link"
                                                       >
-                                                        <Download className="w-3 h-3 text-indigo-600 rotate-180" />
+                                                        <Copy className="w-3 h-3 text-indigo-600" />
                                                       </button>
                                                     </div>
                                                   )}

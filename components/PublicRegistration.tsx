@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { getFormById, getSettings, saveAttendee, getAttendee, getGuestsByPrimaryId, mapAttendeeToDb } from '../services/storageService';
 import { FormField, AppSettings, Attendee, Form } from '../types';
 import { supabase } from '../services/supabaseClient';
-import { Loader2, Check, AlertCircle, Download, Calendar, Tag, CreditCard, ArrowRight, X, Eye, MapPin, UserPlus, Info } from 'lucide-react';
+import { Loader2, Check, AlertCircle, Download, Calendar, Tag, CreditCard, ArrowRight, X, Eye, MapPin, UserPlus, Info, Copy } from 'lucide-react';
 import { useNotifications } from './NotificationSystem';
 import { useParams, useLocation } from 'react-router-dom';
 import { generateTicketPDF } from '../utils/pdfGenerator';
@@ -1362,7 +1362,7 @@ const PublicRegistration = () => {
                                 className="p-1.5 bg-white border border-indigo-200 rounded hover:bg-indigo-50 transition flex-shrink-0"
                                 title="Copy registration link"
                               >
-                                <Download className="w-3.5 h-3.5 text-indigo-600 rotate-180" />
+                                <Copy className="w-3.5 h-3.5 text-indigo-600" />
                               </button>
                             </div>
                           )}
