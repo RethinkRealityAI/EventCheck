@@ -496,6 +496,9 @@ const PublicRegistration = () => {
       }
     }
 
+    // Persist guest ticket data for success page rendering
+    setGuestTicketsData(guestTickets);
+
     // All registrations go through the edge function for server-side validation
     const verifyBody: Record<string, any> = {
       mode: paymentStatus,
