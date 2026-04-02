@@ -269,10 +269,15 @@ const PublicRegistration = () => {
         setError("This table is already at full capacity.");
         return false;
       }
-      // In guest mode, we always need Name and Email in the "Guest details" section
-      // But those are managed by the guests array state, not necessarily the main form fields.
-      if (guests.length === 0 || !guests[0].name || !guests[0].email) {
-        setError("Please provide your name and email address.");
+      // In guest mode, name and email come from the form's standard fields (not the guest details section)
+      const nameField = form.fields.find(f => f.type === 'text' || f.label.toLowerCase().includes('name'));
+      const emailField = form.fields.find(f => f.type === 'email' || f.label.toLowerCase().includes('email'));
+      if (!nameField || !answers[nameField.id]) {
+        setError("Please provide your name.");
+        return false;
+      }
+      if (!emailField || !answers[emailField.id]) {
+        setError("Please provide your email address.");
         return false;
       }
     }
@@ -303,7 +308,11 @@ const PublicRegistration = () => {
     const invoiceId = `INV-${Math.random().toString(10).substr(2, 6)}`;
 
     if (mode === 'guest' && fetchedPrimaryAttendee) {
-      const g = guests[0];
+      // In guest mode, name and email come from the form's standard fields
+      const nameField = form.fields.find(f => f.type === 'text' || f.label.toLowerCase().includes('name'));
+      const emailField = form.fields.find(f => f.type === 'email' || f.label.toLowerCase().includes('email'));
+      const guestName = nameField ? answers[nameField.id] : 'Guest';
+      const guestEmail = emailField ? answers[emailField.id] : 'unknown@example.com';
 
       // Determine the record to update
       const refParam = new URLSearchParams(window.location.search).get('ref');
@@ -312,12 +321,12 @@ const PublicRegistration = () => {
 
       if (refParam) {
         const refAttendee = await getAttendee(refParam);
-        
+
         // If the ref points directly to a placeholder guest, update it in-place
         if (refAttendee && !refAttendee.isPrimary) {
           existingRecord = refAttendee;
           isUpdatingPlaceholder = true;
-          
+
           if (!existingRecord.name?.includes('Guest Ticket #') && existingRecord.email !== fetchedPrimaryAttendee.email) {
             throw new Error("This specific ticket link has already been claimed by a guest.");
           }
@@ -344,10 +353,10 @@ const PublicRegistration = () => {
         id: recordId,
         formId: form.id,
         formTitle: form.title,
-        name: g.name,
-        email: g.email,
-        dietaryPreferences: g.dietary === 'yes' ? 'Vegetarian' : '',
-        guestType: g.guestType || 'adult',
+        name: guestName,
+        email: guestEmail,
+        dietaryPreferences: '',
+        guestType: 'adult',
         ticketType: `Guest of ${fetchedPrimaryAttendee.name}`,
         registeredAt: isUpdatingPlaceholder && existingRecord ? existingRecord.registeredAt : new Date().toISOString(),
         answers: answers,
@@ -738,7 +747,7 @@ const PublicRegistration = () => {
               </div>
             )}
 
-            {form.fields.map(field => isVisible(field) && (
+            {form.fields.map(field => isVisible(field) && !(field.type === 'ticket' && mode === 'guest') && (
               <div key={field.id}>
                 {field.type !== 'ticket' && (
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -1314,7 +1323,7 @@ const PublicRegistration = () => {
                   Unclaimed guests can register using the link on their ticket, or be registered manually at check-in.
                 </p>
 
-                <div className="grid gap-4">
+                <div className="grid gap-4 overflow-hidden">
                   {guestTicketsData.map((gt, idx) => {
                     const isUnclaimed = gt.attendee.name.includes('Guest Ticket #');
                     const displayName = isUnclaimed ? `Guest #${idx + 2}` : gt.attendee.name;
@@ -1325,7 +1334,7 @@ const PublicRegistration = () => {
                     return (
                       <div
                         key={gt.attendee.id}
-                        className="bg-gray-50 border border-gray-200 rounded-xl p-4 flex items-center gap-4"
+                        className="bg-gray-50 border border-gray-200 rounded-xl p-4 flex items-start gap-3 overflow-hidden"
                       >
                         <div className="bg-white p-2 rounded-lg border border-gray-100 flex-shrink-0">
                           <QRCode value={gt.attendee.qrPayload} size={56} />
