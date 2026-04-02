@@ -975,9 +975,6 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
                                             type="button"
                                             onClick={() => {
                                               if (appSettings && lastGeneratedAttendee) {
-                                                const primaryDoc = generateTicketPDF(lastGeneratedAttendee, appSettings, form);
-                                                primaryDoc.save(`${lastGeneratedAttendee.name.replace(/[^a-zA-Z0-9 ]/g, '_')}_Ticket.pdf`);
-
                                                 previewGuestTicketsData.forEach((gt, idx) => {
                                                   const doc = generateTicketPDF(gt.attendee, appSettings, form, gt.registrationUrl);
                                                   const safeName = gt.attendee.name.includes('Guest Ticket #')

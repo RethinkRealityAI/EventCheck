@@ -1301,9 +1301,6 @@ const PublicRegistration = () => {
                     type="button"
                     onClick={() => {
                       if (settings) {
-                        const primaryDoc = generateTicketPDF(generatedTicket, settings, form);
-                        primaryDoc.save(`${generatedTicket.name.replace(/[^a-zA-Z0-9 ]/g, '_')}_Ticket.pdf`);
-
                         guestTicketsData.forEach((gt, idx) => {
                           const doc = generateTicketPDF(gt.attendee, settings, form, gt.registrationUrl);
                           const safeName = gt.attendee.name.includes('Guest Ticket #')
@@ -1315,7 +1312,7 @@ const PublicRegistration = () => {
                     }}
                     className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-indigo-700 transition"
                   >
-                    <Download className="w-4 h-4" /> Download All Tickets
+                    <Download className="w-4 h-4" /> Download All Guest Tickets
                   </button>
                 </div>
 
