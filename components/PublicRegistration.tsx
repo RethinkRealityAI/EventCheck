@@ -21,6 +21,7 @@ const PublicRegistration = () => {
   const [generatedTicket, setGeneratedTicket] = useState<Attendee | null>(null);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [previewPdfUrl, setPreviewPdfUrl] = useState<string | null>(null);
+  const [guestTicketsData, setGuestTicketsData] = useState<Array<{ name: string, attendee: Attendee, registrationUrl?: string }>>([]);
   const { showNotification } = useNotifications();
 
   // Ticket / Payment State
@@ -285,7 +286,7 @@ const PublicRegistration = () => {
     if (!validate()) return;
 
     // Check if ticket field present
-    if (ticketField && paymentTotal > 0) {
+    if (mode === 'purchaser' && ticketField && paymentTotal > 0) {
       setStep('payment');
     } else {
       finalizeRegistration('free');
@@ -1102,6 +1103,8 @@ const PublicRegistration = () => {
               >
                 {loading ? (
                   <Loader2 className="w-5 h-5 animate-spin" />
+                ) : mode === 'guest' ? (
+                  <>Claim Your Ticket <ArrowRight className="w-5 h-5" /></>
                 ) : (ticketField && paymentTotal > 0) ? (
                   <>Proceed to Payment <ArrowRight className="w-5 h-5" /></>
                 ) : (form.settings?.submitButtonText || 'Register Now')}
