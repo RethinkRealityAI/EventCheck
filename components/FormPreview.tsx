@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Ticket, CreditCard, Tag, Eye, AlertCircle, ArrowRight, Loader2, Check, RefreshCw, Download, MapPin, CheckSquare } from 'lucide-react';
+import { Ticket, CreditCard, Tag, Eye, AlertCircle, ArrowRight, Loader2, Check, RefreshCw, Download, MapPin, CheckSquare, UserPlus } from 'lucide-react';
 import QRCode from 'react-qr-code';
 import { FormField, Form, Attendee } from '../types';
 import { getSettings, saveAttendee, mapAttendeeToDb } from '../services/storageService';
@@ -35,6 +35,7 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
     const [previewError, setPreviewError] = useState('');
     const [lastGeneratedAttendee, setLastGeneratedAttendee] = useState<Attendee | null>(null);
     const [appSettings, setAppSettings] = useState<any>(null);
+    const [previewGuestTicketsData, setPreviewGuestTicketsData] = useState<Array<{ name: string, attendee: Attendee, registrationUrl?: string }>>([]);
 
     // Fetch app settings for SMTP and PDF generation
     useEffect(() => {
@@ -292,6 +293,14 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
                 }
             }
 
+            setPreviewGuestTicketsData(guestTickets.map(gt => ({
+                name: gt.name,
+                attendee: gt.attendee,
+                registrationUrl: gt.attendee.name.includes('Guest Ticket #')
+                    ? `${window.location.origin}/#/form/${form.id}?ref=${newAttendee.id}`
+                    : undefined,
+            })));
+
             // All registrations go through the edge function for server-side validation
             const verifyBody: Record<string, any> = {
                 mode: paymentStatus === 'paid' ? 'paid' : 'free',
@@ -392,6 +401,7 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
         setPreviewSkipGuestDetails(false);
         setPreviewPromoCode('');
         setPreviewAppliedPromo(null);
+        setPreviewGuestTicketsData([]);
     };
 
     const ticketField = form.fields.find(f => f.type === 'ticket');
@@ -888,7 +898,7 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
 
                     {previewStep === 'success' && (
                         <div className="relative z-10 flex justify-center py-8 px-4">
-                            <div className="max-w-xl w-full bg-white rounded-2xl shadow-xl overflow-hidden animate-fade-in">
+                            <div className="max-w-2xl w-full bg-white rounded-2xl shadow-xl overflow-hidden animate-fade-in">
                                 {/* Success Banner — matches PublicRegistration */}
                                 <div
                                     className="w-full h-48 flex flex-col items-center justify-center text-white"
@@ -951,6 +961,106 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
                                                 </button>
                                             )}
                                         </div>
+                                    )}
+
+                                    {/* ── Guest Tickets Section (Preview) ── */}
+                                    {lastGeneratedAttendee?.isPrimary && previewGuestTicketsData.length > 0 && (
+                                      <div className="mt-8 text-left px-2">
+                                        <div className="flex items-center justify-between mb-4">
+                                          <div className="flex items-center gap-2">
+                                            <UserPlus className="w-5 h-5 text-indigo-600" />
+                                            <h3 className="font-bold text-gray-900 text-lg">Guest Tickets ({previewGuestTicketsData.length})</h3>
+                                          </div>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              if (appSettings && lastGeneratedAttendee) {
+                                                const primaryDoc = generateTicketPDF(lastGeneratedAttendee, appSettings, form);
+                                                primaryDoc.save(`${lastGeneratedAttendee.name.replace(/[^a-zA-Z0-9 ]/g, '_')}_Ticket.pdf`);
+
+                                                previewGuestTicketsData.forEach((gt, idx) => {
+                                                  const doc = generateTicketPDF(gt.attendee, appSettings, form, gt.registrationUrl);
+                                                  const safeName = gt.attendee.name.includes('Guest Ticket #')
+                                                    ? `Guest_${idx + 2}`
+                                                    : gt.attendee.name.replace(/[^a-zA-Z0-9 ]/g, '_');
+                                                  doc.save(`${safeName}_Ticket.pdf`);
+                                                });
+                                              }
+                                            }}
+                                            className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-indigo-700 transition"
+                                          >
+                                            <Download className="w-4 h-4" /> Download All
+                                          </button>
+                                        </div>
+
+                                        <p className="text-sm text-gray-500 mb-4">
+                                          Unclaimed guests can register using the link on their ticket, or be registered manually at check-in.
+                                        </p>
+
+                                        <div className="grid gap-3">
+                                          {previewGuestTicketsData.map((gt, idx) => {
+                                            const isUnclaimed = gt.attendee.name.includes('Guest Ticket #');
+                                            const displayName = isUnclaimed ? `Guest #${idx + 2}` : gt.attendee.name;
+                                            const safeName = isUnclaimed
+                                              ? `Guest_${idx + 2}`
+                                              : gt.attendee.name.replace(/[^a-zA-Z0-9 ]/g, '_');
+
+                                            return (
+                                              <div
+                                                key={gt.attendee.id}
+                                                className="bg-gray-50 border border-gray-200 rounded-xl p-3 flex items-center gap-3"
+                                              >
+                                                <div className="bg-white p-1.5 rounded-lg border border-gray-100 flex-shrink-0">
+                                                  <QRCode value={gt.attendee.qrPayload} size={40} />
+                                                </div>
+
+                                                <div className="flex-1 min-w-0">
+                                                  <div className="flex items-center gap-2 mb-0.5">
+                                                    <span className="font-bold text-gray-900 text-sm truncate">{displayName}</span>
+                                                    {isUnclaimed ? (
+                                                      <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-bold rounded-full flex-shrink-0">Unclaimed</span>
+                                                    ) : (
+                                                      <span className="px-2 py-0.5 bg-green-100 text-green-700 text-[10px] font-bold rounded-full flex-shrink-0">Registered</span>
+                                                    )}
+                                                  </div>
+
+                                                  {isUnclaimed && gt.registrationUrl && (
+                                                    <div className="mt-1 flex gap-1.5 items-center">
+                                                      <div className="flex-1 bg-white px-2 py-1 rounded border border-indigo-200 text-[10px] font-mono text-indigo-600 truncate">
+                                                        {gt.registrationUrl}
+                                                      </div>
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                          navigator.clipboard.writeText(gt.registrationUrl!);
+                                                        }}
+                                                        className="p-1 bg-white border border-indigo-200 rounded hover:bg-indigo-50 transition flex-shrink-0"
+                                                        title="Copy link"
+                                                      >
+                                                        <Download className="w-3 h-3 text-indigo-600 rotate-180" />
+                                                      </button>
+                                                    </div>
+                                                  )}
+                                                </div>
+
+                                                <button
+                                                  type="button"
+                                                  onClick={() => {
+                                                    if (appSettings) {
+                                                      const doc = generateTicketPDF(gt.attendee, appSettings, form, gt.registrationUrl);
+                                                      doc.save(`${safeName}_Ticket.pdf`);
+                                                    }
+                                                  }}
+                                                  className="p-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition flex-shrink-0"
+                                                  title={`Download ${displayName} ticket`}
+                                                >
+                                                  <Download className="w-4 h-4 text-gray-600" />
+                                                </button>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
                                     )}
 
                                     {/* Fallback button if QR card is hidden but button is shown */}
