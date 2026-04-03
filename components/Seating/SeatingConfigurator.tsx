@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, Suspense, useMemo, useRef } from 'react';
-import { Eye, Rows3, Plus, Trash2, Settings, Save, Loader2, RotateCcw, Crown, FileText, Download, Layout, CheckCircle2, Box, Palette, Tag, Move, RotateCw, Maximize2, Upload, Package, Undo2, Redo2, Copy } from 'lucide-react';
+import { Eye, Rows3, Plus, Trash2, Settings, Save, Loader2, RotateCcw, Crown, FileText, Download, Layout, CheckCircle2, Box, Palette, Tag, Move, RotateCw, Maximize2, Upload, Package, Undo2, Redo2, Copy, Search } from 'lucide-react';
 import Scene3D from './Scene3D';
 import GuestSidebar from './GuestSidebar';
 import { SeatingTable, Attendee, SeatingConfiguration, SeatingAssignment, SceneElement, SceneElementType, Custom3DModel } from '../../types';
@@ -126,6 +126,7 @@ export default function SeatingConfigurator() {
     const [showConfig, setShowConfig] = useState(true);
     const [showGuests, setShowGuests] = useState(true);
     const [transformMode, setTransformMode] = useState<'translate' | 'rotate' | 'scale'>('translate');
+    const [tableSearch, setTableSearch] = useState('');
     const [dialog, setDialog] = useState<{
         type: 'create-config' | 'clone-config' | 'confirm-regenerate' | 'delete-config';
         data?: any;
@@ -1206,6 +1207,55 @@ export default function SeatingConfigurator() {
                                                 <span className="text-[9px] text-slate-500 capitalize">{el.elementType.replace('-', ' ')}</span>
                                             </button>
                                         ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* ═══ Table List ═══ */}
+                            {tables.length > 0 && (
+                                <div className="space-y-2">
+                                    <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                                        <Rows3 className="w-4 h-4" />
+                                        Tables ({tables.length})
+                                    </h4>
+                                    <div className="relative">
+                                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-600" />
+                                        <input
+                                            type="text"
+                                            value={tableSearch}
+                                            onChange={(e) => setTableSearch(e.target.value)}
+                                            placeholder="Search tables..."
+                                            className="w-full pl-9 pr-3 py-2 bg-slate-800/50 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-600 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                        />
+                                    </div>
+                                    <div className="space-y-1 max-h-60 overflow-y-auto custom-scrollbar">
+                                        {tables
+                                            .filter(t => t.name.toLowerCase().includes(tableSearch.toLowerCase()))
+                                            .map(t => {
+                                                const tGuests = assignments.filter(a => a.tableId === t.id).length;
+                                                const occupancy = tGuests / t.capacity;
+                                                return (
+                                                    <button
+                                                        key={t.id}
+                                                        onClick={() => { setSelectedTableId(t.id); setSelectedElementId(null); }}
+                                                        className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left transition-all ${selectedTableId === t.id
+                                                            ? 'bg-emerald-600/20 border border-emerald-500/40'
+                                                            : 'bg-slate-800/30 hover:bg-slate-800/60 border border-transparent'
+                                                        }`}
+                                                    >
+                                                        <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
+                                                            t.vip ? 'bg-indigo-500' : occupancy >= 1 ? 'bg-emerald-500' : occupancy > 0 ? 'bg-amber-500' : 'bg-slate-500'
+                                                        }`} />
+                                                        <span className="text-xs font-medium text-white truncate flex-1">
+                                                            {t.name}
+                                                            {t.vip && ' 👑'}
+                                                        </span>
+                                                        <span className={`text-[10px] font-mono ${occupancy >= 1 ? 'text-emerald-400' : 'text-slate-500'}`}>
+                                                            {tGuests}/{t.capacity}
+                                                        </span>
+                                                    </button>
+                                                );
+                                            })}
                                     </div>
                                 </div>
                             )}
