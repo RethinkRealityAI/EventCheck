@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, Suspense, useMemo, useRef } from 'react';
-import { Eye, Rows3, Plus, Trash2, Settings, Save, Loader2, RotateCcw, Crown, FileText, Download, Layout, CheckCircle2, Box, Palette, Tag, Move, RotateCw, Maximize2, Upload, Package, Undo2, Redo2, Copy, Search, Users } from 'lucide-react';
+import { Rows3, Plus, Trash2, Settings, Save, Loader2, Crown, Download, Box, Move, RotateCw, Maximize2, Upload, Package, Undo2, Redo2, Copy, Search, Users } from 'lucide-react';
 import Scene3D from './Scene3D';
 import GuestSidebar from './GuestSidebar';
 import { SeatingTable, Attendee, SeatingConfiguration, SeatingAssignment, SceneElement, SceneElementType, Custom3DModel } from '../../types';
@@ -674,168 +674,146 @@ export default function SeatingConfigurator() {
     const assignedCount = assignments.length;
 
     return (
-        <div className="h-[calc(100vh-2rem)] flex flex-col gap-0 -mx-4 lg:-mx-6 -mt-4 lg:-mt-6">
+        <div className="fixed inset-0 z-40 flex flex-col bg-slate-950 overflow-hidden">
             {/* Top Bar */}
-            <div className="flex items-center justify-between px-4 py-3 bg-slate-900 border-b border-slate-700/50">
-                <div className="flex items-center gap-4">
-                    <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                        <Rows3 className="w-5 h-5 text-indigo-400" />
-                        Seating Chart
-                    </h2>
+            <div className="flex-shrink-0 bg-slate-900 border-b border-slate-700/50">
+                {/* Row 1: Event/Layout selection + Stats */}
+                <div className="flex items-center justify-between px-3 py-2 gap-3 flex-wrap">
+                    <div className="flex items-center gap-3 min-w-0">
+                        <h2 className="text-sm font-bold text-white flex items-center gap-1.5 flex-shrink-0">
+                            <Rows3 className="w-4 h-4 text-indigo-400" />
+                            Seating
+                        </h2>
 
-                    <div className="flex items-center gap-2">
-                        <span className="text-slate-500 text-xs font-medium uppercase tracking-wider">Event</span>
                         <select
                             value={selectedFormId}
                             onChange={(e) => setSelectedFormId(e.target.value)}
-                            className="bg-slate-800 border border-slate-700 text-white text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            className="bg-slate-800 border border-slate-700 text-white text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 min-w-0 max-w-[140px] truncate"
                         >
                             {forms.map(f => (
                                 <option key={f.id} value={f.id}>{f.title}</option>
                             ))}
                         </select>
-                    </div>
 
-                    <div className="h-6 w-px bg-slate-700 mx-2" />
+                        <div className="h-5 w-px bg-slate-700" />
 
-                    <div className="flex items-center gap-2">
-                        <span className="text-slate-500 text-xs font-medium uppercase tracking-wider">Layout</span>
                         <select
                             value={activeConfigId}
                             onChange={(e) => setActiveConfigId(e.target.value)}
-                            className="bg-slate-800 border border-indigo-500/50 text-white text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            className="bg-slate-800 border border-indigo-500/50 text-white text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 min-w-0 max-w-[130px] truncate"
                         >
                             {configurations.map(c => (
                                 <option key={c.id} value={c.id}>{c.name}</option>
                             ))}
                         </select>
-                        <button
-                            onClick={() => setDialog({ type: 'create-config' })}
-                            className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700 transition-colors"
-                            title="New Layout"
-                        >
-                            <Plus className="w-4 h-4" />
-                        </button>
-                        <button
-                            onClick={() => setDialog({ type: 'clone-config' })}
-                            className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700 transition-colors"
-                            title="Clone Layout"
-                        >
-                            <Copy className="w-4 h-4" />
-                        </button>
-                        {configurations.length > 1 && (
+                        <div className="flex items-center gap-1">
                             <button
-                                onClick={() => setDialog({ type: 'delete-config' })}
-                                className="p-1.5 bg-slate-800 hover:bg-red-900/50 text-slate-300 hover:text-red-400 rounded-lg border border-slate-700 hover:border-red-500/30 transition-colors"
-                                title="Delete Layout"
+                                onClick={() => setDialog({ type: 'create-config' })}
+                                className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md border border-slate-700 transition-colors"
+                                title="New Layout"
                             >
-                                <Trash2 className="w-4 h-4" />
+                                <Plus className="w-3.5 h-3.5" />
                             </button>
-                        )}
-                    </div>
-                </div>
-
-                <div className="flex items-center gap-3">
-                    <div className="hidden lg:flex items-center gap-4 px-4 py-2 bg-slate-800/50 rounded-xl border border-slate-700/30 text-[11px]">
-                        <div className="flex flex-col">
-                            <span className="text-slate-500 uppercase font-bold text-[9px]">Tables</span>
-                            <span className="text-white font-mono">{tables.length}</span>
+                            <button
+                                onClick={() => setDialog({ type: 'clone-config' })}
+                                className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md border border-slate-700 transition-colors"
+                                title="Clone Layout"
+                            >
+                                <Copy className="w-3.5 h-3.5" />
+                            </button>
+                            {configurations.length > 1 && (
+                                <button
+                                    onClick={() => setDialog({ type: 'delete-config' })}
+                                    className="p-1 bg-slate-800 hover:bg-red-900/50 text-slate-300 hover:text-red-400 rounded-md border border-slate-700 hover:border-red-500/30 transition-colors"
+                                    title="Delete Layout"
+                                >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                            )}
                         </div>
-                        <div className="h-6 w-px bg-slate-700" />
-                        <div className="flex flex-col">
-                            <span className="text-slate-500 uppercase font-bold text-[9px]">Seats</span>
-                            <span className="text-white font-mono">{totalSeats}</span>
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                        {/* Stats (inline compact) */}
+                        <div className="hidden md:flex items-center gap-3 px-3 py-1 bg-slate-800/50 rounded-lg border border-slate-700/30 text-[10px]">
+                            <span className="text-slate-500">{tables.length} <span className="text-white font-mono">tbl</span></span>
+                            <span className="text-slate-500">{totalSeats} <span className="text-white font-mono">seats</span></span>
+                            <span className="text-emerald-400 font-bold">{assignedCount} <span className="font-normal text-slate-500">assigned</span></span>
                         </div>
-                        <div className="h-6 w-px bg-slate-700" />
-                        <div className="flex flex-col">
-                            <span className="text-slate-500 uppercase font-bold text-[9px]">Assigned</span>
-                            <span className="text-emerald-400 font-bold font-mono">{assignedCount}</span>
+
+                        {/* View toggles */}
+                        <div className="flex items-center bg-slate-800 rounded-lg p-0.5 border border-slate-700/50">
+                            <button
+                                onClick={() => setPerspective('3d')}
+                                className={`px-2 py-1 text-[11px] font-bold rounded-md transition-all ${perspective === '3d' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}
+                            >
+                                3D
+                            </button>
+                            <button
+                                onClick={() => setPerspective('birds-eye')}
+                                className={`px-2 py-1 text-[11px] font-bold rounded-md transition-all ${perspective === 'birds-eye' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}
+                            >
+                                Plan
+                            </button>
                         </div>
-                        {sceneElements.length > 0 && (
-                            <>
-                                <div className="h-6 w-px bg-slate-700" />
-                                <div className="flex flex-col">
-                                    <span className="text-slate-500 uppercase font-bold text-[9px]">Elements</span>
-                                    <span className="text-violet-400 font-bold font-mono">{sceneElements.length}</span>
-                                </div>
-                            </>
-                        )}
-                    </div>
 
-                    <div className="flex items-center bg-slate-800 rounded-xl p-1 border border-slate-700/50">
-                        <button
-                            onClick={() => setPerspective('3d')}
-                            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${perspective === '3d' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
-                        >
-                            <Layout className="w-3.5 h-3.5" />
-                            3D
-                        </button>
-                        <button
-                            onClick={() => setPerspective('birds-eye')}
-                            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${perspective === 'birds-eye' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
-                        >
-                            <Eye className="w-3.5 h-3.5" />
-                            Plan
-                        </button>
-                    </div>
+                        {/* Panel toggles */}
+                        <div className="flex items-center bg-slate-800 rounded-lg p-0.5 border border-slate-700/50">
+                            <button
+                                onClick={() => setShowConfig(!showConfig)}
+                                className={`p-1.5 rounded-md transition-all ${showConfig ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}
+                                title="Toggle Config Panel"
+                            >
+                                <Settings className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                                onClick={() => setShowGuests(!showGuests)}
+                                className={`p-1.5 rounded-md transition-all ${showGuests ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}
+                                title="Toggle Guest Panel"
+                            >
+                                <Users className="w-3.5 h-3.5" />
+                            </button>
+                        </div>
 
-                    <div className="flex items-center bg-slate-800 rounded-xl p-1 border border-slate-700/50">
-                        <button
-                            onClick={() => setShowConfig(!showConfig)}
-                            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${showConfig ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
-                            title="Toggle Config Panel"
-                        >
-                            <Settings className="w-3.5 h-3.5" />
-                            Config
-                        </button>
-                        <button
-                            onClick={() => setShowGuests(!showGuests)}
-                            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${showGuests ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
-                            title="Toggle Guest Panel"
-                        >
-                            <Users className="w-3.5 h-3.5" />
-                            Guests
-                        </button>
-                    </div>
+                        {/* Undo/Redo */}
+                        <div className="flex items-center bg-slate-800 rounded-lg p-0.5 border border-slate-700/50">
+                            <button
+                                onClick={undo}
+                                disabled={historyIndex <= 0}
+                                className="p-1.5 text-slate-400 hover:text-white disabled:text-slate-700 transition-colors rounded-md"
+                                title="Undo (Ctrl+Z)"
+                            >
+                                <Undo2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                                onClick={redo}
+                                disabled={historyIndex >= history.length - 1}
+                                className="p-1.5 text-slate-400 hover:text-white disabled:text-slate-700 transition-colors rounded-md"
+                                title="Redo (Ctrl+Y)"
+                            >
+                                <Redo2 className="w-3.5 h-3.5" />
+                            </button>
+                        </div>
 
-                    <div className="flex items-center bg-slate-800 rounded-xl p-1 border border-slate-700/50">
-                        <button
-                            onClick={undo}
-                            disabled={historyIndex <= 0}
-                            className="p-1.5 text-slate-400 hover:text-white disabled:text-slate-700 transition-colors rounded-lg"
-                            title="Undo (Ctrl+Z)"
-                        >
-                            <Undo2 className="w-4 h-4" />
-                        </button>
-                        <button
-                            onClick={redo}
-                            disabled={historyIndex >= history.length - 1}
-                            className="p-1.5 text-slate-400 hover:text-white disabled:text-slate-700 transition-colors rounded-lg"
-                            title="Redo (Ctrl+Y)"
-                        >
-                            <Redo2 className="w-4 h-4" />
-                        </button>
-                    </div>
-
-                    <div className="flex items-center gap-2 ml-2">
+                        {/* Actions */}
                         <button
                             onClick={handleExportPDF}
-                            className="flex items-center gap-2 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-semibold rounded-lg border border-slate-700 transition-colors"
+                            className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg border border-slate-700 transition-colors"
+                            title="Export PDF"
                         >
-                            <Download className="w-4 h-4" />
-                            PDF
+                            <Download className="w-3.5 h-3.5" />
                         </button>
                         <button
                             onClick={handleSave}
                             disabled={saving}
-                            className={`flex items-center gap-2 px-4 py-2 text-white text-sm font-bold rounded-lg transition-all shadow-lg ${
+                            className={`flex items-center gap-1.5 px-3 py-1.5 text-white text-xs font-bold rounded-lg transition-all shadow-lg ${
                                 hasUnsavedChanges
                                     ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/20'
                                     : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20'
                             } disabled:bg-slate-700`}
                         >
-                            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                            {saving ? 'Saving...' : hasUnsavedChanges ? 'Save Changes' : 'Saved'}
+                            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                            {saving ? '...' : hasUnsavedChanges ? 'Save' : 'Saved'}
                         </button>
                     </div>
                 </div>
@@ -845,7 +823,7 @@ export default function SeatingConfigurator() {
             <div className="flex-1 flex overflow-hidden">
                 {/* Config Panel (Left) */}
                 {showConfig && (
-                    <div className="w-80 flex-shrink-0 bg-slate-900 border-r border-slate-700/50 overflow-y-auto custom-scrollbar flex flex-col">
+                    <div className="w-72 flex-shrink-0 bg-slate-900 border-r border-slate-700/50 overflow-y-auto custom-scrollbar flex flex-col">
                         <div className="p-4 space-y-6 flex-1">
                             {/* Generator Header */}
                             <div className="bg-indigo-600/10 rounded-2xl p-4 border border-indigo-500/20">
@@ -1372,7 +1350,7 @@ export default function SeatingConfigurator() {
 
                 {/* Guest Sidebar */}
                 {showGuests && (
-                    <div className="w-80 flex-shrink-0 border-l border-slate-700/50 shadow-2xl">
+                    <div className="w-72 flex-shrink-0 border-l border-slate-700/50 shadow-2xl">
                         <GuestSidebar
                             attendees={enhancedAttendees}
                             tables={tables}
