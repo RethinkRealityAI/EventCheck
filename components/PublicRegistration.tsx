@@ -574,7 +574,7 @@ const PublicRegistration = () => {
           to: purchaserEmail,
           subject: `Your Tickets for ${form.title}`,
           name: purchaserName,
-          message: `Thank you for your ${paymentStatus === 'paid' ? 'purchase' : 'registration'}! Attached ${attachments.length === 1 ? 'is your ticket' : `are your ${attachments.length} tickets`}.${guestTickets.length > 0 ? ` We've also included ${guestTickets.length} guest ticket${guestTickets.length !== 1 ? 's' : ''} as a backup. Named guests will receive their own ticket by email directly. For any unnamed guests, you can forward their ticket or share the registration link on it so they can provide their details.` : ''}`,
+          message: `Thank you for your ${paymentStatus === 'paid' ? 'purchase' : 'registration'}! Attached ${attachments.length === 1 ? 'is your ticket' : `are your ${attachments.length} tickets`}.${guestTickets.length > 0 ? ` ${(settings.emailPurchaserGuestNote || "We've also included your guest tickets as a backup. Named guests will receive their own ticket by email directly. For any unnamed guests, you can forward their ticket or share the registration link on it so they can provide their details.")}` : ''}`,
           attachments
         });
 
@@ -587,11 +587,19 @@ const PublicRegistration = () => {
               ? `Guest_${idx + 2}`
               : gt.attendee.name.replace(/[^a-zA-Z0-9 ]/g, '_');
             const guestDoc = generateTicketPDF(gt.attendee, settings, form, gt.registrationUrl);
+            const guestSubject = (settings.emailGuestSubject || 'Your Ticket for {{event}}')
+              .replace(/\{\{event\}\}/g, form.title)
+              .replace(/\{\{purchaser\}\}/g, purchaserName)
+              .replace(/\{\{name\}\}/g, gt.attendee.name);
+            const guestBody = (settings.emailGuestBody || 'Great news! {{purchaser}} has registered you for {{event}}. Your ticket is attached — please bring it with you to the event. You can scan the QR code on your ticket for entry.')
+              .replace(/\{\{event\}\}/g, form.title)
+              .replace(/\{\{purchaser\}\}/g, purchaserName)
+              .replace(/\{\{name\}\}/g, gt.attendee.name);
             await sendTicketEmail(settings, {
               to: gt.attendee.email,
-              subject: `Your Ticket for ${form.title}`,
+              subject: guestSubject,
               name: gt.attendee.name,
-              message: `Great news! ${purchaserName} has registered you for ${form.title}. Your ticket is attached — please bring it with you to the event. You can scan the QR code on your ticket for entry.`,
+              message: guestBody,
               attachments: [{
                 filename: `${safeName}_Ticket.pdf`,
                 content: arrayBufferToBase64(guestDoc.output('arraybuffer')),

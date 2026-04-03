@@ -242,9 +242,14 @@ export const getSettings = async (): Promise<AppSettings> => {
     emailSubject: data.email_subject || '',
     emailBodyTemplate: data.email_body_template || '',
     emailFooterText: data.email_footer_text || '',
+    emailGuestSubject: data.email_guest_subject || DEFAULT_SETTINGS.emailGuestSubject,
+    emailGuestBody: data.email_guest_body || DEFAULT_SETTINGS.emailGuestBody,
+    emailPurchaserGuestNote: data.email_purchaser_guest_note || DEFAULT_SETTINGS.emailPurchaserGuestNote,
     emailInvitationSubject: data.email_invitation_subject || '',
     emailInvitationBody: data.email_invitation_body || '',
-    pdfSettings: pdfSettings
+    pdfSettings: pdfSettings,
+    defaultDashboardFormId: (data as any).default_dashboard_form_id || undefined,
+    dashboardColumnPrefs: ((data as any).dashboard_column_prefs as Record<string, Record<string, boolean>>) || {},
   };
 
   return settings;
@@ -266,9 +271,14 @@ export const saveSettings = async (settings: AppSettings): Promise<void> => {
     email_subject: settings.emailSubject,
     email_body_template: settings.emailBodyTemplate,
     email_footer_text: settings.emailFooterText,
+    email_guest_subject: settings.emailGuestSubject,
+    email_guest_body: settings.emailGuestBody,
+    email_purchaser_guest_note: settings.emailPurchaserGuestNote,
     email_invitation_subject: settings.emailInvitationSubject,
     email_invitation_body: settings.emailInvitationBody,
-    pdf_settings: settings.pdfSettings as unknown as Database['public']['Tables']['app_settings']['Row']['pdf_settings']
+    pdf_settings: settings.pdfSettings as unknown as Database['public']['Tables']['app_settings']['Row']['pdf_settings'],
+    default_dashboard_form_id: settings.defaultDashboardFormId || null,
+    dashboard_column_prefs: settings.dashboardColumnPrefs || {},
   };
 
   const { error } = await supabase

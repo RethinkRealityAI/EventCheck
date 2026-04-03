@@ -576,6 +576,32 @@ const Settings: React.FC = () => {
                     <input type="text" className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
                       value={settings.emailFooterText} onChange={e => handleChange('emailFooterText', e.target.value)} />
                   </div>
+
+                  {/* Guest Email Settings — only shown in Ticket Confirmation mode */}
+                  {previewMode === 'ticket' && (
+                    <div className="border-t border-gray-200 pt-6 mt-2 space-y-4">
+                      <div>
+                        <h4 className="text-sm font-bold text-gray-900 mb-1">Guest Ticket Email</h4>
+                        <p className="text-xs text-gray-500 mb-3">Sent directly to named guests when the purchaser provides their email. Supports placeholders: <code className="bg-gray-100 px-1 rounded">{'{{event}}'}</code> <code className="bg-gray-100 px-1 rounded">{'{{purchaser}}'}</code> <code className="bg-gray-100 px-1 rounded">{'{{name}}'}</code></p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Guest Email Subject</label>
+                        <input type="text" className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
+                          value={settings.emailGuestSubject} onChange={e => handleChange('emailGuestSubject', e.target.value)} />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Guest Email Message</label>
+                        <textarea className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm" rows={3}
+                          value={settings.emailGuestBody} onChange={e => handleChange('emailGuestBody', e.target.value)} />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Purchaser Guest Backup Note</label>
+                        <p className="text-xs text-gray-500 mb-1">Appended to the purchaser's email when guest tickets are included.</p>
+                        <textarea className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm" rows={3}
+                          value={settings.emailPurchaserGuestNote} onChange={e => handleChange('emailPurchaserGuestNote', e.target.value)} />
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 

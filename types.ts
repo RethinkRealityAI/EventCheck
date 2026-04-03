@@ -198,12 +198,22 @@ export interface AppSettings {
   emailBodyTemplate: string; // HTML supported
   emailFooterText: string;
 
+  // Guest Ticket Email (sent directly to named guests)
+  emailGuestSubject: string;
+  emailGuestBody: string;
+  // Purchaser backup note (appended when guest tickets are included)
+  emailPurchaserGuestNote: string;
+
   // Invitation Email
   emailInvitationSubject: string;
   emailInvitationBody: string; // HTML supported
 
   // PDF Ticket
   pdfSettings: PdfSettings;
+
+  // Dashboard Preferences
+  defaultDashboardFormId?: string;
+  dashboardColumnPrefs?: Record<string, Record<string, boolean>>;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -222,8 +232,15 @@ export const DEFAULT_SETTINGS: AppSettings = {
   emailBodyTemplate: '<p>Hi <strong>{{name}}</strong>,</p><p>Thank you for registering for <strong>{{event}}</strong>!</p><p>Attached is your official PDF ticket. Please present the QR code at the entrance.</p><p>Invoice ID: {{invoiceId}}<br>Amount Paid: {{amount}}</p><p>See you there!</p>',
   emailFooterText: '© 2025 Event Organizers Inc. All rights reserved.',
 
+  emailGuestSubject: 'Your Ticket for {{event}}',
+  emailGuestBody: 'Great news! {{purchaser}} has registered you for {{event}}. Your ticket is attached — please bring it with you to the event. You can scan the QR code on your ticket for entry.',
+  emailPurchaserGuestNote: "We've also included your guest tickets as a backup. Named guests will receive their own ticket by email directly. For any unnamed guests, you can forward their ticket or share the registration link on it so they can provide their details.",
+
   emailInvitationSubject: 'You are invited!',
   emailInvitationBody: '<p>Hi there,</p><p>We would love for you to join us at <strong>{{event}}</strong>.</p><p>Please click the link below to register:</p><p><a href="{{link}}" style="color: #4F46E5;">Register Now</a></p><p>Best regards,<br>The Team</p>',
+
+  defaultDashboardFormId: undefined,
+  dashboardColumnPrefs: {},
 
   pdfSettings: {
     enabled: true,
