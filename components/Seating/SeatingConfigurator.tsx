@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, Suspense, useMemo, useRef } from 'react';
-import { Eye, Rows3, Plus, Trash2, Settings, Save, Loader2, RotateCcw, Crown, FileText, Download, Layout, CheckCircle2, Box, Palette, Tag, Move, RotateCw, Maximize2, Upload, Package, Undo2, Redo2, Copy, Search } from 'lucide-react';
+import { Eye, Rows3, Plus, Trash2, Settings, Save, Loader2, RotateCcw, Crown, FileText, Download, Layout, CheckCircle2, Box, Palette, Tag, Move, RotateCw, Maximize2, Upload, Package, Undo2, Redo2, Copy, Search, Users } from 'lucide-react';
 import Scene3D from './Scene3D';
 import GuestSidebar from './GuestSidebar';
 import { SeatingTable, Attendee, SeatingConfiguration, SeatingAssignment, SceneElement, SceneElementType, Custom3DModel } from '../../types';
@@ -65,6 +65,7 @@ export default function SeatingConfigurator() {
 
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
+    const [lastSavedSnapshot, setLastSavedSnapshot] = useState<string>('');
 
     const [history, setHistory] = useState<HistorySnapshot[]>([]);
     const [historyIndex, setHistoryIndex] = useState(-1);
@@ -118,6 +119,13 @@ export default function SeatingConfigurator() {
             };
         });
     }, [attendees, assignments]);
+
+    const currentSnapshot = useMemo(() =>
+        JSON.stringify({ tables, assignments, sceneElements }),
+        [tables, assignments, sceneElements]
+    );
+
+    const hasUnsavedChanges = currentSnapshot !== lastSavedSnapshot && lastSavedSnapshot !== '';
 
     // UI state
     const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
@@ -226,6 +234,7 @@ export default function SeatingConfigurator() {
             setSelectedTableId(null);
             setSelectedElementId(null);
             setLoading(false);
+            setLastSavedSnapshot(JSON.stringify({ tables: t, assignments: as, sceneElements: se }));
             // Push initial snapshot for undo baseline
             setTimeout(() => {
                 pushHistory();
@@ -445,6 +454,7 @@ export default function SeatingConfigurator() {
                 saveSceneElements(sceneElements, activeConfigId)
             ]);
             showNotification('Layout saved successfully', 'success');
+            setLastSavedSnapshot(JSON.stringify({ tables, assignments, sceneElements }));
         } catch (err) {
             showNotification('Failed to save layout. Please try again.', 'error');
             console.error('Save error:', err);
@@ -771,6 +781,25 @@ export default function SeatingConfigurator() {
 
                     <div className="flex items-center bg-slate-800 rounded-xl p-1 border border-slate-700/50">
                         <button
+                            onClick={() => setShowConfig(!showConfig)}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${showConfig ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
+                            title="Toggle Config Panel"
+                        >
+                            <Settings className="w-3.5 h-3.5" />
+                            Config
+                        </button>
+                        <button
+                            onClick={() => setShowGuests(!showGuests)}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${showGuests ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
+                            title="Toggle Guest Panel"
+                        >
+                            <Users className="w-3.5 h-3.5" />
+                            Guests
+                        </button>
+                    </div>
+
+                    <div className="flex items-center bg-slate-800 rounded-xl p-1 border border-slate-700/50">
+                        <button
                             onClick={undo}
                             disabled={historyIndex <= 0}
                             className="p-1.5 text-slate-400 hover:text-white disabled:text-slate-700 transition-colors rounded-lg"
@@ -799,10 +828,14 @@ export default function SeatingConfigurator() {
                         <button
                             onClick={handleSave}
                             disabled={saving}
-                            className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-700 text-white text-sm font-bold rounded-lg transition-all shadow-lg shadow-emerald-600/20"
+                            className={`flex items-center gap-2 px-4 py-2 text-white text-sm font-bold rounded-lg transition-all shadow-lg ${
+                                hasUnsavedChanges
+                                    ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/20'
+                                    : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20'
+                            } disabled:bg-slate-700`}
                         >
                             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                            {saving ? 'Saving...' : 'Save Layout'}
+                            {saving ? 'Saving...' : hasUnsavedChanges ? 'Save Changes' : 'Saved'}
                         </button>
                     </div>
                 </div>
@@ -1170,6 +1203,9 @@ export default function SeatingConfigurator() {
                                                     <span className="text-[9px] font-bold uppercase tracking-wider">Scale (S)</span>
                                                 </button>
                                             </div>
+                                            <p className="text-[9px] text-slate-600 mt-2 text-center">
+                                                T = Move · R = Rotate · S = Scale · Ctrl+Z = Undo
+                                            </p>
                                         </div>
                                         <button
                                             onClick={deleteSelectedElement}
