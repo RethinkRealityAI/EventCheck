@@ -488,33 +488,97 @@ export default function SeatingConfigurator() {
         setAssignments(prev => prev.filter(as => as.attendeeId !== guestId));
     };
 
-    // Auto assign
+    // Auto assign — group-aware: keeps purchaser parties together
     const handleAutoAssign = () => {
         pushHistory();
         const unassigned = attendees.filter(a => !assignments.some(as => as.attendeeId === a.id));
-        if (unassigned.length === 0) return;
+        if (unassigned.length === 0) {
+            showNotification('All guests are already assigned', 'info');
+            return;
+        }
+
+        // Group by purchaser party: primaryAttendeeId links guests to their purchaser
+        const parties: Attendee[][] = [];
+        const solos: Attendee[] = [];
+        const grouped = new Set<string>();
+
+        const purchasers = unassigned.filter(a => a.isPrimary || !a.primaryAttendeeId);
+        for (const purchaser of purchasers) {
+            const guests = unassigned.filter(
+                g => g.primaryAttendeeId === purchaser.id && g.id !== purchaser.id
+            );
+            if (guests.length > 0) {
+                const party = [purchaser, ...guests];
+                parties.push(party);
+                party.forEach(p => grouped.add(p.id));
+            }
+        }
+
+        unassigned.forEach(a => {
+            if (!grouped.has(a.id)) solos.push(a);
+        });
+
+        parties.sort((a, b) => b.length - a.length);
 
         const newAssignments = [...assignments];
-        let guestIndex = 0;
 
-        for (const table of tables) {
-            const tableAssigned = newAssignments.filter(as => as.tableId === table.id);
-            const available = table.capacity - tableAssigned.length;
+        const assignToTable = (guest: Attendee, tableId: string) => {
+            const existing = newAssignments.filter(a => a.tableId === tableId);
+            newAssignments.push({
+                id: crypto.randomUUID(),
+                configurationId: activeConfigId,
+                attendeeId: guest.id,
+                tableId,
+                seatNumber: existing.length + 1
+            });
+        };
 
-            for (let s = 0; s < available && guestIndex < unassigned.length; s++) {
-                newAssignments.push({
-                    id: crypto.randomUUID(),
-                    configurationId: activeConfigId,
-                    attendeeId: unassigned[guestIndex].id,
-                    tableId: table.id,
-                    seatNumber: tableAssigned.length + s + 1
-                });
-                guestIndex++;
+        const getAvailableSeats = (tableId: string) => {
+            const table = tables.find(t => t.id === tableId);
+            if (!table) return 0;
+            return table.capacity - newAssignments.filter(a => a.tableId === tableId).length;
+        };
+
+        for (const party of parties) {
+            let placed = false;
+            for (const table of tables) {
+                if (getAvailableSeats(table.id) >= party.length) {
+                    party.forEach(g => assignToTable(g, table.id));
+                    placed = true;
+                    break;
+                }
             }
-            if (guestIndex >= unassigned.length) break;
+            if (!placed) {
+                let remaining = [...party];
+                for (const table of tables) {
+                    const available = getAvailableSeats(table.id);
+                    if (available <= 0) continue;
+                    const batch = remaining.splice(0, available);
+                    batch.forEach(g => assignToTable(g, table.id));
+                    if (remaining.length === 0) break;
+                }
+            }
+        }
+
+        let soloIdx = 0;
+        for (const table of tables) {
+            const available = getAvailableSeats(table.id);
+            for (let s = 0; s < available && soloIdx < solos.length; s++) {
+                assignToTable(solos[soloIdx], table.id);
+                soloIdx++;
+            }
+            if (soloIdx >= solos.length) break;
         }
 
         setAssignments(newAssignments);
+
+        const totalAssigned = newAssignments.length - assignments.length;
+        const overflow = unassigned.length - totalAssigned;
+        if (overflow > 0) {
+            showNotification(`Assigned ${totalAssigned} guests. ${overflow} couldn't fit — add more tables or increase capacity.`, 'warning');
+        } else {
+            showNotification(`All ${totalAssigned} guests assigned successfully`, 'success');
+        }
     };
 
     // PDF Export

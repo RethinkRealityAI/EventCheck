@@ -165,8 +165,23 @@ export default function GuestSidebar({
                                         className="w-4 h-4 rounded accent-indigo-600"
                                     />
                                     <div className="flex-1 min-w-0">
-                                        <p className="text-sm font-medium text-white truncate">{guest.name}</p>
-                                        <p className="text-xs text-slate-400 truncate">{guest.email}</p>
+                                        <div className="flex items-center gap-1.5">
+                                            <p className="text-sm font-medium text-white truncate">{guest.name}</p>
+                                            {guest.guestType === 'child' && (
+                                                <span className="text-[9px] bg-sky-500/20 text-sky-300 px-1.5 py-0.5 rounded-full font-bold uppercase">Child</span>
+                                            )}
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <p className="text-xs text-slate-400 truncate">{guest.email}</p>
+                                            {guest.dietaryPreferences && (
+                                                <span className="text-[9px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded-full" title={guest.dietaryPreferences}>
+                                                    🍽
+                                                </span>
+                                            )}
+                                        </div>
+                                        {guest.ticketType && (
+                                            <p className="text-[10px] text-slate-500 truncate mt-0.5">{guest.ticketType}</p>
+                                        )}
                                     </div>
                                     {selectedTableId && spotsLeft > 0 && (
                                         <button
@@ -203,9 +218,20 @@ export default function GuestSidebar({
                                             <TableIcon className="w-3.5 h-3.5 text-indigo-400" />
                                             <span className="text-xs font-bold text-white">{table.name}</span>
                                         </div>
-                                        <span className="text-[10px] bg-slate-700 text-slate-300 px-1.5 py-0.5 rounded">
-                                            {assignedByTable[table.id].length}/{table.capacity}
-                                        </span>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-[10px] bg-slate-700 text-slate-300 px-1.5 py-0.5 rounded">
+                                                {assignedByTable[table.id].length}/{table.capacity}
+                                            </span>
+                                            <button
+                                                onClick={() => {
+                                                    assignedByTable[table.id].forEach(g => onUnassignGuest(g.id));
+                                                }}
+                                                className="p-1 text-slate-500 hover:text-red-400 transition-colors"
+                                                title="Clear all from this table"
+                                            >
+                                                <X className="w-3 h-3" />
+                                            </button>
+                                        </div>
                                     </div>
                                     <div className="p-1 space-y-0.5">
                                         {assignedByTable[table.id].map(guest => (
@@ -231,6 +257,27 @@ export default function GuestSidebar({
                         </div>
                     )}
                 </div>
+            </div>
+
+            {/* Summary */}
+            <div className="p-4 border-t border-slate-700/50 bg-slate-950/50">
+                <div className="flex justify-between text-xs">
+                    <span className="text-slate-500">Total Capacity</span>
+                    <span className="text-white font-mono">
+                        {tables.reduce((s, t) => s + t.capacity, 0)} seats
+                    </span>
+                </div>
+                <div className="flex justify-between text-xs mt-1">
+                    <span className="text-slate-500">Total Guests</span>
+                    <span className={`font-mono ${attendees.length > tables.reduce((s, t) => s + t.capacity, 0) ? 'text-red-400' : 'text-emerald-400'}`}>
+                        {attendees.length}
+                    </span>
+                </div>
+                {attendees.length > tables.reduce((s, t) => s + t.capacity, 0) && (
+                    <p className="text-[10px] text-red-400 mt-2">
+                        ⚠ {attendees.length - tables.reduce((s, t) => s + t.capacity, 0)} guests won't fit. Add tables or increase capacity.
+                    </p>
+                )}
             </div>
         </div>
     );
