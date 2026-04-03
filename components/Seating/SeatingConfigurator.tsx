@@ -23,6 +23,7 @@ import {
 import { Form } from '../../types';
 import jsPDF from 'jspdf';
 import ConfirmDialog from './ConfirmDialog';
+import { useNotifications } from '../NotificationSystem';
 
 const ELEMENT_TYPES: { value: SceneElementType; label: string; icon: string }[] = [
     { value: 'stage', label: 'Stage', icon: '🎤' },
@@ -50,6 +51,8 @@ interface HistorySnapshot {
 const MAX_HISTORY = 30;
 
 export default function SeatingConfigurator() {
+    const { showNotification } = useNotifications();
+
     // Data state
     const [forms, setForms] = useState<Form[]>([]);
     const [selectedFormId, setSelectedFormId] = useState<string>('');
@@ -434,12 +437,19 @@ export default function SeatingConfigurator() {
     const handleSave = async () => {
         if (!activeConfigId) return;
         setSaving(true);
-        await Promise.all([
-            saveSeatingTables(tables, selectedFormId, activeConfigId),
-            saveSeatingAssignments(assignments, activeConfigId),
-            saveSceneElements(sceneElements, activeConfigId)
-        ]);
-        setSaving(false);
+        try {
+            await Promise.all([
+                saveSeatingTables(tables, selectedFormId, activeConfigId),
+                saveSeatingAssignments(assignments, activeConfigId),
+                saveSceneElements(sceneElements, activeConfigId)
+            ]);
+            showNotification('Layout saved successfully', 'success');
+        } catch (err) {
+            showNotification('Failed to save layout. Please try again.', 'error');
+            console.error('Save error:', err);
+        } finally {
+            setSaving(false);
+        }
     };
 
     // Assign guests
@@ -932,6 +942,55 @@ export default function SeatingConfigurator() {
                                                 onChange={(e) => updateSelectedTable({ name: e.target.value })}
                                                 className="w-full bg-slate-900/50 border border-slate-700 text-white text-sm rounded-xl px-3 py-2.5 focus:ring-2 focus:ring-indigo-500"
                                             />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[10px] text-slate-500 font-bold uppercase mb-1">Seats</label>
+                                            <div className="flex items-center gap-2">
+                                                <button
+                                                    onClick={() => {
+                                                        pushHistory();
+                                                        const newCap = Math.max(2, selectedTable.capacity - 1);
+                                                        updateSelectedTable({ capacity: newCap });
+                                                        const tableAssigned = assignments.filter(a => a.tableId === selectedTableId);
+                                                        if (tableAssigned.length > newCap) {
+                                                            const toRemove = tableAssigned.slice(newCap);
+                                                            setAssignments(prev => prev.filter(a => !toRemove.some(r => r.id === a.id)));
+                                                        }
+                                                    }}
+                                                    className="p-1.5 bg-slate-900/50 border border-slate-700 text-slate-300 hover:text-white rounded-lg transition-colors"
+                                                >
+                                                    -
+                                                </button>
+                                                <span className="text-white text-sm font-mono w-8 text-center">{selectedTable.capacity}</span>
+                                                <button
+                                                    onClick={() => {
+                                                        pushHistory();
+                                                        updateSelectedTable({ capacity: Math.min(20, selectedTable.capacity + 1) });
+                                                    }}
+                                                    className="p-1.5 bg-slate-900/50 border border-slate-700 text-slate-300 hover:text-white rounded-lg transition-colors"
+                                                >
+                                                    +
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label className="block text-[10px] text-slate-500 font-bold uppercase mb-1">Rotation</label>
+                                            <input
+                                                type="range"
+                                                min={0}
+                                                max={360}
+                                                value={Math.round((selectedTable.rotation * 180) / Math.PI)}
+                                                onChange={(e) => {
+                                                    const degrees = parseInt(e.target.value);
+                                                    updateSelectedTable({ rotation: (degrees * Math.PI) / 180 });
+                                                }}
+                                                className="w-full accent-indigo-500"
+                                            />
+                                            <div className="flex justify-between text-[9px] text-slate-600 mt-1">
+                                                <span>0°</span>
+                                                <span className="text-slate-400 font-mono">{Math.round((selectedTable.rotation * 180) / Math.PI)}°</span>
+                                                <span>360°</span>
+                                            </div>
                                         </div>
                                         <div>
                                             <label className="block text-[10px] text-slate-500 font-bold uppercase mb-1">Notes</label>
