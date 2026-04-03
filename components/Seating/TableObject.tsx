@@ -25,7 +25,7 @@ interface TableObjectProps {
     guests: Attendee[];
 }
 
-const Chair = React.memo(function Chair({ position, rotation, isOccupied }: { position: [number, number, number]; rotation: [number, number, number]; isOccupied: boolean }) {
+const Chair = React.memo(function Chair({ position, rotation, isOccupied, hasDietary }: { position: [number, number, number]; rotation: [number, number, number]; isOccupied: boolean; hasDietary?: boolean }) {
     return (
         <group position={position} rotation={rotation}>
             <mesh geometry={CHAIR_SEAT_GEO} material={CHAIR_MAT} position={[0, 0.35, 0]} />
@@ -35,6 +35,12 @@ const Chair = React.memo(function Chair({ position, rotation, isOccupied }: { po
                 <group position={[0, 0.5, 0]}>
                     <mesh geometry={PERSON_BODY_GEO} material={PERSON_MAT} position={[0, 0.22, 0]} />
                     <mesh geometry={PERSON_HEAD_GEO} material={PERSON_MAT} position={[0, 0.55, 0]} />
+                    {hasDietary && (
+                        <mesh position={[0.2, 0.7, 0]}>
+                            <sphereGeometry args={[0.06, 8, 8]} />
+                            <meshBasicMaterial color="#f59e0b" />
+                        </mesh>
+                    )}
                 </group>
             )}
         </group>
@@ -96,6 +102,14 @@ function TableObject({ table, isSelected, onClick, guests }: TableObjectProps) {
                 </mesh>
             )}
 
+            {/* Capacity fill ring — thin arc showing occupancy */}
+            {guests.length > 0 && !showGlow && (
+                <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
+                    <ringGeometry args={[1.5, 1.6, 32, 1, 0, (occupancy * Math.PI * 2)]} />
+                    <meshBasicMaterial color={statusColor} transparent opacity={0.5} />
+                </mesh>
+            )}
+
             {/* Table surface */}
             <mesh
                 geometry={table.shape === 'round' ? TABLE_ROUND_GEO : TABLE_RECT_GEO}
@@ -108,9 +122,15 @@ function TableObject({ table, isSelected, onClick, guests }: TableObjectProps) {
 
             {/* Chairs */}
             {chairPositions.map((chair, i) => {
-                const isOccupied = guests.some(g => g.assignedSeat === chair.seatId);
+                const occupant = guests.find(g => g.assignedSeat === chair.seatId);
                 return (
-                    <Chair key={i} position={chair.pos} rotation={chair.rot} isOccupied={isOccupied} />
+                    <Chair
+                        key={i}
+                        position={chair.pos}
+                        rotation={chair.rot}
+                        isOccupied={!!occupant}
+                        hasDietary={!!occupant?.dietaryPreferences}
+                    />
                 );
             })}
 
