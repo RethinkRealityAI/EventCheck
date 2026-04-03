@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, Suspense, useMemo, useRef } from 'react';
-import { Rows3, Plus, Trash2, Settings, Save, Loader2, Crown, Download, Box, Move, RotateCw, Maximize2, Upload, Package, Undo2, Redo2, Copy, Search, Users } from 'lucide-react';
+import { Rows3, Plus, Trash2, Settings, Save, Loader2, Crown, Download, Box, Move, RotateCw, Maximize2, Upload, Package, Undo2, Redo2, Copy, Search, Users, PanelLeftClose, PanelRightClose, PanelLeftOpen, PanelRightOpen } from 'lucide-react';
 import Scene3D from './Scene3D';
 import GuestSidebar from './GuestSidebar';
 import { SeatingTable, Attendee, SeatingConfiguration, SeatingAssignment, SceneElement, SceneElementType, Custom3DModel } from '../../types';
@@ -757,24 +757,6 @@ export default function SeatingConfigurator() {
                             </button>
                         </div>
 
-                        {/* Panel toggles */}
-                        <div className="flex items-center bg-slate-800 rounded-lg p-0.5 border border-slate-700/50">
-                            <button
-                                onClick={() => setShowConfig(!showConfig)}
-                                className={`p-1.5 rounded-md transition-all ${showConfig ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}
-                                title="Toggle Config Panel"
-                            >
-                                <Settings className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                                onClick={() => setShowGuests(!showGuests)}
-                                className={`p-1.5 rounded-md transition-all ${showGuests ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}
-                                title="Toggle Guest Panel"
-                            >
-                                <Users className="w-3.5 h-3.5" />
-                            </button>
-                        </div>
-
                         {/* Undo/Redo */}
                         <div className="flex items-center bg-slate-800 rounded-lg p-0.5 border border-slate-700/50">
                             <button
@@ -822,9 +804,23 @@ export default function SeatingConfigurator() {
             {/* Main content */}
             <div className="flex-1 flex overflow-hidden">
                 {/* Config Panel (Left) */}
-                {showConfig && (
-                    <div className="w-72 flex-shrink-0 bg-slate-900 border-r border-slate-700/50 overflow-y-auto custom-scrollbar flex flex-col">
-                        <div className="p-4 space-y-6 flex-1">
+                {showConfig ? (
+                    <div className="w-72 flex-shrink-0 bg-slate-900 border-r border-slate-700/50 overflow-y-auto custom-scrollbar flex flex-col z-10">
+                        {/* Panel header with close */}
+                        <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-700/50 flex-shrink-0">
+                            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                                <Settings className="w-3.5 h-3.5 text-indigo-400" />
+                                Configuration
+                            </h3>
+                            <button
+                                onClick={() => setShowConfig(false)}
+                                className="p-1 text-slate-500 hover:text-white hover:bg-slate-800 rounded-md transition-colors"
+                                title="Collapse panel"
+                            >
+                                <PanelLeftClose className="w-4 h-4" />
+                            </button>
+                        </div>
+                        <div className="p-4 space-y-6 flex-1 overflow-y-auto custom-scrollbar">
                             {/* Generator Header */}
                             <div className="bg-indigo-600/10 rounded-2xl p-4 border border-indigo-500/20">
                                 <h4 className="text-xs font-bold text-indigo-400 uppercase tracking-wider mb-4 flex items-center gap-2">
@@ -1297,33 +1293,42 @@ export default function SeatingConfigurator() {
                             </div>
                         </div>
                     </div>
+                ) : (
+                    <button
+                        onClick={() => setShowConfig(true)}
+                        className="flex-shrink-0 w-8 flex flex-col items-center justify-center bg-slate-900 border-r border-slate-700/50 hover:bg-slate-800 transition-colors group z-10"
+                        title="Open config panel"
+                    >
+                        <PanelLeftOpen className="w-4 h-4 text-slate-500 group-hover:text-indigo-400 transition-colors" />
+                        <span className="text-[9px] text-slate-600 group-hover:text-slate-400 mt-2 [writing-mode:vertical-lr] tracking-widest uppercase font-bold">Config</span>
+                    </button>
                 )}
 
                 {/* 3D View */}
                 <div className="flex-1 relative bg-slate-950 overflow-hidden">
                     {loading ? (
-                        <div className="absolute inset-0 flex items-center justify-center bg-slate-950/80 z-10">
+                        <div className="absolute inset-0 flex items-center justify-center bg-slate-950 z-20">
                             <div className="text-center">
                                 <Loader2 className="w-10 h-10 text-indigo-500 animate-spin mx-auto mb-4" />
                                 <p className="text-slate-400 text-sm font-medium">Reconstructing Layout...</p>
                             </div>
                         </div>
                     ) : tables.length === 0 && sceneElements.length === 0 ? (
-                        <div className="absolute inset-0 flex items-center justify-center p-8">
+                        <div className="absolute inset-0 flex items-center justify-center p-8 z-20 bg-slate-950">
                             <div className="text-center max-w-sm">
                                 <div className="w-20 h-20 bg-slate-900 rounded-3xl flex items-center justify-center mx-auto mb-6 border border-slate-800">
                                     <Rows3 className="w-10 h-10 text-slate-700" />
                                 </div>
                                 <h3 className="text-xl font-bold text-white mb-3">No Room Layout Data</h3>
                                 <p className="text-slate-400 text-sm mb-8 leading-relaxed">
-                                    Start by selecting an event and configuration above. You can then use the generator to populate the floor plan with tables, or add scene elements.
+                                    Use the config panel to generate tables and build your floor plan.
                                 </p>
                                 {!showConfig && (
                                     <button
                                         onClick={() => setShowConfig(true)}
                                         className="px-6 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-600/20"
                                     >
-                                        Initialize Designer
+                                        Open Config Panel
                                     </button>
                                 )}
                             </div>
@@ -1349,8 +1354,8 @@ export default function SeatingConfigurator() {
                 </div>
 
                 {/* Guest Sidebar */}
-                {showGuests && (
-                    <div className="w-72 flex-shrink-0 border-l border-slate-700/50 shadow-2xl">
+                {showGuests ? (
+                    <div className="w-72 flex-shrink-0 border-l border-slate-700/50 shadow-2xl z-10">
                         <GuestSidebar
                             attendees={enhancedAttendees}
                             tables={tables}
@@ -1358,8 +1363,18 @@ export default function SeatingConfigurator() {
                             onAssignGuests={handleAssignGuests}
                             onUnassignGuest={handleUnassignGuest}
                             onAutoAssign={handleAutoAssign}
+                            onCollapse={() => setShowGuests(false)}
                         />
                     </div>
+                ) : (
+                    <button
+                        onClick={() => setShowGuests(true)}
+                        className="flex-shrink-0 w-8 flex flex-col items-center justify-center bg-slate-900 border-l border-slate-700/50 hover:bg-slate-800 transition-colors group z-10"
+                        title="Open guest panel"
+                    >
+                        <PanelRightOpen className="w-4 h-4 text-slate-500 group-hover:text-indigo-400 transition-colors" />
+                        <span className="text-[9px] text-slate-600 group-hover:text-slate-400 mt-2 [writing-mode:vertical-lr] tracking-widest uppercase font-bold">Guests</span>
+                    </button>
                 )}
             </div>
 

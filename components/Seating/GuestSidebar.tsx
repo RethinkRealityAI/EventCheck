@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Search, UserPlus, Users, X, ChevronDown, ChevronUp, Shuffle, UserMinus, Table as TableIcon } from 'lucide-react';
+import { Search, UserPlus, Users, X, ChevronDown, ChevronUp, Shuffle, UserMinus, Table as TableIcon, PanelRightClose } from 'lucide-react';
 import { Attendee, SeatingTable } from '../../types';
 
 interface GuestSidebarProps {
@@ -9,6 +9,7 @@ interface GuestSidebarProps {
     onAssignGuests: (guestIds: string[], tableId: string) => void;
     onUnassignGuest: (guestId: string) => void;
     onAutoAssign: () => void;
+    onCollapse?: () => void;
 }
 
 export default function GuestSidebar({
@@ -17,7 +18,8 @@ export default function GuestSidebar({
     selectedTableId,
     onAssignGuests,
     onUnassignGuest,
-    onAutoAssign
+    onAutoAssign,
+    onCollapse
 }: GuestSidebarProps) {
     const [search, setSearch] = useState('');
     const [selectedGuests, setSelectedGuests] = useState<Set<string>>(new Set());
@@ -79,14 +81,25 @@ export default function GuestSidebar({
     return (
         <div className="w-full h-full flex flex-col bg-slate-900 text-white overflow-hidden">
             {/* Header */}
-            <div className="p-4 border-b border-slate-700/50">
-                <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                    <Users className="w-5 h-5 text-indigo-400" />
-                    Guest List
-                </h3>
-                <p className="text-xs text-slate-400 mt-1">
-                    {unassigned.length} unassigned · {assigned.length} assigned
-                </p>
+            <div className="px-4 py-2.5 border-b border-slate-700/50 flex items-center justify-between flex-shrink-0">
+                <div>
+                    <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                        <Users className="w-3.5 h-3.5 text-indigo-400" />
+                        Guests
+                    </h3>
+                    <p className="text-[10px] text-slate-500 mt-0.5">
+                        {unassigned.length} unassigned · {assigned.length} assigned
+                    </p>
+                </div>
+                {onCollapse && (
+                    <button
+                        onClick={onCollapse}
+                        className="p-1 text-slate-500 hover:text-white hover:bg-slate-800 rounded-md transition-colors"
+                        title="Collapse panel"
+                    >
+                        <PanelRightClose className="w-4 h-4" />
+                    </button>
+                )}
             </div>
 
             {/* Search */}
