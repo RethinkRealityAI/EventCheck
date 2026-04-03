@@ -75,14 +75,21 @@ const FormsManager: React.FC = () => {
 
   return (
     <div>
-      <div className="flex justify-between items-center mb-8">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900">Event Forms</h2>
-          <p className="text-gray-500">Create and manage registration forms for your events.</p>
+      <div className="flex justify-between items-center mb-8 bg-gradient-to-r from-emerald-600 to-teal-700 p-8 rounded-3xl shadow-2xl shadow-emerald-600/20 text-white relative overflow-hidden border border-emerald-500/30">
+        <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
+        <div className="absolute -right-10 -top-20 opacity-20 transform rotate-12 scale-150 pointer-events-none">
+          <Globe strokeWidth={1.5} className="w-64 h-64 text-white" />
+        </div>
+        <div className="relative z-10">
+          <div className="inline-block bg-white/20 backdrop-blur-md px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase mb-3 border border-white/20 shadow-sm text-emerald-50">
+            FORM STUDIO
+          </div>
+          <h2 className="text-4xl font-extrabold text-white mb-2 drop-shadow-md tracking-tight">Event Forms</h2>
+          <p className="text-emerald-100 font-medium tracking-wide text-lg max-w-lg">Create and manage registration forms for your events.</p>
         </div>
         <button
           onClick={handleCreate}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition font-medium"
+          className="relative z-10 flex items-center gap-2 px-6 py-3 bg-white text-emerald-700 rounded-xl hover:bg-emerald-50 transition font-bold shadow-xl shadow-black/10 hover:shadow-2xl hover:scale-105 transform duration-300"
         >
           <Plus className="w-5 h-5" /> Create New Form
         </button>
@@ -90,33 +97,36 @@ const FormsManager: React.FC = () => {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {forms.map(form => (
-          <div key={form.id} className="bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow flex flex-col">
-            <div className="p-6 flex-1">
+          <div key={form.id} className="bg-white/60 backdrop-blur-3xl rounded-3xl border border-white/60 shadow-xl shadow-indigo-500/5 hover:shadow-2xl hover:shadow-indigo-500/10 transition-all duration-300 transform hover:-translate-y-1 flex flex-col relative overflow-hidden group">
+            <div className="absolute top-0 right-0 p-6 opacity-5 group-hover:opacity-10 transition-opacity duration-300 pointer-events-none">
+               <Globe className="w-24 h-24 transform right-[-20px] top-[-20px]" />
+            </div>
+            <div className="p-6 flex-1 relative z-10">
               <div className="flex justify-between items-start mb-4">
-                <div className={`px-2 py-1 rounded text-xs font-semibold uppercase tracking-wide ${form.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
+                <div className={`px-3 py-1 rounded-xl text-xs font-bold uppercase tracking-wide shadow-sm border ${form.status === 'active' ? 'bg-emerald-100 text-emerald-700 border-emerald-200/50' : 'bg-yellow-100 text-yellow-700 border-yellow-200/50'
                   }`}>
                   {form.status}
                 </div>
-                <div className="text-xs text-gray-400">
+                <div className="text-xs font-bold text-slate-400 bg-white/50 px-2 py-1 rounded-lg backdrop-blur-sm border border-white/40">
                   {new Date(form.createdAt).toLocaleDateString()}
                 </div>
               </div>
-              <h3 className="text-lg font-bold text-gray-900 mb-1">{form.title}</h3>
-              <p className="text-sm text-gray-500 line-clamp-2 mb-4">{form.description}</p>
+              <h3 className="text-xl font-black text-slate-800 mb-2">{form.title}</h3>
+              <p className="text-sm font-medium text-slate-500 line-clamp-2 mb-4">{form.description}</p>
             </div>
 
-            <div className="p-4 bg-gray-50 border-t border-gray-100 rounded-b-xl flex justify-between items-center">
+            <div className="p-4 bg-white/40 backdrop-blur-md border-t border-white/60 flex justify-between items-center relative z-10">
               <div className="flex gap-2">
                 <Link
                   to={`/admin/builder/${form.id}`}
-                  className="p-2 text-gray-600 hover:text-indigo-600 hover:bg-white rounded-lg transition"
+                  className="p-2.5 text-slate-500 hover:text-indigo-600 hover:bg-white rounded-xl transition shadow-sm border border-transparent hover:border-indigo-100"
                   title="Edit Builder"
                 >
                   <Edit3 className="w-5 h-5" />
                 </Link>
                 <button
                   onClick={() => setShowEmbedModal(form.id)}
-                  className="p-2 text-gray-600 hover:text-indigo-600 hover:bg-white rounded-lg transition"
+                  className="p-2.5 text-slate-500 hover:text-indigo-600 hover:bg-white rounded-xl transition shadow-sm border border-transparent hover:border-indigo-100"
                   title="Get Embed Code"
                 >
                   <Code className="w-5 h-5" />
@@ -124,14 +134,14 @@ const FormsManager: React.FC = () => {
                 <Link
                   to={`/form/${form.id}`}
                   target="_blank"
-                  className="p-2 text-gray-600 hover:text-green-600 hover:bg-white rounded-lg transition"
+                  className="p-2.5 text-slate-500 hover:text-emerald-600 hover:bg-white rounded-xl transition shadow-sm border border-transparent hover:border-emerald-100"
                   title="View Public Page"
                 >
                   <ExternalLink className="w-5 h-5" />
                 </Link>
                 <button
                   onClick={() => handleDuplicate(form)}
-                  className="p-2 text-gray-600 hover:text-blue-600 hover:bg-white rounded-lg transition"
+                  className="p-2.5 text-slate-500 hover:text-blue-600 hover:bg-white rounded-xl transition shadow-sm border border-transparent hover:border-blue-100"
                   title="Duplicate Form"
                 >
                   <Copy className="w-5 h-5" />
@@ -139,7 +149,7 @@ const FormsManager: React.FC = () => {
               </div>
               <button
                 onClick={() => handleDelete(form.id)}
-                className="p-2 text-gray-400 hover:text-red-600 hover:bg-white rounded-lg transition"
+                className="p-2.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition border border-transparent hover:border-red-100"
               >
                 <Trash2 className="w-5 h-5" />
               </button>

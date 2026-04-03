@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { HashRouter, Routes, Route, Link, useLocation, Navigate, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, QrCode, ClipboardList, LogOut, Settings as SettingsIcon, ExternalLink, Menu, X, ChevronLeft, ChevronRight, Loader2, Rows3 } from 'lucide-react';
+import { LayoutDashboard, QrCode, ClipboardList, LogOut, Settings as SettingsIcon, ExternalLink, Menu, X, ChevronLeft, ChevronRight, Loader2, Rows3, Users } from 'lucide-react';
 import ManualTicketTool from './components/ManualTicketTool';
 import AttendeeList from './components/AttendeeList';
 import Scanner from './components/Scanner';
@@ -10,8 +10,8 @@ import Settings from './components/Settings';
 import PublicRegistration from './components/PublicRegistration';
 import SeatingConfigurator from './components/Seating/SeatingConfigurator';
 import { NotificationProvider } from './components/NotificationSystem';
-import { Attendee } from './types';
-import { getAttendees, checkInAttendee } from './services/storageService';
+import { Attendee, Form } from './types';
+import { getAttendees, checkInAttendee, getForms } from './services/storageService';
 import { AuthProvider, useAuth } from './components/AuthContext';
 import Login from './components/Login';
 
@@ -52,29 +52,41 @@ const DashboardStats = ({ attendees }: { attendees: Attendee[] }) => {
     <div className="space-y-8 mb-8">
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-          <h3 className="text-gray-500 text-sm font-medium mb-2">Total Registrations</h3>
-          <p className="text-4xl font-bold text-gray-900">{primaryAttendees.length}</p>
-          {guestCount > 0 && <p className="text-xs text-gray-400 mt-1">+ {guestCount} guest ticket{guestCount !== 1 ? 's' : ''}</p>}
-        </div>
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-          <h3 className="text-gray-500 text-sm font-medium mb-2">Live Attendance</h3>
-          <div className="flex items-baseline gap-2">
-            <p className="text-4xl font-bold text-indigo-600">{checkedIn}</p>
-            <span className="text-sm text-gray-400">/ {total}</span>
+        <div className="bg-white/80 backdrop-blur-2xl p-6 rounded-3xl shadow-xl shadow-indigo-500/10 border border-white/60 hover:shadow-2xl hover:shadow-indigo-500/20 transition-all duration-300 transform hover:-translate-y-1 relative overflow-hidden group">
+          <div className="absolute top-0 right-0 p-6 opacity-5 group-hover:opacity-10 transition-opacity duration-300">
+            <Users className="w-16 h-16 transform right-[-10px] top-[-10px]" />
           </div>
-          <div className="w-full bg-gray-100 rounded-full h-1.5 mt-3">
-            <div className="bg-indigo-600 h-1.5 rounded-full" style={{ width: `${percentage}%` }}></div>
+          <h3 className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-2">Total Registrations</h3>
+          <p className="text-4xl font-extrabold text-slate-800 drop-shadow-sm">{primaryAttendees.length}</p>
+          {guestCount > 0 && <p className="text-xs text-indigo-600 font-semibold mt-2 bg-indigo-50 inline-block px-2 py-1 rounded-md">+ {guestCount} guest ticket{guestCount !== 1 ? 's' : ''}</p>}
+        </div>
+        <div className="bg-white/80 backdrop-blur-2xl p-6 rounded-3xl shadow-xl shadow-indigo-500/10 border border-white/60 hover:shadow-2xl hover:shadow-indigo-500/20 transition-all duration-300 transform hover:-translate-y-1 relative overflow-hidden group">
+          <div className="absolute top-0 right-0 p-6 opacity-5 group-hover:opacity-10 transition-opacity duration-300">
+             <LayoutDashboard className="w-16 h-16 transform right-[-10px] top-[-10px]" />
+          </div>
+          <h3 className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-2">Live Attendance</h3>
+          <div className="flex items-baseline gap-2 drop-shadow-sm">
+            <p className="text-4xl font-extrabold text-indigo-600">{checkedIn}</p>
+            <span className="text-sm font-bold text-slate-400">/ {total}</span>
+          </div>
+          <div className="w-full bg-indigo-100 rounded-full h-2 mt-4 overflow-hidden border border-indigo-200/50">
+            <div className="bg-gradient-to-r from-indigo-500 to-indigo-600 h-2 rounded-full transition-all duration-1000 ease-out" style={{ width: `${percentage}%` }}></div>
           </div>
         </div>
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-          <h3 className="text-gray-500 text-sm font-medium mb-2">Check-in Rate</h3>
-          <p className="text-4xl font-bold text-gray-900">{percentage}%</p>
+        <div className="bg-white/80 backdrop-blur-2xl p-6 rounded-3xl shadow-xl shadow-indigo-500/10 border border-white/60 hover:shadow-2xl hover:shadow-indigo-500/20 transition-all duration-300 transform hover:-translate-y-1 relative overflow-hidden group">
+          <div className="absolute top-0 right-0 p-6 opacity-5 group-hover:opacity-10 transition-opacity duration-300">
+             <QrCode className="w-16 h-16 transform right-[-10px] top-[-10px]" />
+          </div>
+          <h3 className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-2">Check-in Rate</h3>
+          <p className="text-4xl font-extrabold text-slate-800 drop-shadow-sm">{percentage}%</p>
         </div>
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-          <h3 className="text-gray-500 text-sm font-medium mb-2">Donated Seats</h3>
-          <p className="text-4xl font-bold text-emerald-600">{totalDonatedSeats}</p>
-          <p className="text-xs text-gray-400 mt-1">
+        <div className="bg-white/80 backdrop-blur-2xl p-6 rounded-3xl shadow-xl shadow-emerald-500/10 border border-white/60 hover:shadow-2xl hover:shadow-emerald-500/20 transition-all duration-300 transform hover:-translate-y-1 relative overflow-hidden group">
+          <div className="absolute top-0 right-0 p-6 opacity-5 group-hover:opacity-10 transition-opacity duration-300 text-emerald-600">
+             <Rows3 className="w-16 h-16 transform right-[-10px] top-[-10px]" />
+          </div>
+          <h3 className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-2">Donated Seats</h3>
+          <p className="text-4xl font-extrabold text-emerald-600 drop-shadow-sm">{totalDonatedSeats}</p>
+          <p className="text-xs text-emerald-700 font-semibold mt-2 bg-emerald-50 inline-block px-2 py-1 rounded-md">
             {totalDonatedTables > 0 ? `${totalDonatedTables} table${totalDonatedTables !== 1 ? 's' : ''} · ${totalDonatedSeats} seat${totalDonatedSeats !== 1 ? 's' : ''} donated` : `seats donated for others`}
           </p>
         </div>
@@ -82,24 +94,28 @@ const DashboardStats = ({ attendees }: { attendees: Attendee[] }) => {
 
       {/* Recent Seat Donors List */}
       {recentDonors.length > 0 && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
-            <h3 className="font-bold text-gray-800">Recent Seat Donors</h3>
-            <Link to="/admin" className="text-xs text-indigo-600 font-bold hover:underline">View All</Link>
+        <div className="bg-white/80 backdrop-blur-2xl rounded-3xl shadow-xl shadow-indigo-500/5 border border-white/60 overflow-hidden mt-8 transform hover:-translate-y-1 transition-all duration-300">
+          <div className="px-6 py-5 border-b border-white/40 bg-white/50 backdrop-blur-md flex justify-between items-center relative overflow-hidden">
+            <div className="absolute inset-0 bg-gradient-to-r from-emerald-500/5 to-transparent z-0 pointer-events-none"></div>
+            <h3 className="font-extrabold text-slate-800 text-lg relative z-10 flex items-center gap-2">
+              <span className="bg-emerald-100 text-emerald-600 p-1.5 rounded-xl">🪑</span> Recent Seat Donors
+            </h3>
+            <Link to="/admin" className="text-xs text-indigo-600 font-bold hover:text-indigo-700 bg-indigo-50 px-3 py-1.5 rounded-full hover:bg-indigo-100 transition-colors relative z-10 shadow-sm border border-indigo-100">View All</Link>
           </div>
-          <div className="divide-y divide-gray-100">
+          <div className="divide-y divide-gray-100/50 bg-white/30">
             {recentDonors.map(d => (
-              <div key={d.id} className="p-4 flex justify-between items-center hover:bg-gray-50 transition">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center font-bold text-xs">
-                    🪑
+              <div key={d.id} className="p-4 px-6 flex justify-between items-center hover:bg-white/80 transition-colors group cursor-pointer relative overflow-hidden">
+                <div className="absolute left-0 top-0 bottom-0 w-1 bg-emerald-500 transform scale-y-0 group-hover:scale-y-100 transition-transform origin-center"></div>
+                <div className="flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-emerald-100 to-emerald-50 text-emerald-600 flex items-center justify-center font-bold text-sm shadow-sm border border-emerald-100/50 group-hover:scale-110 transition-transform">
+                    {d.name.charAt(0).toUpperCase()}
                   </div>
                   <div>
-                    <div className="font-bold text-gray-900 text-sm">{d.name}</div>
-                    <div className="text-xs text-gray-500">{new Date(d.registeredAt).toLocaleDateString()}</div>
+                    <div className="font-bold text-slate-800">{d.name}</div>
+                    <div className="text-xs font-medium text-slate-400 mt-0.5">{new Date(d.registeredAt).toLocaleDateString()}</div>
                   </div>
                 </div>
-                <div className="text-emerald-600 font-bold">
+                <div className="text-emerald-600 font-extrabold bg-emerald-50 px-3 py-1.5 rounded-xl shadow-sm border border-emerald-100/50 group-hover:bg-emerald-500 group-hover:text-white transition-colors">
                   {d.donationType === 'table' && (d.donatedTables || 0) > 0
                     ? `+${d.donatedTables} table${(d.donatedTables || 0) !== 1 ? 's' : ''} (${d.donatedSeats} seats)`
                     : `+${d.donatedSeats} seat${(d.donatedSeats || 0) !== 1 ? 's' : ''}`
@@ -117,6 +133,7 @@ const DashboardStats = ({ attendees }: { attendees: Attendee[] }) => {
 const AdminLayout = () => {
   const { signOut } = useAuth();
   const [attendees, setAttendees] = useState<Attendee[]>([]);
+  const [forms, setForms] = useState<Form[]>([]);
   const [loading, setLoading] = useState(true);
   const [showScanner, setShowScanner] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -133,8 +150,9 @@ const AdminLayout = () => {
   useEffect(() => {
     const fetch = async () => {
       try {
-        const data = await getAttendees();
+        const [data, formsData] = await Promise.all([getAttendees(), getForms()]);
         setAttendees(data);
+        setForms(formsData);
       } catch (error) {
         console.error("Failed to fetch attendees", error);
       } finally {
@@ -178,20 +196,48 @@ const AdminLayout = () => {
   };
 
   return (
-    <div className="flex h-screen bg-gradient-to-br from-slate-50 to-gray-100 overflow-hidden">
-      {/* Mobile Header */}
-      <div className="lg:hidden fixed top-0 w-full bg-gray-900 text-white z-20 flex justify-between items-center p-4">
-        <div className="font-bold flex items-center gap-2"><QrCode className="w-6 h-6 text-indigo-500" /> EventCheck</div>
-        <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
-          {isMobileMenuOpen ? <X /> : <Menu />}
+    <div className="flex h-screen bg-gradient-to-br from-indigo-50 via-white to-blue-50/80 overflow-hidden relative">
+      <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-20 pointer-events-none mix-blend-overlay"></div>
+      <div className="absolute top-0 right-0 w-1/2 h-1/2 bg-blue-100/40 rounded-full blur-[120px] pointer-events-none transform translate-x-1/3 -translate-y-1/3"></div>
+      <div className="absolute bottom-0 left-0 w-1/2 h-1/2 bg-indigo-100/40 rounded-full blur-[120px] pointer-events-none transform -translate-x-1/3 translate-y-1/3"></div>
+      {/* Mobile Floating Bottom Nav */}
+      <div className="lg:hidden fixed bottom-6 left-1/2 transform -translate-x-1/2 z-50 flex flex-col items-center">
+        {isMobileMenuOpen && (
+          <div className="bg-slate-900/80 backdrop-blur-2xl p-2 rounded-2xl shadow-2xl shadow-indigo-900/20 border border-slate-700/50 flex items-center gap-2 mb-4 animate-in slide-in-from-bottom-4 zoom-in-95 duration-200">
+            <Link to="/admin" onClick={() => setIsMobileMenuOpen(false)} className="p-3 text-slate-300 hover:text-white hover:bg-slate-800/80 rounded-xl transition-all">
+              <LayoutDashboard className="w-6 h-6" />
+            </Link>
+            <Link to="/admin/forms" onClick={() => setIsMobileMenuOpen(false)} className="p-3 text-slate-300 hover:text-white hover:bg-slate-800/80 rounded-xl transition-all">
+              <ClipboardList className="w-6 h-6" />
+            </Link>
+            <Link to="/admin/seating" onClick={() => setIsMobileMenuOpen(false)} className="p-3 text-slate-300 hover:text-white hover:bg-slate-800/80 rounded-xl transition-all">
+              <Rows3 className="w-6 h-6" />
+            </Link>
+            <button onClick={() => { setShowScanner(true); setIsMobileMenuOpen(false); }} className="p-3 bg-indigo-600 text-white rounded-xl shadow-lg shadow-indigo-500/20 hover:bg-indigo-500 transition-all">
+              <QrCode className="w-6 h-6" />
+            </button>
+            <Link to="/admin/settings" onClick={() => setIsMobileMenuOpen(false)} className="p-3 text-slate-300 hover:text-white hover:bg-slate-800/80 rounded-xl transition-all">
+              <SettingsIcon className="w-6 h-6" />
+            </Link>
+            <button onClick={handleLogout} className="p-3 text-red-400 hover:bg-slate-800/80 rounded-xl transition-all">
+              <LogOut className="w-6 h-6" />
+            </button>
+          </div>
+        )}
+        
+        <button 
+          onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+          className={`p-4 rounded-full shadow-2xl transition-all duration-300 transform border border-white/10 ${isMobileMenuOpen ? 'bg-slate-800 text-white rotate-90 scale-95' : 'bg-indigo-600 text-white hover:scale-105 shadow-indigo-500/30'}`}
+        >
+           {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
         </button>
       </div>
 
+      {/* Desktop Sidebar */}
       <aside
         className={`
-          fixed inset-y-0 left-0 z-10 flex flex-col transition-all duration-300 transform
-          ${isMobileMenuOpen ? 'translate-x-0 pt-16 w-64' : '-translate-x-full lg:translate-x-0 lg:pt-0'}
-          ${(isSidebarCollapsed && !isSidebarPinned) ? 'lg:w-20' : 'lg:w-72'}
+          fixed inset-y-0 left-0 z-40 hidden lg:flex flex-col transition-all duration-300
+          ${(isSidebarCollapsed && !isSidebarPinned) ? 'w-20' : 'w-72'}
           bg-slate-900/95 backdrop-blur-xl border-r border-slate-800 shadow-2xl
         `}
         onMouseEnter={() => !isSidebarPinned && setIsSidebarCollapsed(false)}
@@ -255,28 +301,48 @@ const AdminLayout = () => {
       </aside>
 
       {/* Main Content */}
-      <main className={`flex-1 overflow-y-auto pt-16 lg:pt-0 transition-all duration-300 ${(isSidebarCollapsed && !isSidebarPinned) ? 'lg:pl-20' : 'lg:pl-72'}`}>
+      <main className={`flex-1 overflow-y-auto pb-28 lg:pb-0 pt-4 lg:pt-0 transition-all duration-300 ${(isSidebarCollapsed && !isSidebarPinned) ? 'lg:pl-20' : 'lg:pl-72'}`}>
         <div className="p-4 lg:p-6 w-full mx-auto">
           <Routes>
             <Route path="/" element={
               <>
-                <header className="mb-8 flex justify-between items-center">
-                  <div>
-                    <h2 className="text-2xl font-bold text-gray-900">Event Dashboard</h2>
-                    <p className="text-gray-500">Overview of all event activity.</p>
+                <header className="mb-8 flex justify-between items-center bg-gradient-to-r from-indigo-600 to-indigo-800 p-8 rounded-3xl shadow-2xl shadow-indigo-600/20 text-white relative overflow-hidden border border-indigo-500/30">
+                  <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
+                  <div className="absolute -right-10 -top-20 opacity-20 transform rotate-12 scale-150 pointer-events-none">
+                    <LayoutDashboard strokeWidth={1.5} className="w-64 h-64 text-white" />
+                  </div>
+                  <div className="relative z-10">
+                    <div className="inline-block bg-white/20 backdrop-blur-md px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase mb-3 border border-white/20 shadow-sm text-indigo-50">
+                      LIVE EVENT HUB
+                    </div>
+                    <h2 className="text-4xl font-extrabold text-white mb-2 drop-shadow-md tracking-tight">Event Dashboard</h2>
+                    <p className="text-indigo-100 font-medium tracking-wide text-lg max-w-lg">
+                      Real-time overview of attendance, ticket statuses, and analytics.
+                    </p>
                   </div>
                 </header>
                 <DashboardStats attendees={attendees} />
-                <AttendeeList attendees={attendees} isLoading={loading} />
+                <AttendeeList attendees={attendees} forms={forms} isLoading={loading} />
               </>
             } />
             <Route path="/forms" element={<FormsManager />} />
             <Route path="/builder/:formId" element={<FormBuilder />} />
             <Route path="/generate-qr" element={
               <>
-                <header className="mb-8">
-                  <h2 className="text-2xl font-bold text-gray-900">Manual Ticket Management</h2>
-                  <p className="text-gray-500">Generate QR codes for existing users and manage ticket delivery.</p>
+                <header className="mb-8 flex justify-between items-center bg-gradient-to-r from-violet-600 to-indigo-700 p-8 rounded-3xl shadow-2xl shadow-violet-600/20 text-white relative overflow-hidden border border-violet-500/30">
+                  <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
+                  <div className="absolute -right-10 -top-20 opacity-20 transform rotate-12 scale-150 pointer-events-none">
+                    <QrCode strokeWidth={1.5} className="w-64 h-64 text-white" />
+                  </div>
+                  <div className="relative z-10">
+                    <div className="inline-block bg-white/20 backdrop-blur-md px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase mb-3 border border-white/20 shadow-sm text-violet-50">
+                      TICKET TOOLS
+                    </div>
+                    <h2 className="text-4xl font-extrabold text-white mb-2 drop-shadow-md tracking-tight">Manual Ticket Management</h2>
+                    <p className="text-indigo-100 font-medium tracking-wide text-lg max-w-lg">
+                      Generate QR codes for existing users and manage ticket delivery.
+                    </p>
+                  </div>
                 </header>
                 <ManualTicketTool />
               </>
