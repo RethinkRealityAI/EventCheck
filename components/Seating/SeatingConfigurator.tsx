@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, Suspense, useMemo, useRef } from 'react';
-import { Eye, Rows3, Plus, Trash2, Settings, Save, Loader2, RotateCcw, Crown, FileText, Download, Layout, CheckCircle2, Box, Palette, Tag, Move, RotateCw, Maximize2, Upload, Package } from 'lucide-react';
+import { Eye, Rows3, Plus, Trash2, Settings, Save, Loader2, RotateCcw, Crown, FileText, Download, Layout, CheckCircle2, Box, Palette, Tag, Move, RotateCw, Maximize2, Upload, Package, Undo2, Redo2 } from 'lucide-react';
 import Scene3D from './Scene3D';
 import GuestSidebar from './GuestSidebar';
 import { SeatingTable, Attendee, SeatingConfiguration, SeatingAssignment, SceneElement, SceneElementType, Custom3DModel } from '../../types';
@@ -40,6 +40,14 @@ const DEFAULT_COLORS: string[] = [
     '#22c55e', '#06b6d4', '#3b82f6', '#78716c', '#1e1b4b',
 ];
 
+// History for undo/redo
+interface HistorySnapshot {
+    tables: SeatingTable[];
+    assignments: SeatingAssignment[];
+    sceneElements: SceneElement[];
+}
+const MAX_HISTORY = 30;
+
 export default function SeatingConfigurator() {
     // Data state
     const [forms, setForms] = useState<Form[]>([]);
@@ -53,6 +61,47 @@ export default function SeatingConfigurator() {
 
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
+
+    const [history, setHistory] = useState<HistorySnapshot[]>([]);
+    const [historyIndex, setHistoryIndex] = useState(-1);
+    const isUndoRedoing = useRef(false);
+
+    const pushHistory = useCallback(() => {
+        if (isUndoRedoing.current) return;
+        setHistory(prev => {
+            const truncated = prev.slice(0, historyIndex + 1);
+            const snapshot: HistorySnapshot = {
+                tables: JSON.parse(JSON.stringify(tables)),
+                assignments: JSON.parse(JSON.stringify(assignments)),
+                sceneElements: JSON.parse(JSON.stringify(sceneElements)),
+            };
+            const next = [...truncated, snapshot].slice(-MAX_HISTORY);
+            setHistoryIndex(next.length - 1);
+            return next;
+        });
+    }, [tables, assignments, sceneElements, historyIndex]);
+
+    const undo = useCallback(() => {
+        if (historyIndex <= 0) return;
+        isUndoRedoing.current = true;
+        const snapshot = history[historyIndex - 1];
+        setTables(snapshot.tables);
+        setAssignments(snapshot.assignments);
+        setSceneElements(snapshot.sceneElements);
+        setHistoryIndex(historyIndex - 1);
+        setTimeout(() => { isUndoRedoing.current = false; }, 0);
+    }, [history, historyIndex]);
+
+    const redo = useCallback(() => {
+        if (historyIndex >= history.length - 1) return;
+        isUndoRedoing.current = true;
+        const snapshot = history[historyIndex + 1];
+        setTables(snapshot.tables);
+        setAssignments(snapshot.assignments);
+        setSceneElements(snapshot.sceneElements);
+        setHistoryIndex(historyIndex + 1);
+        setTimeout(() => { isUndoRedoing.current = false; }, 0);
+    }, [history, historyIndex]);
 
     // Filtered/Enhanced Attendees based on assignments
     const enhancedAttendees = useMemo(() => {
@@ -74,17 +123,19 @@ export default function SeatingConfigurator() {
     const [showGuests, setShowGuests] = useState(true);
     const [transformMode, setTransformMode] = useState<'translate' | 'rotate' | 'scale'>('translate');
 
-    // Add hotkeys for transform mode
+    // Add hotkeys for transform mode + undo/redo
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
             if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
+            if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+            if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) { e.preventDefault(); redo(); }
             if (e.key === 'r' || e.key === 'R') setTransformMode('rotate');
             if (e.key === 's' || e.key === 'S') setTransformMode('scale');
             if (e.key === 't' || e.key === 'T' || e.key === 'g' || e.key === 'G') setTransformMode('translate');
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, []);
+    }, [undo, redo]);
 
     // Configurator state
     const [tableCount, setTableCount] = useState(25);
@@ -166,12 +217,18 @@ export default function SeatingConfigurator() {
             setSelectedTableId(null);
             setSelectedElementId(null);
             setLoading(false);
+            // Push initial snapshot for undo baseline
+            setTimeout(() => {
+                pushHistory();
+            }, 0);
         };
         load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [activeConfigId, selectedFormId]);
 
     // Generate tables
     const generateTables = useCallback(() => {
+        pushHistory();
         const cols = Math.ceil(Math.sqrt(tableCount));
         const spacing = 5;
         const newTables: SeatingTable[] = [];
@@ -198,7 +255,7 @@ export default function SeatingConfigurator() {
         }
         setTables(newTables);
         setSelectedTableId(null);
-    }, [tableCount, seatsPerTable, tableShape, selectedFormId, activeConfigId]);
+    }, [tableCount, seatsPerTable, tableShape, selectedFormId, activeConfigId, pushHistory]);
 
     // Create new configuration
     const createNewConfig = async () => {
@@ -253,6 +310,7 @@ export default function SeatingConfigurator() {
 
     // Add scene element
     const addSceneElement = () => {
+        pushHistory();
         if (newElementType === 'custom' && !newElementModelId) return;
         const label = newElementLabel.trim() || ELEMENT_TYPES.find(t => t.value === newElementType)?.label || 'Element';
         const element: SceneElement = {
@@ -311,6 +369,7 @@ export default function SeatingConfigurator() {
 
     // Delete scene element
     const deleteSelectedElement = () => {
+        pushHistory();
         if (!selectedElementId) return;
         setSceneElements(prev => prev.filter(e => e.id !== selectedElementId));
         setSelectedElementId(null);
@@ -330,6 +389,7 @@ export default function SeatingConfigurator() {
 
     // Assign guests
     const handleAssignGuests = async (guestIds: string[], tableId: string) => {
+        pushHistory();
         const table = tables.find(t => t.id === tableId);
         if (!table) return;
 
@@ -359,11 +419,13 @@ export default function SeatingConfigurator() {
 
     // Unassign guest
     const handleUnassignGuest = (guestId: string) => {
+        pushHistory();
         setAssignments(prev => prev.filter(as => as.attendeeId !== guestId));
     };
 
     // Auto assign
     const handleAutoAssign = () => {
+        pushHistory();
         const unassigned = attendees.filter(a => !assignments.some(as => as.attendeeId === a.id));
         if (unassigned.length === 0) return;
 
@@ -558,6 +620,25 @@ export default function SeatingConfigurator() {
                         >
                             <Eye className="w-3.5 h-3.5" />
                             Plan
+                        </button>
+                    </div>
+
+                    <div className="flex items-center bg-slate-800 rounded-xl p-1 border border-slate-700/50">
+                        <button
+                            onClick={undo}
+                            disabled={historyIndex <= 0}
+                            className="p-1.5 text-slate-400 hover:text-white disabled:text-slate-700 transition-colors rounded-lg"
+                            title="Undo (Ctrl+Z)"
+                        >
+                            <Undo2 className="w-4 h-4" />
+                        </button>
+                        <button
+                            onClick={redo}
+                            disabled={historyIndex >= history.length - 1}
+                            className="p-1.5 text-slate-400 hover:text-white disabled:text-slate-700 transition-colors rounded-lg"
+                            title="Redo (Ctrl+Y)"
+                        >
+                            <Redo2 className="w-4 h-4" />
                         </button>
                     </div>
 
@@ -801,6 +882,7 @@ export default function SeatingConfigurator() {
                                             </button>
                                             <button
                                                 onClick={() => {
+                                                    pushHistory();
                                                     setTables(prev => prev.filter(t => t.id !== selectedTableId));
                                                     setSelectedTableId(null);
                                                 }}
