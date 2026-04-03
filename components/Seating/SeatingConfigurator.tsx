@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, Suspense, useMemo, useRef } from 'react';
-import { Eye, Rows3, Plus, Trash2, Settings, Save, Loader2, RotateCcw, Crown, FileText, Download, Layout, CheckCircle2, Box, Palette, Tag, Move, RotateCw, Maximize2, Upload, Package, Undo2, Redo2 } from 'lucide-react';
+import { Eye, Rows3, Plus, Trash2, Settings, Save, Loader2, RotateCcw, Crown, FileText, Download, Layout, CheckCircle2, Box, Palette, Tag, Move, RotateCw, Maximize2, Upload, Package, Undo2, Redo2, Copy } from 'lucide-react';
 import Scene3D from './Scene3D';
 import GuestSidebar from './GuestSidebar';
 import { SeatingTable, Attendee, SeatingConfiguration, SeatingAssignment, SceneElement, SceneElementType, Custom3DModel } from '../../types';
@@ -22,6 +22,7 @@ import {
 } from '../../services/storageService';
 import { Form } from '../../types';
 import jsPDF from 'jspdf';
+import ConfirmDialog from './ConfirmDialog';
 
 const ELEMENT_TYPES: { value: SceneElementType; label: string; icon: string }[] = [
     { value: 'stage', label: 'Stage', icon: '🎤' },
@@ -122,6 +123,10 @@ export default function SeatingConfigurator() {
     const [showConfig, setShowConfig] = useState(true);
     const [showGuests, setShowGuests] = useState(true);
     const [transformMode, setTransformMode] = useState<'translate' | 'rotate' | 'scale'>('translate');
+    const [dialog, setDialog] = useState<{
+        type: 'create-config' | 'clone-config' | 'confirm-regenerate' | 'delete-config';
+        data?: any;
+    } | null>(null);
 
     // Add hotkeys for transform mode + undo/redo
     useEffect(() => {
@@ -258,10 +263,7 @@ export default function SeatingConfigurator() {
     }, [tableCount, seatsPerTable, tableShape, selectedFormId, activeConfigId, pushHistory]);
 
     // Create new configuration
-    const createNewConfig = async () => {
-        const name = prompt('Enter configuration name:', `Layout ${configurations.length + 1}`);
-        if (!name) return;
-
+    const createNewConfig = (name: string) => {
         setLoading(true);
         const newConfig: SeatingConfiguration = {
             id: crypto.randomUUID(),
@@ -269,13 +271,66 @@ export default function SeatingConfigurator() {
             name,
             createdAt: new Date().toISOString()
         };
-        await saveSeatingConfiguration(newConfig);
-        setConfigurations(prev => [...prev, newConfig]);
-        setActiveConfigId(newConfig.id);
-        setTables([]);
-        setAssignments([]);
-        setSceneElements([]);
-        setLoading(false);
+        saveSeatingConfiguration(newConfig).then(() => {
+            setConfigurations(prev => [...prev, newConfig]);
+            setActiveConfigId(newConfig.id);
+            setTables([]);
+            setAssignments([]);
+            setSceneElements([]);
+            setLoading(false);
+        });
+    };
+
+    const cloneCurrentConfig = (name: string) => {
+        setLoading(true);
+        const newConfig: SeatingConfiguration = {
+            id: crypto.randomUUID(),
+            formId: selectedFormId,
+            name,
+            createdAt: new Date().toISOString()
+        };
+        const tableIdMap: Record<string, string> = {};
+        const clonedTables = tables.map(t => {
+            const newId = crypto.randomUUID();
+            tableIdMap[t.id] = newId;
+            return { ...t, id: newId, configurationId: newConfig.id };
+        });
+        const clonedAssignments = assignments.map(a => ({
+            ...a,
+            id: crypto.randomUUID(),
+            configurationId: newConfig.id,
+            tableId: tableIdMap[a.tableId] || a.tableId,
+        }));
+        const clonedElements = sceneElements.map(e => ({
+            ...e,
+            id: crypto.randomUUID(),
+            configurationId: newConfig.id,
+        }));
+
+        saveSeatingConfiguration(newConfig).then(() => {
+            setConfigurations(prev => [...prev, newConfig]);
+            setActiveConfigId(newConfig.id);
+            setTables(clonedTables);
+            setAssignments(clonedAssignments);
+            setSceneElements(clonedElements);
+            setLoading(false);
+        });
+    };
+
+    const deleteCurrentConfig = async () => {
+        if (configurations.length <= 1) return;
+        await deleteSeatingConfiguration(activeConfigId);
+        const remaining = configurations.filter(c => c.id !== activeConfigId);
+        setConfigurations(remaining);
+        setActiveConfigId(remaining[0].id);
+    };
+
+    const handleRegenerateClick = () => {
+        if (tables.length > 0) {
+            setDialog({ type: 'confirm-regenerate' });
+        } else {
+            generateTables();
+        }
     };
 
     // Update selected table
@@ -570,12 +625,28 @@ export default function SeatingConfigurator() {
                             ))}
                         </select>
                         <button
-                            onClick={createNewConfig}
+                            onClick={() => setDialog({ type: 'create-config' })}
                             className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700 transition-colors"
-                            title="Create New Layout"
+                            title="New Layout"
                         >
                             <Plus className="w-4 h-4" />
                         </button>
+                        <button
+                            onClick={() => setDialog({ type: 'clone-config' })}
+                            className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700 transition-colors"
+                            title="Clone Layout"
+                        >
+                            <Copy className="w-4 h-4" />
+                        </button>
+                        {configurations.length > 1 && (
+                            <button
+                                onClick={() => setDialog({ type: 'delete-config' })}
+                                className="p-1.5 bg-slate-800 hover:bg-red-900/50 text-slate-300 hover:text-red-400 rounded-lg border border-slate-700 hover:border-red-500/30 transition-colors"
+                                title="Delete Layout"
+                            >
+                                <Trash2 className="w-4 h-4" />
+                            </button>
+                        )}
                     </div>
                 </div>
 
@@ -713,7 +784,7 @@ export default function SeatingConfigurator() {
                                         </div>
                                     </div>
                                     <button
-                                        onClick={generateTables}
+                                        onClick={handleRegenerateClick}
                                         className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-xl transition-all shadow-xl shadow-indigo-600/20 active:scale-95"
                                     >
                                         Regenerate Layout
@@ -1104,6 +1175,60 @@ export default function SeatingConfigurator() {
                     </div>
                 )}
             </div>
+
+            {/* Dialogs */}
+            {dialog?.type === 'create-config' && (
+                <ConfirmDialog
+                    open
+                    title="New Layout"
+                    message="Enter a name for this new seating configuration."
+                    confirmLabel="Create"
+                    onConfirm={() => {}}
+                    onCancel={() => setDialog(null)}
+                    inputMode={{
+                        placeholder: 'e.g. Layout 2',
+                        defaultValue: `Layout ${configurations.length + 1}`,
+                        onConfirmWithValue: (name) => { createNewConfig(name); setDialog(null); }
+                    }}
+                />
+            )}
+            {dialog?.type === 'clone-config' && (
+                <ConfirmDialog
+                    open
+                    title="Clone Layout"
+                    message={`Clone "${configurations.find(c => c.id === activeConfigId)?.name}" with all its tables, assignments, and elements.`}
+                    confirmLabel="Clone"
+                    onConfirm={() => {}}
+                    onCancel={() => setDialog(null)}
+                    inputMode={{
+                        placeholder: 'e.g. Layout 2 (Copy)',
+                        defaultValue: `${configurations.find(c => c.id === activeConfigId)?.name} (Copy)`,
+                        onConfirmWithValue: (name) => { cloneCurrentConfig(name); setDialog(null); }
+                    }}
+                />
+            )}
+            {dialog?.type === 'confirm-regenerate' && (
+                <ConfirmDialog
+                    open
+                    title="Regenerate Layout?"
+                    message={`This will replace all ${tables.length} existing tables and clear ${assignments.length} seat assignments. This action can be undone.`}
+                    confirmLabel="Regenerate"
+                    confirmVariant="danger"
+                    onConfirm={() => { generateTables(); setDialog(null); }}
+                    onCancel={() => setDialog(null)}
+                />
+            )}
+            {dialog?.type === 'delete-config' && (
+                <ConfirmDialog
+                    open
+                    title="Delete Layout?"
+                    message={`Permanently delete "${configurations.find(c => c.id === activeConfigId)?.name}" and all its tables and assignments. This cannot be undone.`}
+                    confirmLabel="Delete"
+                    confirmVariant="danger"
+                    onConfirm={() => { deleteCurrentConfig(); setDialog(null); }}
+                    onCancel={() => setDialog(null)}
+                />
+            )}
         </div>
     );
 }
