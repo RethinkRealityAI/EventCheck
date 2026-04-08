@@ -350,8 +350,21 @@ serve(async (req: Request) => {
       .upsert(stampedAttendees);
 
     if (insertError) {
-      console.error('Failed to save attendees:', insertError);
-      return jsonResponse({ error: `Database error: ${insertError.message}` }, 500);
+      // CRITICAL: Payment was captured but attendees failed to save.
+      // Log full details for manual recovery.
+      console.error('CRITICAL: Payment captured but DB insert failed!', JSON.stringify({
+        transactionId,
+        capturedAmount,
+        capturedCurrency,
+        formId: formId || 'legacy',
+        attendeeCount: stampedAttendees.length,
+        primaryName: stampedAttendees[0]?.name,
+        primaryEmail: stampedAttendees[0]?.email,
+        dbError: insertError.message,
+      }));
+      return jsonResponse({
+        error: `Your payment was processed but we encountered a database error saving your registration. Please contact the event organizer with this reference: ${transactionId}`,
+      }, 500);
     }
 
     return jsonResponse({
