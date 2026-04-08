@@ -626,12 +626,16 @@ const PublicRegistration = () => {
       console.error('Registration failed:', registrationError);
       setError(registrationError.message || 'An unexpected error occurred. Please try again.');
       setLoading(false);
-      setStep('form');
+      // Stay on payment step so user can retry PayPal — don't bounce back to form
+      if (step !== 'payment') {
+        setStep('form');
+      }
     }
   };
 
   // PayPal Payment Handler (Secure Server-Side Capture)
   const onPayPalApprove = async (data: any, actions: any) => {
+    setError('');
     // We pass the orderID straight to our Edge Function for server-side verification and capture
     const paypalOrderId = data.orderID;
     const expectedCurrency = ticketField?.ticketConfig?.currency || "USD";
@@ -1149,6 +1153,13 @@ const PublicRegistration = () => {
           <h2 className="text-2xl font-bold text-gray-900 mb-2">Secure Payment</h2>
           <p className="text-gray-500 mb-8">Complete your purchase to receive your ticket.</p>
 
+          {error && (
+            <div className="p-3 bg-red-50 text-red-600 rounded-lg text-sm flex items-start gap-2 mb-6 text-left">
+              <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+              <span>{error}</span>
+            </div>
+          )}
+
           <div className="bg-gray-50 p-4 rounded-xl mb-8 border border-gray-100">
             <div className="flex justify-between items-center mb-2">
               <span className="text-gray-600">Ticket(s) Subtotal</span>
@@ -1202,9 +1213,12 @@ const PublicRegistration = () => {
                     });
                   }}
                   onApprove={onPayPalApprove}
+                  onCancel={() => {
+                    setError("Payment was cancelled. You can try again when you're ready.");
+                  }}
                   onError={(err) => {
                     console.error("PayPal Error:", err);
-                    setError("PayPal failed to load. Please verify your Client ID in Settings.");
+                    setError("Something went wrong with PayPal. Please try again or contact the event organizer.");
                   }}
                 />
               </PayPalScriptProvider>
