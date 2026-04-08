@@ -65,7 +65,7 @@ serve(async (req: Request) => {
     } = body;
 
     if (!attendees || attendees.length === 0) {
-      return jsonResponse({ error: 'Missing required field: attendees' });
+      return jsonResponse({ error: 'Missing required field: attendees' }, 400);
     }
 
     // --- Initialize Supabase (service role — bypasses RLS) ---
@@ -87,7 +87,7 @@ serve(async (req: Request) => {
         .single();
 
       if (formError || !formData) {
-        return jsonResponse({ error: 'Form not found' });
+        return jsonResponse({ error: 'Form not found' }, 404);
       }
 
       const fields: FormField[] = typeof formData.fields === 'string'
@@ -109,10 +109,10 @@ serve(async (req: Request) => {
           const qty = (ticketQuantities && ticketQuantities[item.id]) || 0;
 
           if (qty < 0 || !Number.isInteger(qty)) {
-            return jsonResponse({ error: `Invalid quantity for "${item.name}"` });
+            return jsonResponse({ error: `Invalid quantity for "${item.name}"` }, 400);
           }
           if (qty > item.maxPerOrder) {
-            return jsonResponse({ error: `Quantity for "${item.name}" exceeds maximum of ${item.maxPerOrder}` });
+            return jsonResponse({ error: `Quantity for "${item.name}" exceeds maximum of ${item.maxPerOrder}` }, 400);
           }
 
           subtotal += item.price * qty;
@@ -149,7 +149,7 @@ serve(async (req: Request) => {
               const sold = soldCounts[item.name] || 0;
               const remaining = item.inventory - sold;
               if (requestedQty > remaining) {
-                return jsonResponse({ error: `"${item.name}" has only ${Math.max(0, remaining)} tickets remaining` });
+                return jsonResponse({ error: `"${item.name}" has only ${Math.max(0, remaining)} tickets remaining` }, 409);
               }
             }
           }
@@ -183,7 +183,7 @@ serve(async (req: Request) => {
 
     // Validate attendee count
     if (maxAttendees !== null && attendees.length > maxAttendees) {
-      return jsonResponse({ error: `Too many attendees: expected at most ${maxAttendees}, received ${attendees.length}` });
+      return jsonResponse({ error: `Too many attendees: expected at most ${maxAttendees}, received ${attendees.length}` }, 400);
     }
 
     // --- Determine mode ---
@@ -194,7 +194,7 @@ serve(async (req: Request) => {
     // ════════════════════════════════════════════
     if (mode === 'free') {
       if (expectedAmount > 0) {
-        return jsonResponse({ error: 'This registration requires payment. Cannot register as free.' });
+        return jsonResponse({ error: 'This registration requires payment. Cannot register as free.' }, 400);
       }
 
       const stampedAttendees = attendees.map((a: any) => ({
@@ -208,7 +208,7 @@ serve(async (req: Request) => {
 
       if (insertError) {
         console.error('Failed to save attendees:', insertError);
-        return jsonResponse({ error: `Database error: ${insertError.message}` });
+        return jsonResponse({ error: `Database error: ${insertError.message}` }, 500);
       }
 
       return jsonResponse({
@@ -223,7 +223,7 @@ serve(async (req: Request) => {
     //  PAID REGISTRATION — PayPal verification
     // ════════════════════════════════════════════
     if (!paypalOrderId) {
-      return jsonResponse({ error: 'Missing required field: paypalOrderId for paid registration' });
+      return jsonResponse({ error: 'Missing required field: paypalOrderId for paid registration' }, 400);
     }
 
     // Determine PayPal environment — PAYPAL_MODE overrides, then test-mode check, then Origin auto-detect
@@ -243,6 +243,8 @@ serve(async (req: Request) => {
       useSandbox = origin.includes('localhost') || origin.includes('127.0.0.1') || origin === '';
     }
 
+    console.log(`[verify-payment] mode=${mode}, useSandbox=${useSandbox}, origin=${(req.headers.get('origin') || '').toLowerCase()}, formId=${formId || 'legacy'}, attendees=${attendees.length}`);
+
     const PAYPAL_CLIENT_ID = (
       useSandbox
         ? (Deno.env.get('PAYPAL_SANDBOX_CLIENT_ID') || Deno.env.get('PAYPAL_CLIENT_ID'))
@@ -259,7 +261,7 @@ serve(async (req: Request) => {
       || (useSandbox ? 'https://api-m.sandbox.paypal.com' : 'https://api-m.paypal.com');
 
     if (!PAYPAL_CLIENT_ID || !PAYPAL_CLIENT_SECRET) {
-      return jsonResponse({ error: 'PayPal credentials not configured on server' });
+      return jsonResponse({ error: 'PayPal credentials not configured on server' }, 500);
     }
 
     // Get PayPal access token
@@ -275,7 +277,7 @@ serve(async (req: Request) => {
     if (!authResponse.ok) {
       const authError = await authResponse.text();
       console.error('PayPal auth failed:', authError);
-      return jsonResponse({ error: 'Failed to authenticate with PayPal API' });
+      return jsonResponse({ error: 'Failed to authenticate with PayPal API' }, 502);
     }
 
     const { access_token } = await authResponse.json();
@@ -296,12 +298,12 @@ serve(async (req: Request) => {
       return jsonResponse({
         error: 'Payment was not completed or PayPal API rejected the request',
         details: captureData.status || captureData.error_description || captureData.message || 'Unknown error',
-      });
+      }, 502);
     }
 
     const capture = captureData.purchase_units?.[0]?.payments?.captures?.[0];
     if (!capture) {
-      return jsonResponse({ error: 'No capture data found in PayPal response' });
+      return jsonResponse({ error: 'No capture data found in PayPal response' }, 502);
     }
 
     const transactionId = capture.id;
@@ -313,7 +315,7 @@ serve(async (req: Request) => {
       console.error(`Amount mismatch: expected ${expectedAmount}, captured ${capturedAmount}`);
       return jsonResponse({
         error: `Payment amount mismatch. Expected: ${expectedAmount}, Captured: ${capturedAmount}`,
-      });
+      }, 422);
     }
 
     // ALWAYS validate currency
@@ -321,7 +323,7 @@ serve(async (req: Request) => {
       console.error(`Currency mismatch: expected ${expectedCurrency}, captured ${capturedCurrency}`);
       return jsonResponse({
         error: `Payment currency mismatch. Expected: ${expectedCurrency}, Captured: ${capturedCurrency}`,
-      });
+      }, 422);
     }
 
     // ── Duplicate transaction protection ──
@@ -332,7 +334,7 @@ serve(async (req: Request) => {
       .limit(1);
 
     if (existingTx && existingTx.length > 0) {
-      return jsonResponse({ error: 'This payment has already been processed' });
+      return jsonResponse({ error: 'This payment has already been processed' }, 409);
     }
 
     // --- Save attendees with verified payment info ---
@@ -349,7 +351,7 @@ serve(async (req: Request) => {
 
     if (insertError) {
       console.error('Failed to save attendees:', insertError);
-      return jsonResponse({ error: `Database error: ${insertError.message}` });
+      return jsonResponse({ error: `Database error: ${insertError.message}` }, 500);
     }
 
     return jsonResponse({
@@ -362,6 +364,6 @@ serve(async (req: Request) => {
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     console.error('verify-payment error:', message);
-    return jsonResponse({ error: message });
+    return jsonResponse({ error: message }, 500);
   }
 });
