@@ -522,11 +522,21 @@ const PublicRegistration = () => {
       verifyBody.paypalOrderId = transactionId;
     }
 
-    const { data, error: fnError } = await supabase.functions.invoke('verify-payment', {
+    const { data, error: fnError, response: fnResponse } = await supabase.functions.invoke('verify-payment', {
       body: verifyBody
-    });
+    }) as { data: any, error: any, response?: Response };
 
-    if (fnError) throw new Error(fnError.message || 'Registration failed');
+    if (fnError) {
+      // For non-2xx responses, the error message is generic — read the actual error from the response body
+      let detail = 'Registration failed';
+      try {
+        const body = await fnResponse?.json();
+        detail = body?.error || fnError.message || detail;
+      } catch {
+        detail = fnError.message || detail;
+      }
+      throw new Error(detail);
+    }
     if (data?.error) throw new Error(data.error);
 
     if (paymentStatus === 'paid') {
