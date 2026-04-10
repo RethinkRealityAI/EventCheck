@@ -238,9 +238,11 @@ serve(async (req: Request) => {
       // FormPreview / admin test submissions always use sandbox (test records are worthless to attackers)
       useSandbox = true;
     } else {
-      // Auto-detect: browser sets Origin header automatically (not spoofable in browser requests)
+      // Auto-detect from Origin header — default to PRODUCTION if origin is missing or unknown.
+      // Privacy browsers/extensions can strip Origin headers, so missing origin must NOT
+      // fall back to sandbox (which would break real payments).
       const origin = (req.headers.get('origin') || '').toLowerCase();
-      useSandbox = origin.includes('localhost') || origin.includes('127.0.0.1') || origin === '';
+      useSandbox = origin !== '' && (origin.includes('localhost') || origin.includes('127.0.0.1'));
     }
 
     console.log(`[verify-payment] mode=${mode}, useSandbox=${useSandbox}, origin=${(req.headers.get('origin') || '').toLowerCase()}, formId=${formId || 'legacy'}, attendees=${attendees.length}`);
