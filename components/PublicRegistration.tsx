@@ -582,7 +582,7 @@ const PublicRegistration = () => {
         // Send all tickets to the purchaser
         await sendTicketEmail(settings, {
           to: purchaserEmail,
-          subject: `Your Tickets for ${form.title}`,
+          subject: `${form.title} Ticket(s)`,
           name: purchaserName,
           message: `Thank you for your ${paymentStatus === 'paid' ? 'purchase' : 'registration'}! Attached ${attachments.length === 1 ? 'is your ticket' : `are your ${attachments.length} tickets`}.${guestTickets.length > 0 ? ` ${(settings.emailPurchaserGuestNote || "We've also included your guest tickets as a backup. Named guests will receive their own ticket by email directly. For any unnamed guests, you can forward their ticket or share the registration link on it so they can provide their details.")}` : ''}`,
           attachments

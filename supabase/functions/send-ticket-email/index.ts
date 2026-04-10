@@ -24,24 +24,48 @@ function generateEmailTemplate(data: {
     <html>
     <head>
       <meta charset="utf-8">
-      <style>
-        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
-        .header { background-color: #0070f3; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }
-        .content { background-color: #f9f9f9; padding: 40px; border-radius: 0 0 8px 8px; border: 1px solid #eee; }
-        .footer { text-align: center; margin-top: 30px; font-size: 12px; color: #888; }
-      </style>
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
     </head>
-    <body>
-      <div class="header">
-        <h1>${data.title}</h1>
-      </div>
-      <div class="content">
-        <p style="font-size: 18px; font-weight: bold;">${data.greeting},</p>
-        ${data.content}
-        <div class="footer">
-          <p>This email was sent by the SCAGO Event Management System.</p>
-        </div>
-      </div>
+    <body style="margin: 0; padding: 0; background-color: #f4f6f9; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f4f6f9; padding: 40px 20px;">
+        <tr>
+          <td align="center">
+            <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width: 600px; width: 100%; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.08);">
+              <!-- Header -->
+              <tr>
+                <td style="background: linear-gradient(135deg, #1a73e8, #0052cc); padding: 40px 40px 30px; text-align: center;">
+                  <h1 style="margin: 0; color: #ffffff; font-size: 26px; font-weight: 700; letter-spacing: 0.5px;">${data.title}</h1>
+                  <div style="width: 50px; height: 3px; background: rgba(255,255,255,0.5); margin: 16px auto 0; border-radius: 2px;"></div>
+                </td>
+              </tr>
+              <!-- Body -->
+              <tr>
+                <td style="background-color: #ffffff; padding: 40px;">
+                  <p style="margin: 0 0 20px; font-size: 18px; font-weight: 600; color: #1a1a2e;">${data.greeting},</p>
+                  <div style="font-size: 15px; line-height: 1.7; color: #444;">
+                    ${data.content}
+                  </div>
+                  <!-- Attachment hint -->
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top: 28px; background-color: #f0f7ff; border-radius: 8px; border: 1px solid #d4e5f7;">
+                    <tr>
+                      <td style="padding: 16px 20px;">
+                        <p style="margin: 0; font-size: 14px; color: #1a73e8; font-weight: 600;">&#128206; Your ticket is attached to this email</p>
+                        <p style="margin: 6px 0 0; font-size: 13px; color: #5a6c7d;">Please download the PDF and present the QR code at the entrance.</p>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+              <!-- Footer -->
+              <tr>
+                <td style="background-color: #f8f9fb; padding: 24px 40px; text-align: center; border-top: 1px solid #eaedf0;">
+                  <p style="margin: 0; font-size: 12px; color: #8c95a1;">This email was sent by SCAGO Event Management.</p>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
     </body>
     </html>
   `;
@@ -93,7 +117,7 @@ serve(async (req: Request) => {
         }));
 
         await transporter.sendMail({
-            from: `"SCAGO Portal" <${smtpConfig.user}>`,
+            from: `"SCAGO" <${smtpConfig.user}>`,
             to: email.to,
             subject: email.subject,
             html: html,

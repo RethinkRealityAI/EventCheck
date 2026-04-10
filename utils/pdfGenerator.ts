@@ -70,7 +70,8 @@ export const generateTicketPDF = (
   const bodyStartY = 70;
   const hasDonation = attendee.donatedSeats && attendee.donatedSeats > 0;
   const isPlaceholder = registrationUrl && registrationUrl.length > 0;
-  const bodyHeight = isPlaceholder ? 160 : (hasDonation ? 140 : 110);
+  const hasPayment = !!attendee.transactionId;
+  const bodyHeight = isPlaceholder ? 160 : (hasDonation ? 150 : (hasPayment ? 125 : 110));
 
   doc.setDrawColor(200, 200, 200);
   doc.setFillColor(255, 255, 255);
@@ -175,10 +176,10 @@ export const generateTicketPDF = (
   doc.text(formatDate(attendee.registeredAt), labelX, currentY);
 
   if (attendee.transactionId) {
-    const payY = bodyStartY + bodyHeight - 15;
+    currentY += 10;
     doc.setFontSize(9);
     doc.setTextColor(primaryColor);
-    doc.text(`Paid via PayPal (${attendee.paymentAmount || 'Paid'})`, labelX, payY);
+    doc.text(`Paid via PayPal (${attendee.paymentAmount || 'Paid'})`, labelX, currentY);
   }
 
   // --- Donated Seats/Tables Info (inside the box when present) ---
