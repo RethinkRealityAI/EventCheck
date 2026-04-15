@@ -14,6 +14,7 @@ import { Attendee, Form } from './types';
 import { getAttendees, checkInAttendee, getForms } from './services/storageService';
 import { AuthProvider, useAuth } from './components/AuthContext';
 import Login from './components/Login';
+import { CURRENT_SITE } from './config/sites';
 
 const NavLink = ({ to, icon: Icon, children, collapsed }: { to: string, icon: any, children?: React.ReactNode, collapsed?: boolean }) => {
   const location = useLocation();
@@ -246,13 +247,17 @@ const AdminLayout = () => {
         <div className={`p-6 flex items-center ${(isSidebarCollapsed && !isSidebarPinned) ? 'justify-center transition-none' : 'justify-between'} transition-all duration-300`}>
           <div className="flex items-center gap-3 overflow-hidden">
             <div className="bg-indigo-600 p-2 rounded-lg shadow-lg shadow-indigo-500/30 flex-shrink-0">
-              <QrCode className="w-6 h-6 text-white" />
+              {CURRENT_SITE.logoImage ? (
+                <img src={CURRENT_SITE.logoImage} alt={CURRENT_SITE.displayName} className="w-6 h-6 object-contain" />
+              ) : (
+                <QrCode className="w-6 h-6 text-white" />
+              )}
             </div>
             <div className={`transition-all duration-300 ${(isSidebarCollapsed && !isSidebarPinned) ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}>
               <h1 className="text-xl font-bold text-white tracking-tight whitespace-nowrap">
-                EventCheck
+                {CURRENT_SITE.displayName}
               </h1>
-              <p className="text-slate-400 text-[10px] uppercase tracking-wider font-semibold">Admin Console</p>
+              <p className="text-slate-400 text-[10px] uppercase tracking-wider font-semibold">{CURRENT_SITE.adminSubtitle}</p>
             </div>
           </div>
 

@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+:root {
+  --site-primary: #4F46E5;
+  --site-accent: #4F46E5;
+}
+
 /* Custom Scrollbar Styles from previous HTML styles */
 .custom-scrollbar::-webkit-scrollbar {
   width: 10px;

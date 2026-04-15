@@ -95,6 +95,7 @@ The edge function auto-detects sandbox vs production:
 ## Environment Variables
 
 ### Netlify (frontend build)
+- `VITE_SITE` — `scago` or `gansid` (identifies which deployment; defaults to `scago` if unset)
 - `VITE_SUPABASE_URL` — Supabase project URL
 - `VITE_SUPABASE_ANON_KEY` — Supabase anon key
 - `VITE_PAYPAL_CLIENT_ID` — PayPal client ID (production on Netlify, sandbox locally)
@@ -107,19 +108,50 @@ The edge function auto-detects sandbox vs production:
 ### Supabase Secrets (edge functions)
 - `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` — production
 - `PAYPAL_SANDBOX_CLIENT_ID`, `PAYPAL_SANDBOX_CLIENT_SECRET` — sandbox
+- `PAYPAL_MODE` — optional override (`production` | `sandbox`) that short-circuits the Origin-based auto-detect. GANSID project sets this to `production`.
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` — SMTP for `send-ticket-email`
 - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` — auto-provided
 
 ## Commands
 
 - `npm run dev` — local dev server
-- `npm run build` — production build
+- `npm run build` — production build (set `VITE_SITE=gansid` to build the GANSID variant)
+- `npm test` — run Vitest unit tests once
 - `npx tsc --noEmit` — type check without emitting
-- `supabase functions deploy verify-payment --project-ref iigbgbgakevcgilucvbs` — deploy edge function
-- `supabase secrets set KEY=VALUE --project-ref iigbgbgakevcgilucvbs` — set edge function secrets
+- `supabase functions deploy <name> --project-ref <ref>` — deploy edge function (see Multi-site deployment for both refs)
+- `supabase secrets set KEY=VALUE --project-ref <ref>` — set edge function secrets
+
+## Multi-site deployment
+
+This repo powers two independent deployments from one `main` branch:
+
+| Site | Netlify site | Supabase project-ref | VITE_SITE |
+|------|--------------|----------------------|-----------|
+| SCAGO (live) | existing SCAGO site | `iigbgbgakevcgilucvbs` | `scago` |
+| GANSID Congress | `gansidcongress.netlify.app` | `<GANSID_PROJECT_REF>` | `gansid` |
+
+Design: `docs/superpowers/specs/2026-04-15-multi-site-scaffold-design.md`
+Plan: `docs/superpowers/plans/2026-04-15-multi-site-scaffold.md`
+
+**Critical rule:** every migration and edge-function deploy must be applied to BOTH project-refs. Example:
+
+```bash
+# SCAGO
+supabase db push --project-ref iigbgbgakevcgilucvbs
+supabase functions deploy verify-payment --project-ref iigbgbgakevcgilucvbs
+
+# GANSID (replace <GANSID_PROJECT_REF> with the actual ref from the Supabase dashboard)
+supabase db push --project-ref <GANSID_PROJECT_REF>
+supabase functions deploy verify-payment --project-ref <GANSID_PROJECT_REF>
+```
+
+If a migration is applied to only one project, the shared codebase will break on the other site.
+
+Site-level branding is driven at build time by `config/sites.ts` keyed off `VITE_SITE`. Runtime settings (PayPal creds in secrets, email templates / logos / SMTP in `app_settings`) remain per-Supabase.
 
 ## Conventions
 
-- No test framework is set up — testing is manual via the app
+- Vitest is set up; unit tests live in `tests/` (run `npm test`). Most testing is still manual via the app.
 - FormPreview mirrors PublicRegistration's success page for testing the full flow
 - All attendee persistence goes through the `verify-payment` edge function (even free registrations)
 - Guest placeholder records use naming pattern: `"{PurchaserName} - Guest Ticket #N"`
