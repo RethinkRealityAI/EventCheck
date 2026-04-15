@@ -1,8 +1,8 @@
 import React, { useState, useMemo } from 'react';
-import { SponsorProspect, AppSettings, Form } from '../../types';
+import { SponsorProspect, AppSettings } from '../../types';
 import { X, Send, Loader2 } from 'lucide-react';
 import { sendTicketEmail } from '../../services/smtpService';
-import { logProspectEmail, getForms } from '../../services/storageService';
+import { logProspectEmail } from '../../services/storageService';
 import { buildProspectEmailContext, mergeTemplate } from '../../utils/sponsorEmailTemplates';
 import { useNotifications } from '../NotificationSystem';
 
@@ -18,9 +18,6 @@ const SendInvitationModal: React.FC<Props> = ({ prospects, settings, onClose, on
   const [subject, setSubject] = useState(settings.sponsorInvitationSubject);
   const [body, setBody] = useState(settings.sponsorInvitationBody);
   const [sending, setSending] = useState(false);
-  const [forms, setForms] = useState<Form[]>([]);
-
-  React.useEffect(() => { getForms().then(setForms); }, []);
 
   const preview = useMemo(() => {
     if (!prospects[0]) return { subject, body };

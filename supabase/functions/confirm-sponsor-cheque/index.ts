@@ -77,7 +77,20 @@ serve(async (req: Request) => {
         });
       }
       const { error: insErr } = await supabase.from('attendees').insert(guestRows);
-      if (insErr) console.error('Guest row insert failed (continuing):', insErr);
+      if (insErr) {
+        // CRITICAL: sponsor is marked paid but guest seats did not persist.
+        console.error('CRITICAL: Sponsor marked paid but guest rows insert failed!', JSON.stringify({
+          attendeeId,
+          tier,
+          seatCount,
+          dbError: insErr.message,
+        }));
+        return jsonResponse({
+          error: `Sponsor was marked paid, but guest ticket rows failed to save. Please contact engineering with this reference: ${attendeeId}`,
+          partial: true,
+          sponsor,
+        }, 500);
+      }
     }
 
     const { data: updatedSponsor } = await supabase.from('attendees').select('*').eq('id', attendeeId).single();

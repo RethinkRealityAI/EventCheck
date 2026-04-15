@@ -18,6 +18,14 @@ const TABS = [
 
 type TabKey = typeof TABS[number]['key'];
 
+const parsePaymentAmount = (amount?: string): number => {
+  if (!amount) return 0;
+  // Strip non-numeric-except-dot chars (handles "12345.00 CAD (PENDING CHEQUE)" safely)
+  const numeric = amount.replace(/[^0-9.]/g, '');
+  const n = parseFloat(numeric);
+  return Number.isFinite(n) ? n : 0;
+};
+
 export const SponsorsDashboard: React.FC = () => {
   const [tab, setTab] = useState<TabKey>('all');
   const [sponsors, setSponsors] = useState<Attendee[]>([]);
@@ -39,8 +47,8 @@ export const SponsorsDashboard: React.FC = () => {
     return sponsors;
   })();
 
-  const totalRaised = sponsors.filter(s => s.paymentStatus === 'paid').reduce((sum, s) => sum + parseFloat(s.paymentAmount || '0'), 0);
-  const committed = sponsors.filter(s => s.paymentStatus === 'pending').reduce((sum, s) => sum + parseFloat(s.paymentAmount || '0'), 0);
+  const totalRaised = sponsors.filter(s => s.paymentStatus === 'paid').reduce((sum, s) => sum + parsePaymentAmount(s.paymentAmount), 0);
+  const committed = sponsors.filter(s => s.paymentStatus === 'pending').reduce((sum, s) => sum + parsePaymentAmount(s.paymentAmount), 0);
   const confirmed = sponsors.filter(s => s.paymentStatus === 'paid').length;
   const activeProspects = prospects.filter(p => p.status === 'prospect' || p.status === 'invited').length;
 

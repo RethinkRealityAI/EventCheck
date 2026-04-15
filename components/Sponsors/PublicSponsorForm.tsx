@@ -271,7 +271,19 @@ const PublicSponsorForm: React.FC<Props> = ({ form, settings }) => {
       subtotal: i.price * (ticketQuantities[i.id] ?? 0),
     }));
     return {
-      tier: tierItemIdToSponsorTier(selectedPackageId),
+      tier: (() => {
+        // Prefer package tier; fall back to 'scholarship' when only scholarships/ads/booths are present
+        const pkgTier = tierItemIdToSponsorTier(selectedPackageId);
+        if (pkgTier) return pkgTier;
+        // Check if the selection includes a scholarship — give scholarship-only buyers a visible tier
+        const hasScholarship = Object.entries(ticketQuantities).some(
+          ([id, qty]) => id === 'item-scholarship' && (qty ?? 0) > 0
+        );
+        if (hasScholarship) return 'scholarship';
+        // If only ads/booths, still classify as 'award' (closest fit: non-tiered sponsorship) so it appears
+        const hasAnyItem = Object.values(ticketQuantities).some(q => (q ?? 0) > 0);
+        return hasAnyItem ? 'award' : null;
+      })(),
       items,
       companyInfo: {
         orgName: contact.orgName,
