@@ -9,6 +9,7 @@ import { generateTicketPDF } from '../utils/pdfGenerator';
 import { PayPalScriptProvider, PayPalButtons } from "@paypal/react-paypal-js";
 import { sendTicketEmail, arrayBufferToBase64 } from '../services/smtpService';
 import QRCode from 'react-qr-code';
+import PublicSponsorForm from './Sponsors/PublicSponsorForm';
 
 const PublicRegistration = () => {
   const { formId } = useParams<{ formId: string }>();
@@ -684,6 +685,10 @@ const PublicRegistration = () => {
       </div>
     </div>
   );
+
+  if (form.formType === 'sponsor' && !guestRef) {
+    return <PublicSponsorForm form={form} settings={settings} />;
+  }
 
   return (
     <div

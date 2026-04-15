@@ -1,4 +1,4 @@
-import { Attendee, Form, AppSettings, DEFAULT_SETTINGS, FormField, PdfSettings, SeatingTable, SeatingConfiguration, SeatingAssignment, SceneElement, SceneElementType, Custom3DModel } from '../types';
+import { Attendee, Form, AppSettings, DEFAULT_SETTINGS, FormField, PdfSettings, SeatingTable, SeatingConfiguration, SeatingAssignment, SceneElement, SceneElementType, Custom3DModel, SponsorProspect, SponsorProspectStatus } from '../types';
 import { supabase } from './supabaseClient';
 import { Database } from './database.types';
 
@@ -89,6 +89,12 @@ export const updateAttendee = async (id: string, updates: Partial<Attendee>): Pr
   if (updates.assignedTableId !== undefined) dbUpdates.assigned_table_id = updates.assignedTableId;
   if (updates.assignedSeat !== undefined) dbUpdates.assigned_seat = updates.assignedSeat;
   if (updates.guestType !== undefined) dbUpdates.guest_type = updates.guestType || null;
+  if (updates.sponsorTier !== undefined) dbUpdates.sponsor_tier = updates.sponsorTier || null;
+  if (updates.sponsorItems !== undefined) dbUpdates.sponsor_items = updates.sponsorItems as any;
+  if (updates.paymentMethod !== undefined) dbUpdates.payment_method = updates.paymentMethod || null;
+  if (updates.companyInfo !== undefined) dbUpdates.company_info = updates.companyInfo as any;
+  if (updates.sponsoredAwards !== undefined) dbUpdates.sponsored_awards = updates.sponsoredAwards as any;
+  if (updates.adminNotes !== undefined) dbUpdates.admin_notes = updates.adminNotes ?? null;
 
   const { error } = await supabase
     .from('attendees')
@@ -247,6 +253,19 @@ export const getSettings = async (): Promise<AppSettings> => {
     emailPurchaserGuestNote: data.email_purchaser_guest_note || DEFAULT_SETTINGS.emailPurchaserGuestNote,
     emailInvitationSubject: data.email_invitation_subject || '',
     emailInvitationBody: data.email_invitation_body || '',
+    sponsorInvitationSubject: (data as any).sponsor_invitation_subject || DEFAULT_SETTINGS.sponsorInvitationSubject,
+    sponsorInvitationBody: (data as any).sponsor_invitation_body || DEFAULT_SETTINGS.sponsorInvitationBody,
+    sponsorConfirmationPaidSubject: (data as any).sponsor_confirmation_paid_subject || DEFAULT_SETTINGS.sponsorConfirmationPaidSubject,
+    sponsorConfirmationPaidBody: (data as any).sponsor_confirmation_paid_body || DEFAULT_SETTINGS.sponsorConfirmationPaidBody,
+    sponsorChequePledgeSubject: (data as any).sponsor_cheque_pledge_subject || DEFAULT_SETTINGS.sponsorChequePledgeSubject,
+    sponsorChequePledgeBody: (data as any).sponsor_cheque_pledge_body || DEFAULT_SETTINGS.sponsorChequePledgeBody,
+    sponsorChequeInternalSubject: (data as any).sponsor_cheque_internal_subject || DEFAULT_SETTINGS.sponsorChequeInternalSubject,
+    sponsorChequeInternalBody: (data as any).sponsor_cheque_internal_body || DEFAULT_SETTINGS.sponsorChequeInternalBody,
+    sponsorChequeInternalRecipients: (data as any).sponsor_cheque_internal_recipients || DEFAULT_SETTINGS.sponsorChequeInternalRecipients,
+    sponsorChequeReceivedSubject: (data as any).sponsor_cheque_received_subject || DEFAULT_SETTINGS.sponsorChequeReceivedSubject,
+    sponsorChequeReceivedBody: (data as any).sponsor_cheque_received_body || DEFAULT_SETTINGS.sponsorChequeReceivedBody,
+    sponsorChequeMailingAddress: (data as any).sponsor_cheque_mailing_address || DEFAULT_SETTINGS.sponsorChequeMailingAddress,
+    sponsorHstRate: (data as any).sponsor_hst_rate ?? DEFAULT_SETTINGS.sponsorHstRate,
     pdfSettings: pdfSettings,
     defaultDashboardFormId: (data as any).default_dashboard_form_id || undefined,
     dashboardColumnPrefs: ((data as any).dashboard_column_prefs as Record<string, Record<string, boolean>>) || {},
@@ -279,6 +298,19 @@ export const saveSettings = async (settings: AppSettings): Promise<void> => {
     pdf_settings: settings.pdfSettings as unknown as Database['public']['Tables']['app_settings']['Row']['pdf_settings'],
     default_dashboard_form_id: settings.defaultDashboardFormId || null,
     dashboard_column_prefs: settings.dashboardColumnPrefs || {},
+    sponsor_invitation_subject: settings.sponsorInvitationSubject,
+    sponsor_invitation_body: settings.sponsorInvitationBody,
+    sponsor_confirmation_paid_subject: settings.sponsorConfirmationPaidSubject,
+    sponsor_confirmation_paid_body: settings.sponsorConfirmationPaidBody,
+    sponsor_cheque_pledge_subject: settings.sponsorChequePledgeSubject,
+    sponsor_cheque_pledge_body: settings.sponsorChequePledgeBody,
+    sponsor_cheque_internal_subject: settings.sponsorChequeInternalSubject,
+    sponsor_cheque_internal_body: settings.sponsorChequeInternalBody,
+    sponsor_cheque_internal_recipients: settings.sponsorChequeInternalRecipients as any,
+    sponsor_cheque_received_subject: settings.sponsorChequeReceivedSubject,
+    sponsor_cheque_received_body: settings.sponsorChequeReceivedBody,
+    sponsor_cheque_mailing_address: settings.sponsorChequeMailingAddress,
+    sponsor_hst_rate: settings.sponsorHstRate,
   };
 
   const { error } = await supabase
@@ -321,7 +353,13 @@ function mapAttendeeFromDb(db: AttendeeRow): Attendee {
     isPrimary: db.is_primary ?? true,
     assignedTableId: db.assigned_table_id || null,
     assignedSeat: db.assigned_seat ?? null,
-    guestType: (db.guest_type as Attendee['guestType']) || undefined
+    guestType: (db.guest_type as Attendee['guestType']) || undefined,
+    sponsorTier: (db as any).sponsor_tier || null,
+    sponsorItems: ((db as any).sponsor_items as any[]) || [],
+    paymentMethod: (db as any).payment_method || null,
+    companyInfo: ((db as any).company_info as any) || undefined,
+    sponsoredAwards: ((db as any).sponsored_awards as string[]) || [],
+    adminNotes: (db as any).admin_notes || undefined,
   };
 }
 
@@ -349,7 +387,13 @@ export function mapAttendeeToDb(a: Attendee): AttendeeInsert {
     is_primary: a.isPrimary ?? true,
     assigned_table_id: a.assignedTableId || null,
     assigned_seat: a.assignedSeat ?? null,
-    guest_type: a.guestType || null
+    guest_type: a.guestType || null,
+    sponsor_tier: a.sponsorTier || null,
+    sponsor_items: (a.sponsorItems as any) || [],
+    payment_method: a.paymentMethod || null,
+    company_info: (a.companyInfo as any) || {},
+    sponsored_awards: (a.sponsoredAwards as any) || [],
+    admin_notes: a.adminNotes || null,
   };
 }
 
@@ -360,6 +404,7 @@ function mapFormFromDb(db: FormRow): Form {
     description: db.description,
     createdAt: db.created_at,
     status: db.status as 'active' | 'draft' | 'closed',
+    formType: (db as any).form_type === 'sponsor' ? 'sponsor' : 'event',
     settings: (db.settings as any), // Cast JSON to specific setting type if needed
     thankYouMessage: db.thank_you_message || undefined,
     fields: (db.fields as unknown as FormField[]) || []
@@ -372,6 +417,7 @@ function mapFormToDb(f: Form): FormInsert {
     title: f.title,
     description: f.description,
     status: f.status,
+    form_type: f.formType || 'event',
     settings: f.settings as any,
     thank_you_message: f.thankYouMessage,
     fields: f.fields as any
@@ -779,5 +825,122 @@ function mapCustomModelFromDb(db: Custom3DModelRow): Custom3DModel {
     fileSize: db.file_size,
     thumbnailPath: db.thumbnail_path || undefined,
     createdAt: db.created_at,
+  };
+}
+
+// ============================================================
+// Sponsor queries
+// ============================================================
+
+export const getSponsorAttendees = async (): Promise<Attendee[]> => {
+  const { data, error } = await supabase
+    .from('attendees')
+    .select('*')
+    .not('sponsor_tier', 'is', null)
+    .eq('is_primary', true)
+    .order('registered_at', { ascending: false });
+
+  if (error) {
+    console.error('Failed to load sponsor attendees', error);
+    return [];
+  }
+  return (data || []).map(mapAttendeeFromDb);
+};
+
+// ============================================================
+// Sponsor prospects
+// ============================================================
+
+export const getProspects = async (): Promise<SponsorProspect[]> => {
+  const { data, error } = await supabase
+    .from('sponsor_prospects')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Failed to load prospects', error);
+    return [];
+  }
+  return (data || []).map(mapProspectFromDb);
+};
+
+export const saveProspect = async (p: SponsorProspect): Promise<void> => {
+  const { error } = await supabase
+    .from('sponsor_prospects')
+    .upsert(mapProspectToDb(p));
+  if (error) throw new Error(`Failed to save prospect: ${error.message}`);
+};
+
+export const deleteProspect = async (id: string): Promise<void> => {
+  const { error } = await supabase.from('sponsor_prospects').delete().eq('id', id);
+  if (error) console.error('Failed to delete prospect', error);
+};
+
+export const updateProspectStatus = async (id: string, status: SponsorProspectStatus): Promise<void> => {
+  const patch: any = { status };
+  if (status === 'invited') {
+    patch.invited_at = new Date().toISOString();
+    patch.last_emailed_at = new Date().toISOString();
+  }
+  const { error } = await supabase.from('sponsor_prospects').update(patch).eq('id', id);
+  if (error) console.error('Failed to update prospect status', error);
+};
+
+export const logProspectEmail = async (
+  id: string,
+  entry: { sentAt: string; subject: string; templateKey: string; recipientEmail: string }
+): Promise<void> => {
+  const { data } = await supabase
+    .from('sponsor_prospects')
+    .select('email_history, status')
+    .eq('id', id)
+    .single();
+  if (!data) return;
+  const history = (data.email_history as any[]) || [];
+  history.push(entry);
+  const newStatus = data.status === 'prospect' ? 'invited' : data.status;
+  await supabase
+    .from('sponsor_prospects')
+    .update({
+      email_history: history as any,
+      last_emailed_at: entry.sentAt,
+      invited_at: data.status === 'prospect' ? entry.sentAt : undefined,
+      status: newStatus,
+    })
+    .eq('id', id);
+};
+
+function mapProspectFromDb(db: any): SponsorProspect {
+  return {
+    id: db.id,
+    orgName: db.org_name,
+    contactName: db.contact_name || undefined,
+    contactTitle: db.contact_title || undefined,
+    contactEmail: db.contact_email,
+    contactPhone: db.contact_phone || undefined,
+    status: db.status,
+    sponsorFormId: db.sponsor_form_id,
+    invitedAt: db.invited_at,
+    lastEmailedAt: db.last_emailed_at,
+    emailHistory: (db.email_history as any[]) || [],
+    notes: db.notes || undefined,
+    createdAt: db.created_at,
+  };
+}
+
+function mapProspectToDb(p: SponsorProspect): any {
+  return {
+    id: p.id,
+    org_name: p.orgName,
+    contact_name: p.contactName || null,
+    contact_title: p.contactTitle || null,
+    contact_email: p.contactEmail,
+    contact_phone: p.contactPhone || null,
+    status: p.status,
+    sponsor_form_id: p.sponsorFormId || null,
+    invited_at: p.invitedAt || null,
+    last_emailed_at: p.lastEmailedAt || null,
+    email_history: p.emailHistory as any,
+    notes: p.notes || null,
   };
 }

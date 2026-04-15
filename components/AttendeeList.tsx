@@ -25,7 +25,7 @@ const STANDARD_COLUMNS: ColumnDef[] = [
 
 const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading = false }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState<'live' | 'test' | 'donated' | 'tables'>('live');
+  const [activeTab, setActiveTab] = useState<'live' | 'test' | 'donated' | 'tables' | 'sponsor-tickets'>('live');
   const [selectedAttendee, setSelectedAttendee] = useState<Attendee | null>(null);
   const { showNotification } = useNotifications();
   const [showExportModal, setShowExportModal] = useState(false);
@@ -140,6 +140,11 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
   }, [selectedFormId, forms]);
 
   const selectedForm = useMemo(() => forms.find(f => f.id === selectedFormId), [forms, selectedFormId]);
+
+  const sponsorPrimaryIds = useMemo(
+    () => new Set(attendees.filter(a => a.isPrimary && a.sponsorTier).map(a => a.id)),
+    [attendees]
+  );
 
   const allColumns = useMemo(() => [...STANDARD_COLUMNS, ...dynamicColumns], [dynamicColumns]);
 
@@ -262,6 +267,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     if (activeTab === 'test') matchesTab = isTest;
     else if (activeTab === 'donated') matchesTab = !isTest && ((a.donatedSeats || 0) > 0 || (a.donatedTables || 0) > 0);
     else if (activeTab === 'tables') matchesTab = !isTest;
+    else if (activeTab === 'sponsor-tickets') matchesTab = !a.isPrimary && !!a.primaryAttendeeId && sponsorPrimaryIds.has(a.primaryAttendeeId);
     else matchesTab = !isTest;
 
     const matchesStatus = statusFilter === 'all'
@@ -425,6 +431,12 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                 className={`px-3 py-1 text-xs font-medium rounded-md transition flex items-center gap-1 ${activeTab === 'tables' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
               >
                 <LayoutDashboard className="w-3 h-3" /> Tables
+              </button>
+              <button
+                onClick={() => { setActiveTab('sponsor-tickets'); setCurrentPage(1); }}
+                className={`px-3 py-1 text-xs font-medium rounded-md transition ${activeTab === 'sponsor-tickets' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
+              >
+                Sponsor Tickets
               </button>
               <button
                 onClick={() => { setActiveTab('test'); setCurrentPage(1); }}
