@@ -1,8 +1,12 @@
 import React, { useState, useMemo } from 'react';
 import { PayPalScriptProvider, PayPalButtons } from '@paypal/react-paypal-js';
 import { Check, AlertCircle, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
-import { Form, AppSettings, TicketItem, SponsorItemCategory } from '../../types';
+import { Form, AppSettings, TicketItem, SponsorItemCategory, Attendee } from '../../types';
 import { supabase } from '../../services/supabaseClient';
+import { generateReceiptPDF } from '../../utils/receiptGenerator';
+import { generateTicketPDF } from '../../utils/pdfGenerator';
+import { sendTicketEmail, arrayBufferToBase64 } from '../../services/smtpService';
+import { buildSponsorEmailContext, mergeTemplate } from '../../utils/sponsorEmailTemplates';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -284,6 +288,112 @@ const PublicSponsorForm: React.FC<Props> = ({ form, settings }) => {
     };
   };
 
+  const dispatchSponsorEmails = async (
+    primaryId: string,
+    primaryInvoiceId: string,
+    primaryName: string,
+    primaryEmail: string,
+    registeredAt: string,
+    transactionId: string | undefined,
+    paymentMethod: 'paypal' | 'cheque'
+  ) => {
+    const meta = buildSponsorMeta();
+    const savedAttendee: Attendee = {
+      id: primaryId,
+      formId: form.id,
+      formTitle: form.title,
+      name: primaryName,
+      email: primaryEmail,
+      ticketType: meta.items.map(i => `${i.label} x${i.qty}`).join(', '),
+      registeredAt,
+      qrPayload: JSON.stringify({ id: primaryId }),
+      isPrimary: true,
+      sponsorTier: meta.tier as any,
+      sponsorItems: meta.items,
+      paymentMethod,
+      companyInfo: meta.companyInfo,
+      sponsoredAwards: meta.sponsoredAwards,
+      transactionId,
+      paymentAmount: `${meta.total.toFixed(2)} ${settings.currency || 'CAD'}`,
+      invoiceId: primaryInvoiceId,
+    };
+
+    try {
+      const receiptDoc = generateReceiptPDF(savedAttendee, settings, {
+        status: paymentMethod === 'cheque' ? 'pending' : 'paid',
+        hstLineAmount: meta.hst,
+      });
+      const receiptB64 = arrayBufferToBase64(receiptDoc.output('arraybuffer') as ArrayBuffer);
+      const receiptAttachment = {
+        filename: `Receipt_${savedAttendee.invoiceId || savedAttendee.id.slice(0, 8)}.pdf`,
+        content: receiptB64,
+        contentType: 'application/pdf',
+      };
+
+      const ctx = buildSponsorEmailContext(savedAttendee, settings, {
+        event: 'Hope Gala & Awards 2026',
+        adminDashboardLink: window.location.origin + `/#/admin/sponsors`,
+      });
+
+      if (paymentMethod === 'cheque') {
+        // Email sponsor — pledge
+        await sendTicketEmail(settings, {
+          to: savedAttendee.email,
+          subject: mergeTemplate(settings.sponsorChequePledgeSubject, ctx),
+          name: savedAttendee.companyInfo?.contactName || savedAttendee.name,
+          message: mergeTemplate(settings.sponsorChequePledgeBody, ctx),
+          attachments: [receiptAttachment],
+        });
+        // Email internal — cheque notification
+        const internalRecipients = settings.sponsorChequeInternalRecipients.join(', ');
+        await sendTicketEmail(settings, {
+          to: internalRecipients,
+          subject: mergeTemplate(settings.sponsorChequeInternalSubject, ctx),
+          name: 'Gala Team',
+          message: mergeTemplate(settings.sponsorChequeInternalBody, ctx),
+          attachments: [receiptAttachment],
+        });
+      } else {
+        // PAYPAL — fetch guest rows + generate their ticket PDFs
+        const seatCount = meta.tier === 'signature' ? 16 : (meta.tier === 'gold' || meta.tier === 'silver') ? 8 : 0;
+        const ticketAttachments: any[] = [receiptAttachment];
+        if (seatCount > 0) {
+          const { data: guests } = await supabase
+            .from('attendees')
+            .select('*')
+            .eq('primary_attendee_id', savedAttendee.id)
+            .eq('is_primary', false);
+          for (const g of guests || []) {
+            const guestAttendee = {
+              ...savedAttendee,
+              id: g.id,
+              name: g.name,
+              qrPayload: g.qr_payload,
+              isPrimary: false,
+            };
+            const regUrl = `${window.location.origin}/#/form/${form.id}?ref=${g.id}`;
+            const ticketDoc = generateTicketPDF(guestAttendee as Attendee, settings, form, regUrl);
+            ticketAttachments.push({
+              filename: `Ticket_${g.name.replace(/[^a-z0-9]/gi, '_')}.pdf`,
+              content: arrayBufferToBase64(ticketDoc.output('arraybuffer') as ArrayBuffer),
+              contentType: 'application/pdf',
+            });
+          }
+        }
+        await sendTicketEmail(settings, {
+          to: savedAttendee.email,
+          subject: mergeTemplate(settings.sponsorConfirmationPaidSubject, ctx),
+          name: savedAttendee.companyInfo?.contactName || savedAttendee.name,
+          message: mergeTemplate(settings.sponsorConfirmationPaidBody, ctx),
+          attachments: ticketAttachments,
+        });
+      }
+    } catch (mailErr: any) {
+      console.error('Sponsor email dispatch failed:', mailErr);
+      // Don't surface to user — submission already succeeded; email issues are operator-level
+    }
+  };
+
   // Fix 4 — Submit via verify-payment edge function (cheque path)
   const submitCheque = async () => {
     if (!validate()) return;
@@ -317,11 +427,17 @@ const PublicSponsorForm: React.FC<Props> = ({ form, settings }) => {
           mode: 'cheque',
         },
       });
+      // (primaryAttendee is already constructed above — reuse its fields)
+      const regAt = primaryAttendee.registered_at;
+      const invId = primaryAttendee.invoice_id;
+      const primId = primaryAttendee.id;
       if (fnError || resp?.error) {
         throw new Error(resp?.error || fnError?.message || 'Pledge submission failed');
       }
       setChequeSelected(true);
       setStep('success');
+      // Fire email dispatch async — don't block UI
+      dispatchSponsorEmails(primId, invId, contact.orgName, contact.email, regAt, undefined, 'cheque');
     } catch (err: any) {
       setSubmitError(err.message ?? 'Submission failed. Please try again.');
     } finally {
@@ -368,6 +484,7 @@ const PublicSponsorForm: React.FC<Props> = ({ form, settings }) => {
         throw new Error(resp?.error || fnError?.message || 'Payment verification failed');
       }
       setStep('success');
+      dispatchSponsorEmails(primaryAttendee.id, primaryAttendee.invoice_id, contact.orgName, contact.email, primaryAttendee.registered_at, (resp as any)?.transactionId, 'paypal');
     } catch (err: any) {
       setSubmitError(err.message ?? 'Payment verification failed.');
     } finally {
