@@ -112,6 +112,12 @@ export const generateReceiptPDF = (
     y += 7;
   }
 
+  // Ensure the totals block and footer fit on this page; else add a page
+  if (y > 230) {
+    doc.addPage();
+    y = 20;
+  }
+
   y += 3;
   doc.line(15, y, pageWidth - 15, y);
   y += 7;
@@ -145,7 +151,11 @@ export const generateReceiptPDF = (
   const pmLabel = pm === 'paypal' || pm === 'card' ? 'PayPal / Credit Card' : pm === 'cheque' ? 'Cheque' : pm;
   doc.text(status === 'paid' ? `${pmLabel} — Paid` : `${pmLabel} — Pending`, 15, y);
 
-  // Footer
+  // Footer — push to a new page if we're out of room
+  if (y > 265) {
+    doc.addPage();
+    y = 20;
+  }
   doc.setTextColor(150, 150, 150);
   doc.setFontSize(8);
   doc.text(settings.pdfSettings.footerText || '', pageWidth / 2, 280, { align: 'center' });

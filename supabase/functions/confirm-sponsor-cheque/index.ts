@@ -23,20 +23,17 @@ serve(async (req: Request) => {
     const jwt = authHeader.replace(/^Bearer\s+/i, '').trim();
     if (!jwt) return jsonResponse({ error: 'Unauthorized: missing bearer token' }, 401);
 
-    const anonClient = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_ANON_KEY')!
-    );
-    const { data: userData, error: userErr } = await anonClient.auth.getUser(jwt);
-    if (userErr || !userData?.user) {
-      return jsonResponse({ error: 'Unauthorized: invalid token' }, 401);
-    }
-    // (User is authenticated — any authenticated admin can mark cheques received.)
-
+    // Use the service-role client for both auth-check and DB operations.
+    // auth.getUser(jwt) validates the token regardless of which key initialized the client.
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
+    const { data: userData, error: userErr } = await supabase.auth.getUser(jwt);
+    if (userErr || !userData?.user) {
+      return jsonResponse({ error: 'Unauthorized: invalid token' }, 401);
+    }
+    // (User is authenticated — any authenticated admin can mark cheques received.)
 
     const { data: sponsor, error: fetchErr } = await supabase
       .from('attendees')

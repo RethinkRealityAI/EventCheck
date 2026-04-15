@@ -18,6 +18,7 @@ function generateEmailTemplate(data: {
     title: string;
     greeting: string;
     content: string;
+    attachmentNote?: string; // if provided, render as the callout; if undefined, suppress the callout
 }) {
     return `
     <!DOCTYPE html>
@@ -45,15 +46,16 @@ function generateEmailTemplate(data: {
                   <div style="font-size: 15px; line-height: 1.7; color: #444;">
                     ${data.content}
                   </div>
+                  ${data.attachmentNote ? `
                   <!-- Attachment hint -->
                   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top: 28px; background-color: #f0f7ff; border-radius: 8px; border: 1px solid #d4e5f7;">
                     <tr>
                       <td style="padding: 16px 20px;">
-                        <p style="margin: 0; font-size: 14px; color: #1a73e8; font-weight: 600;">&#128206; Your ticket is attached to this email</p>
-                        <p style="margin: 6px 0 0; font-size: 13px; color: #5a6c7d;">Please download the PDF and present the QR code at the entrance.</p>
+                        <p style="margin: 0; font-size: 14px; color: #1a73e8; font-weight: 600;">&#128206; ${data.attachmentNote}</p>
                       </td>
                     </tr>
                   </table>
+                  ` : ''}
                 </td>
               </tr>
               <!-- Footer -->
@@ -102,10 +104,12 @@ serve(async (req: Request) => {
             },
         });
 
+        const hasAttachments = Array.isArray(email.attachments) && email.attachments.length > 0;
         const html = generateEmailTemplate({
             title: 'Event Registration',
             greeting: `Hello ${email.name}`,
             content: `<p>${email.message}</p>`,
+            attachmentNote: hasAttachments ? 'Attachment included — please review the PDF.' : undefined,
         });
 
         // Nodemailer accepts base64 natively

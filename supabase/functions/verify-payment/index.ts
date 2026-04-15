@@ -76,15 +76,86 @@ serve(async (req: Request) => {
       const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
       const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+      // ─── Validate sponsorMeta shape ───
+      if (!sponsorMeta.items || !Array.isArray(sponsorMeta.items) || sponsorMeta.items.length === 0) {
+        return jsonResponse({ error: 'Invalid sponsorMeta: items must be a non-empty array' }, 400);
+      }
+      if (typeof sponsorMeta.total !== 'number' || !Number.isFinite(sponsorMeta.total) || sponsorMeta.total <= 0) {
+        return jsonResponse({ error: 'Invalid sponsorMeta: total must be positive' }, 400);
+      }
+      if (!formId) {
+        return jsonResponse({ error: 'formId required for sponsor submission' }, 400);
+      }
+
+      // ─── Server-side price recomputation from the form's ticketConfig ───
+      // Prevents a tampered client from claiming a high-value tier at a low price.
+      const supabaseUrlForFormLookup = Deno.env.get('SUPABASE_URL')!;
+      const supabaseServiceKeyForFormLookup = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+      const formLookupClient = createClient(supabaseUrlForFormLookup, supabaseServiceKeyForFormLookup);
+      const { data: formRow, error: formErr } = await formLookupClient
+        .from('forms')
+        .select('fields, form_type')
+        .eq('id', formId)
+        .single();
+      if (formErr || !formRow) {
+        return jsonResponse({ error: 'Form not found for sponsor submission' }, 404);
+      }
+      if (formRow.form_type !== 'sponsor') {
+        return jsonResponse({ error: 'Form is not a sponsor form' }, 400);
+      }
+      const formFields = (typeof formRow.fields === 'string' ? JSON.parse(formRow.fields) : formRow.fields) as any[];
+      const ticketField = formFields.find((f: any) => f.type === 'ticket');
+      if (!ticketField?.ticketConfig?.items) {
+        return jsonResponse({ error: 'Sponsor form has no ticket config' }, 500);
+      }
+      const catalogById = new Map<string, { price: number; name: string; maxPerOrder: number; itemCategory?: string }>();
+      for (const i of ticketField.ticketConfig.items) {
+        catalogById.set(i.id, { price: i.price, name: i.name, maxPerOrder: i.maxPerOrder, itemCategory: i.itemCategory });
+      }
+
+      // Recompute expected subtotal + HST from the form's catalog
+      let expectedSubtotal = 0;
+      let expectedBoothSubtotal = 0;
+      for (const item of sponsorMeta.items) {
+        const catalog = catalogById.get(item.key);
+        if (!catalog) {
+          return jsonResponse({ error: `Unknown item: ${item.key}` }, 400);
+        }
+        if (!Number.isInteger(item.qty) || item.qty <= 0 || item.qty > catalog.maxPerOrder) {
+          return jsonResponse({ error: `Invalid qty for item ${item.key}` }, 400);
+        }
+        const lineTotal = catalog.price * item.qty;
+        expectedSubtotal += lineTotal;
+        if (catalog.itemCategory === 'booth') expectedBoothSubtotal += lineTotal;
+      }
+
+      // Fetch HST rate from app_settings
+      const { data: settingsRow } = await formLookupClient
+        .from('app_settings')
+        .select('sponsor_hst_rate')
+        .eq('id', 1)
+        .single();
+      const hstRate = Number(settingsRow?.sponsor_hst_rate ?? 0.13);
+      const expectedHst = expectedBoothSubtotal * hstRate;
+      const expectedTotal = expectedSubtotal + expectedHst;
+
+      // Validate client's claimed total matches what the server computed (1-cent tolerance)
+      if (Math.abs(Number(sponsorMeta.total) - expectedTotal) > 0.01) {
+        return jsonResponse({
+          error: `Total mismatch. Client: ${sponsorMeta.total}, Server: ${expectedTotal.toFixed(2)}`,
+        }, 422);
+      }
+
+      // Use the server-computed total for all downstream checks
+      const computedTotal = expectedTotal;
+      const currency = 'CAD';
+
       const primary = attendees[0];
       primary.sponsor_tier = sponsorMeta.tier || null;
       primary.sponsor_items = sponsorMeta.items || [];
       primary.company_info = sponsorMeta.companyInfo || {};
       primary.sponsored_awards = sponsorMeta.sponsoredAwards || [];
       primary.payment_method = paymentMethod === 'cheque' ? 'cheque' : 'paypal';
-
-      const computedTotal = Number(sponsorMeta.total || 0);
-      const currency = 'CAD';
 
       // ─── CHEQUE: skip PayPal, save pending, no guest tickets yet ───
       if (paymentMethod === 'cheque') {
