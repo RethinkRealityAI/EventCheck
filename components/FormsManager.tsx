@@ -1,15 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Edit3, Trash2, Globe, Code, ExternalLink, Copy, Check } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Plus, Edit3, Trash2, Globe, Code, ExternalLink, Copy, Check, Handshake } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
 import { Form } from '../types';
 import { getForms, saveForm, deleteForm } from '../services/storageService';
 import { useNotifications } from './NotificationSystem';
+import { createSponsorForm } from './Sponsors/createSponsorForm';
 
 const FormsManager: React.FC = () => {
   const [forms, setForms] = useState<Form[]>([]);
   const [showEmbedModal, setShowEmbedModal] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const { showNotification } = useNotifications();
+  const navigate = useNavigate();
 
   useEffect(() => {
     const fetch = async () => {
@@ -87,12 +89,25 @@ const FormsManager: React.FC = () => {
           <h2 className="text-4xl font-extrabold text-white mb-2 drop-shadow-md tracking-tight">Event Forms</h2>
           <p className="text-emerald-100 font-medium tracking-wide text-lg max-w-lg">Create and manage registration forms for your events.</p>
         </div>
-        <button
-          onClick={handleCreate}
-          className="relative z-10 flex items-center gap-2 px-6 py-3 bg-white text-emerald-700 rounded-xl hover:bg-emerald-50 transition font-bold shadow-xl shadow-black/10 hover:shadow-2xl hover:scale-105 transform duration-300"
-        >
-          <Plus className="w-5 h-5" /> Create New Form
-        </button>
+        <div className="relative z-10 flex items-center gap-3">
+          <button
+            onClick={handleCreate}
+            className="flex items-center gap-2 px-6 py-3 bg-white text-emerald-700 rounded-xl hover:bg-emerald-50 transition font-bold shadow-xl shadow-black/10 hover:shadow-2xl hover:scale-105 transform duration-300"
+          >
+            <Plus className="w-5 h-5" /> Create New Form
+          </button>
+          <button
+            onClick={async () => {
+              const newForm = createSponsorForm();
+              await saveForm(newForm);
+              navigate(`/admin/builder/${newForm.id}`);
+            }}
+            className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl shadow-md font-semibold"
+          >
+            <Handshake className="w-4 h-4" />
+            Create Sponsor Form
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

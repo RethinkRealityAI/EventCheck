@@ -25,6 +25,13 @@ export interface Attendee {
   // Seating Assignment
   assignedTableId?: string | null;
   assignedSeat?: number | null;
+  // Sponsor fields (populated only when this attendee is a sponsor submission)
+  sponsorTier?: SponsorTier | null;
+  sponsorItems?: SponsorItem[];
+  paymentMethod?: PaymentMethod | null;
+  companyInfo?: CompanyInfo;
+  sponsoredAwards?: string[];
+  adminNotes?: string;
 }
 
 export interface SeatingConfiguration {
@@ -106,6 +113,8 @@ export interface TicketItem {
   inventory: number; // 0 for unlimited
   maxPerOrder: number;
   seats?: number; // Number of seats this ticket represents (e.g. 8 for a table)
+  itemCategory?: SponsorItemCategory;
+  benefits?: string[];  // for tier cards — bulleted benefits list shown in the UI
 }
 
 export interface TicketConfig {
@@ -140,6 +149,7 @@ export interface FormField {
 
 export interface Form {
   id: string;
+  formType?: 'event' | 'sponsor';  // defaults to 'event' when undefined
   title: string;
   description: string;
   thankYouMessage?: string; // HTML supported
@@ -208,6 +218,21 @@ export interface AppSettings {
   emailInvitationSubject: string;
   emailInvitationBody: string; // HTML supported
 
+  // Sponsor Email Templates
+  sponsorInvitationSubject: string;
+  sponsorInvitationBody: string;
+  sponsorConfirmationPaidSubject: string;
+  sponsorConfirmationPaidBody: string;
+  sponsorChequePledgeSubject: string;
+  sponsorChequePledgeBody: string;
+  sponsorChequeInternalSubject: string;
+  sponsorChequeInternalBody: string;
+  sponsorChequeInternalRecipients: string[];
+  sponsorChequeReceivedSubject: string;
+  sponsorChequeReceivedBody: string;
+  sponsorChequeMailingAddress: string;
+  sponsorHstRate: number;
+
   // PDF Ticket
   pdfSettings: PdfSettings;
 
@@ -242,6 +267,20 @@ export const DEFAULT_SETTINGS: AppSettings = {
   defaultDashboardFormId: undefined,
   dashboardColumnPrefs: {},
 
+  sponsorInvitationSubject: 'Invitation to Partner with SCAGO at the Hope Gala & Awards 2026',
+  sponsorInvitationBody: '<p>Dear {{contactName}},</p><p>On behalf of the Sickle Cell Awareness Group of Ontario, I am writing to invite <strong>{{orgName}}</strong> to partner with us at the <strong>{{event}}</strong> on <strong>{{eventDate}}</strong>.</p><p>You can review our sponsorship packages and confirm your preferred level of support using the form below:</p><p><a href="{{sponsorFormLink}}" style="display:inline-block;padding:12px 24px;background:#C8262A;color:#fff;text-decoration:none;border-radius:6px;font-weight:600;">View Sponsorship Options</a></p><p>We kindly ask that confirmations be received by <strong>March 31, 2026</strong> to support timely planning.</p><p>Thank you for considering this partnership.</p><p>Warm regards,<br>SCAGO Team</p>',
+  sponsorConfirmationPaidSubject: 'Thank you for your sponsorship — {{event}}',
+  sponsorConfirmationPaidBody: '<p>Dear {{contactName}},</p><p>Thank you for confirming <strong>{{orgName}}</strong> as a partner at the {{event}}. We are honoured to have your support.</p><p><strong>Your sponsorship includes:</strong></p>{{itemsList}}<p><strong>Total paid:</strong> {{total}}<br><strong>Transaction ID:</strong> {{transactionId}}</p><p>Attached you will find your official receipt and event tickets (if applicable). We will be in touch shortly regarding logo artwork and additional partnership details.</p><p>With gratitude,<br>SCAGO Team</p>',
+  sponsorChequePledgeSubject: 'Sponsorship pledge received — {{event}}',
+  sponsorChequePledgeBody: '<p>Dear {{contactName}},</p><p>Thank you for pledging to support <strong>{{orgName}}</strong> at the {{event}}. Your selections have been recorded.</p><p><strong>Your selections:</strong></p>{{itemsList}}<p><strong>Total due:</strong> {{total}}</p><p><strong>Please mail your cheque to:</strong></p><p>{{mailingAddress}}</p><p>Once the cheque is received, we will send your official receipt and event tickets (if applicable). Attached please find a preliminary pending-payment receipt for your records.</p><p>With gratitude,<br>SCAGO Team</p>',
+  sponsorChequeInternalSubject: 'Cheque payment request — {{orgName}} — {{total}}',
+  sponsorChequeInternalBody: '<p><strong>A new cheque sponsorship pledge has been submitted. Please follow up with the sponsor.</strong></p><p><strong>Organization:</strong> {{orgName}}<br><strong>Contact:</strong> {{contactName}}<br><strong>Email:</strong> {{contactEmail}}<br><strong>Phone:</strong> {{contactPhone}}</p><p><strong>Selections:</strong></p>{{itemsList}}<p><strong>Total due:</strong> {{total}}</p><p><a href="{{adminDashboardLink}}">Open in admin dashboard</a></p>',
+  sponsorChequeInternalRecipients: ['gala@sicklecellanemia.ca', 'sicklecellawarenessontario@gmail.com', 'communication@sicklecellanemia.ca'],
+  sponsorChequeReceivedSubject: 'Payment received — thank you! ({{event}})',
+  sponsorChequeReceivedBody: '<p>Dear {{contactName}},</p><p>We are pleased to confirm that we have received your cheque payment for <strong>{{orgName}}</strong>\'s sponsorship of the {{event}}.</p><p><strong>Your confirmed sponsorship:</strong></p>{{itemsList}}<p><strong>Total paid:</strong> {{total}}</p><p>Attached you will find your final receipt and event tickets (if applicable).</p><p>With gratitude,<br>SCAGO Team</p>',
+  sponsorChequeMailingAddress: 'Sickle Cell Awareness Group of Ontario\n5109 Steeles Ave W #330\nNorth York, ON M9L 2Y8\n\nPayable to: "Sickle Cell Awareness Group of Ontario"',
+  sponsorHstRate: 0.13,
+
   pdfSettings: {
     enabled: true,
     logoUrl: '',
@@ -252,3 +291,55 @@ export const DEFAULT_SETTINGS: AppSettings = {
     footerText: 'This ticket is non-transferable. Please bring a valid ID.'
   }
 };
+
+// ============================================================
+// Sponsor Management
+// ============================================================
+
+export type SponsorTier = 'signature' | 'gold' | 'silver' | 'award' | 'scholarship';
+export type SponsorItemCategory = 'package' | 'scholarship' | 'ad' | 'booth';
+export type PaymentMethod = 'card' | 'paypal' | 'cheque';
+export type SponsorProspectStatus = 'prospect' | 'invited' | 'responded' | 'confirmed' | 'declined';
+
+export interface SponsorItem {
+  type: SponsorItemCategory;
+  key: string;       // stable identifier e.g. 'tier-gold', 'ad-back-page'
+  label: string;     // display label e.g. 'Gold Sponsorship'
+  qty: number;
+  unitPrice: number;
+  subtotal: number;
+}
+
+export interface CompanyInfo {
+  orgName: string;
+  contactName?: string;
+  contactTitle?: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  website?: string;
+  logoUrl?: string;
+}
+
+export interface SponsorProspectEmailLog {
+  sentAt: string;     // ISO date
+  subject: string;
+  templateKey: string;
+  recipientEmail: string;
+}
+
+export interface SponsorProspect {
+  id: string;
+  orgName: string;
+  contactName?: string;
+  contactTitle?: string;
+  contactEmail: string;
+  contactPhone?: string;
+  status: SponsorProspectStatus;
+  sponsorFormId?: string | null;
+  invitedAt?: string | null;
+  lastEmailedAt?: string | null;
+  emailHistory: SponsorProspectEmailLog[];
+  notes?: string;
+  createdAt: string;
+}

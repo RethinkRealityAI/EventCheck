@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { HashRouter, Routes, Route, Link, useLocation, Navigate, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, QrCode, ClipboardList, LogOut, Settings as SettingsIcon, ExternalLink, Menu, X, ChevronLeft, ChevronRight, Loader2, Rows3, Users } from 'lucide-react';
+import { LayoutDashboard, QrCode, ClipboardList, LogOut, Settings as SettingsIcon, ExternalLink, Menu, X, ChevronLeft, ChevronRight, Loader2, Rows3, Users, Handshake } from 'lucide-react';
 import ManualTicketTool from './components/ManualTicketTool';
 import AttendeeList from './components/AttendeeList';
 import Scanner from './components/Scanner';
@@ -9,6 +9,7 @@ import FormBuilder from './components/FormBuilder';
 import Settings from './components/Settings';
 import PublicRegistration from './components/PublicRegistration';
 import SeatingConfigurator from './components/Seating/SeatingConfigurator';
+import SponsorsDashboard from './components/Sponsors/SponsorsDashboard';
 import { NotificationProvider } from './components/NotificationSystem';
 import { Attendee, Form } from './types';
 import { getAttendees, checkInAttendee, getForms } from './services/storageService';
@@ -214,6 +215,9 @@ const AdminLayout = () => {
             <Link to="/admin/seating" onClick={() => setIsMobileMenuOpen(false)} className="p-3 text-slate-300 hover:text-white hover:bg-slate-800/80 rounded-xl transition-all">
               <Rows3 className="w-6 h-6" />
             </Link>
+            <Link to="/admin/sponsors" onClick={() => setIsMobileMenuOpen(false)} className="p-3 text-slate-300 hover:text-white hover:bg-slate-800/80 rounded-xl transition-all">
+              <Handshake className="w-6 h-6" />
+            </Link>
             <button onClick={() => { setShowScanner(true); setIsMobileMenuOpen(false); }} className="p-3 bg-indigo-600 text-white rounded-xl shadow-lg shadow-indigo-500/20 hover:bg-indigo-500 transition-all">
               <QrCode className="w-6 h-6" />
             </button>
@@ -277,6 +281,7 @@ const AdminLayout = () => {
         <nav className="flex-1 px-3 space-y-2 mt-4 lg:mt-2 overflow-y-auto overflow-x-hidden custom-scrollbar">
           <NavLink to="/admin" icon={LayoutDashboard} collapsed={isSidebarCollapsed && !isSidebarPinned}>Dashboard</NavLink>
           <NavLink to="/admin/forms" icon={ClipboardList} collapsed={isSidebarCollapsed && !isSidebarPinned}>Manage Forms</NavLink>
+          <NavLink to="/admin/sponsors" icon={Handshake} collapsed={isSidebarCollapsed && !isSidebarPinned}>Sponsors</NavLink>
           <NavLink to="/admin/seating" icon={Rows3} collapsed={isSidebarCollapsed && !isSidebarPinned}>Seating Chart</NavLink>
           <NavLink to="/admin/generate-qr" icon={QrCode} collapsed={isSidebarCollapsed && !isSidebarPinned}>Generate QR</NavLink>
           <NavLink to="/admin/settings" icon={SettingsIcon} collapsed={isSidebarCollapsed && !isSidebarPinned}>Settings</NavLink>
@@ -331,6 +336,7 @@ const AdminLayout = () => {
               </>
             } />
             <Route path="/forms" element={<FormsManager />} />
+            <Route path="/sponsors" element={<SponsorsDashboard />} />
             <Route path="/builder/:formId" element={<FormBuilder />} />
             <Route path="/generate-qr" element={
               <>

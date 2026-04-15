@@ -19,8 +19,5 @@ export default defineConfig(({ mode }) => {
           '@': path.resolve(__dirname, '.'),
         }
       },
-      test: {
-        environment: 'node',
-      },
     };
 });

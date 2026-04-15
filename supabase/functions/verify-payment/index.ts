@@ -59,6 +59,8 @@ serve(async (req: Request) => {
       promoCode,
       donatedSeats: clientDonatedSeats,
       mode: clientMode,
+      paymentMethod,
+      sponsorMeta,
       // Legacy parameters (backward compat only — used when formId is absent)
       expectedAmount: legacyExpectedAmount,
       expectedCurrency: legacyExpectedCurrency,
@@ -67,6 +69,220 @@ serve(async (req: Request) => {
     if (!attendees || attendees.length === 0) {
       return jsonResponse({ error: 'Missing required field: attendees' }, 400);
     }
+
+    // ── SPONSOR BRANCH: special handling before the standard event flow ──
+    if (sponsorMeta) {
+      const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+      const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+      const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+      // ─── Validate sponsorMeta shape ───
+      if (!sponsorMeta.items || !Array.isArray(sponsorMeta.items) || sponsorMeta.items.length === 0) {
+        return jsonResponse({ error: 'Invalid sponsorMeta: items must be a non-empty array' }, 400);
+      }
+      if (typeof sponsorMeta.total !== 'number' || !Number.isFinite(sponsorMeta.total) || sponsorMeta.total <= 0) {
+        return jsonResponse({ error: 'Invalid sponsorMeta: total must be positive' }, 400);
+      }
+      if (!formId) {
+        return jsonResponse({ error: 'formId required for sponsor submission' }, 400);
+      }
+
+      // ─── Server-side price recomputation from the form's ticketConfig ───
+      // Prevents a tampered client from claiming a high-value tier at a low price.
+      const supabaseUrlForFormLookup = Deno.env.get('SUPABASE_URL')!;
+      const supabaseServiceKeyForFormLookup = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+      const formLookupClient = createClient(supabaseUrlForFormLookup, supabaseServiceKeyForFormLookup);
+      const { data: formRow, error: formErr } = await formLookupClient
+        .from('forms')
+        .select('fields, form_type')
+        .eq('id', formId)
+        .single();
+      if (formErr || !formRow) {
+        return jsonResponse({ error: 'Form not found for sponsor submission' }, 404);
+      }
+      if (formRow.form_type !== 'sponsor') {
+        return jsonResponse({ error: 'Form is not a sponsor form' }, 400);
+      }
+      const formFields = (typeof formRow.fields === 'string' ? JSON.parse(formRow.fields) : formRow.fields) as any[];
+      const ticketField = formFields.find((f: any) => f.type === 'ticket');
+      if (!ticketField?.ticketConfig?.items) {
+        return jsonResponse({ error: 'Sponsor form has no ticket config' }, 500);
+      }
+      const catalogById = new Map<string, { price: number; name: string; maxPerOrder: number; itemCategory?: string }>();
+      for (const i of ticketField.ticketConfig.items) {
+        catalogById.set(i.id, { price: i.price, name: i.name, maxPerOrder: i.maxPerOrder, itemCategory: i.itemCategory });
+      }
+
+      // Recompute expected subtotal + HST from the form's catalog
+      let expectedSubtotal = 0;
+      let expectedBoothSubtotal = 0;
+      for (const item of sponsorMeta.items) {
+        const catalog = catalogById.get(item.key);
+        if (!catalog) {
+          return jsonResponse({ error: `Unknown item: ${item.key}` }, 400);
+        }
+        if (!Number.isInteger(item.qty) || item.qty <= 0 || item.qty > catalog.maxPerOrder) {
+          return jsonResponse({ error: `Invalid qty for item ${item.key}` }, 400);
+        }
+        const lineTotal = catalog.price * item.qty;
+        expectedSubtotal += lineTotal;
+        if (catalog.itemCategory === 'booth') expectedBoothSubtotal += lineTotal;
+      }
+
+      // Fetch HST rate from app_settings
+      const { data: settingsRow } = await formLookupClient
+        .from('app_settings')
+        .select('sponsor_hst_rate')
+        .eq('id', 1)
+        .single();
+      const hstRate = Number(settingsRow?.sponsor_hst_rate ?? 0.13);
+      const expectedHst = expectedBoothSubtotal * hstRate;
+      const expectedTotal = expectedSubtotal + expectedHst;
+
+      // Validate client's claimed total matches what the server computed (1-cent tolerance)
+      if (Math.abs(Number(sponsorMeta.total) - expectedTotal) > 0.01) {
+        return jsonResponse({
+          error: `Total mismatch. Client: ${sponsorMeta.total}, Server: ${expectedTotal.toFixed(2)}`,
+        }, 422);
+      }
+
+      // Use the server-computed total for all downstream checks
+      const computedTotal = expectedTotal;
+      const currency = 'CAD';
+
+      const primary = attendees[0];
+      primary.sponsor_tier = sponsorMeta.tier || null;
+      primary.sponsor_items = sponsorMeta.items || [];
+      primary.company_info = sponsorMeta.companyInfo || {};
+      primary.sponsored_awards = sponsorMeta.sponsoredAwards || [];
+      primary.payment_method = paymentMethod === 'cheque' ? 'cheque' : 'paypal';
+
+      // ─── CHEQUE: skip PayPal, save pending, no guest tickets yet ───
+      if (paymentMethod === 'cheque') {
+        primary.payment_status = 'pending';
+        primary.payment_amount = `${computedTotal.toFixed(2)} ${currency} (PENDING CHEQUE)`;
+        const { error } = await supabase.from('attendees').upsert([primary]);
+        if (error) return jsonResponse({ error: error.message }, 500);
+        return jsonResponse({
+          success: true,
+          cheque: true,
+          attendeeId: primary.id,
+          total: computedTotal,
+        });
+      }
+
+      // ─── PAYPAL: verify, then save sponsor + guest placeholders ───
+      if (!paypalOrderId) return jsonResponse({ error: 'paypalOrderId required for PayPal sponsor payment' }, 400);
+
+      const paypalMode = (Deno.env.get('PAYPAL_MODE') || '').toLowerCase();
+      const allAreTest = attendees.every((a: any) => a.is_test === true);
+      let useSandbox: boolean;
+      if (paypalMode === 'production') useSandbox = false;
+      else if (paypalMode === 'sandbox') useSandbox = true;
+      else if (allAreTest) useSandbox = true;
+      else {
+        const origin = (req.headers.get('origin') || '').toLowerCase();
+        useSandbox = origin !== '' && (origin.includes('localhost') || origin.includes('127.0.0.1'));
+      }
+      const PAYPAL_CLIENT_ID = (useSandbox ? (Deno.env.get('PAYPAL_SANDBOX_CLIENT_ID') || Deno.env.get('PAYPAL_CLIENT_ID')) : Deno.env.get('PAYPAL_CLIENT_ID'))?.trim() || '';
+      const PAYPAL_CLIENT_SECRET = (useSandbox ? (Deno.env.get('PAYPAL_SANDBOX_CLIENT_SECRET') || Deno.env.get('PAYPAL_CLIENT_SECRET')) : Deno.env.get('PAYPAL_CLIENT_SECRET'))?.trim() || '';
+      const PAYPAL_API_BASE = Deno.env.get('PAYPAL_API_BASE') || (useSandbox ? 'https://api-m.sandbox.paypal.com' : 'https://api-m.paypal.com');
+
+      if (!PAYPAL_CLIENT_ID || !PAYPAL_CLIENT_SECRET) {
+        return jsonResponse({ error: 'PayPal credentials not configured' }, 500);
+      }
+
+      const authResp = await fetch(`${PAYPAL_API_BASE}/v1/oauth2/token`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Basic ${btoa(`${PAYPAL_CLIENT_ID}:${PAYPAL_CLIENT_SECRET}`)}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: 'grant_type=client_credentials',
+      });
+      if (!authResp.ok) return jsonResponse({ error: 'PayPal auth failed' }, 502);
+      const { access_token } = await authResp.json();
+
+      const capResp = await fetch(`${PAYPAL_API_BASE}/v2/checkout/orders/${paypalOrderId}/capture`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${access_token}`, 'Content-Type': 'application/json' },
+      });
+      const capData = await capResp.json();
+      if (!capResp.ok || capData.status !== 'COMPLETED') {
+        return jsonResponse({ error: 'PayPal capture failed', details: capData }, 502);
+      }
+      const capture = capData.purchase_units?.[0]?.payments?.captures?.[0];
+      if (!capture) return jsonResponse({ error: 'No capture data' }, 502);
+
+      // ── Duplicate transaction protection (sponsor path) ──
+      const { data: existingSponsorTx } = await supabase
+        .from('attendees')
+        .select('id')
+        .eq('transaction_id', capture.id)
+        .limit(1);
+      if (existingSponsorTx && existingSponsorTx.length > 0) {
+        return jsonResponse({ error: 'This payment has already been processed' }, 409);
+      }
+
+      const capturedAmount = parseFloat(capture.amount.value);
+      if (Math.abs(capturedAmount - computedTotal) > 0.01) {
+        return jsonResponse({ error: `Amount mismatch: expected ${computedTotal}, captured ${capturedAmount}` }, 422);
+      }
+
+      primary.payment_status = 'paid';
+      primary.transaction_id = capture.id;
+      primary.payment_amount = `${capturedAmount} ${capture.amount.currency_code}`;
+
+      // Guest placeholder rows for tiers that include seats
+      const seatCount =
+        sponsorMeta.tier === 'signature' ? 16 :
+        (sponsorMeta.tier === 'gold' || sponsorMeta.tier === 'silver') ? 8 : 0;
+      const guestRows: any[] = [];
+      for (let i = 1; i <= seatCount; i++) {
+        const gid = crypto.randomUUID();
+        guestRows.push({
+          id: gid,
+          form_id: primary.form_id,
+          form_title: primary.form_title,
+          name: `${primary.company_info?.orgName || primary.name} - Guest Ticket #${i}`,
+          email: primary.email,
+          ticket_type: `${sponsorMeta.tier} seat`,
+          registered_at: new Date().toISOString(),
+          qr_payload: JSON.stringify({ id: gid }),
+          is_primary: false,
+          primary_attendee_id: primary.id,
+          payment_status: 'paid',
+          transaction_id: capture.id,
+          is_test: false,
+        });
+      }
+
+      const { error } = await supabase.from('attendees').upsert([primary, ...guestRows]);
+      if (error) {
+        // CRITICAL: PayPal captured but DB insert failed. Log for manual recovery.
+        console.error('CRITICAL: Sponsor PayPal captured but DB insert failed!', JSON.stringify({
+          transactionId: capture.id,
+          capturedAmount,
+          capturedCurrency: capture.amount.currency_code,
+          sponsorTier: sponsorMeta.tier,
+          orgName: primary.company_info?.orgName,
+          email: primary.email,
+          dbError: error.message,
+        }));
+        return jsonResponse({
+          error: `Your payment was processed but we encountered a database error saving your sponsorship. Please contact SCAGO with this reference: ${capture.id}`,
+        }, 500);
+      }
+
+      return jsonResponse({
+        success: true,
+        sponsor: true,
+        attendeeId: primary.id,
+        transactionId: capture.id,
+        guestCount: seatCount,
+      });
+    }
+    // ── END SPONSOR BRANCH — fall through to existing event flow below ──
 
     // --- Initialize Supabase (service role — bypasses RLS) ---
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
