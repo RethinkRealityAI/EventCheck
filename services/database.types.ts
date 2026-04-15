@@ -34,6 +34,12 @@ export type Database = {
                     assigned_table_id: string | null
                     assigned_seat: number | null
                     guest_type: string | null
+                    sponsor_tier: string | null
+                    sponsor_items: Json | null
+                    payment_method: string | null
+                    company_info: Json | null
+                    sponsored_awards: Json | null
+                    admin_notes: string | null
                 }
                 Insert: {
                     id: string
@@ -59,6 +65,12 @@ export type Database = {
                     assigned_table_id?: string | null
                     assigned_seat?: number | null
                     guest_type?: string | null
+                    sponsor_tier?: string | null
+                    sponsor_items?: Json | null
+                    payment_method?: string | null
+                    company_info?: Json | null
+                    sponsored_awards?: Json | null
+                    admin_notes?: string | null
                 }
                 Update: {
                     id?: string
@@ -84,6 +96,12 @@ export type Database = {
                     assigned_table_id?: string | null
                     assigned_seat?: number | null
                     guest_type?: string | null
+                    sponsor_tier?: string | null
+                    sponsor_items?: Json | null
+                    payment_method?: string | null
+                    company_info?: Json | null
+                    sponsored_awards?: Json | null
+                    admin_notes?: string | null
                 }
             }
             forms: {
@@ -96,6 +114,7 @@ export type Database = {
                     settings: Json | null
                     thank_you_message: string | null
                     fields: Json
+                    form_type: string
                 }
                 Insert: {
                     id: string
@@ -106,6 +125,7 @@ export type Database = {
                     settings?: Json | null
                     thank_you_message?: string | null
                     fields: Json
+                    form_type?: string
                 }
                 Update: {
                     id?: string
@@ -116,6 +136,7 @@ export type Database = {
                     settings?: Json | null
                     thank_you_message?: string | null
                     fields?: Json
+                    form_type?: string
                 }
             }
             app_settings: {
@@ -137,6 +158,19 @@ export type Database = {
                     email_invitation_subject: string | null
                     email_invitation_body: string | null
                     pdf_settings: Json | null
+                    sponsor_invitation_subject: string | null
+                    sponsor_invitation_body: string | null
+                    sponsor_confirmation_paid_subject: string | null
+                    sponsor_confirmation_paid_body: string | null
+                    sponsor_cheque_pledge_subject: string | null
+                    sponsor_cheque_pledge_body: string | null
+                    sponsor_cheque_internal_subject: string | null
+                    sponsor_cheque_internal_body: string | null
+                    sponsor_cheque_internal_recipients: Json | null
+                    sponsor_cheque_received_subject: string | null
+                    sponsor_cheque_received_body: string | null
+                    sponsor_cheque_mailing_address: string | null
+                    sponsor_hst_rate: number | null
                 }
                 Insert: {
                     id?: number
@@ -156,6 +190,19 @@ export type Database = {
                     email_invitation_subject?: string | null
                     email_invitation_body?: string | null
                     pdf_settings?: Json | null
+                    sponsor_invitation_subject?: string | null
+                    sponsor_invitation_body?: string | null
+                    sponsor_confirmation_paid_subject?: string | null
+                    sponsor_confirmation_paid_body?: string | null
+                    sponsor_cheque_pledge_subject?: string | null
+                    sponsor_cheque_pledge_body?: string | null
+                    sponsor_cheque_internal_subject?: string | null
+                    sponsor_cheque_internal_body?: string | null
+                    sponsor_cheque_internal_recipients?: Json | null
+                    sponsor_cheque_received_subject?: string | null
+                    sponsor_cheque_received_body?: string | null
+                    sponsor_cheque_mailing_address?: string | null
+                    sponsor_hst_rate?: number | null
                 }
                 Update: {
                     id?: number
@@ -175,6 +222,19 @@ export type Database = {
                     email_invitation_subject?: string | null
                     email_invitation_body?: string | null
                     pdf_settings?: Json | null
+                    sponsor_invitation_subject?: string | null
+                    sponsor_invitation_body?: string | null
+                    sponsor_confirmation_paid_subject?: string | null
+                    sponsor_confirmation_paid_body?: string | null
+                    sponsor_cheque_pledge_subject?: string | null
+                    sponsor_cheque_pledge_body?: string | null
+                    sponsor_cheque_internal_subject?: string | null
+                    sponsor_cheque_internal_body?: string | null
+                    sponsor_cheque_internal_recipients?: Json | null
+                    sponsor_cheque_received_subject?: string | null
+                    sponsor_cheque_received_body?: string | null
+                    sponsor_cheque_mailing_address?: string | null
+                    sponsor_hst_rate?: number | null
                 }
             }
             seating_tables: {
@@ -345,6 +405,54 @@ export type Database = {
                     thumbnail_path?: string | null
                     created_at?: string
                 }
+            }
+            sponsor_prospects: {
+                Row: {
+                    id: string
+                    org_name: string
+                    contact_name: string | null
+                    contact_title: string | null
+                    contact_email: string
+                    contact_phone: string | null
+                    status: string
+                    sponsor_form_id: string | null
+                    invited_at: string | null
+                    last_emailed_at: string | null
+                    email_history: Json
+                    notes: string | null
+                    created_at: string
+                }
+                Insert: {
+                    id?: string
+                    org_name: string
+                    contact_name?: string | null
+                    contact_title?: string | null
+                    contact_email: string
+                    contact_phone?: string | null
+                    status?: string
+                    sponsor_form_id?: string | null
+                    invited_at?: string | null
+                    last_emailed_at?: string | null
+                    email_history?: Json
+                    notes?: string | null
+                    created_at?: string
+                }
+                Update: {
+                    id?: string
+                    org_name?: string
+                    contact_name?: string | null
+                    contact_title?: string | null
+                    contact_email?: string
+                    contact_phone?: string | null
+                    status?: string
+                    sponsor_form_id?: string | null
+                    invited_at?: string | null
+                    last_emailed_at?: string | null
+                    email_history?: Json
+                    notes?: string | null
+                    created_at?: string
+                }
+                Relationships: []
             }
         }
         Views: {
