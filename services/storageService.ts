@@ -292,6 +292,19 @@ export const saveSettings = async (settings: AppSettings): Promise<void> => {
     pdf_settings: settings.pdfSettings as unknown as Database['public']['Tables']['app_settings']['Row']['pdf_settings'],
     default_dashboard_form_id: settings.defaultDashboardFormId || null,
     dashboard_column_prefs: settings.dashboardColumnPrefs || {},
+    sponsor_invitation_subject: settings.sponsorInvitationSubject,
+    sponsor_invitation_body: settings.sponsorInvitationBody,
+    sponsor_confirmation_paid_subject: settings.sponsorConfirmationPaidSubject,
+    sponsor_confirmation_paid_body: settings.sponsorConfirmationPaidBody,
+    sponsor_cheque_pledge_subject: settings.sponsorChequePledgeSubject,
+    sponsor_cheque_pledge_body: settings.sponsorChequePledgeBody,
+    sponsor_cheque_internal_subject: settings.sponsorChequeInternalSubject,
+    sponsor_cheque_internal_body: settings.sponsorChequeInternalBody,
+    sponsor_cheque_internal_recipients: settings.sponsorChequeInternalRecipients as any,
+    sponsor_cheque_received_subject: settings.sponsorChequeReceivedSubject,
+    sponsor_cheque_received_body: settings.sponsorChequeReceivedBody,
+    sponsor_cheque_mailing_address: settings.sponsorChequeMailingAddress,
+    sponsor_hst_rate: settings.sponsorHstRate,
   };
 
   const { error } = await supabase
