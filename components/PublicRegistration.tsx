@@ -5,6 +5,7 @@ import type { PricingTemplate } from '../types';
 import { resolveBracket, resolveTier, computeTotal, formatPrice } from '../utils/pricing';
 import { computeGroupTotal, type GroupMemberPricingInput } from '../utils/groupPricing';
 import CountryField from './FormBuilder/fields/CountryField';
+import { getCountryName } from '../utils/countries';
 import GroupPersonRow from './Group/GroupPersonRow';
 import GroupShortcutsToggle from './Group/GroupShortcutsToggle';
 import { supabase } from '../services/supabaseClient';
@@ -61,6 +62,8 @@ const PublicRegistration = () => {
   const [fetchedPrimaryAttendee, setFetchedPrimaryAttendee] = useState<Attendee | null>(null);
   const [remainingSeats, setRemainingSeats] = useState<number>(0);
   const [isTableFull, setIsTableFull] = useState(false);
+  // Pending-claim: the specific guest record referenced by the ?ref link
+  const [loadedRefAttendee, setLoadedRefAttendee] = useState<Attendee | null>(null);
 
   // Dynamic Pricing Engine state
   const pricingTemplate: PricingTemplate | null = (form as any)?.pricingTemplate ?? null;
@@ -110,6 +113,9 @@ const PublicRegistration = () => {
 
   const groupTotal = (groupPricingResult && groupPricingResult.ok) ? groupPricingResult.total : null;
 
+  // Pending-claim: group guest completing their personal details post-purchase
+  const isPendingClaim = (loadedRefAttendee as any)?.guestType === 'pending-claim';
+
   // Sync groupMembers array length when groupSize changes
   useEffect(() => {
     setGroupMembers(prev => {
@@ -158,6 +164,18 @@ const PublicRegistration = () => {
       // Handle Guest Mode (Referral Link)
       if (guestRef && formId) {
         let refAttendee = await getAttendee(guestRef);
+
+        // Pending-claim: group guest with guest_type='pending-claim' completes their own details
+        if (refAttendee && (refAttendee as any).guestType === 'pending-claim' && refAttendee.formId === formId) {
+          setLoadedRefAttendee(refAttendee);
+          setMode('guest');
+          // Pre-fill answers from whatever was saved at purchase time
+          if (refAttendee.answers && Object.keys(refAttendee.answers).length > 0) {
+            setAnswers(refAttendee.answers);
+          }
+          setLoading(false);
+          return;
+        }
 
         // If the ref points to a placeholder guest (not primary), resolve up to the actual primary purchaser
         let actualPrimary = refAttendee;
@@ -380,9 +398,42 @@ const PublicRegistration = () => {
     return true;
   };
 
-  const submitForm = (e: React.FormEvent) => {
+  const submitForm = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validate()) return;
+
+    // Pending-claim: update attendee row in-place, flip guest_type to 'claimed'
+    if (isPendingClaim && loadedRefAttendee) {
+      setLoading(true);
+      try {
+        const { error: updateError } = await supabase
+          .from('attendees')
+          .update({
+            answers,
+            guest_type: 'claimed',
+          })
+          .eq('id', loadedRefAttendee.id);
+
+        if (updateError) {
+          setError(updateError.message || 'Failed to save your registration. Please try again.');
+          return;
+        }
+
+        // Fire-and-forget personal confirmation email via send-ticket-email.
+        // The 'guest-claim-completed' mode ships in the next task; a 400 here is harmless.
+        supabase.functions.invoke('send-ticket-email', {
+          body: { mode: 'guest-claim-completed', attendeeId: loadedRefAttendee.id },
+        }).catch(() => {/* ignore — email is best-effort */});
+
+        setGeneratedTicket({ ...loadedRefAttendee, answers });
+        setStep('success');
+      } catch (err: any) {
+        setError(err.message || 'An unexpected error occurred. Please try again.');
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
 
     // Check if ticket field present
     if (mode === 'purchaser' && ticketField && paymentTotal > 0) {
@@ -882,7 +933,13 @@ const PublicRegistration = () => {
               </div>
             )}
 
-            {mode === 'guest' && fetchedPrimaryAttendee && (
+            {isPendingClaim && (
+              <div className="mb-4 p-3 rounded-lg bg-blue-50 border border-blue-200 text-sm text-blue-900">
+                Your registration has been paid for as part of a group. Please complete your personal details below.
+              </div>
+            )}
+
+            {!isPendingClaim && mode === 'guest' && fetchedPrimaryAttendee && (
               <div className="bg-indigo-50 border border-indigo-200 p-4 rounded-xl flex gap-3 animate-in slide-in-from-top-4">
                 <UserPlus className="w-5 h-5 text-indigo-600 flex-shrink-0" />
                 <div>
@@ -906,6 +963,9 @@ const PublicRegistration = () => {
             {form.fields.map(field => {
               if (!isVisible(field)) return null;
               if (field.type === 'ticket' && mode === 'guest') return null;
+              // Pending-claim guests skip pricing-related UI entirely
+              if (isPendingClaim && field.type === 'registration-mode-selector') return null;
+              if (isPendingClaim && field.type === 'ticket') return null;
 
               // Registration Mode Selector field — always render so visitor can pick a path
               if (field.type === 'registration-mode-selector') {
@@ -1001,6 +1061,21 @@ const PublicRegistration = () => {
 
               // Hide all non-RMS fields until a mode is chosen (when there is an RMS field)
               if (rmsField && registrationMode === null) return null;
+
+              // Pending-claim: render usedForPricing country field as read-only (locked post-payment)
+              if (isPendingClaim && field.type === 'country' && field.usedForPricing) {
+                const currentCode = (answers[field.id] as string) ?? '';
+                return (
+                  <div key={field.id} className="py-2">
+                    <label className="block text-sm font-medium text-slate-700 mb-1">
+                      {field.label}
+                    </label>
+                    <div className="px-3 py-2 rounded-lg bg-slate-100 text-slate-700 text-sm">
+                      {getCountryName(currentCode) || currentCode || '—'} <span className="text-xs text-slate-400">(locked)</span>
+                    </div>
+                  </div>
+                );
+              }
 
               return (
               <div key={field.id}>
@@ -1409,12 +1484,14 @@ const PublicRegistration = () => {
             <div className="pt-4">
               <button
                 type="submit"
-                disabled={loading || (pricingTemplate != null && (!selectedCategoryId || !activeTier || !activeBracket || dynamicTotal == null)) || (registrationMode === 'group' && (!groupPricingResult?.ok || groupMembers.some(m => !m.name.trim() || !m.email.trim() || !m.countryCode || !m.categoryId)))}
+                disabled={loading || (!isPendingClaim && pricingTemplate != null && (!selectedCategoryId || !activeTier || !activeBracket || dynamicTotal == null)) || (!isPendingClaim && registrationMode === 'group' && (!groupPricingResult?.ok || groupMembers.some(m => !m.name.trim() || !m.email.trim() || !m.countryCode || !m.categoryId)))}
                 className="w-full py-4 text-white rounded-xl font-black uppercase tracking-widest transition shadow-lg flex justify-center items-center gap-2 transform hover:scale-[1.02] active:scale-95 disabled:opacity-70 disabled:grayscale disabled:cursor-not-allowed"
                 style={{ backgroundColor: form.settings?.formAccentColor || '#4F46E5' }}
               >
                 {loading ? (
                   <Loader2 className="w-5 h-5 animate-spin" />
+                ) : isPendingClaim ? (
+                  <>Complete Registration <ArrowRight className="w-5 h-5" /></>
                 ) : mode === 'guest' ? (
                   <>Claim Your Ticket <ArrowRight className="w-5 h-5" /></>
                 ) : (ticketField && paymentTotal > 0) ? (
