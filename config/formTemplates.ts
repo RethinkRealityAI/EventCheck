@@ -3,6 +3,7 @@ import type { SiteKey } from './sites';
 import { buildBlank } from './formTemplates/buildBlank';
 import { buildSponsorForm } from './formTemplates/buildSponsorForm';
 import { buildGansidIndividualGroup } from './formTemplates/buildGansidIndividualGroup';
+import { buildGansidExhibitor } from './formTemplates/buildGansidExhibitor';
 
 export interface FormTemplate {
   key: string;
@@ -23,6 +24,10 @@ export const TEMPLATES: FormTemplate[] = [
     description: 'Congress registration with Individual/Group path selector and dynamic per-person pricing.',
     siteFilter: ['gansid'],
     build: buildGansidIndividualGroup },
+  { key: 'gansid-exhibitor', displayName: 'GANSID Exhibitor Registration',
+    description: 'Organization-level exhibitor form with tier-driven staff quotas. Paid externally.',
+    siteFilter: ['gansid'],
+    build: buildGansidExhibitor },
 ];
 
 export function availableTemplatesForSite(siteKey: SiteKey): FormTemplate[] {

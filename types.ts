@@ -21,7 +21,8 @@ export interface Attendee {
   dietaryPreferences?: string; // e.g. "Vegetarian", "Vegan", etc.
   primaryAttendeeId?: string; // If this is a guest, link to purchaser
   isPrimary?: boolean; // Defaults to true
-  guestType?: 'adult' | 'child' | 'pending-claim' | 'claimed'; // Whether this guest is an adult or child (+ group-flow states)
+  guestType?: 'adult' | 'child' | 'pending-claim' | 'claimed'
+            | 'exhibitor-staff-pending' | 'exhibitor-staff-claimed'; // Whether this guest is an adult or child (+ group-flow states)
   // Seating Assignment
   assignedTableId?: string | null;
   assignedSeat?: number | null;
@@ -151,11 +152,17 @@ export interface FormField {
   groupMaxSize?: number;
   groupLabel?: string;
   individualLabel?: string;
+  // consent-checkbox specific
+  linkText?: string;
+  consentModal?: {
+    title: string;
+    url: string;
+  };
 }
 
 export interface Form {
   id: string;
-  formType?: 'event' | 'sponsor';  // defaults to 'event' when undefined
+  formType?: 'event' | 'sponsor' | 'exhibitor';  // defaults to 'event' when undefined
   title: string;
   description: string;
   thankYouMessage?: string; // HTML supported
