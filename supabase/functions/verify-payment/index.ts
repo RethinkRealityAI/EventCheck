@@ -298,13 +298,174 @@ serve(async (req: Request) => {
       // ── SECURE PATH: look up form, compute price from DB ──
       const { data: formData, error: formError } = await supabase
         .from('forms')
-        .select('fields')
+        .select('fields, settings, form_type')
         .eq('id', formId)
         .single();
 
       if (formError || !formData) {
         return jsonResponse({ error: 'Form not found' }, 404);
       }
+
+      // ── DYNAMIC PRICING BRANCH ──
+      // Gated on form.settings.pricingTemplateId + request body pricingSelection.
+      // Server re-resolves bracket, tier, category, and add-ons; rejects PayPal
+      // captures that differ from the expected total by more than 1 cent.
+      const pricingTemplateId = formData.settings?.pricingTemplateId ?? null;
+      const pricingSelection = body.pricingSelection ?? null;
+
+      if (pricingTemplateId && pricingSelection) {
+        // 1. Load pricing template
+        const { data: tpl, error: tplErr } = await supabase
+          .from('pricing_templates')
+          .select('*')
+          .eq('id', pricingTemplateId)
+          .maybeSingle();
+
+        if (tplErr || !tpl) return jsonResponse({ error: 'Pricing template not found' }, 400);
+
+        // 2. Re-resolve active bracket server-side (never trust client)
+        const nowMs = Date.now();
+        let activeBracket: any = null;
+        if (tpl.active_bracket_override) {
+          activeBracket = (tpl.date_brackets ?? []).find((b: any) => b.id === tpl.active_bracket_override) ?? null;
+        }
+        if (!activeBracket) {
+          for (const b of (tpl.date_brackets ?? [])) {
+            const start = Date.parse(`${b.startDate}T00:00:00Z`);
+            const end = Date.parse(`${b.endDate}T23:59:59.999Z`);
+            if (nowMs >= start && nowMs <= end) { activeBracket = b; break; }
+          }
+        }
+        if (!activeBracket) return jsonResponse({ error: 'No active pricing bracket' }, 400);
+
+        // 3. Re-resolve tier from country code (fallback to last tier)
+        const code = (pricingSelection.countryCode ?? '').toUpperCase();
+        const tiers = (tpl.tiers ?? []) as any[];
+        if (tiers.length === 0) return jsonResponse({ error: 'No tiers configured' }, 400);
+        const activeTier = tiers.find((t: any) => (t.countries ?? []).includes(code)) ?? tiers[tiers.length - 1];
+
+        // 4. Look up category
+        const cat = (tpl.categories ?? []).find((c: any) => c.id === pricingSelection.categoryId);
+        if (!cat) return jsonResponse({ error: 'Unknown category' }, 400);
+
+        // 5. Look up base fee
+        const fee = cat.prices?.[activeTier.id]?.[activeBracket.id];
+        if (typeof fee !== 'number') return jsonResponse({ error: 'Price not configured' }, 400);
+
+        // 6. Sum add-on prices (ignore unknown IDs)
+        const addonIds: string[] = Array.isArray(pricingSelection.addonIds) ? pricingSelection.addonIds : [];
+        const addonTotal = addonIds.reduce((sum: number, id: string) => {
+          const a = (tpl.addons ?? []).find((x: any) => x.id === id);
+          return sum + (typeof a?.price === 'number' ? a.price : 0);
+        }, 0);
+
+        // 7. expectedCents = base fee (already in cents) + addons
+        const expectedCents = fee + addonTotal;
+
+        // 8. Capture PayPal order and extract amount in cents
+        if (!paypalOrderId) return jsonResponse({ error: 'paypalOrderId required for dynamic pricing payment' }, 400);
+
+        const ppMode = (Deno.env.get('PAYPAL_MODE') || '').toLowerCase();
+        const allTest = attendees.every((a: any) => a.is_test === true);
+        let ppSandbox: boolean;
+        if (ppMode === 'production') ppSandbox = false;
+        else if (ppMode === 'sandbox') ppSandbox = true;
+        else if (allTest) ppSandbox = true;
+        else {
+          const origin = (req.headers.get('origin') || '').toLowerCase();
+          ppSandbox = origin !== '' && (origin.includes('localhost') || origin.includes('127.0.0.1'));
+        }
+
+        const PP_CLIENT_ID = (
+          ppSandbox
+            ? (Deno.env.get('PAYPAL_SANDBOX_CLIENT_ID') || Deno.env.get('PAYPAL_CLIENT_ID'))
+            : Deno.env.get('PAYPAL_CLIENT_ID')
+        )?.trim() || '';
+        const PP_CLIENT_SECRET = (
+          ppSandbox
+            ? (Deno.env.get('PAYPAL_SANDBOX_CLIENT_SECRET') || Deno.env.get('PAYPAL_CLIENT_SECRET'))
+            : Deno.env.get('PAYPAL_CLIENT_SECRET')
+        )?.trim() || '';
+        const PP_API_BASE = Deno.env.get('PAYPAL_API_BASE')
+          || (ppSandbox ? 'https://api-m.sandbox.paypal.com' : 'https://api-m.paypal.com');
+
+        if (!PP_CLIENT_ID || !PP_CLIENT_SECRET) {
+          return jsonResponse({ error: 'PayPal credentials not configured' }, 500);
+        }
+
+        const ppAuthResp = await fetch(`${PP_API_BASE}/v1/oauth2/token`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Basic ${btoa(`${PP_CLIENT_ID}:${PP_CLIENT_SECRET}`)}`,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: 'grant_type=client_credentials',
+        });
+        if (!ppAuthResp.ok) return jsonResponse({ error: 'PayPal auth failed' }, 502);
+        const { access_token: ppToken } = await ppAuthResp.json();
+
+        const ppCapResp = await fetch(`${PP_API_BASE}/v2/checkout/orders/${paypalOrderId}/capture`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${ppToken}`, 'Content-Type': 'application/json' },
+        });
+        const ppCapData = await ppCapResp.json();
+        if (!ppCapResp.ok || ppCapData.status !== 'COMPLETED') {
+          return jsonResponse({ error: 'PayPal capture failed', details: ppCapData }, 502);
+        }
+        const ppCapture = ppCapData.purchase_units?.[0]?.payments?.captures?.[0];
+        if (!ppCapture) return jsonResponse({ error: 'No capture data in PayPal response' }, 502);
+
+        const capturedCents = Math.round(Number(ppCapture.amount?.value ?? 0) * 100);
+
+        // 9. Reject if captured amount differs from expected by > 1 cent
+        if (Math.abs(capturedCents - expectedCents) > 1) {
+          return jsonResponse({
+            error: 'Price mismatch',
+            expected: expectedCents,
+            received: capturedCents,
+          }, 400);
+        }
+
+        // Duplicate transaction protection
+        const { data: existingDynTx } = await supabase
+          .from('attendees')
+          .select('id')
+          .eq('transaction_id', ppCapture.id)
+          .limit(1);
+        if (existingDynTx && existingDynTx.length > 0) {
+          return jsonResponse({ error: 'This payment has already been processed' }, 409);
+        }
+
+        // 10. Persist attendee with pricing metadata
+        const primary = attendees[0] ?? {};
+        const { error: insertErr } = await supabase.from('attendees').upsert([{
+          ...primary,
+          payment_status: 'paid',
+          transaction_id: ppCapture.id,
+          payment_amount: `${(expectedCents / 100).toFixed(2)} ${tpl.currency ?? 'CAD'}`,
+          pricing_template_id: tpl.id,
+          pricing_bracket: activeBracket.id,
+          pricing_tier: activeTier.id,
+          pricing_category_id: cat.id,
+        }]);
+        if (insertErr) {
+          console.error('CRITICAL: Dynamic pricing PayPal captured but DB insert failed!', JSON.stringify({
+            transactionId: ppCapture.id,
+            capturedCents,
+            expectedCents,
+            pricingTemplateId: tpl.id,
+            email: primary.email,
+            dbError: insertErr.message,
+          }));
+          return jsonResponse({
+            error: `Your payment was processed but we encountered a database error. Please contact the event organizer with this reference: ${ppCapture.id}`,
+          }, 500);
+        }
+
+        // 11. Return success
+        return jsonResponse({ ok: true, total: expectedCents, currency: tpl.currency ?? 'CAD' });
+      }
+      // ── END DYNAMIC PRICING BRANCH — fall through to static-pricing event branch ──
 
       const fields: FormField[] = typeof formData.fields === 'string'
         ? JSON.parse(formData.fields)

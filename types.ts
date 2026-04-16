@@ -97,7 +97,7 @@ export interface SeatingTable {
 
 export type ScanStatus = 'idle' | 'scanning' | 'success' | 'error' | 'already_checked_in';
 
-export type FieldType = 'text' | 'textarea' | 'number' | 'email' | 'phone' | 'address' | 'select' | 'radio' | 'checkbox' | 'boolean' | 'ticket';
+export type FieldType = 'text' | 'textarea' | 'number' | 'email' | 'phone' | 'address' | 'select' | 'radio' | 'checkbox' | 'boolean' | 'ticket' | 'country';
 
 export interface PromoCode {
   code: string;
@@ -145,6 +145,7 @@ export interface FormField {
     value: string;
   };
   validation?: 'string' | 'int';
+  usedForPricing?: boolean;
 }
 
 export interface Form {
@@ -176,8 +177,10 @@ export interface Form {
     submitButtonText?: string; // Customize submit button text
     transparentBackground?: boolean;
     cardBackgroundImage?: string;
+    pricingTemplateId?: string | null;
   };
   pdfSettings?: Partial<PdfSettings>; // Per-form PDF overrides
+  pricingTemplate?: PricingTemplate; // Runtime-attached in getFormById; not persisted in DB
 }
 
 export interface PdfSettings {
@@ -239,6 +242,9 @@ export interface AppSettings {
   // Dashboard Preferences
   defaultDashboardFormId?: string;
   dashboardColumnPrefs?: Record<string, Record<string, boolean>>;
+
+  // Feature flags
+  feature_pricing_templates?: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -342,4 +348,57 @@ export interface SponsorProspect {
   emailHistory: SponsorProspectEmailLog[];
   notes?: string;
   createdAt: string;
+}
+
+// ---------------------------------------------------------------------------
+// Dynamic Pricing Engine
+// ---------------------------------------------------------------------------
+
+export interface PricingTier {
+  id: string;
+  name: string;
+  label: string;
+  countries: string[];
+}
+
+export interface DateBracket {
+  id: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+}
+
+export interface PricingCategory {
+  id: string;
+  name: string;
+  prices: Record<string, Record<string, number>>;
+}
+
+export interface PricingAddon {
+  id: string;
+  name: string;
+  description: string;
+  price: number;
+}
+
+export interface PricingTemplate {
+  id: string;
+  name: string;
+  timezone: string;
+  currency: string;
+  isActive: boolean;
+  tiers: PricingTier[];
+  dateBrackets: DateBracket[];
+  activeBracketOverride: string | null;
+  categories: PricingCategory[];
+  addons: PricingAddon[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DynamicPricingSelection {
+  countryCode: string;
+  categoryId: string;
+  addonIds: string[];
+  expectedTotal: number;
 }

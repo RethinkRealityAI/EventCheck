@@ -1,4 +1,4 @@
-import { Attendee, Form, AppSettings, DEFAULT_SETTINGS, FormField, PdfSettings, SeatingTable, SeatingConfiguration, SeatingAssignment, SceneElement, SceneElementType, Custom3DModel, SponsorProspect, SponsorProspectStatus } from '../types';
+import { Attendee, Form, AppSettings, DEFAULT_SETTINGS, FormField, PdfSettings, SeatingTable, SeatingConfiguration, SeatingAssignment, SceneElement, SceneElementType, Custom3DModel, SponsorProspect, SponsorProspectStatus, PricingTemplate } from '../types';
 import { supabase } from './supabaseClient';
 import { Database } from './database.types';
 
@@ -179,7 +179,21 @@ export const getFormById = async (id: string): Promise<Form | undefined> => {
     .single();
 
   if (error) return undefined;
-  return mapFormFromDb(data);
+  const form = mapFormFromDb(data);
+
+  // Attach linked pricing template if present
+  const templateId = (form as any).settings?.pricingTemplateId as string | null | undefined;
+  if (templateId) {
+    try {
+      const tpl = await getPricingTemplateById(templateId);
+      if (tpl) (form as any).pricingTemplate = tpl;
+    } catch (e) {
+      // Template missing / deleted / unreachable → fall back to static pricing silently.
+      console.warn('Linked pricing template failed to load', e);
+    }
+  }
+
+  return form;
 };
 
 export const getAttendee = async (id: string): Promise<Attendee | undefined> => {
@@ -943,4 +957,101 @@ function mapProspectToDb(p: SponsorProspect): any {
     email_history: p.emailHistory as any,
     notes: p.notes || null,
   };
+}
+
+// --- Pricing Templates ---
+
+function mapPricingTemplateRow(row: any): PricingTemplate {
+  return {
+    id: row.id,
+    name: row.name,
+    timezone: row.timezone,
+    currency: row.currency,
+    isActive: row.is_active,
+    tiers: row.tiers ?? [],
+    dateBrackets: row.date_brackets ?? [],
+    activeBracketOverride: row.active_bracket_override ?? null,
+    categories: row.categories ?? [],
+    addons: row.addons ?? [],
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function pricingTemplateToRow(t: Partial<PricingTemplate>): any {
+  return {
+    ...(t.id ? { id: t.id } : {}),
+    ...(t.name !== undefined ? { name: t.name } : {}),
+    ...(t.timezone !== undefined ? { timezone: t.timezone } : {}),
+    ...(t.currency !== undefined ? { currency: t.currency } : {}),
+    ...(t.isActive !== undefined ? { is_active: t.isActive } : {}),
+    ...(t.tiers !== undefined ? { tiers: t.tiers } : {}),
+    ...(t.dateBrackets !== undefined ? { date_brackets: t.dateBrackets } : {}),
+    ...(t.activeBracketOverride !== undefined
+      ? { active_bracket_override: t.activeBracketOverride }
+      : {}),
+    ...(t.categories !== undefined ? { categories: t.categories } : {}),
+    ...(t.addons !== undefined ? { addons: t.addons } : {}),
+  };
+}
+
+export async function getPricingTemplates(): Promise<PricingTemplate[]> {
+  const { data, error } = await supabase
+    .from('pricing_templates')
+    .select('*')
+    .eq('is_active', true)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map(mapPricingTemplateRow);
+}
+
+export async function getPricingTemplateById(id: string): Promise<PricingTemplate | null> {
+  const { data, error } = await supabase
+    .from('pricing_templates')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? mapPricingTemplateRow(data) : null;
+}
+
+export async function createPricingTemplate(
+  template: Omit<PricingTemplate, 'id' | 'createdAt' | 'updatedAt'>,
+): Promise<PricingTemplate> {
+  const { data, error } = await supabase
+    .from('pricing_templates')
+    .insert(pricingTemplateToRow(template))
+    .select()
+    .single();
+  if (error) throw error;
+  return mapPricingTemplateRow(data);
+}
+
+export async function updatePricingTemplate(
+  id: string,
+  patch: Partial<PricingTemplate>,
+): Promise<PricingTemplate> {
+  const { data, error } = await supabase
+    .from('pricing_templates')
+    .update(pricingTemplateToRow(patch))
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+  return mapPricingTemplateRow(data);
+}
+
+export async function archivePricingTemplate(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('pricing_templates')
+    .update({ is_active: false })
+    .eq('id', id);
+  if (error) throw error;
+}
+
+export async function duplicatePricingTemplate(id: string, newName: string): Promise<PricingTemplate> {
+  const original = await getPricingTemplateById(id);
+  if (!original) throw new Error('Template not found');
+  const { id: _omit, createdAt: _c, updatedAt: _u, ...rest } = original;
+  return createPricingTemplate({ ...rest, name: newName, isActive: true });
 }

@@ -253,6 +253,24 @@ If a migration is applied to only one project, the shared codebase will break on
 
 Site-level branding is driven at build time by `config/sites.ts` keyed off `VITE_SITE`. Runtime settings (PayPal creds in secrets, email templates / logos / SMTP in `app_settings`) remain per-Supabase.
 
+## Dynamic Pricing Engine
+
+Optional feature, gated on `app_settings.feature_pricing_templates`. Enabled on GANSID; disabled on SCAGO.
+
+- Admin-managed templates live in the `pricing_templates` table. Each row contains tiers (country→tier mapping), date brackets, a category × tier × bracket price matrix, and flat-price add-ons — all JSONB.
+- Forms opt in via `form.settings.pricingTemplateId`. When null/absent, the form uses the existing static `TicketItem` flow unchanged.
+- Pure pricing resolution logic lives in `utils/pricing.ts`: `resolveBracket`, `resolveTier`, `computeTotal`, `formatPrice`. Covered by `tests/pricing.test.ts`.
+- Country list (ISO 3166-1 alpha-2, 195 entries) in `utils/countries.ts`.
+- Public registration renders `components/Pricing/{PricingBracketBanner,LivePriceCategory,AddonsList,RunningTotal}.tsx` when a template is attached. Country field renders `components/FormBuilder/fields/CountryField.tsx`.
+- `verify-payment` edge function re-computes the expected total server-side from its own clock + registrant's country + template data, then rejects PayPal captures that differ from expected by more than 1 cent.
+- Attendee rows carry `pricing_template_id`, `pricing_bracket`, `pricing_tier`, `pricing_category_id` for audit.
+- Settings → Pricing Templates tab (visible when feature flag is on) provides a full template editor: Basics, Tiers+country mapping, Date brackets with active-bracket indicator, spreadsheet-style pricing matrix, Add-ons.
+- Form builder's Pricing tab lets admins link a form to a template and flag a country field as `usedForPricing`.
+- GANSID Congress 2026 template seed lives (non-committed) in `tmp/seed-gansid-pricing-template.sql` — re-run if the GANSID template ever needs rebuilding from scratch.
+
+Spec: `docs/superpowers/specs/2026-04-15-dynamic-pricing-engine-design.md`
+Plan: `docs/superpowers/plans/2026-04-16-dynamic-pricing-engine.md`
+
 ## Database schema — key tables
 
 - `forms` — adds `form_type TEXT NOT NULL DEFAULT 'event'` (values: `'event' | 'sponsor'`)
