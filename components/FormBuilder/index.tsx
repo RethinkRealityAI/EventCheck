@@ -9,6 +9,7 @@ import FieldToolbox, { FIELD_TYPES } from './FieldToolbox';
 import FieldCard from './FieldCard';
 import FieldPropertiesPanel from './FieldPropertiesPanel';
 import FormSettingsTab from './FormSettingsTab';
+import PricingTab from './PricingTab';
 import './FormBuilder.css';
 
 const FormBuilder: React.FC = () => {
@@ -16,7 +17,7 @@ const FormBuilder: React.FC = () => {
     const navigate = useNavigate();
     const [form, setForm] = useState<Form | null>(null);
     const [editingField, setEditingField] = useState<FormField | null>(null);
-    const [activeTab, setActiveTab] = useState<'editor' | 'settings' | 'preview'>('editor');
+    const [activeTab, setActiveTab] = useState<'editor' | 'settings' | 'preview' | 'pricing'>('editor');
 
     // DnD state
     const [draggedType, setDraggedType] = useState<FieldType | null>(null);
@@ -241,6 +242,12 @@ const FormBuilder: React.FC = () => {
                         >
                             Settings
                         </button>
+                        <button
+                            onClick={() => setActiveTab('pricing')}
+                            className={`fb-tab ${activeTab === 'pricing' ? 'fb-tab--active' : ''}`}
+                        >
+                            Pricing
+                        </button>
                     </div>
                     <button onClick={save} className="fb-save-btn">
                         <Save className="w-4 h-4" /> Save
@@ -353,6 +360,20 @@ const FormBuilder: React.FC = () => {
                         onUpdate={updateFormMetadata}
                         onImageUpload={handleImageUpload}
                     />
+                )}
+
+                {activeTab === 'pricing' && (
+                    <div className="flex-1 overflow-y-auto custom-scrollbar bg-gray-50/30">
+                        <div className="max-w-2xl mx-auto w-full p-4 lg:p-6 pb-20">
+                            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-4">
+                                <h3 className="text-xl font-bold text-gray-900">Pricing</h3>
+                                <PricingTab
+                                    form={form}
+                                    onFormChange={f => setForm(f)}
+                                />
+                            </div>
+                        </div>
+                    </div>
                 )}
 
                 {activeTab === 'preview' && (

@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { getFormById, getSettings, saveAttendee, getAttendee, getGuestsByPrimaryId, mapAttendeeToDb } from '../services/storageService';
-import { FormField, AppSettings, Attendee, Form } from '../types';
+import { FormField, AppSettings, Attendee, Form, DynamicPricingSelection } from '../types';
+import type { PricingTemplate } from '../types';
+import { resolveBracket, resolveTier, computeTotal } from '../utils/pricing';
+import CountryField from './FormBuilder/fields/CountryField';
 import { supabase } from '../services/supabaseClient';
 import { Loader2, Check, AlertCircle, Download, Calendar, Tag, CreditCard, ArrowRight, X, Eye, MapPin, UserPlus, Info, Copy } from 'lucide-react';
 import { useNotifications } from './NotificationSystem';
@@ -10,6 +13,10 @@ import { PayPalScriptProvider, PayPalButtons } from "@paypal/react-paypal-js";
 import { sendTicketEmail, arrayBufferToBase64 } from '../services/smtpService';
 import QRCode from 'react-qr-code';
 import PublicSponsorForm from './Sponsors/PublicSponsorForm';
+import PricingBracketBanner from './Pricing/PricingBracketBanner';
+import LivePriceCategory from './Pricing/LivePriceCategory';
+import AddonsList from './Pricing/AddonsList';
+import RunningTotal from './Pricing/RunningTotal';
 
 const PublicRegistration = () => {
   const { formId } = useParams<{ formId: string }>();
@@ -51,6 +58,19 @@ const PublicRegistration = () => {
   const [fetchedPrimaryAttendee, setFetchedPrimaryAttendee] = useState<Attendee | null>(null);
   const [remainingSeats, setRemainingSeats] = useState<number>(0);
   const [isTableFull, setIsTableFull] = useState(false);
+
+  // Dynamic Pricing Engine state
+  const pricingTemplate: PricingTemplate | null = (form as any)?.pricingTemplate ?? null;
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
+  const [selectedAddonIds, setSelectedAddonIds] = useState<string[]>([]);
+  const [selectedCountryCode, setSelectedCountryCode] = useState<string>('');
+
+  // Derived pricing values — recomputed each render
+  const activeBracket = pricingTemplate ? resolveBracket(pricingTemplate, new Date()) : null;
+  const activeTier = pricingTemplate ? resolveTier(pricingTemplate, selectedCountryCode) : null;
+  const dynamicTotal = (pricingTemplate && activeBracket && activeTier && selectedCategoryId)
+    ? computeTotal(pricingTemplate, selectedCategoryId, activeTier, activeBracket, selectedAddonIds)
+    : null;
 
   useEffect(() => {
     const fetch = async () => {
@@ -523,6 +543,20 @@ const PublicRegistration = () => {
       verifyBody.paypalOrderId = transactionId;
     }
 
+    // Include dynamic pricing selection when a pricing template is attached
+    let pricingSelection: DynamicPricingSelection | undefined;
+    if (pricingTemplate && dynamicTotal != null && selectedCategoryId && activeTier && activeBracket) {
+      pricingSelection = {
+        countryCode: selectedCountryCode,
+        categoryId: selectedCategoryId,
+        addonIds: selectedAddonIds,
+        expectedTotal: dynamicTotal,
+      };
+    }
+    if (pricingSelection) {
+      verifyBody.pricingSelection = pricingSelection;
+    }
+
     const { data, error: fnError, response: fnResponse } = await supabase.functions.invoke('verify-payment', {
       body: verifyBody
     }) as { data: any, error: any, response?: Response };
@@ -776,13 +810,23 @@ const PublicRegistration = () => {
 
             {form.fields.map(field => isVisible(field) && !(field.type === 'ticket' && mode === 'guest') && (
               <div key={field.id}>
-                {field.type !== 'ticket' && (
+                {field.type !== 'ticket' && field.type !== 'country' && (
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     {field.label} {field.required && <span className="text-red-500">*</span>}
                   </label>
                 )}
 
-                {field.type === 'textarea' ? (
+                {field.type === 'country' ? (
+                  <CountryField
+                    label={field.label}
+                    required={field.required}
+                    value={(answers[field.id] as string) ?? ''}
+                    onChange={(code) => {
+                      handleInputChange(field.id, code);
+                      if (field.usedForPricing) setSelectedCountryCode(code);
+                    }}
+                  />
+                ) : field.type === 'textarea' ? (
                   <textarea
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                     rows={3}
@@ -800,6 +844,29 @@ const PublicRegistration = () => {
                     {field.options?.map(opt => <option key={opt} value={opt}>{opt}</option>)}
                   </select>
                 ) : field.type === 'ticket' ? (
+                  pricingTemplate ? (
+                    <div className="space-y-4">
+                      <PricingBracketBanner bracket={activeBracket} />
+                      <LivePriceCategory
+                        template={pricingTemplate}
+                        tier={activeTier}
+                        bracket={activeBracket}
+                        value={selectedCategoryId}
+                        onChange={setSelectedCategoryId}
+                      />
+                      <AddonsList
+                        template={pricingTemplate}
+                        selectedIds={selectedAddonIds}
+                        onToggle={setSelectedAddonIds}
+                      />
+                      <RunningTotal
+                        template={pricingTemplate}
+                        total={dynamicTotal}
+                        bracket={activeBracket}
+                        tier={activeTier}
+                      />
+                    </div>
+                  ) : (
                   <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
                     <div className="mb-4 pb-2 border-b border-gray-200">
                       <span className="font-bold text-gray-900 block text-lg">{field.label}</span>
@@ -1085,6 +1152,7 @@ const PublicRegistration = () => {
                       </div>
                     )}
                   </div>
+                  )
                 ) : field.type === 'radio' ? (
                   <div className="space-y-2 mt-2">
                     {field.options?.map(opt => (
@@ -1146,7 +1214,7 @@ const PublicRegistration = () => {
             <div className="pt-4">
               <button
                 type="submit"
-                disabled={loading}
+                disabled={loading || (pricingTemplate != null && (!selectedCategoryId || !activeTier || !activeBracket || dynamicTotal == null))}
                 className="w-full py-4 text-white rounded-xl font-black uppercase tracking-widest transition shadow-lg flex justify-center items-center gap-2 transform hover:scale-[1.02] active:scale-95 disabled:opacity-70 disabled:grayscale disabled:cursor-not-allowed"
                 style={{ backgroundColor: form.settings?.formAccentColor || '#4F46E5' }}
               >
@@ -1212,6 +1280,17 @@ const PublicRegistration = () => {
                     tagline: false
                   }}
                   createOrder={(data, actions) => {
+                    if (pricingTemplate && dynamicTotal != null) {
+                      return actions.order.create({
+                        purchase_units: [{
+                          amount: {
+                            currency_code: pricingTemplate.currency,
+                            value: (dynamicTotal / 100).toFixed(2),
+                          },
+                        }],
+                        intent: 'CAPTURE',
+                      });
+                    }
                     return actions.order.create({
                       intent: "CAPTURE",
                       purchase_units: [

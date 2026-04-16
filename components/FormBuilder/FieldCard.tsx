@@ -2,6 +2,7 @@ import React from 'react';
 import { GripVertical, Settings, Trash2, Ticket } from 'lucide-react';
 import { FormField } from '../../types';
 import { FIELD_TYPES } from './FieldToolbox';
+import CountryField from './fields/CountryField';
 
 interface FieldCardProps {
     field: FormField;
@@ -107,6 +108,14 @@ const FieldCard: React.FC<FieldCardProps> = ({
                                     <div className="fb-preview-more">+ {(field.options || []).length - 3} more</div>
                                 )}
                             </div>
+                        ) : field.type === 'country' ? (
+                            <CountryField
+                                label={field.label}
+                                required={field.required}
+                                value=""
+                                onChange={() => {}}
+                                disabled={true}
+                            />
                         ) : field.type === 'ticket' ? (
                             <div className="fb-preview-tickets">
                                 {field.ticketConfig?.items.slice(0, 3).map((item, i) => (

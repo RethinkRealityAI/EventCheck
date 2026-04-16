@@ -201,6 +201,33 @@ const FieldPropertiesPanel: React.FC<FieldPropertiesPanelProps> = ({ field, form
                     )}
                 </div>
 
+                {/* Country: used-for-pricing toggle */}
+                {field.type === 'country' && (() => {
+                    const anotherFlagged = form.fields.some(
+                        f => f.id !== field.id && f.type === 'country' && f.usedForPricing === true
+                    );
+                    return (
+                        <div className="fb-field-group">
+                            <label className="fb-label">Dynamic Pricing</label>
+                            <label className={`fb-checkbox-label ${anotherFlagged ? 'opacity-50' : ''}`}>
+                                <input
+                                    type="checkbox"
+                                    className="fb-checkbox"
+                                    checked={!!field.usedForPricing}
+                                    disabled={anotherFlagged}
+                                    onChange={e => update({ usedForPricing: e.target.checked })}
+                                />
+                                <span>Use this country for dynamic pricing</span>
+                            </label>
+                            {anotherFlagged ? (
+                                <p className="fb-hint text-amber-600">Another country field is already flagged for pricing. Disable that first.</p>
+                            ) : (
+                                <p className="fb-hint">When on, the registrant's selected country determines their pricing tier. Only one country field per form can be flagged.</p>
+                            )}
+                        </div>
+                    );
+                })()}
+
                 {/* Ticket Config */}
                 {field.type === 'ticket' && field.ticketConfig && (
                     <TicketConfigEditor field={field} onChange={onChange} />

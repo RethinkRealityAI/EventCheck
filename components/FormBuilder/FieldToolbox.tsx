@@ -1,5 +1,5 @@
 import React from 'react';
-import { Plus, Ticket, MapPin, CheckSquare, Type, AlignLeft, Mail, Phone, Hash, List, CircleDot, ListChecks, GripVertical } from 'lucide-react';
+import { Plus, Ticket, MapPin, CheckSquare, Type, AlignLeft, Mail, Phone, Hash, List, CircleDot, ListChecks, GripVertical, Globe } from 'lucide-react';
 import { FieldType } from '../../types';
 
 export const FIELD_TYPES: { type: FieldType; label: string; icon: any; color: string }[] = [
@@ -13,6 +13,7 @@ export const FIELD_TYPES: { type: FieldType; label: string; icon: any; color: st
     { type: 'select', label: 'Dropdown', icon: List, color: '#F97316' },
     { type: 'radio', label: 'Single Choice', icon: CircleDot, color: '#EF4444' },
     { type: 'checkbox', label: 'Multi Choice', icon: ListChecks, color: '#8B5CF6' },
+    { type: 'country', label: 'Country', icon: Globe, color: '#0EA5E9' },
     { type: 'ticket', label: 'Tickets & Payment', icon: Ticket, color: '#4F46E5' },
 ];
 

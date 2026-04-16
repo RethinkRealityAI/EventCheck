@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Ticket, CreditCard, Tag, Eye, AlertCircle, ArrowRight, Loader2, Check, RefreshCw, Download, MapPin, CheckSquare, UserPlus, Copy } from 'lucide-react';
+import CountryField from './FormBuilder/fields/CountryField';
 import QRCode from 'react-qr-code';
 import { FormField, Form, Attendee } from '../types';
 import { getSettings, saveAttendee, mapAttendeeToDb } from '../services/storageService';
@@ -464,14 +465,23 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
 
                                     {form.fields.map(field => isFieldVisibleInPreview(field) && (
                                         <div key={field.id}>
-                                            {field.type !== 'ticket' && (
+                                            {field.type !== 'ticket' && field.type !== 'country' && (
                                                 <label className="block text-sm font-medium text-gray-700 mb-1">
                                                     {field.label} {field.required && <span className="text-red-500">*</span>}
                                                 </label>
                                             )}
 
-                                            {/* Textarea */}
-                                            {field.type === 'textarea' ? (
+                                            {/* Country */}
+                                            {field.type === 'country' ? (
+                                                <CountryField
+                                                    label={field.label}
+                                                    required={field.required}
+                                                    value={(previewAnswers[field.id] as string) ?? ''}
+                                                    onChange={(code) => setPreviewAnswers({ ...previewAnswers, [field.id]: code })}
+                                                />
+
+                                            /* Textarea */
+                                            ) : field.type === 'textarea' ? (
                                                 <textarea
                                                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                                                     rows={3}
