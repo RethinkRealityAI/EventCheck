@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Save, CreditCard, Mail, Key, Eye, FileText, Check, Upload, Image as ImageIcon, Send as SendIcon, Users, UserPlus, Menu, PanelLeftClose, PanelLeft, Plus, X, Activity, Server, Database, ShieldCheck, Loader2, CheckSquare } from 'lucide-react';
+import { Save, CreditCard, Mail, Key, Eye, FileText, Check, Upload, Image as ImageIcon, Send as SendIcon, Users, UserPlus, Menu, PanelLeftClose, PanelLeft, Plus, X, Activity, Server, Database, ShieldCheck, Loader2, CheckSquare, Tag } from 'lucide-react';
 import { AppSettings, DEFAULT_SETTINGS, Attendee } from '../types';
 import { getSettings, saveSettings, getAttendees } from '../services/storageService';
+import PricingTemplatesTab from './Settings/PricingTemplates/PricingTemplatesTab';
 import { sendEmail } from '../services/emailService';
 import { sendTicketEmail } from '../services/smtpService';
 import { supabase } from '../services/supabaseClient';
@@ -11,7 +12,7 @@ import RichTextEditor from './RichTextEditor';
 
 const Settings: React.FC = () => {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
-  const [activeTab, setActiveTab] = useState<'general' | 'email' | 'pdf' | 'diagnostics'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'email' | 'pdf' | 'diagnostics' | 'pricing-templates'>('general');
   const [previewMode, setPreviewMode] = useState<'ticket' | 'invite'>('ticket');
   const [dummyAttendee, setDummyAttendee] = useState<Attendee | null>(null);
   const [allAttendees, setAllAttendees] = useState<Attendee[]>([]);
@@ -350,6 +351,15 @@ const Settings: React.FC = () => {
             >
               <Activity className="w-5 h-5 flex-shrink-0" /> {isSidebarOpen && <span className="truncate">System Health</span>}
             </button>
+
+            {settings.feature_pricing_templates && (
+              <button
+                onClick={() => setActiveTab('pricing-templates')}
+                className={`w-full text-left px-4 py-3 rounded-xl flex items-center gap-3 font-semibold transition-all ${activeTab === 'pricing-templates' ? 'bg-white text-indigo-600 shadow-sm border border-gray-100' : 'text-gray-600 hover:bg-white/60'}`}
+              >
+                <Tag className="w-5 h-5 flex-shrink-0" /> {isSidebarOpen && <span className="truncate">Pricing Templates</span>}
+              </button>
+            )}
           </div>
         </div>
 
@@ -383,6 +393,28 @@ const Settings: React.FC = () => {
                     <input type="text" className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none" value={settings.smtpUser} onChange={e => handleChange('smtpUser', e.target.value)} /></div>
                   <div><label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
                     <input type="password" className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none" value={settings.smtpPass} onChange={e => handleChange('smtpPass', e.target.value)} /></div>
+                </div>
+              </div>
+
+              <div className="border-t border-gray-100 pt-8">
+                <h3 className="text-lg font-bold text-gray-900 mb-4">Feature Flags</h3>
+                <div className="space-y-4">
+                  <label className="flex items-start gap-4 p-4 bg-gray-50 border border-gray-200 rounded-xl cursor-pointer hover:bg-gray-100 transition-colors">
+                    <div className="relative flex-shrink-0 mt-0.5">
+                      <input
+                        type="checkbox"
+                        className="sr-only peer"
+                        checked={!!settings.feature_pricing_templates}
+                        onChange={e => handleChange('feature_pricing_templates', e.target.checked)}
+                      />
+                      <div className="w-10 h-6 bg-gray-200 peer-checked:bg-indigo-600 rounded-full transition-colors" />
+                      <div className="absolute top-1 left-1 w-4 h-4 bg-white rounded-full shadow transition-transform peer-checked:translate-x-4" />
+                    </div>
+                    <div>
+                      <div className="text-sm font-semibold text-gray-900">Enable Pricing Templates</div>
+                      <div className="text-xs text-gray-500 mt-0.5">Dynamic pricing (date-bracket × geographic-tier × category) for event forms. When enabled, the Pricing Templates tab becomes available, and forms can opt into dynamic pricing via the form builder.</div>
+                    </div>
+                  </label>
                 </div>
               </div>
             </div>
@@ -771,6 +803,12 @@ const Settings: React.FC = () => {
                   </p>
                 </div>
               </div>
+            </div>
+          )}
+
+          {activeTab === 'pricing-templates' && settings.feature_pricing_templates && (
+            <div className="animate-fade-in-up">
+              <PricingTemplatesTab />
             </div>
           )}
 
