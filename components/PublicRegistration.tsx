@@ -2,8 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { getFormById, getSettings, saveAttendee, getAttendee, getGuestsByPrimaryId, mapAttendeeToDb } from '../services/storageService';
 import { FormField, AppSettings, Attendee, Form, DynamicPricingSelection } from '../types';
 import type { PricingTemplate } from '../types';
-import { resolveBracket, resolveTier, computeTotal } from '../utils/pricing';
+import { resolveBracket, resolveTier, computeTotal, formatPrice } from '../utils/pricing';
+import { computeGroupTotal, type GroupMemberPricingInput } from '../utils/groupPricing';
 import CountryField from './FormBuilder/fields/CountryField';
+import GroupPersonRow from './Group/GroupPersonRow';
+import GroupShortcutsToggle from './Group/GroupShortcutsToggle';
 import { supabase } from '../services/supabaseClient';
 import { Loader2, Check, AlertCircle, Download, Calendar, Tag, CreditCard, ArrowRight, X, Eye, MapPin, UserPlus, Info, Copy } from 'lucide-react';
 import { useNotifications } from './NotificationSystem';
@@ -65,12 +68,82 @@ const PublicRegistration = () => {
   const [selectedAddonIds, setSelectedAddonIds] = useState<string[]>([]);
   const [selectedCountryCode, setSelectedCountryCode] = useState<string>('');
 
+  // Detect RMS field on the form
+  const rmsField = form?.fields?.find((f: any) => f.type === 'registration-mode-selector') ?? null;
+
+  const [registrationMode, setRegistrationMode] = useState<'individual' | 'group' | null>(null);
+  const [groupSize, setGroupSize] = useState<number>(2);
+  const [groupHasAllInfo, setGroupHasAllInfo] = useState<boolean>(false);
+  const [groupAllSameCountry, setGroupAllSameCountry] = useState<boolean>(false);
+  const [groupAllSameCategory, setGroupAllSameCategory] = useState<boolean>(false);
+
+  const [groupMembers, setGroupMembers] = useState<Array<{
+    name: string;
+    email: string;
+    countryCode: string;
+    categoryId: string | null;
+    addonIds: string[];
+    fullAnswers?: Record<string, any>;
+  }>>([
+    { name: '', email: '', countryCode: '', categoryId: null, addonIds: [] },
+    { name: '', email: '', countryCode: '', categoryId: null, addonIds: [] },
+  ]);
+
   // Derived pricing values — recomputed each render
   const activeBracket = pricingTemplate ? resolveBracket(pricingTemplate, new Date()) : null;
   const activeTier = pricingTemplate ? resolveTier(pricingTemplate, selectedCountryCode) : null;
   const dynamicTotal = (pricingTemplate && activeBracket && activeTier && selectedCategoryId)
     ? computeTotal(pricingTemplate, selectedCategoryId, activeTier, activeBracket, selectedAddonIds)
     : null;
+
+  const groupPricingResult = (pricingTemplate && registrationMode === 'group')
+    ? computeGroupTotal(
+        pricingTemplate,
+        groupMembers.map(m => ({
+          countryCode: m.countryCode,
+          categoryId: m.categoryId ?? '',
+          addonIds: m.addonIds,
+        })),
+        new Date(),
+      )
+    : null;
+
+  const groupTotal = (groupPricingResult && groupPricingResult.ok) ? groupPricingResult.total : null;
+
+  // Sync groupMembers array length when groupSize changes
+  useEffect(() => {
+    setGroupMembers(prev => {
+      if (prev.length === groupSize) return prev;
+      if (prev.length < groupSize) {
+        return [...prev, ...Array(groupSize - prev.length).fill(null).map(() => ({
+          name: '', email: '', countryCode: '', categoryId: null, addonIds: [],
+        }))];
+      }
+      return prev.slice(0, groupSize);
+    });
+  }, [groupSize]);
+
+  // "Same country" shortcut — propagate first member's country to all
+  useEffect(() => {
+    if (!groupAllSameCountry) return;
+    setGroupMembers(prev => {
+      const first = prev[0];
+      if (!first) return prev;
+      return prev.map(m => ({ ...m, countryCode: first.countryCode }));
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupAllSameCountry, groupMembers[0]?.countryCode]);
+
+  // "Same category" shortcut — propagate first member's category to all
+  useEffect(() => {
+    if (!groupAllSameCategory) return;
+    setGroupMembers(prev => {
+      const first = prev[0];
+      if (!first) return prev;
+      return prev.map(m => ({ ...m, categoryId: first.categoryId }));
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupAllSameCategory, groupMembers[0]?.categoryId]);
 
   useEffect(() => {
     const fetch = async () => {
@@ -557,6 +630,22 @@ const PublicRegistration = () => {
       verifyBody.pricingSelection = pricingSelection;
     }
 
+    if (pricingTemplate && registrationMode === 'group' && groupMembers.length > 0) {
+      verifyBody.groupPricingSelections = groupMembers.map(m => ({
+        countryCode: m.countryCode,
+        categoryId: m.categoryId ?? '',
+        addonIds: m.addonIds,
+      }));
+      verifyBody.attendees = groupMembers.map((m, i) => ({
+        name: m.name,
+        email: m.email,
+        ticket_type: 'Registration',
+        is_primary: i === 0,
+        guest_type: i === 0 ? null : (groupHasAllInfo ? null : 'pending-claim'),
+        answers: groupHasAllInfo && m.fullAnswers ? m.fullAnswers : null,
+      }));
+    }
+
     const { data, error: fnError, response: fnResponse } = await supabase.functions.invoke('verify-payment', {
       body: verifyBody
     }) as { data: any, error: any, response?: Response };
@@ -814,7 +903,106 @@ const PublicRegistration = () => {
               </div>
             )}
 
-            {form.fields.map(field => isVisible(field) && !(field.type === 'ticket' && mode === 'guest') && (
+            {form.fields.map(field => {
+              if (!isVisible(field)) return null;
+              if (field.type === 'ticket' && mode === 'guest') return null;
+
+              // Registration Mode Selector field — always render so visitor can pick a path
+              if (field.type === 'registration-mode-selector') {
+                return (
+                  <div key={field.id} className="space-y-3">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      {field.label} {field.required && <span className="text-red-500">*</span>}
+                    </label>
+                    <div className="flex gap-4">
+                      <label className="flex items-center gap-2 text-sm">
+                        <input type="radio" name={field.id} checked={registrationMode === 'individual'}
+                          onChange={() => setRegistrationMode('individual')} />
+                        {(field as any).individualLabel || 'Individual — just me'}
+                      </label>
+                      {((field as any).groupEnabled ?? true) && (
+                        <label className="flex items-center gap-2 text-sm">
+                          <input type="radio" name={field.id} checked={registrationMode === 'group'}
+                            onChange={() => setRegistrationMode('group')} />
+                          {(field as any).groupLabel || `Group — up to ${(field as any).groupMaxSize ?? 5} people`}
+                        </label>
+                      )}
+                    </div>
+
+                    {registrationMode === 'group' && pricingTemplate && (
+                      <div className="space-y-4 border-l-4 border-indigo-200 pl-4 mt-3">
+                        <div>
+                          <label className="block text-sm font-medium mb-1">How many people total?</label>
+                          <div className="flex gap-2">
+                            {[2, 3, 4, 5].filter(n => n <= ((field as any).groupMaxSize ?? 5)).map(n => (
+                              <button type="button" key={n} onClick={() => setGroupSize(n)}
+                                className={`px-3 py-1 rounded border text-sm ${groupSize === n ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white border-slate-300'}`}>
+                                {n}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <label className="flex items-center gap-2 text-sm">
+                          <input type="checkbox" checked={groupHasAllInfo}
+                            onChange={e => setGroupHasAllInfo(e.target.checked)} />
+                          I have all their details now and want to fill them in
+                        </label>
+                        <p className="text-xs text-slate-500 -mt-1">
+                          If unchecked, we'll capture basic pricing info now and email each person a link to complete their details later. Payment is up-front regardless.
+                        </p>
+
+                        <GroupShortcutsToggle
+                          template={pricingTemplate}
+                          tier={activeTier}
+                          bracket={activeBracket}
+                          allSameCountry={groupAllSameCountry}
+                          allSameCategory={groupAllSameCategory}
+                          onToggleCountry={setGroupAllSameCountry}
+                          onToggleCategory={setGroupAllSameCategory}
+                          sharedCountry={groupMembers[0]?.countryCode ?? ''}
+                          sharedCategoryId={groupMembers[0]?.categoryId ?? null}
+                          onSharedCountry={code => setGroupMembers(prev => prev.map(m => ({ ...m, countryCode: code })))}
+                          onSharedCategory={id => setGroupMembers(prev => prev.map(m => ({ ...m, categoryId: id })))}
+                        />
+
+                        <div className="space-y-2">
+                          {groupMembers.map((m, i) => (
+                            <GroupPersonRow
+                              key={i}
+                              index={i}
+                              isPrimary={i === 0}
+                              template={pricingTemplate}
+                              tier={activeTier}
+                              bracket={activeBracket}
+                              name={m.name}
+                              email={m.email}
+                              countryCode={m.countryCode}
+                              categoryId={m.categoryId}
+                              hasAllInfo={groupHasAllInfo}
+                              hideCountry={groupAllSameCountry}
+                              hideCategory={groupAllSameCategory}
+                              onChange={patch => setGroupMembers(prev => prev.map((row, j) => j === i ? { ...row, ...patch } : row))}
+                            />
+                          ))}
+                        </div>
+
+                        {groupTotal != null && (
+                          <div className="sticky bottom-4 p-4 bg-white shadow-lg rounded-xl border flex items-center justify-between">
+                            <div className="text-xs text-slate-500 uppercase tracking-wider">Group total ({groupMembers.length} people)</div>
+                            <div className="text-2xl font-bold">{formatPrice(groupTotal, pricingTemplate.currency)}</div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              }
+
+              // Hide all non-RMS fields until a mode is chosen (when there is an RMS field)
+              if (rmsField && registrationMode === null) return null;
+
+              return (
               <div key={field.id}>
                 {field.type !== 'ticket' && field.type !== 'country' && (
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -1215,12 +1403,13 @@ const PublicRegistration = () => {
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
 
             <div className="pt-4">
               <button
                 type="submit"
-                disabled={loading || (pricingTemplate != null && (!selectedCategoryId || !activeTier || !activeBracket || dynamicTotal == null))}
+                disabled={loading || (pricingTemplate != null && (!selectedCategoryId || !activeTier || !activeBracket || dynamicTotal == null)) || (registrationMode === 'group' && (!groupPricingResult?.ok || groupMembers.some(m => !m.name.trim() || !m.email.trim() || !m.countryCode || !m.categoryId)))}
                 className="w-full py-4 text-white rounded-xl font-black uppercase tracking-widest transition shadow-lg flex justify-center items-center gap-2 transform hover:scale-[1.02] active:scale-95 disabled:opacity-70 disabled:grayscale disabled:cursor-not-allowed"
                 style={{ backgroundColor: form.settings?.formAccentColor || '#4F46E5' }}
               >
@@ -1286,6 +1475,12 @@ const PublicRegistration = () => {
                     tagline: false
                   }}
                   createOrder={(data, actions) => {
+                    if (pricingTemplate && registrationMode === 'group' && groupTotal != null) {
+                      return actions.order.create({
+                        purchase_units: [{ amount: { currency_code: pricingTemplate.currency, value: (groupTotal / 100).toFixed(2) } }],
+                        intent: 'CAPTURE',
+                      });
+                    }
                     if (pricingTemplate && dynamicTotal != null) {
                       return actions.order.create({
                         purchase_units: [{
