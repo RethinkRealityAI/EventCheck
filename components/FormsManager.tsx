@@ -1,15 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Edit3, Trash2, Globe, Code, ExternalLink, Copy, Check, Handshake } from 'lucide-react';
+import { Plus, Edit3, Trash2, Globe, Code, ExternalLink, Copy, Check } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Form } from '../types';
 import { getForms, saveForm, deleteForm } from '../services/storageService';
 import { useNotifications } from './NotificationSystem';
-import { createSponsorForm } from './Sponsors/createSponsorForm';
+import TemplatePickerModal from './FormBuilder/TemplatePickerModal';
+import { type FormTemplate } from '../config/formTemplates';
 
 const FormsManager: React.FC = () => {
   const [forms, setForms] = useState<Form[]>([]);
   const [showEmbedModal, setShowEmbedModal] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const { showNotification } = useNotifications();
   const navigate = useNavigate();
 
@@ -21,22 +23,17 @@ const FormsManager: React.FC = () => {
     fetch();
   }, []);
 
-  const handleCreate = async () => {
+  const handlePick = async (t: FormTemplate) => {
+    const partial = t.build();
     const newForm: Form = {
+      ...partial,
       id: crypto.randomUUID(),
-      title: 'New Event Registration',
-      description: 'Enter event details here...',
       createdAt: new Date().toISOString(),
       status: 'draft',
-      fields: [
-        { id: 'f_name', type: 'text', label: 'Full Name', required: true },
-        { id: 'f_email', type: 'email', label: 'Email Address', required: true }
-      ]
-    };
+    } as Form;
     await saveForm(newForm);
-    const updatedForms = await getForms();
-    setForms(updatedForms);
-    showNotification('New form created successfully', 'success');
+    setPickerOpen(false);
+    navigate(`/admin/builder/${newForm.id}`);
   };
 
   const handleDelete = async (id: string) => {
@@ -91,21 +88,10 @@ const FormsManager: React.FC = () => {
         </div>
         <div className="relative z-10 flex items-center gap-3">
           <button
-            onClick={handleCreate}
+            onClick={() => setPickerOpen(true)}
             className="flex items-center gap-2 px-6 py-3 bg-white text-emerald-700 rounded-xl hover:bg-emerald-50 transition font-bold shadow-xl shadow-black/10 hover:shadow-2xl hover:scale-105 transform duration-300"
           >
-            <Plus className="w-5 h-5" /> Create New Form
-          </button>
-          <button
-            onClick={async () => {
-              const newForm = createSponsorForm();
-              await saveForm(newForm);
-              navigate(`/admin/builder/${newForm.id}`);
-            }}
-            className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl shadow-md font-semibold"
-          >
-            <Handshake className="w-4 h-4" />
-            Create Sponsor Form
+            <Plus className="w-5 h-5" /> Create Form
           </button>
         </div>
       </div>
@@ -176,10 +162,14 @@ const FormsManager: React.FC = () => {
           <div className="col-span-full py-12 text-center border-2 border-dashed border-gray-200 rounded-xl">
             <Globe className="w-12 h-12 text-gray-300 mx-auto mb-4" />
             <p className="text-gray-500">No forms created yet.</p>
-            <button onClick={handleCreate} className="text-indigo-600 font-medium mt-2">Create your first form</button>
+            <button onClick={() => setPickerOpen(true)} className="text-indigo-600 font-medium mt-2">Create your first form</button>
           </div>
         )}
       </div>
+
+      {pickerOpen && (
+        <TemplatePickerModal onPick={handlePick} onClose={() => setPickerOpen(false)} />
+      )}
 
       {/* Embed Modal */}
       {showEmbedModal && (
