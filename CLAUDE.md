@@ -198,6 +198,7 @@ misleadingly claim a ticket is attached.
 ## Environment Variables
 
 ### Netlify (frontend build)
+- `VITE_SITE` — `scago` or `gansid` (identifies which deployment; defaults to `scago` if unset)
 - `VITE_SUPABASE_URL` — Supabase project URL
 - `VITE_SUPABASE_ANON_KEY` — Supabase anon key
 - `VITE_PAYPAL_CLIENT_ID` — PayPal client ID (production on Netlify, sandbox locally)
@@ -210,20 +211,47 @@ misleadingly claim a ticket is attached.
 ### Supabase Secrets (edge functions)
 - `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` — production
 - `PAYPAL_SANDBOX_CLIENT_ID`, `PAYPAL_SANDBOX_CLIENT_SECRET` — sandbox
+- `PAYPAL_MODE` — optional override (`production` | `sandbox`) that short-circuits the Origin-based auto-detect. GANSID project sets this to `production`.
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` — for send-ticket-email
 - `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` — auto-provided to edge functions
 
 ## Commands
 
 - `npm run dev` — local dev server
-- `npm run build` — production build
-- `npx tsc --noEmit` — type check without emitting
+- `npm run build` — production build (set `VITE_SITE=gansid` to build the GANSID variant)
 - `npm test` — run Vitest unit tests once
+- `npx tsc --noEmit` — type check without emitting
 - `npm run test:watch` — Vitest in watch mode
-- `supabase functions deploy <name> --project-ref iigbgbgakevcgilucvbs` — deploy edge function
-- `supabase secrets set KEY=VALUE --project-ref iigbgbgakevcgilucvbs` — set edge function secrets
+- `supabase functions deploy <name> --project-ref <ref>` — deploy edge function (see Multi-site deployment for both refs)
+- `supabase secrets set KEY=VALUE --project-ref <ref>` — set edge function secrets
 
-Supabase project ref: `iigbgbgakevcgilucvbs`
+## Multi-site deployment
+
+This repo powers two independent deployments from one `main` branch:
+
+| Site | Netlify site | Supabase project-ref | VITE_SITE |
+|------|--------------|----------------------|-----------|
+| SCAGO (live) | existing SCAGO site | `iigbgbgakevcgilucvbs` | `scago` |
+| GANSID Congress | `gansidcongress.netlify.app` | `gticuvgclbvhwvpzkuez` | `gansid` |
+
+Design: `docs/superpowers/specs/2026-04-15-multi-site-scaffold-design.md`
+Plan: `docs/superpowers/plans/2026-04-15-multi-site-scaffold.md`
+
+**Critical rule:** every migration and edge-function deploy must be applied to BOTH project-refs. Example:
+
+```bash
+# SCAGO
+supabase db push --project-ref iigbgbgakevcgilucvbs
+supabase functions deploy verify-payment --project-ref iigbgbgakevcgilucvbs
+
+# GANSID
+supabase db push --project-ref gticuvgclbvhwvpzkuez
+supabase functions deploy verify-payment --project-ref gticuvgclbvhwvpzkuez
+```
+
+If a migration is applied to only one project, the shared codebase will break on the other site.
+
+Site-level branding is driven at build time by `config/sites.ts` keyed off `VITE_SITE`. Runtime settings (PayPal creds in secrets, email templates / logos / SMTP in `app_settings`) remain per-Supabase.
 
 ## Database schema — key tables
 
@@ -241,8 +269,8 @@ Supabase project ref: `iigbgbgakevcgilucvbs`
 
 ## Conventions
 
-- **Vitest** is configured for pure-function unit tests (templates, pricing, form seed shape).
-  UI/integration testing is manual.
+- **Vitest** is configured for pure-function unit tests (templates, pricing, form seed shape,
+  site-config resolution). UI/integration testing is manual.
 - All event-flow and sponsor-flow attendee persistence goes through the `verify-payment` edge
   function — never write attendees directly from the client.
 - Guest placeholder records use naming pattern: `"{PurchaserName} - Guest Ticket #N"` for
@@ -264,3 +292,5 @@ Supabase project ref: `iigbgbgakevcgilucvbs`
 - Admin-only edge functions (`confirm-sponsor-cheque`) enforce JWT auth both at the Supabase
   gateway (`verify_jwt: true`) and inside the function body (`auth.getUser(jwt)` belt-and-
   suspenders).
+- **Site-level branding** is build-time via `config/sites.ts` keyed on `VITE_SITE`; runtime
+  settings (logos, email templates, PayPal/SMTP) remain per-Supabase in `app_settings`.
