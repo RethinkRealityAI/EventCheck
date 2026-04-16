@@ -696,7 +696,13 @@ const PublicRegistration = () => {
     }
   };
 
-  const paypalClientId = getEnvVar('VITE_PAYPAL_CLIENT_ID') || settings?.paypalClientId || "";
+  // When VITE_PAYPAL_ENV=sandbox, prefer the sandbox client ID so both keys can
+  // coexist in Netlify and the site flips mode by changing a single env var.
+  // Falls back to the production client ID or the admin-provided value.
+  const paypalEnv = (getEnvVar('VITE_PAYPAL_ENV') || 'live').toLowerCase();
+  const paypalClientId = (paypalEnv === 'sandbox'
+    ? (getEnvVar('VITE_PAYPAL_SANDBOX_CLIENT_ID') || getEnvVar('VITE_PAYPAL_CLIENT_ID'))
+    : getEnvVar('VITE_PAYPAL_CLIENT_ID')) || settings?.paypalClientId || "";
 
   const downloadPdf = () => {
     if (generatedTicket && settings) {
