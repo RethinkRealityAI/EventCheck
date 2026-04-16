@@ -418,7 +418,7 @@ function mapFormFromDb(db: FormRow): Form {
     description: db.description,
     createdAt: db.created_at,
     status: db.status as 'active' | 'draft' | 'closed',
-    formType: (db as any).form_type === 'sponsor' ? 'sponsor' : 'event',
+    formType: (db as any).form_type || 'event',
     settings: (db.settings as any), // Cast JSON to specific setting type if needed
     thankYouMessage: db.thank_you_message || undefined,
     fields: (db.fields as unknown as FormField[]) || []
