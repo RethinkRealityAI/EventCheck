@@ -250,7 +250,13 @@ const AdminLayout = () => {
       >
         <div className={`p-6 flex items-center ${(isSidebarCollapsed && !isSidebarPinned) ? 'justify-center transition-none' : 'justify-between'} transition-all duration-300`}>
           <div className="flex items-center gap-3 overflow-hidden">
-            <div className="bg-indigo-600 p-2 rounded-lg shadow-lg shadow-indigo-500/30 flex-shrink-0">
+            <div
+              className="p-2 rounded-lg shadow-lg flex-shrink-0"
+              style={{
+                backgroundColor: CURRENT_SITE.fallbackColors.primary,
+                boxShadow: `0 10px 15px -3px ${CURRENT_SITE.fallbackColors.primary}4D`,
+              }}
+            >
               {CURRENT_SITE.logoImage ? (
                 <img src={CURRENT_SITE.logoImage} alt={CURRENT_SITE.displayName} className="w-6 h-6 object-contain" />
               ) : (
