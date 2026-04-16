@@ -21,7 +21,7 @@ export interface Attendee {
   dietaryPreferences?: string; // e.g. "Vegetarian", "Vegan", etc.
   primaryAttendeeId?: string; // If this is a guest, link to purchaser
   isPrimary?: boolean; // Defaults to true
-  guestType?: 'adult' | 'child'; // Whether this guest is an adult or child
+  guestType?: 'adult' | 'child' | 'pending-claim' | 'claimed'; // Whether this guest is an adult or child (+ group-flow states)
   // Seating Assignment
   assignedTableId?: string | null;
   assignedSeat?: number | null;

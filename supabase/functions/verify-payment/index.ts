@@ -435,6 +435,22 @@ serve(async (req: Request) => {
           }, 500);
         }
 
+        // Fire-and-forget invitation emails for pending-claim guests
+        const pendingGuests = rows.filter((r: any) => r.guest_type === 'pending-claim');
+        if (pendingGuests.length > 0) {
+          const emailFnUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/send-ticket-email`;
+          for (const g of pendingGuests) {
+            fetch(emailFnUrl, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ mode: 'group-invite', attendeeId: g.id, origin: req.headers.get('origin') ?? '' }),
+            }).catch(e => console.warn('Group invite email failed', e));
+          }
+        }
+
         return jsonResponse({ ok: true, total: expectedCents, currency: tpl.currency ?? 'USD', primaryId, guestIds: rows.slice(1).map(r => r.id) });
       }
       // ── END GROUP DYNAMIC BRANCH — fall through to single-person dynamic branch below ──

@@ -3,15 +3,90 @@ import { Attendee, Form, AppSettings, SeatingTable } from '../types';
 import { LayoutDashboard, Users, ChevronDown, ChevronRight, UserPlus, CheckCircle, Clock, Search, Calendar, Eye, X, Mail, User, Download, FileSpreadsheet, Check, ChevronLeft, Filter, Loader2, Copy, ChevronsDown, ChevronsRight, Star, Pin, Plus, SlidersHorizontal } from 'lucide-react';
 import { format } from 'date-fns';
 import { updateAttendee, getSettings, saveSettings, getSeatingTables } from '../services/storageService';
+import { supabase } from '../services/supabaseClient';
 import { useNotifications } from './NotificationSystem';
 import AttendeeModal from './AttendeeModal';
 import AddAttendeeModal from './AddAttendeeModal';
 import ColumnVisibilityDropdown, { ColumnDef } from './ColumnVisibilityDropdown';
 
+// ── Group-registration helpers ──────────────────────────────────────────────
+
+interface GroupedAttendee {
+  primary: Attendee;
+  guests: Attendee[];
+}
+
+function groupByPrimary(attendees: Attendee[]): GroupedAttendee[] {
+  // Primaries: records where isPrimary is not explicitly false AND no primaryAttendeeId
+  const primaries = attendees.filter(a => a.isPrimary !== false && !a.primaryAttendeeId);
+  const byPrimaryId = new Map<string, Attendee[]>();
+  for (const a of attendees) {
+    const pid = a.primaryAttendeeId;
+    if (pid) {
+      const arr = byPrimaryId.get(pid) ?? [];
+      arr.push(a);
+      byPrimaryId.set(pid, arr);
+    }
+  }
+  return primaries.map(p => ({ primary: p, guests: byPrimaryId.get(p.id) ?? [] }));
+}
+
+function GuestStatusBadge({ guest }: { guest: Attendee }) {
+  const t = guest.guestType;
+  if (t === 'pending-claim') {
+    return <span className="ml-2 text-xs px-2 py-0.5 bg-yellow-100 text-yellow-900 rounded-full">Pending</span>;
+  }
+  if (t === 'claimed') {
+    return <span className="ml-2 text-xs px-2 py-0.5 bg-green-100 text-green-900 rounded-full">Completed</span>;
+  }
+  return <span className="ml-2 text-xs px-2 py-0.5 bg-blue-100 text-blue-900 rounded-full">Pre-filled</span>;
+}
+
+function GuestActions({ guest, formId, onRefresh }: { guest: Attendee; formId: string; onRefresh: () => void }) {
+  const { showNotification } = useNotifications();
+
+  const copyLink = () => {
+    const url = `${window.location.origin}/#/form/${formId}?ref=${guest.id}`;
+    navigator.clipboard.writeText(url);
+    showNotification('Registration link copied to clipboard', 'success');
+  };
+
+  const resend = async () => {
+    await supabase.functions.invoke('send-ticket-email', {
+      body: { mode: 'group-invite', attendeeId: guest.id, origin: window.location.origin },
+    });
+    showNotification('Invitation re-sent', 'success');
+  };
+
+  const markComplete = async () => {
+    if (!window.confirm(`Mark ${guest.name} as completed?`)) return;
+    await supabase.from('attendees').update({ guest_type: 'claimed' }).eq('id', guest.id);
+    onRefresh();
+  };
+
+  if (guest.guestType !== 'pending-claim') return null;
+  return (
+    <div className="flex gap-1 justify-end">
+      <button onClick={copyLink} title="Copy registration link" className="p-1 hover:bg-slate-200 rounded">
+        <Copy className="w-3.5 h-3.5" />
+      </button>
+      <button onClick={resend} title="Resend invitation" className="p-1 hover:bg-slate-200 rounded">
+        <Mail className="w-3.5 h-3.5" />
+      </button>
+      <button onClick={markComplete} title="Mark as completed" className="p-1 hover:bg-slate-200 rounded">
+        <Check className="w-3.5 h-3.5" />
+      </button>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 interface AttendeeListProps {
   attendees: Attendee[];
   forms: Form[];
   isLoading?: boolean;
+  onRefresh?: () => void;
 }
 
 const STANDARD_COLUMNS: ColumnDef[] = [
@@ -23,7 +98,7 @@ const STANDARD_COLUMNS: ColumnDef[] = [
   { key: 'actions', label: 'Actions', group: 'standard' },
 ];
 
-const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading = false }) => {
+const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading = false, onRefresh }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState<'live' | 'test' | 'donated' | 'tables' | 'sponsor-tickets'>('live');
   const [selectedAttendee, setSelectedAttendee] = useState<Attendee | null>(null);
@@ -36,6 +111,15 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
 
   // Collapsed state for tables
   const [expandedTables, setExpandedTables] = useState<Record<string, boolean>>({});
+
+  // Collapsed state for primary/guest groups in the flat live list
+  const [expandedPrimaries, setExpandedPrimaries] = useState<Set<string>>(new Set());
+  const toggleExpandPrimary = (id: string) => setExpandedPrimaries(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    return next;
+  });
 
   // New state for form filtering, settings, columns, seating, add modal
   const [selectedFormId, setSelectedFormId] = useState<string>('_all');
@@ -910,94 +994,142 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                   </td>
                 </tr>
               ) : (
-                paginatedItems.map((attendee) => (
-                  <tr key={attendee.id} className="hover:bg-white/60 transition">
-                    {isColumnVisible('name') && (
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <div className="font-medium text-gray-900">{attendee.name}</div>
-                          {attendee.isPrimary === false && (
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-700">GUEST</span>
-                          )}
-                          {attendee.guestType === 'child' && (
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-700 border border-blue-200">CHILD</span>
-                          )}
-                          {attendee.guestType === 'adult' && (
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">ADULT</span>
-                          )}
-                          {((attendee.donatedSeats || 0) > 0 || (attendee.donatedTables || 0) > 0) && (
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-700">
-                              {attendee.donationType === 'table' && (attendee.donatedTables || 0) > 0
-                                ? `${attendee.donatedTables} tbl (${attendee.donatedSeats})`
-                                : `${attendee.donatedSeats}`
-                              }
+                (() => {
+                  // Build a set of group-path guest IDs so they aren't rendered as standalone rows
+                  const groupGuestIds = new Set(
+                    paginatedItems
+                      .filter(a => a.primaryAttendeeId && (a.guestType === 'pending-claim' || a.guestType === 'claimed'))
+                      .map(a => a.id)
+                  );
+
+                  // For each primary, collect its group-path guests that appear in paginatedItems
+                  const groupGuestsByPrimary = new Map<string, Attendee[]>();
+                  for (const a of paginatedItems) {
+                    if (a.primaryAttendeeId && (a.guestType === 'pending-claim' || a.guestType === 'claimed')) {
+                      const arr = groupGuestsByPrimary.get(a.primaryAttendeeId) ?? [];
+                      arr.push(a);
+                      groupGuestsByPrimary.set(a.primaryAttendeeId, arr);
+                    }
+                  }
+
+                  const renderAttendeeRow = (attendee: Attendee, isGuestRow = false) => (
+                    <tr key={attendee.id} className={`hover:bg-white/60 transition${isGuestRow ? ' bg-slate-50/60' : ''}`}>
+                      {isColumnVisible('name') && (
+                        <td className={`px-4 py-3${isGuestRow ? ' pl-10' : ''}`}>
+                          <div className="flex items-center gap-2">
+                            {!isGuestRow && (groupGuestsByPrimary.get(attendee.id) ?? []).length > 0 && (
+                              <button
+                                onClick={() => toggleExpandPrimary(attendee.id)}
+                                className="p-0.5 hover:bg-slate-100 rounded flex-shrink-0"
+                                title={expandedPrimaries.has(attendee.id) ? 'Collapse guests' : 'Expand guests'}
+                              >
+                                {expandedPrimaries.has(attendee.id)
+                                  ? <ChevronDown className="w-4 h-4 text-slate-400" />
+                                  : <ChevronRight className="w-4 h-4 text-slate-400" />
+                                }
+                              </button>
+                            )}
+                            <div className="font-medium text-gray-900">{attendee.name}</div>
+                            {attendee.isPrimary === false && !isGuestRow && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-700">GUEST</span>
+                            )}
+                            {isGuestRow && <GuestStatusBadge guest={attendee} />}
+                            {attendee.guestType === 'child' && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-700 border border-blue-200">CHILD</span>
+                            )}
+                            {attendee.guestType === 'adult' && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">ADULT</span>
+                            )}
+                            {((attendee.donatedSeats || 0) > 0 || (attendee.donatedTables || 0) > 0) && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-700">
+                                {attendee.donationType === 'table' && (attendee.donatedTables || 0) > 0
+                                  ? `${attendee.donatedTables} tbl (${attendee.donatedSeats})`
+                                  : `${attendee.donatedSeats}`
+                                }
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-gray-400 text-xs">{attendee.email}</div>
+                        </td>
+                      )}
+                      {isColumnVisible('formTitle') && (
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-1.5 text-gray-700">
+                            <Calendar className="w-3 h-3 text-indigo-500" />
+                            <span className="truncate max-w-[150px] block" title={attendee.formTitle}>
+                              {attendee.formTitle || 'Unknown Event'}
+                            </span>
+                          </div>
+                        </td>
+                      )}
+                      {isColumnVisible('ticketType') && (
+                        <td className="px-4 py-3">
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700">
+                            {attendee.ticketType}
+                          </span>
+                        </td>
+                      )}
+                      {isColumnVisible('status') && (
+                        <td className="px-4 py-3">
+                          {attendee.checkedInAt ? (
+                            <span className="flex items-center gap-1.5 text-green-600 font-medium">
+                              <CheckCircle className="w-4 h-4" /> Checked In
+                            </span>
+                          ) : (
+                            <span className="flex items-center gap-1.5 text-gray-400">
+                              <Clock className="w-4 h-4" /> Pending
                             </span>
                           )}
-                        </div>
-                        <div className="text-gray-400 text-xs">{attendee.email}</div>
-                      </td>
-                    )}
-                    {isColumnVisible('formTitle') && (
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1.5 text-gray-700">
-                          <Calendar className="w-3 h-3 text-indigo-500" />
-                          <span className="truncate max-w-[150px] block" title={attendee.formTitle}>
-                            {attendee.formTitle || 'Unknown Event'}
-                          </span>
-                        </div>
-                      </td>
-                    )}
-                    {isColumnVisible('ticketType') && (
-                      <td className="px-4 py-3">
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700">
-                          {attendee.ticketType}
-                        </span>
-                      </td>
-                    )}
-                    {isColumnVisible('status') && (
-                      <td className="px-4 py-3">
-                        {attendee.checkedInAt ? (
-                          <span className="flex items-center gap-1.5 text-green-600 font-medium">
-                            <CheckCircle className="w-4 h-4" /> Checked In
-                          </span>
-                        ) : (
-                          <span className="flex items-center gap-1.5 text-gray-400">
-                            <Clock className="w-4 h-4" /> Pending
-                          </span>
-                        )}
-                      </td>
-                    )}
-                    {isColumnVisible('registered') && (
-                      <td className="px-4 py-3 text-gray-500 font-mono text-xs">
-                        {format(new Date(attendee.registeredAt), 'MMM d, yyyy')}
-                      </td>
-                    )}
-                    {dynamicColumns.map(col => {
-                      if (!isColumnVisible(col.key)) return null;
-                      const fieldId = col.key.replace('answer_', '');
-                      const val = attendee.answers?.[fieldId];
-                      return (
-                        <td key={col.key} className="px-4 py-3 text-gray-600 text-xs">
-                          {val !== undefined && val !== null
-                            ? (Array.isArray(val) ? val.join(', ') : String(val))
-                            : <span className="text-gray-300">-</span>
+                        </td>
+                      )}
+                      {isColumnVisible('registered') && (
+                        <td className="px-4 py-3 text-gray-500 font-mono text-xs">
+                          {format(new Date(attendee.registeredAt), 'MMM d, yyyy')}
+                        </td>
+                      )}
+                      {dynamicColumns.map(col => {
+                        if (!isColumnVisible(col.key)) return null;
+                        const fieldId = col.key.replace('answer_', '');
+                        const val = attendee.answers?.[fieldId];
+                        return (
+                          <td key={col.key} className="px-4 py-3 text-gray-600 text-xs">
+                            {val !== undefined && val !== null
+                              ? (Array.isArray(val) ? val.join(', ') : String(val))
+                              : <span className="text-gray-300">-</span>
+                            }
+                          </td>
+                        );
+                      })}
+                      {isColumnVisible('actions') && (
+                        <td className="px-4 py-3 text-right sticky right-0 bg-white/95 backdrop-blur-sm z-10 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.06)]">
+                          {isGuestRow
+                            ? <GuestActions guest={attendee} formId={attendee.formId} onRefresh={onRefresh ?? (() => {})} />
+                            : (
+                              <button
+                                onClick={() => setSelectedAttendee(attendee)}
+                                className="text-indigo-600 hover:text-indigo-800 hover:bg-white/80 hover:shadow-sm p-2 rounded-lg transition"
+                                title="View Details"
+                              >
+                                <Eye className="w-4 h-4" />
+                              </button>
+                            )
                           }
                         </td>
-                      );
-                    })}
-                    {isColumnVisible('actions') && (
-                      <td className="px-4 py-3 text-right sticky right-0 bg-white/95 backdrop-blur-sm z-10 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.06)]">
-                        <button
-                          onClick={() => setSelectedAttendee(attendee)}
-                          className="text-indigo-600 hover:text-indigo-800 hover:bg-white/80 hover:shadow-sm p-2 rounded-lg transition"
-                          title="View Details"
-                        >
-                          <Eye className="w-4 h-4" />
-                        </button>
-                      </td>
-                    )}
-                  </tr>
-                ))
+                      )}
+                    </tr>
+                  );
+
+                  return paginatedItems
+                    .filter(a => !groupGuestIds.has(a.id))
+                    .flatMap(attendee => {
+                      const groupGuests = groupGuestsByPrimary.get(attendee.id) ?? [];
+                      const rows: React.ReactNode[] = [renderAttendeeRow(attendee, false)];
+                      if (expandedPrimaries.has(attendee.id) && groupGuests.length > 0) {
+                        groupGuests.forEach(g => rows.push(renderAttendeeRow(g, true)));
+                      }
+                      return rows;
+                    });
+                })()
               )}
             </tbody>
           </table>
