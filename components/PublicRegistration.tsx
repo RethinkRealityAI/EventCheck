@@ -17,10 +17,14 @@ import { PayPalScriptProvider, PayPalButtons } from "@paypal/react-paypal-js";
 import { sendTicketEmail, arrayBufferToBase64 } from '../services/smtpService';
 import QRCode from 'react-qr-code';
 import PublicSponsorForm from './Sponsors/PublicSponsorForm';
+import PublicExhibitorForm from './Exhibitor/PublicExhibitorForm';
+import ConsentCheckbox from './Consent/ConsentCheckbox';
 import PricingBracketBanner from './Pricing/PricingBracketBanner';
 import LivePriceCategory from './Pricing/LivePriceCategory';
 import AddonsList from './Pricing/AddonsList';
 import RunningTotal from './Pricing/RunningTotal';
+
+const EXHIBITOR_STAFF_HIDDEN_FIELD_IDS = new Set(['f_present', 'f_emerg_name', 'f_emerg_phone', 'f_emerg_rel']);
 
 const PublicRegistration = () => {
   const { formId } = useParams<{ formId: string }>();
@@ -115,6 +119,8 @@ const PublicRegistration = () => {
 
   // Pending-claim: group guest completing their personal details post-purchase
   const isPendingClaim = (loadedRefAttendee as any)?.guestType === 'pending-claim';
+  const isExhibitorStaffPending = (loadedRefAttendee as any)?.guestType === 'exhibitor-staff-pending';
+  const isAnyPendingClaim = isPendingClaim || isExhibitorStaffPending;
 
   // Sync groupMembers array length when groupSize changes
   useEffect(() => {
@@ -165,8 +171,10 @@ const PublicRegistration = () => {
       if (guestRef && formId) {
         let refAttendee = await getAttendee(guestRef);
 
-        // Pending-claim: group guest with guest_type='pending-claim' completes their own details
-        if (refAttendee && (refAttendee as any).guestType === 'pending-claim' && refAttendee.formId === formId) {
+        // Pending-claim: group guest with guest_type='pending-claim' OR exhibitor staff with
+        // guest_type='exhibitor-staff-pending' completes their own details
+        const pendingClaimTypes = ['pending-claim', 'exhibitor-staff-pending'];
+        if (refAttendee && pendingClaimTypes.includes((refAttendee as any).guestType) && refAttendee.formId === formId) {
           setLoadedRefAttendee(refAttendee);
           setMode('guest');
           // Pre-fill answers from whatever was saved at purchase time
@@ -402,15 +410,18 @@ const PublicRegistration = () => {
     e.preventDefault();
     if (!validate()) return;
 
-    // Pending-claim: update attendee row in-place, flip guest_type to 'claimed'
-    if (isPendingClaim && loadedRefAttendee) {
+    // Pending-claim: update attendee row in-place, flip guest_type to 'claimed' (or 'exhibitor-staff-claimed')
+    if (isAnyPendingClaim && loadedRefAttendee) {
       setLoading(true);
       try {
+        const newGuestType = isExhibitorStaffPending ? 'exhibitor-staff-claimed' : 'claimed';
+        const emailMode = isExhibitorStaffPending ? 'exhibitor-staff-claim-completed' : 'guest-claim-completed';
+
         const { error: updateError } = await supabase
           .from('attendees')
           .update({
             answers,
-            guest_type: 'claimed',
+            guest_type: newGuestType,
           })
           .eq('id', loadedRefAttendee.id);
 
@@ -420,9 +431,8 @@ const PublicRegistration = () => {
         }
 
         // Fire-and-forget personal confirmation email via send-ticket-email.
-        // The 'guest-claim-completed' mode ships in the next task; a 400 here is harmless.
         supabase.functions.invoke('send-ticket-email', {
-          body: { mode: 'guest-claim-completed', attendeeId: loadedRefAttendee.id },
+          body: { mode: emailMode, attendeeId: loadedRefAttendee.id },
         }).catch(() => {/* ignore — email is best-effort */});
 
         setGeneratedTicket({ ...loadedRefAttendee, answers });
@@ -870,6 +880,10 @@ const PublicRegistration = () => {
     return <PublicSponsorForm form={form} settings={settings} />;
   }
 
+  if (form.formType === 'exhibitor' && !guestRef) {
+    return <PublicExhibitorForm form={form} />;
+  }
+
   return (
     <div
       className="min-h-screen py-12 px-4 sm:px-6 lg:px-8 flex flex-col items-center relative"
@@ -933,13 +947,15 @@ const PublicRegistration = () => {
               </div>
             )}
 
-            {isPendingClaim && (
+            {isAnyPendingClaim && (
               <div className="mb-4 p-3 rounded-lg bg-blue-50 border border-blue-200 text-sm text-blue-900">
-                Your registration has been paid for as part of a group. Please complete your personal details below.
+                {isExhibitorStaffPending
+                  ? 'Your organization has registered you for the GANSID Congress. Please complete your personal details below.'
+                  : 'Your registration has been paid for as part of a group. Please complete your personal details below.'}
               </div>
             )}
 
-            {!isPendingClaim && mode === 'guest' && fetchedPrimaryAttendee && (
+            {!isAnyPendingClaim && mode === 'guest' && fetchedPrimaryAttendee && (
               <div className="bg-indigo-50 border border-indigo-200 p-4 rounded-xl flex gap-3 animate-in slide-in-from-top-4">
                 <UserPlus className="w-5 h-5 text-indigo-600 flex-shrink-0" />
                 <div>
@@ -964,8 +980,10 @@ const PublicRegistration = () => {
               if (!isVisible(field)) return null;
               if (field.type === 'ticket' && mode === 'guest') return null;
               // Pending-claim guests skip pricing-related UI entirely
-              if (isPendingClaim && field.type === 'registration-mode-selector') return null;
-              if (isPendingClaim && field.type === 'ticket') return null;
+              if (isAnyPendingClaim && field.type === 'registration-mode-selector') return null;
+              if (isAnyPendingClaim && field.type === 'ticket') return null;
+              // Exhibitor staff hide additional fields not relevant to their claim flow
+              if (isExhibitorStaffPending && EXHIBITOR_STAFF_HIDDEN_FIELD_IDS.has(field.id)) return null;
 
               // Registration Mode Selector field — always render so visitor can pick a path
               if (field.type === 'registration-mode-selector') {
@@ -1456,6 +1474,18 @@ const PublicRegistration = () => {
                     ))}
                   </div>
                 ) : field.type === 'boolean' ? (
+                  field.consentModal && field.linkText ? (
+                    <ConsentCheckbox
+                      id={field.id}
+                      label={field.label.replace(field.linkText, '').trim()}
+                      linkText={field.linkText}
+                      modalTitle={field.consentModal.title}
+                      modalUrl={field.consentModal.url}
+                      checked={!!answers[field.id]}
+                      onChange={v => handleInputChange(field.id, v)}
+                      required={field.required}
+                    />
+                  ) : (
                   <div className="flex items-center justify-between p-4 rounded-xl border border-gray-100 hover:bg-gray-50 transition cursor-pointer"
                     onClick={() => handleInputChange(field.id, !answers[field.id])}
                   >
@@ -1464,6 +1494,7 @@ const PublicRegistration = () => {
                       <div className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform duration-200 ${answers[field.id] ? 'translate-x-6' : ''}`}></div>
                     </div>
                   </div>
+                  )
                 ) : (
                   <div className="relative">
                     {field.type === 'address' && <MapPin className="absolute left-3 top-3 w-4 h-4 text-gray-400" />}
@@ -1484,13 +1515,13 @@ const PublicRegistration = () => {
             <div className="pt-4">
               <button
                 type="submit"
-                disabled={loading || (!isPendingClaim && pricingTemplate != null && (!selectedCategoryId || !activeTier || !activeBracket || dynamicTotal == null)) || (!isPendingClaim && registrationMode === 'group' && (!groupPricingResult?.ok || groupMembers.some(m => !m.name.trim() || !m.email.trim() || !m.countryCode || !m.categoryId)))}
+                disabled={loading || (!isAnyPendingClaim && pricingTemplate != null && (!selectedCategoryId || !activeTier || !activeBracket || dynamicTotal == null)) || (!isAnyPendingClaim && registrationMode === 'group' && (!groupPricingResult?.ok || groupMembers.some(m => !m.name.trim() || !m.email.trim() || !m.countryCode || !m.categoryId)))}
                 className="w-full py-4 text-white rounded-xl font-black uppercase tracking-widest transition shadow-lg flex justify-center items-center gap-2 transform hover:scale-[1.02] active:scale-95 disabled:opacity-70 disabled:grayscale disabled:cursor-not-allowed"
                 style={{ backgroundColor: form.settings?.formAccentColor || '#4F46E5' }}
               >
                 {loading ? (
                   <Loader2 className="w-5 h-5 animate-spin" />
-                ) : isPendingClaim ? (
+                ) : isAnyPendingClaim ? (
                   <>Complete Registration <ArrowRight className="w-5 h-5" /></>
                 ) : mode === 'guest' ? (
                   <>Claim Your Ticket <ArrowRight className="w-5 h-5" /></>
