@@ -228,6 +228,58 @@ const FieldPropertiesPanel: React.FC<FieldPropertiesPanelProps> = ({ field, form
                     );
                 })()}
 
+                {/* Registration Mode Selector config */}
+                {field.type === 'registration-mode-selector' && (
+                    <>
+                        <div className="fb-field-group">
+                            <label className="fb-checkbox-label">
+                                <input
+                                    type="checkbox"
+                                    className="fb-checkbox"
+                                    checked={field.groupEnabled ?? true}
+                                    onChange={e => update({ groupEnabled: e.target.checked })}
+                                />
+                                <span>Group mode enabled</span>
+                            </label>
+                            <p className="fb-hint">
+                                When off, only the Individual path is available.
+                            </p>
+                        </div>
+                        <div className="fb-field-group">
+                            <label className="fb-label">Max group size</label>
+                            <input
+                                type="number"
+                                className="fb-input"
+                                min={2}
+                                max={10}
+                                value={field.groupMaxSize ?? 5}
+                                onChange={e => update({ groupMaxSize: Math.max(2, Math.min(10, Number(e.target.value))) })}
+                            />
+                            <p className="fb-hint">Maximum number of people in a group (2–10).</p>
+                        </div>
+                        <div className="fb-field-group">
+                            <label className="fb-label">Individual label</label>
+                            <input
+                                type="text"
+                                className="fb-input"
+                                value={field.individualLabel ?? ''}
+                                placeholder="Individual — just me"
+                                onChange={e => update({ individualLabel: e.target.value })}
+                            />
+                        </div>
+                        <div className="fb-field-group">
+                            <label className="fb-label">Group label</label>
+                            <input
+                                type="text"
+                                className="fb-input"
+                                value={field.groupLabel ?? ''}
+                                placeholder="Group — up to 5 people"
+                                onChange={e => update({ groupLabel: e.target.value })}
+                            />
+                        </div>
+                    </>
+                )}
+
                 {/* Ticket Config */}
                 {field.type === 'ticket' && field.ticketConfig && (
                     <TicketConfigEditor field={field} onChange={onChange} />

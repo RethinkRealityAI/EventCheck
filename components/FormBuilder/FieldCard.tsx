@@ -108,6 +108,20 @@ const FieldCard: React.FC<FieldCardProps> = ({
                                     <div className="fb-preview-more">+ {(field.options || []).length - 3} more</div>
                                 )}
                             </div>
+                        ) : field.type === 'registration-mode-selector' ? (
+                            <div className="py-2">
+                                <div className="flex items-center gap-4">
+                                    <label className="flex items-center gap-2 text-sm">
+                                        <input type="radio" disabled /> {field.individualLabel || 'Individual — just me'}
+                                    </label>
+                                    <label className="flex items-center gap-2 text-sm">
+                                        <input type="radio" disabled /> {field.groupLabel || `Group — up to ${field.groupMaxSize ?? 5} people`}
+                                    </label>
+                                </div>
+                                <div className="text-xs text-slate-400 mt-1 italic">
+                                    Group UX (size picker + per-person blocks) renders on the public form.
+                                </div>
+                            </div>
                         ) : field.type === 'country' ? (
                             <CountryField
                                 label={field.label}
