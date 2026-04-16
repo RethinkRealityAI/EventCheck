@@ -230,6 +230,117 @@ serve(async (req: Request) => {
             return jsonResponse({ ok: ticketOk });
         }
 
+        // ── EXHIBITOR STAFF INVITE: send registration-completion link to an exhibitor staff member ──
+        if (body.mode === 'exhibitor-staff-invite') {
+            const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+            const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+            const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+            const { data: staff, error: sErr } = await supabase
+                .from('attendees')
+                .select('*')
+                .eq('id', body.attendeeId)
+                .maybeSingle();
+            if (sErr || !staff) return jsonResponse({ error: 'Staff member not found' }, 404);
+
+            const { data: org } = await supabase
+                .from('attendees')
+                .select('company_info, email, name')
+                .eq('id', staff.primary_attendee_id)
+                .maybeSingle();
+
+            const { data: form } = await supabase
+                .from('forms')
+                .select('title')
+                .eq('id', staff.form_id)
+                .maybeSingle();
+            const eventName = form?.title || 'the GANSID Congress';
+            const orgName = (org?.company_info as any)?.orgName || 'your organization';
+
+            const origin = body.origin || '';
+            const registrationLink = `${origin}/#/form/${staff.form_id}?ref=${staff.id}`;
+
+            const subject = `Complete your registration for ${eventName}`;
+            const html = `
+                <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
+                  <h2>Hi ${staff.name || 'there'},</h2>
+                  <p><strong>${orgName}</strong> has registered you for the <strong>${eventName}</strong> as an exhibitor staff member.</p>
+                  <p>Please click below to complete your personal details (dietary restrictions, accessibility needs, consent).</p>
+                  <p style="text-align:center;margin:24px 0;">
+                    <a href="${registrationLink}" style="display:inline-block;padding:12px 24px;background:#1E4A8C;color:white;border-radius:6px;text-decoration:none;font-weight:600;">
+                      Complete my registration
+                    </a>
+                  </p>
+                  <p style="color:#666;font-size:13px;">Or copy this link into your browser:<br>${registrationLink}</p>
+                </div>
+            `;
+
+            await sendSimpleEmail({ to: staff.email, subject, html });
+            return jsonResponse({ ok: true });
+        }
+
+        // ── EXHIBITOR STAFF CLAIM COMPLETED: send ticket to claimed staff + notify org contact ──
+        if (body.mode === 'exhibitor-staff-claim-completed') {
+            const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+            const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+            const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+            const { data: staff, error: sErr } = await supabase
+                .from('attendees')
+                .select('*')
+                .eq('id', body.attendeeId)
+                .maybeSingle();
+            if (sErr || !staff) return jsonResponse({ error: 'Staff not found' }, 404);
+
+            const { data: form } = await supabase
+                .from('forms')
+                .select('title')
+                .eq('id', staff.form_id)
+                .maybeSingle();
+            const eventName = form?.title || 'the GANSID Congress';
+
+            // 1. Send personal ticket confirmation to the staff member
+            try {
+                const subject = `Your registration for ${eventName} is confirmed`;
+                const html = `
+                    <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
+                      <h2>Hi ${staff.name || 'there'},</h2>
+                      <p>Thank you for completing your registration for <strong>${eventName}</strong>!</p>
+                      <p>You are all set. Please bring this confirmation (or the QR code on your ticket) to the event for check-in.</p>
+                      <p style="color:#666;font-size:13px;">Registration ID: ${staff.id}</p>
+                    </div>
+                `;
+                await sendSimpleEmail({ to: staff.email, subject, html });
+            } catch (e) {
+                console.warn('Failed to send exhibitor-staff ticket email', e);
+            }
+
+            // 2. Notify the org contact (best-effort)
+            if (staff.primary_attendee_id) {
+                const { data: org } = await supabase
+                    .from('attendees')
+                    .select('company_info, email')
+                    .eq('id', staff.primary_attendee_id)
+                    .maybeSingle();
+                const contactEmail = org?.email;
+                const orgName = (org?.company_info as any)?.orgName || 'your organization';
+                if (contactEmail) {
+                    const subject = `${staff.name} has completed their registration`;
+                    const html = `
+                        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
+                          <p>Hi ${(org?.company_info as any)?.contactName || 'there'},</p>
+                          <p><strong>${staff.name}</strong> has completed their registration details for the <strong>${eventName}</strong> on behalf of <strong>${orgName}</strong>.</p>
+                          <p>Their individual ticket confirmation has been emailed to them directly.</p>
+                        </div>
+                    `;
+                    await sendSimpleEmail({ to: contactEmail, subject, html })
+                        .catch(e => console.warn('Org contact notification failed', e));
+                }
+            }
+
+            return jsonResponse({ ok: true });
+        }
+
         // ── DEFAULT FLOW: generic SMTP relay (original behaviour) ──
         const { smtpConfig, email } = body;
 

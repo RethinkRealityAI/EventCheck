@@ -66,6 +66,98 @@ serve(async (req: Request) => {
       expectedCurrency: legacyExpectedCurrency,
     } = body;
 
+    // ── EXHIBITOR BRANCH: no PayPal, no attendees array — just insert rows ──
+    if (body.exhibitorSubmission === true) {
+      const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+      const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+      const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+      // Validate the form is exhibitor type
+      const { data: exhibitorForm, error: fErr } = await supabase
+        .from('forms').select('form_type').eq('id', formId).maybeSingle();
+      if (fErr || !exhibitorForm) return jsonResponse({ error: 'Form not found' }, 404);
+      if (exhibitorForm.form_type !== 'exhibitor') {
+        return jsonResponse({ error: 'Not an exhibitor form' }, 400);
+      }
+
+      const org = body.org;
+      const staffFormId = body.staffFormId;
+      const staffMembers = Array.isArray(body.staff) ? body.staff : [];
+      if (!org || !staffFormId || staffMembers.length === 0) {
+        return jsonResponse({ error: 'Missing org, staffFormId, or staff' }, 400);
+      }
+
+      // 1. Insert the org primary row
+      const orgId = crypto.randomUUID();
+      const orgRow = {
+        id: orgId,
+        form_id: formId,
+        name: `${org.orgName} — Contact`,
+        email: org.contactEmail,
+        ticket_type: 'Exhibitor',
+        is_primary: true,
+        payment_status: 'paid',
+        payment_amount: 'PAID EXTERNALLY',
+        qr_payload: JSON.stringify({ id: orgId }),
+        company_info: {
+          orgName: org.orgName,
+          tier: org.tier,
+          additionalSqm: org.additionalSqm,
+          contactName: org.contactName,
+          contactEmail: org.contactEmail,
+          contactPhone: org.contactPhone,
+        },
+      };
+
+      const { error: orgErr } = await supabase.from('attendees').insert([orgRow]);
+      if (orgErr) return jsonResponse({ error: 'Failed to save org: ' + orgErr.message }, 500);
+
+      // 2. Insert N staff rows on the staff form
+      const staffRows = staffMembers.map((s: any) => {
+        const id = crypto.randomUUID();
+        return {
+          id,
+          form_id: staffFormId,
+          name: s.name,
+          email: s.email,
+          ticket_type: 'Exhibitor Staff',
+          is_primary: false,
+          primary_attendee_id: orgId,
+          guest_type: 'exhibitor-staff-pending',
+          payment_status: 'paid',
+          payment_amount: 'PAID EXTERNALLY',
+          qr_payload: JSON.stringify({ id }),
+          answers: { exhibitor_staff_category: s.category },
+        };
+      });
+
+      const { error: staffErr } = await supabase.from('attendees').insert(staffRows);
+      if (staffErr) {
+        console.error('CRITICAL: org inserted but staff insert failed', JSON.stringify({ orgId, error: staffErr.message }));
+        return jsonResponse({ error: 'Saved org but failed to save staff: ' + staffErr.message }, 500);
+      }
+
+      // 3. Fire per-staff invitation emails (fire-and-forget)
+      const emailFnUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/send-ticket-email`;
+      for (const row of staffRows) {
+        fetch(emailFnUrl, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            mode: 'exhibitor-staff-invite',
+            attendeeId: row.id,
+            origin: req.headers.get('origin') ?? '',
+          }),
+        }).catch(e => console.warn('Exhibitor staff invite email failed', e));
+      }
+
+      return jsonResponse({ ok: true, orgId, staffIds: staffRows.map((r: any) => r.id) });
+    }
+    // ── END EXHIBITOR BRANCH ──
+
     if (!attendees || attendees.length === 0) {
       return jsonResponse({ error: 'Missing required field: attendees' }, 400);
     }
