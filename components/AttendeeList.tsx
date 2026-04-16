@@ -8,6 +8,7 @@ import { useNotifications } from './NotificationSystem';
 import AttendeeModal from './AttendeeModal';
 import AddAttendeeModal from './AddAttendeeModal';
 import ColumnVisibilityDropdown, { ColumnDef } from './ColumnVisibilityDropdown';
+import ExhibitorsTab from './Exhibitor/ExhibitorsTab';
 
 // ── Group-registration helpers ──────────────────────────────────────────────
 
@@ -100,7 +101,7 @@ const STANDARD_COLUMNS: ColumnDef[] = [
 
 const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading = false, onRefresh }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState<'live' | 'test' | 'donated' | 'tables' | 'sponsor-tickets'>('live');
+  const [activeTab, setActiveTab] = useState<'live' | 'test' | 'donated' | 'tables' | 'sponsor-tickets' | 'exhibitors'>('live');
   const [selectedAttendee, setSelectedAttendee] = useState<Attendee | null>(null);
   const { showNotification } = useNotifications();
   const [showExportModal, setShowExportModal] = useState(false);
@@ -229,6 +230,8 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     () => new Set(attendees.filter(a => a.isPrimary && a.sponsorTier).map(a => a.id)),
     [attendees]
   );
+
+  const hasExhibitorForms = forms.some(f => (f as any).formType === 'exhibitor');
 
   const allColumns = useMemo(() => [...STANDARD_COLUMNS, ...dynamicColumns], [dynamicColumns]);
 
@@ -528,6 +531,14 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
               >
                 Test
               </button>
+              {hasExhibitorForms && (
+                <button
+                  onClick={() => { setActiveTab('exhibitors'); setCurrentPage(1); }}
+                  className={`px-3 py-1 text-xs font-medium rounded-md transition ${activeTab === 'exhibitors' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
+                >
+                  Exhibitors
+                </button>
+              )}
               {/* Separator */}
               <div className="h-5 w-px bg-gray-300/50 mx-1"></div>
               {/* Form Selector */}
@@ -781,7 +792,11 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
 
       {/* Table Content */}
       <div className="overflow-x-auto flex-1 custom-scrollbar">
-        {activeTab === 'tables' ? (
+        {activeTab === 'exhibitors' ? (
+          <div className="p-4">
+            <ExhibitorsTab attendees={attendees} forms={forms} onRefresh={onRefresh} />
+          </div>
+        ) : activeTab === 'tables' ? (
           <div className="p-4 space-y-4">
             {isLoading ? (
               <div className="p-12 text-center text-gray-400">

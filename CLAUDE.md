@@ -306,9 +306,39 @@ Seed for the GANSID Individual/Group form lives (non-committed) in `tmp/seed-gan
 Spec: `docs/superpowers/specs/2026-04-16-form-templates-and-group-registration-design.md`
 Plan: `docs/superpowers/plans/2026-04-16-form-templates-and-group-registration.md`
 
+## Exhibitor Form
+
+GANSID-only, component-driven (`form_type='exhibitor'`), no pricing — exhibitors have paid
+externally. `PublicExhibitorForm.tsx` renders org info, tier-driven staff roster (hard quota
+caps from `EXHIBITOR_TIERS` in `config/formTemplates/buildGansidExhibitor.ts`), optional
+additional m², and consent checkboxes with modal-gated document viewing.
+
+Data model: one primary attendee row per org (on the exhibitor form), N guest rows per staff
+(on the registration form), linked via `primary_attendee_id`. All rows carry
+`payment_status='paid'` and `payment_amount='PAID EXTERNALLY'`. Staff claim flow reuses the
+pending-claim infrastructure; `guest_type='exhibitor-staff-pending'` activates the usual hides
+(RMS, ticket, PayPal) plus presenting + emergency contact fields.
+
+Admin dashboard: "Exhibitors" tab (visible only when exhibitor forms exist) with expandable
+org rows → staff subsections → status badges + per-staff actions.
+
+Spec: `docs/superpowers/specs/2026-04-16-exhibitor-form-and-admin-tabs-design.md`
+Plan: `docs/superpowers/plans/2026-04-16-exhibitor-form-and-admin-tabs.md`
+
+## Consent Modals
+
+`components/Consent/ConsentCheckbox.tsx` — clickable label opens a modal that fetches a
+markdown file at runtime (rendered as plain text). Checkbox stays disabled until the modal has
+been closed once. Used for GANSID's T&C + Disclaimer on both the Congress registration form
+and the exhibitor form. Documents live at `public/branding/gansid/docs/`.
+
+To add a consent-with-modal to any form: set `FormField.type = 'boolean'`, add `linkText`
+(clickable portion) and `consentModal: { title, url }`. `PublicRegistration.tsx` auto-detects
+and renders via `ConsentCheckbox` instead of the plain boolean path.
+
 ## Database schema — key tables
 
-- `forms` — adds `form_type TEXT NOT NULL DEFAULT 'event'` (values: `'event' | 'sponsor'`)
+- `forms` — adds `form_type TEXT NOT NULL DEFAULT 'event'` (values: `'event' | 'sponsor' | 'exhibitor'`)
 - `attendees` — adds `sponsor_tier` (TEXT, nullable, check constrained), `sponsor_items` (JSONB),
   `payment_method` (TEXT, nullable, 'card'|'paypal'|'cheque'), `company_info` (JSONB),
   `sponsored_awards` (JSONB), `admin_notes` (TEXT). Partial index on `sponsor_tier WHERE NOT NULL`.
