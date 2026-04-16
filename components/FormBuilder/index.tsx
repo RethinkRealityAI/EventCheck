@@ -264,6 +264,7 @@ const FormBuilder: React.FC = () => {
                             onAddField={addField}
                             onDragStart={handleToolboxDragStart}
                             hasTicketField={!!form.fields.find(f => f.type === 'ticket')}
+                            hasRmsField={!!form.fields.find(f => f.type === 'registration-mode-selector')}
                         />
 
                         {/* Canvas */}

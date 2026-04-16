@@ -1,5 +1,5 @@
 import React from 'react';
-import { Plus, Ticket, MapPin, CheckSquare, Type, AlignLeft, Mail, Phone, Hash, List, CircleDot, ListChecks, GripVertical, Globe } from 'lucide-react';
+import { Plus, Ticket, MapPin, CheckSquare, Type, AlignLeft, Mail, Phone, Hash, List, CircleDot, ListChecks, GripVertical, Globe, Users } from 'lucide-react';
 import { FieldType } from '../../types';
 
 export const FIELD_TYPES: { type: FieldType; label: string; icon: any; color: string }[] = [
@@ -14,6 +14,7 @@ export const FIELD_TYPES: { type: FieldType; label: string; icon: any; color: st
     { type: 'radio', label: 'Single Choice', icon: CircleDot, color: '#EF4444' },
     { type: 'checkbox', label: 'Multi Choice', icon: ListChecks, color: '#8B5CF6' },
     { type: 'country', label: 'Country', icon: Globe, color: '#0EA5E9' },
+    { type: 'registration-mode-selector', label: 'Individual/Group', icon: Users, color: '#06B6D4' },
     { type: 'ticket', label: 'Tickets & Payment', icon: Ticket, color: '#4F46E5' },
 ];
 
@@ -21,9 +22,10 @@ interface FieldToolboxProps {
     onAddField: (type: FieldType) => void;
     onDragStart: (e: React.DragEvent, type: FieldType) => void;
     hasTicketField: boolean;
+    hasRmsField: boolean;
 }
 
-const FieldToolbox: React.FC<FieldToolboxProps> = ({ onAddField, onDragStart, hasTicketField }) => {
+const FieldToolbox: React.FC<FieldToolboxProps> = ({ onAddField, onDragStart, hasTicketField, hasRmsField }) => {
     return (
         <div className="fb-toolbox">
             <div className="fb-toolbox-header">
@@ -36,7 +38,9 @@ const FieldToolbox: React.FC<FieldToolboxProps> = ({ onAddField, onDragStart, ha
 
             <div className="fb-toolbox-grid">
                 {FIELD_TYPES.map(ft => {
-                    const isDisabled = ft.type === 'ticket' && hasTicketField;
+                    const isDisabled =
+                        (ft.type === 'ticket' && hasTicketField) ||
+                        (ft.type === 'registration-mode-selector' && hasRmsField);
                     const Icon = ft.icon;
                     return (
                         <div
@@ -45,7 +49,11 @@ const FieldToolbox: React.FC<FieldToolboxProps> = ({ onAddField, onDragStart, ha
                             draggable={!isDisabled}
                             onDragStart={e => !isDisabled && onDragStart(e, ft.type)}
                             onClick={() => !isDisabled && onAddField(ft.type)}
-                            title={isDisabled ? 'Only one ticket block allowed per form' : `Add ${ft.label}`}
+                            title={
+                                ft.type === 'ticket' && hasTicketField ? 'Only one ticket block allowed per form' :
+                                ft.type === 'registration-mode-selector' && hasRmsField ? 'Only one Individual/Group selector per form' :
+                                `Add ${ft.label}`
+                            }
                         >
                             <div className="fb-toolbox-item-icon" style={{ color: ft.color }}>
                                 <Icon className="w-4 h-4" />

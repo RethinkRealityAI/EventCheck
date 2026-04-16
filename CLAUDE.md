@@ -271,6 +271,41 @@ Optional feature, gated on `app_settings.feature_pricing_templates`. Enabled on 
 Spec: `docs/superpowers/specs/2026-04-15-dynamic-pricing-engine-design.md`
 Plan: `docs/superpowers/plans/2026-04-16-dynamic-pricing-engine.md`
 
+## Form Templates
+
+File-based registry in `config/formTemplates.ts`. The admin's "Create Form" button in `FormsManager` opens `TemplatePickerModal` showing cards for each available template. Templates can declare `siteFilter: SiteKey[]` to restrict visibility per deployment.
+
+Existing templates:
+- **Blank** — empty form (all sites)
+- **Sponsor** — re-export of the existing sponsor-form builder (all sites)
+- **GANSID Individual + Group Registration** — GANSID-only (`siteFilter: ['gansid']`)
+
+To add a template: create `config/formTemplates/build<Name>.ts` that returns a partial `Form` shape, then add it to `TEMPLATES`. No UI work needed. If the new template should ONLY appear on a specific site, add `siteFilter: ['<siteKey>']`.
+
+## Group Registration Flow
+
+Triggered by the `registration-mode-selector` (RMS) field type on a form. A form may have at most one RMS field (builder enforces via `hasRmsField` flag in the toolbox). The public form renders an Individual/Group radio selector; selecting Group reveals a nested UX: size picker (2–`groupMaxSize`), "I have all their details now" checkbox, per-person rows, and "same country" / "same category" shortcut toggles.
+
+- **Inline mode** (`groupHasAllInfo = true`) — contact fills every person's full registration inline
+- **Send-links mode** (default) — contact enters Name + Email + Country + Category for each; pending-claim guests receive a link to complete their personal details
+
+Contact pays one PayPal capture for the group total (sum of per-person prices computed by `computeGroupTotal` in `utils/groupPricing.ts`). `verify-payment` re-resolves prices server-side and inserts N attendee rows sharing a `transaction_id`:
+- Primary (`is_primary = true`)
+- Guests (`primary_attendee_id = primary.id`, `guest_type = 'pending-claim'` for send-links or `null` for inline)
+
+**Claim flow:** pending-claim guests click `?ref=<attendeeId>` → PublicRegistration detects `guestType === 'pending-claim'` → pre-fills + locks their name/email/country/category → shows remaining personal fields → submit updates the row + flips `guest_type` to `'claimed'` + invokes `send-ticket-email` with `mode: 'guest-claim-completed'` (ships the ticket to the guest and notifies the primary).
+
+**Emails:** `send-ticket-email` has two extra modes:
+- `mode: 'group-invite'` — short "complete your registration" email fired by `verify-payment` for each pending-claim guest after a successful group capture
+- `mode: 'guest-claim-completed'` — sends the ticket to the now-claimed guest + a "X has completed their registration" note to the primary
+
+**Admin dashboard:** `AttendeeList` renders group primaries with expand/collapse chevrons; expanded rows show indented guests with status badges (Pending / Completed / Pre-filled) and per-guest actions (copy registration link, resend invitation, mark complete).
+
+Seed for the GANSID Individual/Group form lives (non-committed) in `tmp/seed-gansid-form.sql`.
+
+Spec: `docs/superpowers/specs/2026-04-16-form-templates-and-group-registration-design.md`
+Plan: `docs/superpowers/plans/2026-04-16-form-templates-and-group-registration.md`
+
 ## Database schema — key tables
 
 - `forms` — adds `form_type TEXT NOT NULL DEFAULT 'event'` (values: `'event' | 'sponsor'`)

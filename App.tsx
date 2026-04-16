@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { HashRouter, Routes, Route, Link, useLocation, Navigate, useNavigate } from 'react-router-dom';
 import { LayoutDashboard, QrCode, ClipboardList, LogOut, Settings as SettingsIcon, ExternalLink, Menu, X, ChevronLeft, ChevronRight, Loader2, Rows3, Users, Handshake } from 'lucide-react';
 import ManualTicketTool from './components/ManualTicketTool';
@@ -149,22 +149,23 @@ const AdminLayout = () => {
   };
 
   // Refresh data whenever route might have changed data or periodically
-  useEffect(() => {
-    const fetch = async () => {
-      try {
-        const [data, formsData] = await Promise.all([getAttendees(), getForms()]);
-        setAttendees(data);
-        setForms(formsData);
-      } catch (error) {
-        console.error("Failed to fetch attendees", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetch();
-    const interval = setInterval(fetch, 5000);
-    return () => clearInterval(interval);
+  const refreshAttendees = useCallback(async () => {
+    try {
+      const [data, formsData] = await Promise.all([getAttendees(), getForms()]);
+      setAttendees(data);
+      setForms(formsData);
+    } catch (error) {
+      console.error("Failed to fetch attendees", error);
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    refreshAttendees();
+    const interval = setInterval(refreshAttendees, 5000);
+    return () => clearInterval(interval);
+  }, [refreshAttendees]);
 
   const handleScan = async (data: string): Promise<Attendee | 'not_found' | 'already_checked_in'> => {
     try {
@@ -338,7 +339,7 @@ const AdminLayout = () => {
                   </div>
                 </header>
                 <DashboardStats attendees={attendees} />
-                <AttendeeList attendees={attendees} forms={forms} isLoading={loading} />
+                <AttendeeList attendees={attendees} forms={forms} isLoading={loading} onRefresh={refreshAttendees} />
               </>
             } />
             <Route path="/forms" element={<FormsManager />} />

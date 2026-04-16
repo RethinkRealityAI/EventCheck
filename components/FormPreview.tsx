@@ -465,7 +465,7 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
 
                                     {form.fields.map(field => isFieldVisibleInPreview(field) && (
                                         <div key={field.id}>
-                                            {field.type !== 'ticket' && field.type !== 'country' && (
+                                            {field.type !== 'ticket' && field.type !== 'country' && field.type !== 'registration-mode-selector' && (
                                                 <label className="block text-sm font-medium text-gray-700 mb-1">
                                                     {field.label} {field.required && <span className="text-red-500">*</span>}
                                                 </label>
@@ -788,6 +788,25 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
                                                             <span className="text-sm text-gray-700">{opt}</span>
                                                         </label>
                                                     ))}
+                                                </div>
+
+                                                /* Registration Mode Selector */
+                                            ) : field.type === 'registration-mode-selector' ? (
+                                                <div key={field.id} className="py-2">
+                                                    <label className="block text-sm font-medium text-gray-700 mb-2">{field.label}</label>
+                                                    <div className="flex gap-4">
+                                                        <label className="flex items-center gap-2 text-sm">
+                                                            <input type="radio" name={field.id} disabled />
+                                                            {field.individualLabel || 'Individual — just me'}
+                                                        </label>
+                                                        {(field.groupEnabled ?? true) && (
+                                                            <label className="flex items-center gap-2 text-sm">
+                                                                <input type="radio" name={field.id} disabled />
+                                                                {field.groupLabel || `Group — up to ${field.groupMaxSize ?? 5} people`}
+                                                            </label>
+                                                        )}
+                                                    </div>
+                                                    <p className="text-xs text-slate-500 italic mt-1">Preview only — group UX renders on the public form.</p>
                                                 </div>
 
                                                 /* Boolean Toggle */

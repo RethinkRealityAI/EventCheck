@@ -21,7 +21,7 @@ export interface Attendee {
   dietaryPreferences?: string; // e.g. "Vegetarian", "Vegan", etc.
   primaryAttendeeId?: string; // If this is a guest, link to purchaser
   isPrimary?: boolean; // Defaults to true
-  guestType?: 'adult' | 'child'; // Whether this guest is an adult or child
+  guestType?: 'adult' | 'child' | 'pending-claim' | 'claimed'; // Whether this guest is an adult or child (+ group-flow states)
   // Seating Assignment
   assignedTableId?: string | null;
   assignedSeat?: number | null;
@@ -97,7 +97,7 @@ export interface SeatingTable {
 
 export type ScanStatus = 'idle' | 'scanning' | 'success' | 'error' | 'already_checked_in';
 
-export type FieldType = 'text' | 'textarea' | 'number' | 'email' | 'phone' | 'address' | 'select' | 'radio' | 'checkbox' | 'boolean' | 'ticket' | 'country';
+export type FieldType = 'text' | 'textarea' | 'number' | 'email' | 'phone' | 'address' | 'select' | 'radio' | 'checkbox' | 'boolean' | 'ticket' | 'country' | 'registration-mode-selector';
 
 export interface PromoCode {
   code: string;
@@ -146,6 +146,11 @@ export interface FormField {
   };
   validation?: 'string' | 'int';
   usedForPricing?: boolean;
+  // registration-mode-selector specific
+  groupEnabled?: boolean;
+  groupMaxSize?: number;
+  groupLabel?: string;
+  individualLabel?: string;
 }
 
 export interface Form {
@@ -178,6 +183,11 @@ export interface Form {
     transparentBackground?: boolean;
     cardBackgroundImage?: string;
     pricingTemplateId?: string | null;
+    groupPath?: {
+      enabled: boolean;
+      maxSize: number;
+    };
+    sendGuestConfirmationEmails?: boolean;
   };
   pdfSettings?: Partial<PdfSettings>; // Per-form PDF overrides
   pricingTemplate?: PricingTemplate; // Runtime-attached in getFormById; not persisted in DB
@@ -401,4 +411,10 @@ export interface DynamicPricingSelection {
   categoryId: string;
   addonIds: string[];
   expectedTotal: number;
+}
+
+export interface GroupMemberPricingSelection {
+  countryCode: string;
+  categoryId: string;
+  addonIds: string[];
 }

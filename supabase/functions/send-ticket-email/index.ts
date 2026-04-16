@@ -3,6 +3,7 @@
 // supabase functions deploy send-ticket-email
 
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import nodemailer from 'npm:nodemailer';
 
 const corsHeaders = {
@@ -10,6 +11,13 @@ const corsHeaders = {
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform',
     'Access-Control-Allow-Methods': 'POST, GET, OPTIONS, PUT, DELETE',
 };
+
+function jsonResponse(body: Record<string, any>, status = 200) {
+    return new Response(JSON.stringify(body), {
+        status,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+}
 
 /**
  * Generate a branded HTML email template.
@@ -73,6 +81,36 @@ function generateEmailTemplate(data: {
   `;
 }
 
+/**
+ * Build a transporter from environment variables (or fallback to smtpConfig).
+ */
+function buildTransporter(smtpConfig?: any) {
+    const smtpHost = Deno.env.get('SMTP_HOST') || smtpConfig?.host || 'smtp.ionos.com';
+    const smtpPort = Number(Deno.env.get('SMTP_PORT') || smtpConfig?.port || 587);
+    const smtpUser = Deno.env.get('SMTP_USER') || smtpConfig?.user;
+    const smtpPass = Deno.env.get('SMTP_PASS') || smtpConfig?.pass;
+    return { transporter: nodemailer.createTransport({
+        host: smtpHost,
+        port: smtpPort,
+        secure: smtpPort === 465,
+        auth: { user: smtpUser, pass: smtpPass },
+    }), smtpUser };
+}
+
+/**
+ * Send a simple HTML email (no attachments).
+ * Reads SMTP config from environment variables.
+ */
+async function sendSimpleEmail({ to, subject, html }: { to: string; subject: string; html: string }) {
+    const { transporter, smtpUser } = buildTransporter();
+    await transporter.sendMail({
+        from: `"SCAGO" <${smtpUser}>`,
+        to,
+        subject,
+        html,
+    });
+}
+
 serve(async (req: Request) => {
     // Handle CORS preflight
     if (req.method === 'OPTIONS') {
@@ -80,7 +118,120 @@ serve(async (req: Request) => {
     }
 
     try {
-        const { smtpConfig, email } = await req.json();
+        const body = await req.json();
+
+        // ── GROUP INVITE: send registration-completion link to a pending-claim guest ──
+        if (body.mode === 'group-invite') {
+            const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+            const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+            const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+            const { data: guest, error: gErr } = await supabase
+                .from('attendees')
+                .select('*')
+                .eq('id', body.attendeeId)
+                .maybeSingle();
+            if (gErr || !guest) return jsonResponse({ error: 'Guest not found' }, 404);
+
+            const { data: primary } = await supabase
+                .from('attendees')
+                .select('name, email')
+                .eq('id', guest.primary_attendee_id)
+                .maybeSingle();
+
+            const { data: form } = await supabase
+                .from('forms')
+                .select('title')
+                .eq('id', guest.form_id)
+                .maybeSingle();
+            const eventName = form?.title || 'the event';
+
+            const origin = body.origin || '';
+            const registrationLink = `${origin}/#/form/${guest.form_id}?ref=${guest.id}`;
+
+            const subject = `Complete your registration for ${eventName}`;
+            const html = `
+                <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
+                  <h2>Hi ${guest.name || 'there'},</h2>
+                  <p><strong>${primary?.name || 'A colleague'}</strong> has registered you for <strong>${eventName}</strong>.</p>
+                  <p>Your registration is paid. Please click below to complete your personal details (dietary restrictions, emergency contact, consent).</p>
+                  <p style="text-align:center;margin:24px 0;">
+                    <a href="${registrationLink}" style="display:inline-block;padding:12px 24px;background:#1E4A8C;color:white;border-radius:6px;text-decoration:none;font-weight:600;">
+                      Complete my registration
+                    </a>
+                  </p>
+                  <p style="color:#666;font-size:13px;">Or copy this link into your browser:<br>${registrationLink}</p>
+                </div>
+            `;
+
+            await sendSimpleEmail({ to: guest.email, subject, html });
+            return jsonResponse({ ok: true });
+        }
+
+        // ── GUEST CLAIM COMPLETED: send ticket to the now-claimed guest + notify primary ──
+        if (body.mode === 'guest-claim-completed') {
+            const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+            const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+            const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+            const { data: attendee, error: aErr } = await supabase
+                .from('attendees')
+                .select('*')
+                .eq('id', body.attendeeId)
+                .maybeSingle();
+            if (aErr || !attendee) return jsonResponse({ error: 'Attendee not found' }, 404);
+
+            const { data: form } = await supabase
+                .from('forms')
+                .select('title')
+                .eq('id', attendee.form_id)
+                .maybeSingle();
+            const eventName = form?.title || 'the event';
+
+            // 1. Send a personal ticket confirmation to the claimed guest
+            let ticketOk = true;
+            try {
+                const subject = `Your registration for ${eventName} is confirmed`;
+                const html = `
+                    <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
+                      <h2>Hi ${attendee.name || 'there'},</h2>
+                      <p>Thank you for completing your registration for <strong>${eventName}</strong>!</p>
+                      <p>You are all set. Please bring this confirmation (or the QR code on your ticket) to the event for check-in.</p>
+                      <p style="color:#666;font-size:13px;">Registration ID: ${attendee.id}</p>
+                    </div>
+                `;
+                await sendSimpleEmail({ to: attendee.email, subject, html });
+            } catch (e) {
+                console.warn('Failed to send personal ticket on claim-completion', e);
+                ticketOk = false;
+            }
+
+            // 2. Notify the primary (best-effort)
+            if (attendee.primary_attendee_id) {
+                const { data: primary } = await supabase
+                    .from('attendees')
+                    .select('name, email')
+                    .eq('id', attendee.primary_attendee_id)
+                    .maybeSingle();
+                if (primary?.email) {
+                    const subject = `${attendee.name} has completed their registration`;
+                    const html = `
+                        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
+                          <p>Hi ${primary.name || 'there'},</p>
+                          <p><strong>${attendee.name}</strong> has completed their registration details for <strong>${eventName}</strong>.
+                          Their individual ticket confirmation has been emailed to them directly.</p>
+                        </div>
+                    `;
+                    await sendSimpleEmail({ to: primary.email, subject, html })
+                        .catch(e => console.warn('Primary notification failed', e));
+                }
+            }
+
+            return jsonResponse({ ok: ticketOk });
+        }
+
+        // ── DEFAULT FLOW: generic SMTP relay (original behaviour) ──
+        const { smtpConfig, email } = body;
 
         const smtpHost = Deno.env.get('SMTP_HOST') || smtpConfig?.host || 'smtp.ionos.com';
         const smtpPort = Number(Deno.env.get('SMTP_PORT') || smtpConfig?.port || 587);

@@ -313,6 +313,148 @@ serve(async (req: Request) => {
       const pricingTemplateId = formData.settings?.pricingTemplateId ?? null;
       const pricingSelection = body.pricingSelection ?? null;
 
+      // ── GROUP DYNAMIC PRICING BRANCH ──
+      // Checked first because it has a distinct request shape (groupPricingSelections[]).
+      // Single-person branch below handles the solo pricingSelection case.
+      const groupPricingSelections = body.groupPricingSelections ?? null;
+
+      if (pricingTemplateId && Array.isArray(groupPricingSelections) && groupPricingSelections.length >= 2) {
+        // 1. Load template
+        const { data: tpl, error: tplErr } = await supabase
+          .from('pricing_templates').select('*').eq('id', pricingTemplateId).maybeSingle();
+        if (tplErr || !tpl) return jsonResponse({ error: 'Pricing template not found' }, 400);
+
+        // 2. Resolve active bracket (same logic as single-person branch)
+        const nowMs = Date.now();
+        let activeBracket: any = null;
+        if (tpl.active_bracket_override) {
+          activeBracket = (tpl.date_brackets ?? []).find((b: any) => b.id === tpl.active_bracket_override) ?? null;
+        }
+        if (!activeBracket) {
+          for (const b of (tpl.date_brackets ?? [])) {
+            const start = Date.parse(`${b.startDate}T00:00:00Z`);
+            const end = Date.parse(`${b.endDate}T23:59:59.999Z`);
+            if (nowMs >= start && nowMs <= end) { activeBracket = b; break; }
+          }
+        }
+        if (!activeBracket) return jsonResponse({ error: 'No active pricing bracket' }, 400);
+
+        const tiers = (tpl.tiers ?? []) as any[];
+        if (tiers.length === 0) return jsonResponse({ error: 'No tiers configured' }, 400);
+
+        // 3. Per-person resolution
+        const memberResolutions: Array<{ cents: number; tierId: string; bracketId: string; categoryId: string }> = [];
+        for (let i = 0; i < groupPricingSelections.length; i++) {
+          const sel = groupPricingSelections[i];
+          const code = (sel.countryCode ?? '').toUpperCase();
+          const tier = tiers.find((t: any) => (t.countries ?? []).includes(code)) ?? tiers[tiers.length - 1];
+          const cat = (tpl.categories ?? []).find((c: any) => c.id === sel.categoryId);
+          if (!cat) return jsonResponse({ error: `Member ${i + 1}: unknown category '${sel.categoryId}'` }, 400);
+          const fee = cat.prices?.[tier.id]?.[activeBracket.id];
+          if (typeof fee !== 'number') return jsonResponse({ error: `Member ${i + 1}: price not configured` }, 400);
+          const addonIds: string[] = Array.isArray(sel.addonIds) ? sel.addonIds : [];
+          const addonTotal = addonIds.reduce((sum: number, id: string) => {
+            const a = (tpl.addons ?? []).find((x: any) => x.id === id);
+            return sum + (typeof a?.price === 'number' ? a.price : 0);
+          }, 0);
+          memberResolutions.push({ cents: fee + addonTotal, tierId: tier.id, bracketId: activeBracket.id, categoryId: cat.id });
+        }
+
+        const expectedCents = memberResolutions.reduce((sum, m) => sum + m.cents, 0);
+
+        // 4. Capture PayPal order — replicate the inlined OAuth + capture logic
+        if (!paypalOrderId) return jsonResponse({ error: 'paypalOrderId required for group payment' }, 400);
+        const ppMode = (Deno.env.get('PAYPAL_MODE') || '').toLowerCase();
+        const allTest = attendees.every((a: any) => a.is_test === true);
+        let ppSandbox: boolean;
+        if (ppMode === 'production') ppSandbox = false;
+        else if (ppMode === 'sandbox') ppSandbox = true;
+        else if (allTest) ppSandbox = true;
+        else {
+          const origin = (req.headers.get('origin') || '').toLowerCase();
+          ppSandbox = origin !== '' && (origin.includes('localhost') || origin.includes('127.0.0.1'));
+        }
+        const PP_CLIENT_ID = (ppSandbox ? (Deno.env.get('PAYPAL_SANDBOX_CLIENT_ID') || Deno.env.get('PAYPAL_CLIENT_ID')) : Deno.env.get('PAYPAL_CLIENT_ID'))?.trim() || '';
+        const PP_CLIENT_SECRET = (ppSandbox ? (Deno.env.get('PAYPAL_SANDBOX_CLIENT_SECRET') || Deno.env.get('PAYPAL_CLIENT_SECRET')) : Deno.env.get('PAYPAL_CLIENT_SECRET'))?.trim() || '';
+        const PP_API_BASE = Deno.env.get('PAYPAL_API_BASE') || (ppSandbox ? 'https://api-m.sandbox.paypal.com' : 'https://api-m.paypal.com');
+        if (!PP_CLIENT_ID || !PP_CLIENT_SECRET) return jsonResponse({ error: 'PayPal credentials not configured' }, 500);
+
+        const ppAuthResp = await fetch(`${PP_API_BASE}/v1/oauth2/token`, {
+          method: 'POST',
+          headers: { 'Authorization': `Basic ${btoa(`${PP_CLIENT_ID}:${PP_CLIENT_SECRET}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: 'grant_type=client_credentials',
+        });
+        if (!ppAuthResp.ok) return jsonResponse({ error: 'PayPal auth failed' }, 502);
+        const { access_token: ppToken } = await ppAuthResp.json();
+
+        const ppCapResp = await fetch(`${PP_API_BASE}/v2/checkout/orders/${paypalOrderId}/capture`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${ppToken}`, 'Content-Type': 'application/json' },
+        });
+        const ppCapData = await ppCapResp.json();
+        if (!ppCapResp.ok || ppCapData.status !== 'COMPLETED') return jsonResponse({ error: 'PayPal capture failed', details: ppCapData }, 502);
+        const ppCapture = ppCapData.purchase_units?.[0]?.payments?.captures?.[0];
+        if (!ppCapture) return jsonResponse({ error: 'No capture data in PayPal response' }, 502);
+        const capturedCents = Math.round(Number(ppCapture.amount?.value ?? 0) * 100);
+
+        if (Math.abs(capturedCents - expectedCents) > 1) {
+          return jsonResponse({ error: 'Group price mismatch', expected: expectedCents, received: capturedCents }, 400);
+        }
+
+        // 5. Duplicate tx guard
+        const { data: existingGroupTx } = await supabase.from('attendees').select('id').eq('transaction_id', ppCapture.id).limit(1);
+        if (existingGroupTx && existingGroupTx.length > 0) return jsonResponse({ error: 'This payment has already been processed' }, 409);
+
+        // 6. Persist N attendees
+        const primaryId = attendees[0]?.id ?? crypto.randomUUID();
+        const rows = memberResolutions.map((m, i) => {
+          const attendeeDraft = attendees[i] ?? {};
+          return {
+            ...attendeeDraft,
+            id: i === 0 ? primaryId : (attendeeDraft.id ?? crypto.randomUUID()),
+            form_id: formId,
+            is_primary: i === 0,
+            primary_attendee_id: i === 0 ? null : primaryId,
+            payment_status: 'paid',
+            transaction_id: ppCapture.id,
+            payment_amount: `${(m.cents / 100).toFixed(2)} ${tpl.currency ?? 'USD'}`,
+            pricing_template_id: tpl.id,
+            pricing_tier: m.tierId,
+            pricing_bracket: m.bracketId,
+            pricing_category_id: m.categoryId,
+          };
+        });
+
+        const { error: insertErr } = await supabase.from('attendees').upsert(rows);
+        if (insertErr) {
+          console.error('CRITICAL: group PayPal captured but DB insert failed', JSON.stringify({
+            transactionId: ppCapture.id, expectedCents, capturedCents, rowCount: rows.length, dbError: insertErr.message,
+          }));
+          return jsonResponse({
+            error: `Your payment was processed but we encountered a database error. Please contact the event organizer with this reference: ${ppCapture.id}`,
+          }, 500);
+        }
+
+        // Fire-and-forget invitation emails for pending-claim guests
+        const pendingGuests = rows.filter((r: any) => r.guest_type === 'pending-claim');
+        if (pendingGuests.length > 0) {
+          const emailFnUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/send-ticket-email`;
+          for (const g of pendingGuests) {
+            fetch(emailFnUrl, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ mode: 'group-invite', attendeeId: g.id, origin: req.headers.get('origin') ?? '' }),
+            }).catch(e => console.warn('Group invite email failed', e));
+          }
+        }
+
+        return jsonResponse({ ok: true, total: expectedCents, currency: tpl.currency ?? 'USD', primaryId, guestIds: rows.slice(1).map(r => r.id) });
+      }
+      // ── END GROUP DYNAMIC BRANCH — fall through to single-person dynamic branch below ──
+
       if (pricingTemplateId && pricingSelection) {
         // 1. Load pricing template
         const { data: tpl, error: tplErr } = await supabase
