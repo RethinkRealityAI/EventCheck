@@ -38,4 +38,55 @@ describe('form templates', () => {
     const flagged = form.fields.filter((f: any) => f.type === 'country' && f.usedForPricing);
     expect(flagged.length).toBe(1);
   });
+
+  // Regression guard: Bug 2 — seed SQL used "tickets" instead of "items" in ticketConfig.
+  // This test catches any template that uses the wrong property name.
+  it('ticket fields use ticketConfig.items not ticketConfig.tickets', () => {
+    for (const t of TEMPLATES) {
+      const form = t.build();
+      const ticketFields = form.fields.filter((f: any) => f.type === 'ticket');
+      for (const tf of ticketFields) {
+        if ((tf as any).ticketConfig) {
+          expect(
+            (tf as any).ticketConfig,
+            `Template "${t.key}" ticket field should use ticketConfig.items`,
+          ).toHaveProperty('items');
+          expect(
+            (tf as any).ticketConfig,
+            `Template "${t.key}" ticket field must NOT use ticketConfig.tickets`,
+          ).not.toHaveProperty('tickets');
+        }
+      }
+    }
+  });
+
+  // Regression guard: Bug 1 — mapper silently dropped unknown form_type values.
+  // This test catches any template that uses an unrecognized formType value.
+  it('every template formType is a recognized value', () => {
+    const VALID_FORM_TYPES = ['event', 'sponsor', 'exhibitor'];
+    for (const t of TEMPLATES) {
+      const form = t.build() as any;
+      if (form.formType !== undefined) {
+        expect(
+          VALID_FORM_TYPES,
+          `Template "${t.key}" has unrecognized formType "${form.formType}"`,
+        ).toContain(form.formType);
+      }
+    }
+  });
+
+  it('every template with a ticket field has ticketConfig.promoCodes array', () => {
+    for (const t of TEMPLATES) {
+      const form = t.build();
+      const ticketFields = form.fields.filter((f: any) => f.type === 'ticket');
+      for (const tf of ticketFields) {
+        if ((tf as any).ticketConfig) {
+          expect(
+            Array.isArray((tf as any).ticketConfig.promoCodes),
+            `Template "${t.key}" ticket field ticketConfig.promoCodes should be an array`,
+          ).toBe(true);
+        }
+      }
+    }
+  });
 });

@@ -418,6 +418,9 @@ function mapFormFromDb(db: FormRow): Form {
     description: db.description,
     createdAt: db.created_at,
     status: db.status as 'active' | 'draft' | 'closed',
+    // IMPORTANT: Pass through form_type from DB — do NOT hardcode a ternary here.
+    // Bug history: hardcoded 'sponsor' ? 'sponsor' : 'event' silently dropped 'exhibitor'.
+    // Any new form_type value added to the CHECK constraint must pass through without changes.
     formType: (db as any).form_type || 'event',
     settings: (db.settings as any), // Cast JSON to specific setting type if needed
     thankYouMessage: db.thank_you_message || undefined,
