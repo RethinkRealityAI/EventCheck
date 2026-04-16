@@ -26,7 +26,9 @@ const CONFIGS: Record<SiteKey, SiteConfig> = {
     adminSubtitle: 'Congress Admin',
     pageTitle: 'GANSID Congress — Registration',
     logoImage: '/branding/gansid/mark.svg',
-    fallbackColors: { primary: '#B3282D', accent: '#1E4A8C' },
+    // GANSID brand: blue is the primary (the "GANSID" wordmark in the logo).
+    // Red is the secondary accent (the "CONGRESS" wordmark + blood-drops mark).
+    fallbackColors: { primary: '#1E4A8C', accent: '#B3282D' },
     supportEmail: 'congress@inheritedblooddisorders.world',
   },
 };
