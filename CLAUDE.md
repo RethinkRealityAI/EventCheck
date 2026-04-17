@@ -22,13 +22,29 @@ Deployed on **Netlify** (frontend) with **Supabase** (database, auth, edge funct
 components/
   PublicRegistration.tsx   — Public-facing registration form (event purchaser + guest modes)
                              + dispatches to PublicSponsorForm when form.formType === 'sponsor'
+                             + dispatches to PublicExhibitorForm when form.formType === 'exhibitor'
   FormPreview.tsx          — Admin preview of registration form
   FormBuilder/             — Drag-and-drop form builder for admins
   Settings.tsx             — Global app settings (SMTP, event email templates, PDF, PayPal)
   AttendeeList.tsx         — Dashboard attendee table (tabs: Live / Test / Donated / Tables /
-                             Sponsor Tickets)
+                             Sponsor Tickets / Exhibitors)
   Scanner.tsx              — QR code scanner for event check-in
-  FormsManager.tsx         — Form CRUD; "Create Sponsor Form" button seeds a sponsor-typed form
+  FormsManager.tsx         — Form CRUD; "Create Form" button opens TemplatePickerModal with
+                             site-filtered template cards (Blank, Sponsor, GANSID-specific)
+  Exhibitor/               — Exhibitor registration section
+    PublicExhibitorForm.tsx — Component-driven exhibitor form (org info, tier, staff roster)
+    ExhibitorStaffRow.tsx   — Per-staff name + email row
+    ExhibitorsTab.tsx       — Admin dashboard Exhibitors tab
+  Group/                   — Group registration UX components
+    GroupPersonRow.tsx      — Per-person row with live pricing
+    GroupShortcutsToggle.tsx— "Same country" / "Same category" batch toggles
+  Pricing/                 — Dynamic pricing UI components
+    PricingBracketBanner.tsx— "Early Bird — ends Jun 30" subtle banner
+    LivePriceCategory.tsx  — Category dropdown with live per-person prices
+    AddonsList.tsx         — Optional add-on checkboxes (e.g. Networking Reception)
+    RunningTotal.tsx       — Sticky running total widget
+  Consent/                 — Consent checkbox with modal-gated document viewing
+    ConsentCheckbox.tsx    — Clickable label → modal → unlock checkbox pattern
   Sponsors/                — Sponsor management section
     SponsorsDashboard.tsx  — Admin dashboard shell with stats + 7-tab routing
     SponsorsTable.tsx      — Submission list with status/method filters
@@ -52,24 +68,44 @@ utils/
   receiptGenerator.ts      — jsPDF itemized sponsor receipt (paid/pending, HST line)
   sponsorEmailTemplates.ts — Template merge helpers (mergeTemplate, buildSponsorEmailContext,
                              buildProspectEmailContext, renderItemsListHtml, escapeHtml)
+  pricing.ts               — Pure pricing resolution: resolveBracket, resolveTier, computeTotal,
+                             formatPrice. Covered by tests/pricing.test.ts
+  countries.ts             — ISO 3166-1 alpha-2 list (195 entries) + lookup helpers
+  groupPricing.ts          — computeGroupTotal: sums per-person pricing for group registrations
+config/
+  sites.ts                 — Per-site branding config keyed off VITE_SITE (scago / gansid)
+  formTemplates.ts         — Form template registry + availableTemplatesForSite()
+  formTemplates/            — Template builder functions (buildBlank, buildSponsorForm,
+                              buildGansidIndividualGroup, buildGansidExhibitor)
 supabase/functions/
   verify-payment/          — Server-side PayPal verification + attendee persistence. Handles
-                             BOTH event flow AND sponsor flow (sponsor branch fires when
-                             sponsorMeta is present and returns before the event flow runs).
+                             FOUR flows: sponsor (sponsorMeta), exhibitor (exhibitorSubmission),
+                             group dynamic pricing (groupPricingSelections), and single-person
+                             dynamic pricing (pricingSelection). Each branch gates on a
+                             distinct request body flag and short-circuits independently.
   confirm-sponsor-cheque/  — Admin-only (JWT-guarded) endpoint that flips a pending cheque
                              sponsor to paid and creates guest ticket placeholders
-  send-ticket-email/       — SMTP email delivery (attachment callout now conditional on
-                             whether attachments are actually included)
+  send-ticket-email/       — SMTP email delivery with multiple modes: default (ticket PDF),
+                             group-invite, guest-claim-completed, exhibitor-staff-invite,
+                             exhibitor-staff-claim-completed. Attachment callout conditional
+                             on whether attachments are actually included.
 supabase/migrations/
-  20260414_add_sponsor_tables.sql — Sponsor schema: form_type on forms, sponsor columns on
-                             attendees, new sponsor_prospects table, sponsor email template
-                             fields on app_settings, sponsor-logos storage bucket
+  20260414_add_sponsor_tables.sql — Sponsor schema
+  20260416000000_add_pricing_templates.sql — Pricing templates table + attendee pricing columns
+  20260416120000_extend_form_type_with_exhibitor.sql — form_type CHECK includes 'exhibitor'
 tests/
   sponsorEmailTemplates.test.ts — Template merge + HTML escape + context builders (19 tests)
   createSponsorForm.test.ts     — Sponsor form seed shape + pricing (9 tests)
   sponsorPricing.test.ts        — HST-on-booth-only logic (5 tests)
+  sites.test.ts                 — Site config resolution (3 tests)
+  countries.test.ts             — Country list + lookups (5 tests)
+  pricing.test.ts               — resolveBracket / resolveTier / computeTotal / formatPrice (12 tests)
+  groupPricing.test.ts          — computeGroupTotal mixed-group pricing (3 tests)
+  formTemplates.test.ts         — Template registry + field shape validation (8 tests)
+  exhibitorTiers.test.ts        — Tier config + quota validation (5 tests)
+  storageMappers.test.ts        — Mapper source-grep guards: no hardcoded ternaries (6 tests)
 types.ts                   — All TypeScript interfaces (Attendee, Form, AppSettings,
-                             SponsorProspect, SponsorItem, CompanyInfo, SponsorTier, etc.)
+                             PricingTemplate, SponsorProspect, FormField, etc.)
 ```
 
 ## Key Flows
@@ -279,8 +315,13 @@ Existing templates:
 - **Blank** — empty form (all sites)
 - **Sponsor** — re-export of the existing sponsor-form builder (all sites)
 - **GANSID Individual + Group Registration** — GANSID-only (`siteFilter: ['gansid']`)
+- **GANSID Exhibitor Registration** — GANSID-only (`siteFilter: ['gansid']`)
 
 To add a template: create `config/formTemplates/build<Name>.ts` that returns a partial `Form` shape, then add it to `TEMPLATES`. No UI work needed. If the new template should ONLY appear on a specific site, add `siteFilter: ['<siteKey>']`.
+
+**Critical:** when a template includes a `ticket`-type field, its `ticketConfig` must use
+`items: []` (not `tickets: []`) and include `promoCodes: []`. Run `npm test` after creating
+any template — `tests/formTemplates.test.ts` validates these shapes.
 
 ## Group Registration Flow
 
@@ -366,6 +407,14 @@ and renders via `ConsentCheckbox` instead of the plain boolean path.
 - **Sponsor total = sum(items.subtotal) + (HST rate × booth subtotal)** — HST applies to
   booth items only per the SCAGO rate card. Recomputed server-side in `verify-payment` to
   prevent client-side price manipulation.
+- **`mapFormFromDb` must pass through `form_type`** — do NOT hardcode a ternary like
+  `form_type === 'sponsor' ? 'sponsor' : 'event'`. Use `form_type || 'event'` so any new
+  form_type value (e.g. `'exhibitor'`) is preserved. Source-grep tests in
+  `tests/storageMappers.test.ts` enforce this.
+- **Template builders must match TypeScript interfaces** — `ticketConfig` uses `items` (not
+  `tickets`), `promoCodes` must be an array. Tests in `tests/formTemplates.test.ts` validate
+  field shapes against the `TicketConfig` interface. Always run `npm test` after creating or
+  modifying a template.
 - **Sponsor tier derivation** — `PublicSponsorForm` assigns tier based on selected package
   first; if no package is selected but a scholarship item is chosen, tier falls back to
   `'scholarship'`; for ads/booth-only orders, tier falls back to `'award'` so the row still
