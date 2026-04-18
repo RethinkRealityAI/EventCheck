@@ -1101,3 +1101,26 @@ export async function duplicatePricingTemplate(id: string, newName: string): Pro
   const { id: _omit, createdAt: _c, updatedAt: _u, ...rest } = original;
   return createPricingTemplate({ ...rest, name: newName, isActive: true });
 }
+
+// --- Portal Helpers ---
+
+export async function getAttendeesForUser(userId: string, email: string): Promise<Attendee[]> {
+  // Match by user_id OR email so legacy (email-only) attendees surface too
+  const { data, error } = await supabase
+    .from('attendees')
+    .select('*')
+    .or(`user_id.eq.${userId},email.eq.${email}`)
+    .order('created_at', { ascending: false });
+  if (error) { console.error('getAttendeesForUser', error); return []; }
+  return (data ?? []).map(mapAttendeeFromDb);
+}
+
+export async function getPortalForms(): Promise<Form[]> {
+  const { data, error } = await supabase
+    .from('forms')
+    .select('*')
+    .eq('show_in_portal', true)
+    .eq('status', 'active');
+  if (error) { console.error('getPortalForms', error); return []; }
+  return (data ?? []).map(mapFormFromDb);
+}
