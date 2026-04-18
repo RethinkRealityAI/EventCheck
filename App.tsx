@@ -382,8 +382,25 @@ const AdminLayout = () => {
   );
 };
 
-const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
-  const { user, loading } = useAuth();
+interface ProtectedRouteProps {
+  children: React.ReactElement;
+  requireRole?: 'admin';
+}
+
+const ProtectedRoute = ({ children, requireRole }: ProtectedRouteProps) => {
+  const { user, profile, loading } = useAuth();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (loading) return;
+    if (!user) {
+      navigate(CURRENT_SITE.portalEnabled ? '/' : '/login', { replace: true });
+      return;
+    }
+    if (requireRole === 'admin' && profile !== null && profile.role !== 'admin') {
+      navigate(CURRENT_SITE.portalEnabled ? '/portal' : '/', { replace: true });
+    }
+  }, [user, profile, loading, requireRole, navigate]);
 
   if (loading) {
     return (
@@ -393,9 +410,18 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
     );
   }
 
-  if (!user) {
-    return <Navigate to="/login" replace />;
+  if (!user) return null;
+
+  // Still fetching profile? Wait before evaluating role.
+  if (user && profile === null && requireRole) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
+      </div>
+    );
   }
+
+  if (requireRole === 'admin' && profile?.role !== 'admin') return null;
 
   return <>{children}</>;
 };
@@ -419,7 +445,7 @@ export default function App() {
             <Route
               path="/admin/*"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute requireRole="admin">
                   <AdminLayout />
                 </ProtectedRoute>
               }
