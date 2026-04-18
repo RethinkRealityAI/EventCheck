@@ -426,6 +426,17 @@ const Settings: React.FC = () => {
                     <input type="text" className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none" value={settings.smtpUser} onChange={e => handleChange('smtpUser', e.target.value)} /></div>
                   <div><label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
                     <input type="password" className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none" value={settings.smtpPass} onChange={e => handleChange('smtpPass', e.target.value)} /></div>
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">From Name <span className="text-xs text-gray-400 font-normal">(appears as sender in recipients' inbox)</span></label>
+                    <input
+                      type="text"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none"
+                      placeholder="e.g. GANSID Congress"
+                      value={settings.emailFromName || ''}
+                      onChange={e => handleChange('emailFromName', e.target.value)}
+                    />
+                    <p className="text-xs text-gray-500 mt-1">Leave blank to fall back to the server default ("SCAGO").</p>
+                  </div>
                 </div>
               </div>
 

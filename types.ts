@@ -226,6 +226,7 @@ export interface AppSettings {
   smtpPort: string;
   smtpUser: string;
   smtpPass: string;
+  emailFromName: string; // Display name for the "From" line (e.g. "GANSID Congress")
 
   // Ticket Email
   emailHeaderLogo: string;
@@ -279,6 +280,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   smtpPort: '587',
   smtpUser: '',
   smtpPass: '',
+  emailFromName: '',
 
   emailHeaderLogo: '',
   emailHeaderColor: '#f8fafc',

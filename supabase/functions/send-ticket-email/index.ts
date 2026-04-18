@@ -89,22 +89,25 @@ function buildTransporter(smtpConfig?: any) {
     const smtpPort = Number(Deno.env.get('SMTP_PORT') || smtpConfig?.port || 587);
     const smtpUser = Deno.env.get('SMTP_USER') || smtpConfig?.user;
     const smtpPass = Deno.env.get('SMTP_PASS') || smtpConfig?.pass;
+    const fromName = (smtpConfig?.fromName && String(smtpConfig.fromName).trim())
+      || Deno.env.get('SMTP_FROM_NAME')
+      || 'SCAGO';
     return { transporter: nodemailer.createTransport({
         host: smtpHost,
         port: smtpPort,
         secure: smtpPort === 465,
         auth: { user: smtpUser, pass: smtpPass },
-    }), smtpUser };
+    }), smtpUser, fromName };
 }
 
 /**
  * Send a simple HTML email (no attachments).
  * Reads SMTP config from environment variables.
  */
-async function sendSimpleEmail({ to, subject, html }: { to: string; subject: string; html: string }) {
-    const { transporter, smtpUser } = buildTransporter();
+async function sendSimpleEmail({ to, subject, html, smtpConfig }: { to: string; subject: string; html: string; smtpConfig?: any }) {
+    const { transporter, smtpUser, fromName } = buildTransporter(smtpConfig);
     await transporter.sendMail({
-        from: `"SCAGO" <${smtpUser}>`,
+        from: `"${fromName}" <${smtpUser}>`,
         to,
         subject,
         html,
@@ -348,6 +351,9 @@ serve(async (req: Request) => {
         const smtpPort = Number(Deno.env.get('SMTP_PORT') || smtpConfig?.port || 587);
         const smtpUser = Deno.env.get('SMTP_USER') || smtpConfig?.user;
         const smtpPass = Deno.env.get('SMTP_PASS') || smtpConfig?.pass;
+        const fromName = (smtpConfig?.fromName && String(smtpConfig.fromName).trim())
+            || Deno.env.get('SMTP_FROM_NAME')
+            || 'SCAGO';
 
         if (!smtpUser || !smtpPass) {
             return new Response(
@@ -383,7 +389,7 @@ serve(async (req: Request) => {
         }));
 
         await transporter.sendMail({
-            from: `"SCAGO" <${smtpConfig.user}>`,
+            from: `"${fromName}" <${smtpConfig.user}>`,
             to: email.to,
             subject: email.subject,
             html: html,

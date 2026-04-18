@@ -52,6 +52,7 @@ export async function sendTicketEmail(settings: AppSettings, data: {
         port: Number(settings.smtpPort || 587),
         user: settings.smtpUser,
         pass: settings.smtpPass,
+        fromName: settings.emailFromName || '',
       },
       email: {
         to: data.to,
