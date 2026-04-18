@@ -10,13 +10,26 @@ interface Props { profile: Profile; attendee: Attendee | null; }
 export function CredentialCard({ profile, attendee }: Props) {
   const [open, setOpen] = useState(false);
   const initials = (profile.fullName ?? profile.email).split(' ').map((s) => s[0]).join('').slice(0, 2).toUpperCase();
-  const roleBadge = profile.role === 'exhibitor' ? 'Exhibitor' : profile.role === 'sponsor' ? 'Sponsor' : 'Delegate';
+  const roleBadge = profile.role === 'exhibitor' ? 'Exhibitor'
+    : profile.role === 'sponsor' ? 'Sponsor'
+    : profile.role === 'admin' ? 'Admin'
+    : 'Delegate';
+  const rolePillGradient =
+    profile.role === 'exhibitor' ? 'bg-[linear-gradient(135deg,#8b2a5e_0%,#5a3575_100%)]'
+    : profile.role === 'sponsor' ? 'bg-[linear-gradient(135deg,#2260a1_0%,#1a4880_100%)]'
+    : profile.role === 'admin' ? 'bg-[linear-gradient(135deg,#0f172a_0%,#1a4880_100%)]'
+    : 'bg-gansid-primary-gradient';
 
   if (!attendee) {
     return (
       <GlassCard>
         <div className="flex flex-col items-center text-center space-y-3">
-          <div className="font-display text-xs uppercase tracking-widest text-gansid-on-surface/50">GANSID Congress 2026</div>
+          <div className="flex items-center justify-between w-full">
+            <span className="font-display text-xs uppercase tracking-widest text-gansid-on-surface/50">GANSID Congress 2026</span>
+            <span className={`${rolePillGradient} text-white font-display text-[10px] font-bold uppercase tracking-[0.18em] px-3 py-1 rounded-full shadow-md`}>
+              {roleBadge}
+            </span>
+          </div>
           <div className="h-24 w-24 rounded-full bg-gansid-primary-gradient flex items-center justify-center font-display text-2xl text-white shadow-lg ring-4 ring-white">
             {initials}
           </div>
@@ -38,7 +51,9 @@ export function CredentialCard({ profile, attendee }: Props) {
         <div className="flex flex-col items-center text-center space-y-3">
           <div className="flex items-center justify-between w-full">
             <span className="font-display text-xs uppercase tracking-widest text-gansid-on-surface/50">GANSID Congress 2026</span>
-            <span className="px-3 py-1 text-xs rounded-full bg-gansid-primary-container/20 text-gansid-primary font-display uppercase tracking-wide">{roleBadge}</span>
+            <span className={`${rolePillGradient} text-white font-display text-[10px] font-bold uppercase tracking-[0.18em] px-3 py-1 rounded-full shadow-md`}>
+              {roleBadge}
+            </span>
           </div>
           <div className="h-24 w-24 rounded-full bg-gansid-primary-gradient flex items-center justify-center text-white font-display text-2xl">
             {initials}

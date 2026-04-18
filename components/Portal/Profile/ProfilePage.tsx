@@ -49,104 +49,97 @@ export function ProfilePage() {
   };
 
   return (
-    <div className="max-w-3xl mx-auto space-y-8">
-      <div>
-        <h1 className="font-display text-4xl font-bold mb-2">
+    <div className="max-w-6xl mx-auto">
+      <div className="mb-6">
+        <h1 className="font-display text-3xl font-bold mb-1">
           <span className="text-gansid-secondary">My</span>{' '}
           <span className="bg-gansid-primary-gradient bg-clip-text text-transparent">Profile</span>
         </h1>
-        <p className="font-body text-gansid-on-surface/60">Update your details and photo.</p>
+        <p className="font-body text-sm text-gansid-on-surface/60">Update your details and photo.</p>
       </div>
 
-      {/* Card 1: Profile Photo */}
-      <section className="bg-white rounded-gansid-lg p-8 shadow-2xl shadow-gansid-secondary/10 gradient-border">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="font-display text-xl font-semibold">Profile Photo</h2>
-          <span className={`${attendeeTypePillGradient} text-white font-display text-xs font-bold uppercase tracking-[0.2em] px-4 py-2 rounded-full shadow-lg`}>
+      <div className="grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-6">
+        {/* Left: Personal Details */}
+        <section className="bg-white rounded-gansid-lg p-6 shadow-2xl shadow-gansid-secondary/10 gradient-border">
+          <h2 className="font-display text-lg font-semibold mb-4">Personal Details</h2>
+          <form onSubmit={save} className="space-y-3">
+            <div>
+              <label className="block text-xs font-display font-semibold mb-1 text-gansid-on-surface/70 uppercase tracking-wide">Full Name</label>
+              <GlassInput value={fullName} onChange={(e) => setFullName(e.target.value)} />
+            </div>
+            <div>
+              <label className="block text-xs font-display font-semibold mb-1 text-gansid-on-surface/70 uppercase tracking-wide">Email</label>
+              <GlassInput value={profile.email} disabled />
+            </div>
+            <div>
+              <label className="block text-xs font-display font-semibold mb-1 text-gansid-on-surface/70 uppercase tracking-wide">Organization</label>
+              <GlassInput value={organization} onChange={(e) => setOrganization(e.target.value)} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-display font-semibold mb-1 text-gansid-on-surface/70 uppercase tracking-wide">Country</label>
+                <GlassSelect value={countryCode} onChange={(e) => setCountryCode(e.target.value)}>
+                  <option value="">Select…</option>
+                  {COUNTRIES.map((c: any) => (
+                    <option key={c.code} value={c.code}>{c.name}</option>
+                  ))}
+                </GlassSelect>
+              </div>
+              <div>
+                <label className="block text-xs font-display font-semibold mb-1 text-gansid-on-surface/70 uppercase tracking-wide">Phone</label>
+                <GlassInput value={phone} onChange={(e) => setPhone(e.target.value)} />
+              </div>
+            </div>
+            <div className="flex items-center justify-between pt-3">
+              {toast && <p className="text-sm text-gansid-secondary font-semibold">{toast}</p>}
+              <div className="ml-auto">
+                <ViscousButton type="submit" variant="primary" disabled={saving}>
+                  {saving ? 'Saving\u2026' : 'Save Profile'}
+                </ViscousButton>
+              </div>
+            </div>
+          </form>
+        </section>
+
+        {/* Right: Profile Photo + attendee pill */}
+        <section className="bg-white rounded-gansid-lg p-6 shadow-2xl shadow-gansid-secondary/10 gradient-border flex flex-col items-center text-center">
+          <span className={`${attendeeTypePillGradient} text-white font-display text-[11px] font-bold uppercase tracking-[0.2em] px-4 py-1.5 rounded-full shadow-lg mb-6`}>
             {attendeeTypeLabel}
           </span>
-        </div>
-        <div className="flex items-center gap-6">
-          <div className="relative">
+          <div className="relative mb-4">
             {avatarUrl ? (
-              <img src={avatarUrl} alt="Avatar" className="h-28 w-28 rounded-full object-cover ring-4 ring-white shadow-xl" />
+              <img src={avatarUrl} alt="Avatar" className="h-32 w-32 rounded-full object-cover ring-4 ring-white shadow-xl" />
             ) : (
-              <div className="h-28 w-28 rounded-full bg-gansid-primary-gradient flex items-center justify-center text-white font-display text-3xl shadow-xl ring-4 ring-white">
+              <div className="h-32 w-32 rounded-full bg-gansid-primary-gradient flex items-center justify-center text-white font-display text-3xl shadow-xl ring-4 ring-white">
                 {(profile.fullName ?? profile.email).split(' ').map((s) => s[0]).join('').slice(0, 2).toUpperCase()}
               </div>
             )}
           </div>
-          <div>
-            <label className="inline-block cursor-pointer px-5 py-2.5 rounded-full bg-gansid-primary-gradient hover:scale-[1.02] transition-all font-display text-sm font-semibold text-white shadow-lg">
-              {uploadingAvatar ? 'Uploading\u2026' : avatarUrl ? 'Change photo' : 'Upload photo'}
-              <input
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={async (e) => {
-                  const file = e.target.files?.[0];
-                  if (!file) return;
-                  setUploadingAvatar(true);
-                  const url = await uploadAvatar(user.id, file);
-                  if (url) {
-                    setAvatarUrl(url);
-                    await updateProfile(user.id, { avatarUrl: url });
-                    await refreshProfile();
-                  }
-                  setUploadingAvatar(false);
-                  e.target.value = '';
-                }}
-              />
-            </label>
-            <p className="text-xs text-gansid-on-surface/50 mt-2">JPG, PNG, or GIF &middot; max ~2MB</p>
-          </div>
-        </div>
-      </section>
-
-      {/* Card 2: Personal Details */}
-      <section className="bg-white rounded-gansid-lg p-8 shadow-2xl shadow-gansid-secondary/10 gradient-border">
-        <h2 className="font-display text-xl font-semibold mb-6">Personal Details</h2>
-        <form onSubmit={save} className="space-y-4">
-          <div>
-            <label className="block text-sm font-display font-semibold mb-1.5">Full Name</label>
-            <GlassInput value={fullName} onChange={(e) => setFullName(e.target.value)} />
-          </div>
-          <div>
-            <label className="block text-sm font-display font-semibold mb-1.5">Email</label>
-            <GlassInput value={profile.email} disabled />
-          </div>
-          <div>
-            <label className="block text-sm font-display font-semibold mb-1.5">Organization</label>
-            <GlassInput value={organization} onChange={(e) => setOrganization(e.target.value)} />
-          </div>
-          <div>
-            <label className="block text-sm font-display font-semibold mb-1.5">Country</label>
-            <GlassSelect value={countryCode} onChange={(e) => setCountryCode(e.target.value)}>
-              <option value="">Select a country</option>
-              {COUNTRIES.map((c: any) => (
-                <option key={c.code} value={c.code}>{c.name}</option>
-              ))}
-            </GlassSelect>
-          </div>
-          <div>
-            <label className="block text-sm font-display font-semibold mb-1.5">Phone</label>
-            <GlassInput value={phone} onChange={(e) => setPhone(e.target.value)} />
-          </div>
-          <div className="pt-2">
-            <label className="block text-sm font-display font-semibold mb-1.5">Role</label>
-            <div className="inline-block px-4 py-2 rounded-full bg-gansid-surface-container-low text-gansid-secondary font-display font-semibold text-sm capitalize">
-              {profile.role}
-            </div>
-            <p className="text-xs text-gansid-on-surface/50 mt-2">Contact support to change your role.</p>
-          </div>
-          {toast && <p className="text-sm text-gansid-secondary font-semibold">{toast}</p>}
-          <div className="pt-4">
-            <ViscousButton type="submit" variant="primary" disabled={saving}>
-              {saving ? 'Saving\u2026' : 'Save Profile'}
-            </ViscousButton>
-          </div>
-        </form>
-      </section>
+          <label className="inline-block cursor-pointer px-5 py-2 rounded-full bg-gansid-primary-gradient hover:scale-[1.02] transition-all font-display text-sm font-semibold text-white shadow-lg">
+            {uploadingAvatar ? 'Uploading\u2026' : avatarUrl ? 'Change photo' : 'Upload photo'}
+            <input
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                setUploadingAvatar(true);
+                const url = await uploadAvatar(user.id, file);
+                if (url) {
+                  setAvatarUrl(url);
+                  await updateProfile(user.id, { avatarUrl: url });
+                  await refreshProfile();
+                }
+                setUploadingAvatar(false);
+                e.target.value = '';
+              }}
+            />
+          </label>
+          <p className="text-xs text-gansid-on-surface/50 mt-2">JPG, PNG, or GIF &middot; max ~2MB</p>
+          <p className="text-xs text-gansid-on-surface/40 mt-4">Role changes require support.</p>
+        </section>
+      </div>
     </div>
   );
 }
