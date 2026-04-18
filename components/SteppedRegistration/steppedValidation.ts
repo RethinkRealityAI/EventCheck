@@ -1,4 +1,4 @@
-import type { FormField } from '../../types';
+import type { FormField, FormStep } from '../../types';
 
 export interface ValidateResult {
   ok: boolean;
@@ -48,6 +48,31 @@ export interface GroupMember {
   email: string;
   countryCode?: string | null;
   categoryId?: string | null;
+}
+
+export function groupFieldsBySection(
+  fields: FormField[],
+  steps: FormStep[],
+): Record<string, FormField[]> {
+  const byStep: Record<string, FormField[]> = {};
+  for (const step of steps) byStep[step.id] = [];
+
+  const firstStepId = steps[0]?.id;
+  for (const field of fields) {
+    const stepId = field.section && byStep[field.section] ? field.section : firstStepId;
+    if (!stepId) continue;
+    byStep[stepId].push(field);
+  }
+
+  for (const stepId of Object.keys(byStep)) {
+    byStep[stepId].sort((a, b) => {
+      const ao = (a.sectionOrder ?? (a as any).order ?? 0);
+      const bo = (b.sectionOrder ?? (b as any).order ?? 0);
+      return ao - bo;
+    });
+  }
+
+  return byStep;
 }
 
 export function validateGroupMembers(

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { FormField } from '../types';
-import { validateRequired, validateRms, validateGroupMembers } from '../components/SteppedRegistration/steppedValidation';
+import { validateRequired, validateRms, validateGroupMembers, groupFieldsBySection } from '../components/SteppedRegistration/steppedValidation';
 import type { GroupMember } from '../components/SteppedRegistration/steppedValidation';
 
 describe('RMS field validation', () => {
@@ -104,5 +104,40 @@ describe('validateGroupMembers', () => {
     const members: GroupMember[] = [validMember, { name: 'Bob Jones', email: 'bob@example.com', countryCode: 'US', categoryId: 'cat-2' }];
     const result = validateGroupMembers('group', members, true);
     expect(result.ok).toBe(true);
+  });
+});
+
+describe('groupFieldsBySection', () => {
+  it('groups fields by their section ID, sorted by sectionOrder', () => {
+    const steps = [
+      { id: 'a', label: 'A' },
+      { id: 'b', label: 'B' },
+    ];
+    const fields = [
+      { id: 'f1', section: 'a', sectionOrder: 1, label: 'F1', type: 'text', required: false },
+      { id: 'f2', section: 'b', sectionOrder: 1, label: 'F2', type: 'text', required: false },
+      { id: 'f3', section: 'a', sectionOrder: 2, label: 'F3', type: 'text', required: false },
+    ] as any[];
+    const result = groupFieldsBySection(fields, steps);
+    expect(result.a.map(f => f.id)).toEqual(['f1', 'f3']);
+    expect(result.b.map(f => f.id)).toEqual(['f2']);
+  });
+
+  it('falls back to first step for fields with no section', () => {
+    const steps = [{ id: 'first', label: 'First' }];
+    const fields = [{ id: 'f1', label: 'F1', type: 'text', required: false }] as any[];
+    expect(groupFieldsBySection(fields, steps).first).toHaveLength(1);
+  });
+
+  it('returns empty-arrayed object when no steps provided', () => {
+    expect(groupFieldsBySection([], [])).toEqual({});
+  });
+
+  it('places unknown-section fields into the first step', () => {
+    const steps = [{ id: 'one', label: 'One' }, { id: 'two', label: 'Two' }];
+    const fields = [{ id: 'orphan', section: 'nonexistent', label: 'O', type: 'text', required: false }] as any[];
+    const result = groupFieldsBySection(fields, steps);
+    expect(result.one).toHaveLength(1);
+    expect(result.two).toHaveLength(0);
   });
 });

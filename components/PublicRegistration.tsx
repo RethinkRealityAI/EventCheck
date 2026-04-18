@@ -25,6 +25,7 @@ import LivePriceCategory from './Pricing/LivePriceCategory';
 import AddonsList from './Pricing/AddonsList';
 import RunningTotal from './Pricing/RunningTotal';
 import { SingleFormShell } from './SteppedRegistration/SingleFormShell';
+import { SteppedFormShell } from './SteppedRegistration/SteppedFormShell';
 
 const PublicRegistration = () => {
   const { formId } = useParams<{ formId: string }>();
@@ -413,8 +414,7 @@ const PublicRegistration = () => {
     return true;
   };
 
-  const submitForm = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const doSubmit = async () => {
     if (!validate()) return;
 
     // Pending-claim: update attendee row in-place, flip guest_type to 'claimed' (or 'exhibitor-staff-claimed')
@@ -458,6 +458,11 @@ const PublicRegistration = () => {
     } else {
       finalizeRegistration('free');
     }
+  };
+
+  const submitForm = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await doSubmit();
   };
 
   const finalizeRegistration = async (paymentStatus: 'paid' | 'free', transactionId?: string, paymentAmount?: string) => {
@@ -983,59 +988,116 @@ const PublicRegistration = () => {
               </div>
             )}
 
-            <SingleFormShell
-              form={form}
-              mode={mode}
-              isVisible={isVisible}
-              isAnyPendingClaim={isAnyPendingClaim}
-              isPendingClaim={isPendingClaim}
-              isExhibitorStaffPending={isExhibitorStaffPending}
-              rmsField={rmsField}
-              registrationMode={registrationMode}
-              setRegistrationMode={setRegistrationMode}
-              groupMembers={groupMembers}
-              setGroupMembers={setGroupMembers}
-              groupSize={groupSize}
-              setGroupSize={setGroupSize}
-              groupHasAllInfo={groupHasAllInfo}
-              setGroupHasAllInfo={setGroupHasAllInfo}
-              groupAllSameCountry={groupAllSameCountry}
-              setGroupAllSameCountry={setGroupAllSameCountry}
-              groupAllSameCategory={groupAllSameCategory}
-              setGroupAllSameCategory={setGroupAllSameCategory}
-              groupTotal={groupTotal}
-              answers={answers}
-              onFieldChange={handleInputChange}
-              pricingTemplate={pricingTemplate}
-              selectedCategoryId={selectedCategoryId}
-              setSelectedCategoryId={setSelectedCategoryId}
-              selectedAddonIds={selectedAddonIds}
-              setSelectedAddonIds={setSelectedAddonIds}
-              activeTier={activeTier}
-              activeBracket={activeBracket}
-              dynamicTotal={dynamicTotal}
-              ticketQuantities={ticketQuantities}
-              onQuantityChange={handleQuantityChange}
-              promoCode={promoCode}
-              setPromoCode={setPromoCode}
-              appliedPromo={appliedPromo}
-              onApplyPromo={applyPromo}
-              paymentTotal={paymentTotal}
-              guests={guests}
-              setGuests={setGuests}
-              skipGuestDetails={skipGuestDetails}
-              setSkipGuestDetails={setSkipGuestDetails}
-              isFirstGuestPurchaser={isFirstGuestPurchaser}
-              setIsFirstGuestPurchaser={setIsFirstGuestPurchaser}
-              isTableFull={isTableFull}
-              donateOption={donateOption}
-              setDonateOption={setDonateOption}
-              donatedSeats={donatedSeats}
-              setDonatedSeats={setDonatedSeats}
-              donatedTables={donatedTables}
-              setDonatedTables={setDonatedTables}
-              setSelectedCountryCode={setSelectedCountryCode}
-            />
+            {form.settings?.renderMode === 'stepped' && (form.settings.steps?.length ?? 0) > 0 ? (
+              <SteppedFormShell
+                form={form}
+                mode={mode}
+                isVisible={isVisible}
+                isAnyPendingClaim={isAnyPendingClaim}
+                isPendingClaim={isPendingClaim}
+                isExhibitorStaffPending={isExhibitorStaffPending}
+                rmsField={rmsField}
+                registrationMode={registrationMode}
+                setRegistrationMode={setRegistrationMode}
+                groupMembers={groupMembers}
+                setGroupMembers={setGroupMembers}
+                groupSize={groupSize}
+                setGroupSize={setGroupSize}
+                groupHasAllInfo={groupHasAllInfo}
+                setGroupHasAllInfo={setGroupHasAllInfo}
+                groupAllSameCountry={groupAllSameCountry}
+                setGroupAllSameCountry={setGroupAllSameCountry}
+                groupAllSameCategory={groupAllSameCategory}
+                setGroupAllSameCategory={setGroupAllSameCategory}
+                groupTotal={groupTotal}
+                answers={answers}
+                onFieldChange={handleInputChange}
+                pricingTemplate={pricingTemplate}
+                selectedCategoryId={selectedCategoryId}
+                setSelectedCategoryId={setSelectedCategoryId}
+                selectedAddonIds={selectedAddonIds}
+                setSelectedAddonIds={setSelectedAddonIds}
+                activeTier={activeTier}
+                activeBracket={activeBracket}
+                dynamicTotal={dynamicTotal}
+                ticketQuantities={ticketQuantities}
+                onQuantityChange={handleQuantityChange}
+                promoCode={promoCode}
+                setPromoCode={setPromoCode}
+                appliedPromo={appliedPromo}
+                onApplyPromo={applyPromo}
+                paymentTotal={paymentTotal}
+                guests={guests}
+                setGuests={setGuests}
+                skipGuestDetails={skipGuestDetails}
+                setSkipGuestDetails={setSkipGuestDetails}
+                isFirstGuestPurchaser={isFirstGuestPurchaser}
+                setIsFirstGuestPurchaser={setIsFirstGuestPurchaser}
+                isTableFull={isTableFull}
+                donateOption={donateOption}
+                setDonateOption={setDonateOption}
+                donatedSeats={donatedSeats}
+                setDonatedSeats={setDonatedSeats}
+                donatedTables={donatedTables}
+                setDonatedTables={setDonatedTables}
+                setSelectedCountryCode={setSelectedCountryCode}
+                onSubmit={doSubmit}
+              />
+            ) : (
+              <SingleFormShell
+                form={form}
+                mode={mode}
+                isVisible={isVisible}
+                isAnyPendingClaim={isAnyPendingClaim}
+                isPendingClaim={isPendingClaim}
+                isExhibitorStaffPending={isExhibitorStaffPending}
+                rmsField={rmsField}
+                registrationMode={registrationMode}
+                setRegistrationMode={setRegistrationMode}
+                groupMembers={groupMembers}
+                setGroupMembers={setGroupMembers}
+                groupSize={groupSize}
+                setGroupSize={setGroupSize}
+                groupHasAllInfo={groupHasAllInfo}
+                setGroupHasAllInfo={setGroupHasAllInfo}
+                groupAllSameCountry={groupAllSameCountry}
+                setGroupAllSameCountry={setGroupAllSameCountry}
+                groupAllSameCategory={groupAllSameCategory}
+                setGroupAllSameCategory={setGroupAllSameCategory}
+                groupTotal={groupTotal}
+                answers={answers}
+                onFieldChange={handleInputChange}
+                pricingTemplate={pricingTemplate}
+                selectedCategoryId={selectedCategoryId}
+                setSelectedCategoryId={setSelectedCategoryId}
+                selectedAddonIds={selectedAddonIds}
+                setSelectedAddonIds={setSelectedAddonIds}
+                activeTier={activeTier}
+                activeBracket={activeBracket}
+                dynamicTotal={dynamicTotal}
+                ticketQuantities={ticketQuantities}
+                onQuantityChange={handleQuantityChange}
+                promoCode={promoCode}
+                setPromoCode={setPromoCode}
+                appliedPromo={appliedPromo}
+                onApplyPromo={applyPromo}
+                paymentTotal={paymentTotal}
+                guests={guests}
+                setGuests={setGuests}
+                skipGuestDetails={skipGuestDetails}
+                setSkipGuestDetails={setSkipGuestDetails}
+                isFirstGuestPurchaser={isFirstGuestPurchaser}
+                setIsFirstGuestPurchaser={setIsFirstGuestPurchaser}
+                isTableFull={isTableFull}
+                donateOption={donateOption}
+                setDonateOption={setDonateOption}
+                donatedSeats={donatedSeats}
+                setDonatedSeats={setDonatedSeats}
+                donatedTables={donatedTables}
+                setDonatedTables={setDonatedTables}
+                setSelectedCountryCode={setSelectedCountryCode}
+              />
+            )}
 
             <div className="pt-4">
               <button
