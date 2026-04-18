@@ -16,11 +16,11 @@ export function PortalLayout() {
 
   return (
     <div className="portal-root min-h-screen relative overflow-hidden">
-      {/* Viscous background — white base, hues fade in from right side only */}
+      {/* Viscous background — white base with hues radiating from bottom-center */}
       <div className="absolute inset-0 bg-white -z-10" />
-      <div className="absolute top-0 right-0 w-1/2 h-full bg-gradient-to-l from-gansid-secondary/15 via-gansid-primary-container/8 to-transparent -z-10" />
-      <div className="absolute top-20 right-0 w-[550px] h-[550px] rounded-full bg-gansid-gradient-radial opacity-20 blur-3xl -z-10" />
-      <div className="absolute bottom-0 right-10 w-[400px] h-[400px] rounded-full bg-gansid-gradient-swirl opacity-10 blur-3xl -z-10" />
+      <div className="absolute -bottom-32 left-1/2 -translate-x-1/2 w-[1100px] h-[700px] rounded-full bg-gansid-gradient-radial opacity-25 blur-3xl -z-10" />
+      <div className="absolute -bottom-20 left-1/2 -translate-x-1/2 w-[800px] h-[500px] rounded-full bg-gansid-gradient-swirl opacity-15 blur-3xl -z-10" />
+      <div className="absolute top-20 -right-20 w-[400px] h-[400px] rounded-full bg-gansid-primary-container opacity-5 blur-3xl -z-10" />
 
       <header className="relative bg-[#239DBB] text-white sticky top-0 z-40 px-6 py-4 flex items-center justify-between shadow-lg">
         <div className="absolute top-0 inset-x-0 h-1 bg-[linear-gradient(90deg,#ba0028_0%,#E0243C_50%,#2260a1_100%)]" />
