@@ -16,6 +16,11 @@ import { getAttendees, checkInAttendee, getForms } from './services/storageServi
 import { AuthProvider, useAuth } from './components/AuthContext';
 import Login from './components/Login';
 import { CURRENT_SITE } from './config/sites';
+import { Landing } from './components/Portal/Landing/Landing';
+import { PortalLayout } from './components/Portal/PortalLayout';
+import { PortalDashboard } from './components/Portal/Dashboard/PortalDashboard';
+import { ProfilePage } from './components/Portal/Profile/ProfilePage';
+import { ResetPasswordPage } from './components/Portal/ResetPassword/ResetPasswordPage';
 
 const NavLink = ({ to, icon: Icon, children, collapsed }: { to: string, icon: any, children?: React.ReactNode, collapsed?: boolean }) => {
   const location = useLocation();
@@ -435,8 +440,26 @@ export default function App() {
             {/* Login Route */}
             <Route path="/login" element={<Login />} />
 
-            {/* Redirect Root to Admin */}
-            <Route path="/" element={<Navigate to="/admin" replace />} />
+            {/* Site-conditional root routes */}
+            {CURRENT_SITE.portalEnabled ? (
+              <>
+                <Route path="/" element={<Landing />} />
+                <Route path="/reset-password" element={<ResetPasswordPage />} />
+                <Route
+                  path="/portal"
+                  element={
+                    <ProtectedRoute>
+                      <PortalLayout />
+                    </ProtectedRoute>
+                  }
+                >
+                  <Route index element={<PortalDashboard />} />
+                  <Route path="profile" element={<ProfilePage />} />
+                </Route>
+              </>
+            ) : (
+              <Route path="/" element={<Navigate to="/admin" replace />} />
+            )}
 
             {/* Public Form Route */}
             <Route path="/form/:formId" element={<PublicRegistration />} />
