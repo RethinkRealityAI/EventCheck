@@ -377,6 +377,7 @@ function mapAttendeeFromDb(db: AttendeeRow): Attendee {
     companyInfo: ((db as any).company_info as any) || undefined,
     sponsoredAwards: ((db as any).sponsored_awards as string[]) || [],
     adminNotes: (db as any).admin_notes || undefined,
+    userId: db.user_id ?? null,
   };
 }
 
@@ -427,7 +428,8 @@ function mapFormFromDb(db: FormRow): Form {
     formType: (db as any).form_type || 'event',
     settings: (db.settings as any), // Cast JSON to specific setting type if needed
     thankYouMessage: db.thank_you_message || undefined,
-    fields: (db.fields as unknown as FormField[]) || []
+    fields: (db.fields as unknown as FormField[]) || [],
+    showInPortal: db.show_in_portal ?? false,
   };
 }
 
@@ -440,7 +442,8 @@ function mapFormToDb(f: Form): FormInsert {
     form_type: f.formType || 'event',
     settings: f.settings as any,
     thank_you_message: f.thankYouMessage,
-    fields: f.fields as any
+    fields: f.fields as any,
+    show_in_portal: f.showInPortal ?? false,
   };
 }
 
