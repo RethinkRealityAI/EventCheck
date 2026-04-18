@@ -721,8 +721,18 @@ const PublicRegistration = () => {
       }));
     }
 
+    // Pass the current session's access_token so the edge function can derive
+    // user_id server-side.  supabase.functions.invoke already forwards the
+    // Authorization header automatically when a session is active, but we make
+    // it explicit here to document the intent.
+    const { data: { session: verifySession } } = await supabase.auth.getSession();
+    const verifyAuthHeaders: Record<string, string> = verifySession?.access_token
+      ? { Authorization: `Bearer ${verifySession.access_token}` }
+      : {};
+
     const { data, error: fnError, response: fnResponse } = await supabase.functions.invoke('verify-payment', {
-      body: verifyBody
+      body: verifyBody,
+      headers: verifyAuthHeaders,
     }) as { data: any, error: any, response?: Response };
 
     if (fnError) {
