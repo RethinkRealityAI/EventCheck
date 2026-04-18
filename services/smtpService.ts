@@ -45,7 +45,7 @@ export async function sendTicketEmail(settings: AppSettings, data: {
     return;
   }
 
-  const { data: responseData, error } = await supabase.functions.invoke('send-ticket-email', {
+  const { data: responseData, error, response } = await supabase.functions.invoke('send-ticket-email', {
     body: {
       smtpConfig: {
         host: settings.smtpHost || 'smtp.ionos.com',
@@ -62,11 +62,20 @@ export async function sendTicketEmail(settings: AppSettings, data: {
         attachments: data.attachments || [],
       }
     },
-  });
+  }) as { data: any; error: any; response?: Response };
 
   if (error) {
-    console.error('Error invoking send-ticket-email function:', error);
-    throw new Error(error.message || 'Failed to invoke send-ticket-email function');
+    // Non-2xx from the edge function. supabase-js wraps the body, but we can
+    // read it off `response` to surface the real message (e.g. SMTP auth failed).
+    let detail = error.message || 'Failed to invoke send-ticket-email function';
+    try {
+      const body = await response?.clone().json();
+      if (body?.error) detail = `SMTP error: ${body.error}`;
+    } catch {
+      /* body wasn't JSON */
+    }
+    console.error('Error invoking send-ticket-email function:', detail);
+    throw new Error(detail);
   }
 
   if (responseData?.error) {
