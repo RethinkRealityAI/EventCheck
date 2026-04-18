@@ -19,6 +19,7 @@ import QRCode from 'react-qr-code';
 import PublicSponsorForm from './Sponsors/PublicSponsorForm';
 import PublicExhibitorForm from './Exhibitor/PublicExhibitorForm';
 import ConsentCheckbox from './Consent/ConsentCheckbox';
+import { validateRequired, validateRms, validateGroupMembers } from './SteppedRegistration/steppedValidation';
 import PricingBracketBanner from './Pricing/PricingBracketBanner';
 import LivePriceCategory from './Pricing/LivePriceCategory';
 import AddonsList from './Pricing/AddonsList';
@@ -362,42 +363,49 @@ const PublicRegistration = () => {
   const validate = () => {
     if (!form) return false;
 
-    // Check custom fields
-    for (const field of form.fields) {
-      if (isVisible(field) && field.required && !answers[field.id] && field.type !== 'ticket') {
-        setError(`Please fill in ${field.label}`);
-        return false;
-      }
-      if (isVisible(field) && field.type === 'text' && field.validation === 'int' && answers[field.id]) {
-        if (!/^\d+$/.test(answers[field.id])) {
-          setError(`${field.label} must be a whole number.`);
-          return false;
-        }
-      }
+    const requiredCheck = validateRequired(form.fields, answers, isVisible);
+    if (!requiredCheck.ok) {
+      setError(requiredCheck.error!);
+      return false;
+    }
+
+    const rmsCheck = validateRms(rmsField, registrationMode);
+    if (!rmsCheck.ok) {
+      setError(rmsCheck.error!);
+      return false;
+    }
+
+    const groupCheck = validateGroupMembers(
+      registrationMode,
+      groupMembers,
+      Boolean(pricingTemplate),
+    );
+    if (!groupCheck.ok) {
+      setError(groupCheck.error!);
+      return false;
     }
 
     if (mode === 'purchaser') {
       if (ticketField && ticketField.required) {
         const totalQty = Object.values(ticketQuantities).reduce((a: number, b: number) => a + b, 0);
         if (totalQty === 0) {
-          setError("Please select at least one ticket.");
+          setError('Please select at least one ticket.');
           return false;
         }
       }
     } else {
       if (isTableFull) {
-        setError("This table is already at full capacity.");
+        setError('This table is already at full capacity.');
         return false;
       }
-      // In guest mode, name and email come from the form's standard fields (not the guest details section)
       const nameField = form.fields.find(f => f.type === 'text' || f.label.toLowerCase().includes('name'));
       const emailField = form.fields.find(f => f.type === 'email' || f.label.toLowerCase().includes('email'));
       if (!nameField || !answers[nameField.id]) {
-        setError("Please provide your name.");
+        setError('Please provide your name.');
         return false;
       }
       if (!emailField || !answers[emailField.id]) {
-        setError("Please provide your email address.");
+        setError('Please provide your email address.');
         return false;
       }
     }

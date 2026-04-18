@@ -9,6 +9,7 @@ import { PayPalScriptProvider, PayPalButtons } from "@paypal/react-paypal-js";
 import { useNotifications } from './NotificationSystem';
 import { generateTicketPDF } from '../utils/pdfGenerator';
 import { sendTicketEmail, arrayBufferToBase64 } from '../services/smtpService';
+import { validateRequired } from './SteppedRegistration/steppedValidation';
 
 interface FormPreviewProps {
     form: Form;
@@ -124,21 +125,18 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
         e.preventDefault();
 
         // Basic validation
-        let isValid = true;
-        for (const field of form.fields) {
-            if (isFieldVisibleInPreview(field) && field.required && !previewAnswers[field.id] && field.type !== 'ticket') {
-                isValid = false;
-            }
+        const requiredCheck = validateRequired(form.fields, previewAnswers, isFieldVisibleInPreview);
+        if (!requiredCheck.ok) {
+            setPreviewError(requiredCheck.error || 'Please fill in all required fields in the preview.');
+            return;
         }
         const ticketField = form.fields.find(f => f.type === 'ticket');
         if (ticketField && ticketField.required) {
             const totalQty = Object.values(previewTicketQuantities).reduce((a: number, b: number) => a + b, 0);
-            if (totalQty === 0) isValid = false;
-        }
-
-        if (!isValid) {
-            setPreviewError('Please fill in all required fields in the preview.');
-            return;
+            if (totalQty === 0) {
+                setPreviewError('Please select at least one ticket.');
+                return;
+            }
         }
         setPreviewError('');
 
