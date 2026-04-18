@@ -3,6 +3,7 @@ import { Save, CreditCard, Mail, Key, Eye, FileText, Check, Upload, Image as Ima
 import { AppSettings, DEFAULT_SETTINGS, Attendee } from '../types';
 import { getSettings, saveSettings, getAttendees, uploadBrandingAsset, BrandingAssetKind } from '../services/storageService';
 import PricingTemplatesTab from './Settings/PricingTemplates/PricingTemplatesTab';
+import { AnnouncementsTab } from './Settings/AnnouncementsTab';
 import { sendEmail } from '../services/emailService';
 import { sendTicketEmail } from '../services/smtpService';
 import { supabase } from '../services/supabaseClient';
@@ -12,7 +13,7 @@ import RichTextEditor from './RichTextEditor';
 
 const Settings: React.FC = () => {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
-  const [activeTab, setActiveTab] = useState<'general' | 'email' | 'pdf' | 'diagnostics' | 'pricing-templates'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'email' | 'pdf' | 'diagnostics' | 'pricing-templates' | 'announcements'>('general');
   const [previewMode, setPreviewMode] = useState<'ticket' | 'invite'>('ticket');
   const [dummyAttendee, setDummyAttendee] = useState<Attendee | null>(null);
   const [allAttendees, setAllAttendees] = useState<Attendee[]>([]);
@@ -385,6 +386,13 @@ const Settings: React.FC = () => {
                 <Tag className="w-5 h-5 flex-shrink-0" /> {isSidebarOpen && <span className="truncate">Pricing Templates</span>}
               </button>
             )}
+
+            <button
+              onClick={() => setActiveTab('announcements')}
+              className={`w-full text-left px-4 py-3 rounded-xl flex items-center gap-3 font-semibold transition-all ${activeTab === 'announcements' ? 'bg-white text-indigo-600 shadow-sm border border-gray-100' : 'text-gray-600 hover:bg-white/60'}`}
+            >
+              <SendIcon className="w-5 h-5 flex-shrink-0" /> {isSidebarOpen && <span className="truncate">Announcements</span>}
+            </button>
           </div>
         </div>
 
@@ -836,6 +844,12 @@ const Settings: React.FC = () => {
           {activeTab === 'pricing-templates' && settings.feature_pricing_templates && (
             <div className="animate-fade-in-up">
               <PricingTemplatesTab />
+            </div>
+          )}
+
+          {activeTab === 'announcements' && (
+            <div className="animate-fade-in-up">
+              <AnnouncementsTab />
             </div>
           )}
 
