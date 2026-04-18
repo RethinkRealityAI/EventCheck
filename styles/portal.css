@@ -18,7 +18,26 @@
 }
 
 .portal-root .gansid-gradient {
-  background: linear-gradient(135deg, #ba0028, #E0243C);
+  background: linear-gradient(135deg, #ba0028 0%, #E0243C 60%, #2260a1 100%);
+}
+
+.portal-root .gradient-swirl {
+  background: conic-gradient(from 180deg at 50% 50%, #ba0028, #E0243C 33%, #2260a1 66%, #ba0028);
+}
+
+.portal-root .gradient-radial {
+  background: radial-gradient(ellipse at top left, #ba0028 0%, #E0243C 40%, #2260a1 80%);
+}
+
+/* Ambient animation for hero swirls */
+@keyframes gradientShift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+.portal-root .gradient-shift {
+  background-size: 200% 200%;
+  animation: gradientShift 12s ease infinite;
 }
 
 @keyframes viscousFadeIn {

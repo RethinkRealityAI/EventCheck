@@ -1,5 +1,73 @@
 @import "tailwindcss";
 
+/*
+  GANSID Viscous Flow design tokens (Tailwind v4 @theme block).
+  These generate utility classes like bg-gansid-primary, text-gansid-secondary,
+  font-display, font-body, rounded-gansid-lg, shadow-invisible-lift.
+*/
+@theme {
+  --color-gansid-primary: #ba0028;
+  --color-gansid-primary-container: #E0243C;
+  --color-gansid-secondary: #2260a1;
+  --color-gansid-surface: #f9f9f9;
+  --color-gansid-surface-container-low: #f3f3f3;
+  --color-gansid-surface-container-lowest: #FDFDFD;
+  --color-gansid-on-surface: #1a1c1c;
+  --color-gansid-outline-variant: #e5bdbc;
+
+  --font-display: "Outfit", system-ui, sans-serif;
+  --font-body: "DM Sans", system-ui, sans-serif;
+
+  --radius-gansid-md: 1.5rem;
+  --radius-gansid-lg: 2rem;
+  --radius-gansid-xl: 3rem;
+
+  --shadow-invisible-lift: 0 0 64px -12px rgba(26, 28, 28, 0.06);
+
+  --ease-viscous: cubic-bezier(0.8, 0, 0.2, 1);
+
+  --blur-viscous: 24px;
+}
+
+/*
+  Gradient utilities (Tailwind v4 @utility directive — generates real classes
+  like bg-gansid-primary-gradient that work alongside the theme colors).
+*/
+@utility bg-gansid-primary-gradient {
+  background-image: linear-gradient(135deg, #ba0028 0%, #E0243C 60%, #2260a1 100%);
+}
+@utility bg-gansid-gradient-135 {
+  background-image: linear-gradient(135deg, #ba0028 0%, #E0243C 60%, #2260a1 100%);
+}
+@utility bg-gansid-gradient-45 {
+  background-image: linear-gradient(45deg, #ba0028, #E0243C 40%, #2260a1);
+}
+@utility bg-gansid-gradient-reverse {
+  background-image: linear-gradient(90deg, #2260a1 0%, #E0243C 50%, #ba0028 100%);
+}
+@utility bg-gansid-gradient-swirl {
+  background-image: conic-gradient(from 180deg at 50% 50%, #ba0028, #E0243C 33%, #2260a1 66%, #ba0028);
+}
+@utility bg-gansid-gradient-radial {
+  background-image: radial-gradient(ellipse at top left, #ba0028 0%, #E0243C 40%, #2260a1 80%);
+}
+
+/*
+  Gradient border pattern: uses the dual-background (content box + border box)
+  trick. The inner white fills the content, the gradient paints only the border.
+*/
+@utility gradient-border {
+  background: linear-gradient(white, white) padding-box,
+              linear-gradient(135deg, #ba0028 0%, #E0243C 60%, #2260a1 100%) border-box;
+  border: 2px solid transparent;
+}
+
+@utility gradient-border-input {
+  background: linear-gradient(white, white) padding-box,
+              linear-gradient(135deg, rgba(186, 0, 40, 0.5), rgba(224, 36, 60, 0.45) 60%, rgba(34, 96, 161, 0.5) 100%) border-box;
+  border: 1.5px solid transparent;
+}
+
 :root {
   --site-primary: #4F46E5;
   --site-accent: #4F46E5;

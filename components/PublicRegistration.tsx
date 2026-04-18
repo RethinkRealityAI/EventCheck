@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { getFormById, getSettings, saveAttendee, getAttendee, getGuestsByPrimaryId, mapAttendeeToDb } from '../services/storageService';
 import { FormField, AppSettings, Attendee, Form, DynamicPricingSelection } from '../types';
 import type { PricingTemplate } from '../types';
@@ -28,9 +28,17 @@ import { SingleFormShell } from './SteppedRegistration/SingleFormShell';
 import { SteppedFormShell } from './SteppedRegistration/SteppedFormShell';
 import { useAuth } from './AuthContext';
 
-const PublicRegistration = () => {
-  const { formId } = useParams<{ formId: string }>();
-  const { user } = useAuth();
+interface PublicRegistrationProps {
+  /** Override the formId that would otherwise come from route params (used when embedded in a modal). */
+  formId?: string;
+  /** If provided, a "Return to Portal" button appears on the success screen and invokes this. */
+  onComplete?: () => void;
+}
+
+const PublicRegistration = ({ formId: propFormId, onComplete }: PublicRegistrationProps = {}) => {
+  const params = useParams<{ formId: string }>();
+  const formId = propFormId ?? params.formId;
+  const { user, profile } = useAuth();
   const [form, setForm] = useState<Form | null>(null);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [answers, setAnswers] = useState<Record<string, any>>({});
@@ -159,6 +167,37 @@ const PublicRegistration = () => {
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupAllSameCategory, groupMembers[0]?.categoryId]);
+
+  // Pre-fill form answers from the signed-in user's profile so we don't re-ask
+  // things we already know (name, email, organization, country, phone). Runs once
+  // when profile + form both exist; later user edits are preserved.
+  const prefilledRef = useRef(false);
+  useEffect(() => {
+    if (prefilledRef.current) return;
+    if (!profile || !form || mode !== 'purchaser') return;
+
+    const nameParts = (profile.fullName ?? '').trim().split(/\s+/);
+    const firstName = nameParts.slice(0, 1).join(' ');
+    const lastName = nameParts.slice(1).join(' ');
+
+    const patch: Record<string, any> = {};
+    for (const field of form.fields) {
+      const id = field.id.toLowerCase();
+      const label = (field.label ?? '').toLowerCase();
+      if ((id.includes('fname') || label.includes('first name')) && firstName) patch[field.id] = firstName;
+      else if ((id.includes('lname') || label.includes('last name')) && lastName) patch[field.id] = lastName;
+      else if (field.type === 'email' && profile.email) patch[field.id] = profile.email;
+      else if ((id.includes('org') || label.includes('organization')) && profile.organization) patch[field.id] = profile.organization;
+      else if (field.type === 'country' && profile.countryCode) patch[field.id] = profile.countryCode;
+      else if ((id.includes('phone') || id.includes('whatsapp') || field.type === 'phone') && profile.phone) patch[field.id] = profile.phone;
+    }
+
+    if (Object.keys(patch).length > 0) {
+      setAnswers((prev) => ({ ...patch, ...prev }));
+      if (profile.countryCode) setSelectedCountryCode(profile.countryCode);
+    }
+    prefilledRef.current = true;
+  }, [profile, form, mode]);
 
   useEffect(() => {
     const fetch = async () => {
@@ -454,8 +493,14 @@ const PublicRegistration = () => {
       return;
     }
 
-    // Check if ticket field present
-    if (mode === 'purchaser' && ticketField && paymentTotal > 0) {
+    // Route to payment screen if any pricing path has a non-zero total.
+    // paymentTotal = static-ticket total, dynamicTotal = dynamic per-person,
+    // groupTotal = dynamic group sum. Any of these > 0 means payment required.
+    const hasPayableAmount = paymentTotal > 0
+      || (pricingTemplate && (dynamicTotal ?? 0) > 0)
+      || (pricingTemplate && registrationMode === 'group' && (groupTotal ?? 0) > 0);
+
+    if (mode === 'purchaser' && (ticketField || pricingTemplate) && hasPayableAmount) {
       setStep('payment');
     } else {
       finalizeRegistration('free');
@@ -741,6 +786,8 @@ const PublicRegistration = () => {
       try {
         const body = await fnResponse?.json();
         detail = body?.error || fnError.message || detail;
+        if (body?.diagnostic) detail += ` [diag: ${JSON.stringify(body.diagnostic)}]`;
+        if (body?.details && typeof body.details === 'object') console.error('verify-payment error details:', body.details);
       } catch {
         detail = fnError.message || detail;
       }
@@ -908,10 +955,14 @@ const PublicRegistration = () => {
     return <PublicExhibitorForm form={form} />;
   }
 
+  const isSteppedMode = form.settings?.renderMode === 'stepped';
+
   return (
     <div
-      className="min-h-screen py-12 px-4 sm:px-6 lg:px-8 flex flex-col items-center relative"
-      style={{
+      className={isSteppedMode
+        ? "w-full h-full flex flex-col relative min-h-0"
+        : "w-full py-12 px-4 sm:px-6 lg:px-8 flex flex-col items-center relative"}
+      style={isSteppedMode ? undefined : {
         backgroundColor: form.settings?.transparentBackground ? 'transparent' : (form.settings?.formBackgroundColor || '#F3F4F6'),
         backgroundImage: form.settings?.formBackgroundImage ? `url(${form.settings.formBackgroundImage})` : 'none',
         backgroundSize: 'cover',
@@ -920,7 +971,7 @@ const PublicRegistration = () => {
       }}
     >
       {/* Overlay to ensure readability if there's a background image */}
-      {form.settings?.formBackgroundImage && (
+      {!isSteppedMode && form.settings?.formBackgroundImage && (
         <div className="absolute inset-0 bg-black/10 pointer-events-none"></div>
       )}
 
@@ -939,32 +990,34 @@ const PublicRegistration = () => {
 
       {step === 'form' && (
         <div
-          className="max-w-xl w-full bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl overflow-hidden relative z-10 border border-white/20"
-          style={form.settings?.cardBackgroundImage ? {
+          className={isSteppedMode
+            ? 'w-full h-full flex flex-col relative z-10 min-h-0'
+            : 'max-w-xl w-full bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl overflow-hidden relative z-10 border border-white/20'}
+          style={!isSteppedMode && form.settings?.cardBackgroundImage ? {
             backgroundImage: `url(${form.settings.cardBackgroundImage})`,
             backgroundSize: 'cover',
             backgroundPosition: 'center'
           } : {}}
         >
           <div
-            className="px-8 py-8 text-center"
-            style={{ backgroundColor: form.settings?.formHeaderColor || '#4F46E5' }}
+            className={`${isSteppedMode ? 'shrink-0 ' : ''}${form.settings?.formHeaderColor ? 'px-8 py-6 text-center' : 'bg-gansid-primary-gradient px-8 py-6 text-center'}`}
+            style={form.settings?.formHeaderColor ? { backgroundColor: form.settings.formHeaderColor } : undefined}
           >
             <h1
-              className="text-3xl font-black mb-2"
+              className={`${isSteppedMode ? 'text-2xl' : 'text-3xl'} font-black mb-1`}
               style={{ color: form.settings?.formTitleColor || '#FFFFFF' }}
             >
               {form.settings?.formTitle || form.title}
             </h1>
             <p
-              className="opacity-90 font-medium"
+              className="opacity-90 font-medium text-sm"
               style={{ color: form.settings?.formDescriptionColor || '#FFFFFF' }}
             >
               {form.description}
             </p>
           </div>
 
-          <form onSubmit={submitForm} className="p-8 space-y-6">
+          <form onSubmit={submitForm} className={isSteppedMode ? 'flex-1 min-h-0 flex flex-col' : 'p-8 space-y-6'}>
             {error && (
               <div className="bg-red-50 text-red-600 p-3 rounded-lg flex items-center gap-2 text-sm">
                 <AlertCircle className="w-4 h-4" /> {error}
@@ -1113,30 +1166,46 @@ const PublicRegistration = () => {
               />
             )}
 
-            <div className="pt-4">
-              <button
-                type="submit"
-                disabled={loading || (!isAnyPendingClaim && pricingTemplate != null && (!selectedCategoryId || !activeTier || !activeBracket || dynamicTotal == null)) || (!isAnyPendingClaim && registrationMode === 'group' && (!groupPricingResult?.ok || groupMembers.some(m => !m.name.trim() || !m.email.trim() || !m.countryCode || !m.categoryId)))}
-                className="w-full py-4 text-white rounded-xl font-black uppercase tracking-widest transition shadow-lg flex justify-center items-center gap-2 transform hover:scale-[1.02] active:scale-95 disabled:opacity-70 disabled:grayscale disabled:cursor-not-allowed"
-                style={{ backgroundColor: form.settings?.formAccentColor || '#4F46E5' }}
-              >
-                {loading ? (
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                ) : isAnyPendingClaim ? (
-                  <>Complete Registration <ArrowRight className="w-5 h-5" /></>
-                ) : mode === 'guest' ? (
-                  <>Claim Your Ticket <ArrowRight className="w-5 h-5" /></>
-                ) : (ticketField && paymentTotal > 0) ? (
-                  <>Proceed to Payment <ArrowRight className="w-5 h-5" /></>
-                ) : (form.settings?.submitButtonText || 'Register Now')}
-              </button>
-            </div>
+            {form.settings?.renderMode !== 'stepped' && (
+              <div className="pt-4">
+                <button
+                  type="submit"
+                  disabled={loading || (!isAnyPendingClaim && pricingTemplate != null && (!selectedCategoryId || !activeTier || !activeBracket || dynamicTotal == null)) || (!isAnyPendingClaim && registrationMode === 'group' && (!groupPricingResult?.ok || groupMembers.some(m => !m.name.trim() || !m.email.trim() || !m.countryCode || !m.categoryId)))}
+                  className="w-full py-4 text-white rounded-xl font-black uppercase tracking-widest transition shadow-lg flex justify-center items-center gap-2 transform hover:scale-[1.02] active:scale-95 disabled:opacity-70 disabled:grayscale disabled:cursor-not-allowed"
+                  style={{ backgroundColor: form.settings?.formAccentColor || '#4F46E5' }}
+                >
+                  {loading ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : isAnyPendingClaim ? (
+                    <>Complete Registration <ArrowRight className="w-5 h-5" /></>
+                  ) : mode === 'guest' ? (
+                    <>Claim Your Ticket <ArrowRight className="w-5 h-5" /></>
+                  ) : (ticketField && paymentTotal > 0) ? (
+                    <>Proceed to Payment <ArrowRight className="w-5 h-5" /></>
+                  ) : (form.settings?.submitButtonText || 'Register Now')}
+                </button>
+              </div>
+            )}
           </form>
         </div>
       )}
 
-      {step === 'payment' && (
-        <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 text-center">
+      {step === 'payment' && (() => {
+        // Resolve the actual amount being charged. Dynamic pricing stores totals in cents.
+        const displayCurrency = pricingTemplate?.currency || ticketField?.ticketConfig?.currency || 'USD';
+        const isGroup = pricingTemplate && registrationMode === 'group' && groupTotal != null;
+        const isDynamic = pricingTemplate && dynamicTotal != null;
+        const displayTotal = isGroup
+          ? (groupTotal! / 100)
+          : isDynamic
+            ? (dynamicTotal! / 100)
+            : paymentTotal;
+        const displaySubtotal = isGroup || isDynamic ? displayTotal : ticketSubtotal;
+        return (
+        <div className={isSteppedMode
+          ? "flex-1 min-h-0 w-full flex items-center justify-center p-6 overflow-y-auto"
+          : "w-full flex items-center justify-center"}>
+        <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 text-center mx-auto">
           <h2 className="text-2xl font-bold text-gray-900 mb-2">Secure Payment</h2>
           <p className="text-gray-500 mb-8">Complete your purchase to receive your ticket.</p>
 
@@ -1149,8 +1218,8 @@ const PublicRegistration = () => {
 
           <div className="bg-gray-50 p-4 rounded-xl mb-8 border border-gray-100">
             <div className="flex justify-between items-center mb-2">
-              <span className="text-gray-600">Ticket(s) Subtotal</span>
-              <span className="font-medium text-gray-900">{ticketSubtotal.toFixed(2)} {ticketField?.ticketConfig?.currency}</span>
+              <span className="text-gray-600">{isGroup ? `Group total (${groupMembers.length})` : 'Ticket(s) Subtotal'}</span>
+              <span className="font-medium text-gray-900">{displaySubtotal.toFixed(2)} {displayCurrency}</span>
             </div>
             {appliedPromo && (
               <div className="flex justify-between items-center text-sm text-green-600 border-t border-gray-200 pt-2 mt-2">
@@ -1166,15 +1235,15 @@ const PublicRegistration = () => {
             )}
             <div className="flex justify-between items-center text-lg font-bold text-indigo-600 border-t border-gray-200 pt-3 mt-3">
               <span>Total Due</span>
-              <span>{paymentTotal.toFixed(2)} {ticketField?.ticketConfig?.currency}</span>
+              <span>{displayTotal.toFixed(2)} {displayCurrency}</span>
             </div>
           </div>
 
           {paypalClientId ? (
-            <div key={`${paypalClientId}-${paymentTotal}`} className="min-h-[150px] flex flex-col gap-2">
+            <div key={`${paypalClientId}-${displayTotal}`} className="min-h-[150px] flex flex-col gap-2">
               <PayPalScriptProvider options={{
                 clientId: paypalClientId,
-                currency: ticketField?.ticketConfig?.currency || "USD",
+                currency: displayCurrency,
                 components: "buttons"
               }}>
                 <PayPalButtons
@@ -1226,9 +1295,9 @@ const PublicRegistration = () => {
                   }}
                 />
               </PayPalScriptProvider>
-              {/* Temporary Debug ID (First 10 chars) */}
+              {/* Debug: show both ends of the client ID so we can verify which app is in use */}
               <div className="text-[10px] text-gray-400 mt-2 italic">
-                Payment Instance ID: {paypalClientId.substring(0, 10)}...
+                Payment Instance ID: {paypalClientId.substring(0, 8)}…{paypalClientId.slice(-6)}
               </div>
             </div>
           ) : (
@@ -1241,10 +1310,15 @@ const PublicRegistration = () => {
 
           <p className="text-xs text-gray-400 mt-4">Safe and secure payments.</p>
         </div>
-      )}
+        </div>
+        );
+      })()}
 
       {step === 'success' && generatedTicket && (
-        <div className="max-w-2xl w-full bg-white rounded-2xl shadow-xl overflow-hidden animate-fade-in-up relative z-10">
+        <div className={isSteppedMode
+          ? "flex-1 min-h-0 w-full flex items-start sm:items-center justify-center p-6 overflow-y-auto"
+          : "w-full flex items-center justify-center"}>
+        <div className="max-w-2xl w-full bg-white rounded-2xl shadow-xl overflow-hidden animate-fade-in-up relative z-10 mx-auto">
           {/* ── Success Header ── */}
           <div
             className="w-full h-48 flex flex-col items-center justify-center text-white"
@@ -1436,12 +1510,24 @@ const PublicRegistration = () => {
             )}
           </div>
 
-          <button
-            onClick={() => window.location.reload()}
-            className="text-gray-500 text-sm font-medium hover:text-gray-900 underline block mx-auto mb-6"
-          >
-            Start New Registration
-          </button>
+          <div className="flex flex-col items-center gap-3 mb-6">
+            {onComplete && (
+              <button
+                type="button"
+                onClick={onComplete}
+                className="px-8 py-3 rounded-full bg-gansid-primary-gradient text-white font-display font-bold shadow-lg hover:scale-[1.02] transition-all"
+              >
+                Return to Portal Dashboard
+              </button>
+            )}
+            <button
+              onClick={() => onComplete ? onComplete() : window.location.reload()}
+              className="text-gray-500 text-sm font-medium hover:text-gray-900 underline"
+            >
+              {onComplete ? 'Close' : 'Start New Registration'}
+            </button>
+          </div>
+        </div>
         </div>
       )}
 

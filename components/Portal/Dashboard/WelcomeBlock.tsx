@@ -23,9 +23,8 @@ export function WelcomeBlock({ profile, latestAttendee }: Props) {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-display font-bold text-5xl leading-tight">
-          Welcome back,
-          <br />
+        <h1 className="font-display font-bold text-4xl md:text-5xl leading-tight">
+          <span className="text-gansid-secondary">Welcome back,</span>{' '}
           <span className="bg-gansid-primary-gradient bg-clip-text text-transparent">{firstName}</span>
         </h1>
         <p className="font-body text-gansid-on-surface/70 mt-3 text-lg">{subhead}</p>

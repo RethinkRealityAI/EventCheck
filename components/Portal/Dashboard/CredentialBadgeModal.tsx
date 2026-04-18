@@ -13,7 +13,10 @@ interface Props {
 
 export function CredentialBadgeModal({ open, onClose, profile, attendee }: Props) {
   const badgeRef = useRef<HTMLDivElement>(null);
-  const roleBadge = profile.role === 'exhibitor' ? 'Exhibitor' : profile.role === 'sponsor' ? 'Sponsor' : 'Delegate';
+  const roleBadge = profile.role === 'exhibitor' ? 'Exhibitor'
+    : profile.role === 'sponsor' ? 'Sponsor'
+    : profile.role === 'admin' ? 'Admin'
+    : 'Attendee';
   const qrPayload = (attendee as any).qrPayload ?? attendee.id;
 
   const handleSave = async () => {
@@ -35,7 +38,7 @@ export function CredentialBadgeModal({ open, onClose, profile, attendee }: Props
     <GlassDialog open={open} onClose={onClose}>
       <div ref={badgeRef} className="bg-white rounded-gansid-xl overflow-hidden">
         <div className="h-20 bg-gansid-primary-gradient flex items-center justify-center">
-          <span className="text-white font-display text-2xl tracking-wider">GANSID 2026</span>
+          <span className="text-white font-display text-xl tracking-widest">GANSID Congress 2026</span>
         </div>
         <div className="p-8 flex flex-col items-center space-y-4">
           <div className="h-28 w-28 rounded-full bg-gansid-primary-gradient flex items-center justify-center text-white font-display text-3xl">

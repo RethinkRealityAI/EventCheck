@@ -19,7 +19,7 @@ export function VerifyEmailBanner() {
   };
 
   return (
-    <div className="mb-6 rounded-gansid-lg bg-gansid-primary-container/10 px-6 py-4 flex items-center justify-between gap-4">
+    <div className="mb-6 rounded-gansid-lg bg-gradient-to-r from-gansid-primary-container/15 via-white to-gansid-secondary/15 border border-gansid-outline-variant/30 px-6 py-4 flex items-center justify-between gap-4">
       <p className="font-body text-sm text-gansid-on-surface">
         <strong>Verify your email.</strong> Registration requires a verified account. Check your inbox for the verification link.
       </p>

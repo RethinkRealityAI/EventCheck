@@ -1105,22 +1105,33 @@ export async function duplicatePricingTemplate(id: string, newName: string): Pro
 // --- Portal Helpers ---
 
 export async function getAttendeesForUser(userId: string, email: string): Promise<Attendee[]> {
-  // Match by user_id OR email so legacy (email-only) attendees surface too
-  const { data, error } = await supabase
-    .from('attendees')
-    .select('*')
-    .or(`user_id.eq.${userId},email.eq.${email}`)
-    .order('created_at', { ascending: false });
-  if (error) { console.error('getAttendeesForUser', error); return []; }
-  return (data ?? []).map(mapAttendeeFromDb);
+  // Match by user_id OR email so legacy (email-only) attendees surface too.
+  // Run two queries + merge instead of PostgREST .or() because email values
+  // with special chars (@, +, .) can confuse the parser and return 400s.
+  const [byUserId, byEmail] = await Promise.all([
+    supabase.from('attendees').select('*').eq('user_id', userId).order('registered_at', { ascending: false }),
+    email ? supabase.from('attendees').select('*').eq('email', email).order('registered_at', { ascending: false }) : Promise.resolve({ data: [], error: null } as any),
+  ]);
+  if (byUserId.error) console.error('getAttendeesForUser byUserId', byUserId.error);
+  if (byEmail.error) console.error('getAttendeesForUser byEmail', byEmail.error);
+  const rows = [...(byUserId.data ?? []), ...(byEmail.data ?? [])];
+  // Dedupe by id, keep the first (which is either user_id or email match — both valid)
+  const seen = new Set<string>();
+  const unique = rows.filter((r: any) => {
+    if (seen.has(r.id)) return false;
+    seen.add(r.id);
+    return true;
+  });
+  return unique.map(mapAttendeeFromDb);
 }
 
 export async function getPortalForms(): Promise<Form[]> {
+  // Show any portal-enabled form regardless of status (draft/active) — the portal
+  // dashboard surface is already admin-curated via show_in_portal.
   const { data, error } = await supabase
     .from('forms')
     .select('*')
-    .eq('show_in_portal', true)
-    .eq('status', 'active');
+    .eq('show_in_portal', true);
   if (error) { console.error('getPortalForms', error); return []; }
   return (data ?? []).map(mapFormFromDb);
 }

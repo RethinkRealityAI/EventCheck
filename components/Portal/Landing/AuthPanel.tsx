@@ -12,7 +12,8 @@ export function AuthPanel() {
   const [mode, setMode] = useState<Mode>('signup');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [fullName, setFullName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [role, setRole] = useState<'attendee' | 'exhibitor' | 'sponsor'>('attendee');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -23,7 +24,7 @@ export function AuthPanel() {
     setError(''); setLoading(true);
     const { error: err } = await supabase.auth.signUp({
       email, password,
-      options: { data: { full_name: fullName, role } },
+      options: { data: { full_name: `${firstName} ${lastName}`.trim(), role } },
     });
     setLoading(false);
     if (err) { setError(err.message); return; }
@@ -33,20 +34,32 @@ export function AuthPanel() {
   const handleSignin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(''); setLoading(true);
-    const { error: err } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error: err } = await supabase.auth.signInWithPassword({ email, password });
+    if (err) { setLoading(false); setError(err.message); return; }
+
+    const user = data.user;
+    if (!user) { setLoading(false); navigate('/portal'); return; }
+
+    // Check if the user has any existing attendee rows
+    const { count } = await supabase
+      .from('attendees')
+      .select('*', { count: 'exact', head: true })
+      .or(`user_id.eq.${user.id},email.eq.${user.email}`);
+
     setLoading(false);
-    if (err) { setError(err.message); return; }
-    navigate('/portal');
+    if (!count || count === 0) {
+      // First-time user — take them straight to the Congress registration form
+      navigate('/form/gansid-congress-2026');
+    } else {
+      navigate('/portal');
+    }
   };
 
   return (
-    <div className="w-full max-w-md lg:sticky lg:top-8 bg-white rounded-gansid-lg p-8 shadow-2xl border border-gansid-outline-variant/30 relative overflow-hidden">
-      {/* Top accent bar */}
-      <div className="absolute top-0 inset-x-0 h-1.5 bg-gansid-primary-gradient" />
-
+    <div className="w-full max-w-md lg:sticky lg:top-8 rounded-gansid-lg p-8 shadow-2xl gradient-border relative">
       <div className="flex justify-center mb-6">
         <FloatingToggleTabs<Mode>
-          tabs={[{ id: 'signup', label: 'Sign Up' }, { id: 'signin', label: 'Sign In' }]}
+          tabs={[{ id: 'signup', label: 'Create Account' }, { id: 'signin', label: 'Sign In' }]}
           active={mode}
           onChange={(id) => { setMode(id); setError(''); setSignupSuccess(false); }}
         />
@@ -61,7 +74,10 @@ export function AuthPanel() {
         </div>
       ) : mode === 'signup' ? (
         <form onSubmit={handleSignup} className="space-y-4">
-          <GlassInput placeholder="Full name" value={fullName} onChange={(e) => setFullName(e.target.value)} required />
+          <div className="grid grid-cols-2 gap-3">
+            <GlassInput placeholder="First name" value={firstName} onChange={(e) => setFirstName(e.target.value)} required />
+            <GlassInput placeholder="Last name" value={lastName} onChange={(e) => setLastName(e.target.value)} required />
+          </div>
           <GlassInput type="email" placeholder="Email address" value={email} onChange={(e) => setEmail(e.target.value)} required />
           <GlassInput type="password" placeholder="Password (min 8 chars)" value={password} minLength={8} onChange={(e) => setPassword(e.target.value)} required />
           <div>
@@ -70,7 +86,7 @@ export function AuthPanel() {
               {(['attendee', 'exhibitor', 'sponsor'] as const).map((r) => (
                 <label key={r} className="flex-1">
                   <input type="radio" name="role" value={r} checked={role === r} onChange={() => setRole(r)} className="sr-only peer" />
-                  <span className="block text-center px-3 py-2 rounded-full bg-gansid-surface-container-low cursor-pointer peer-checked:bg-gradient-to-r peer-checked:from-gansid-primary peer-checked:to-gansid-primary-container peer-checked:text-white font-display text-sm capitalize transition-all">
+                  <span className="block text-center px-3 py-2 rounded-full bg-gansid-surface-container-low cursor-pointer peer-checked:bg-gansid-primary-gradient peer-checked:text-white font-display text-sm capitalize transition-all">
                     {r}
                   </span>
                 </label>

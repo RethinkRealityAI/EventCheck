@@ -5,7 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:gansid": "vite --mode gansid",
+    "dev:scago": "vite --mode scago",
     "build": "vite build",
+    "build:gansid": "vite build --mode gansid",
+    "build:scago": "vite build --mode scago",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",

@@ -83,34 +83,38 @@ export default function ConsentCheckbox({
 
       {modalOpen && (
         <div
-          className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-4"
+          className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4"
           onClick={closeModal}
         >
           <div
-            className="bg-white rounded-2xl max-w-3xl w-full shadow-2xl max-h-[85vh] flex flex-col"
+            className="bg-white rounded-gansid-xl max-w-3xl w-full shadow-2xl max-h-[85vh] flex flex-col overflow-hidden"
             onClick={e => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between p-5 border-b">
-              <h2 className="text-xl font-semibold">{modalTitle}</h2>
-              <button onClick={closeModal} className="p-1.5 hover:bg-slate-100 rounded-lg">
+            <div className="bg-gansid-primary-gradient px-6 py-5 flex items-center justify-between">
+              <h2 className="text-xl font-display font-bold text-white">{modalTitle}</h2>
+              <button
+                onClick={closeModal}
+                aria-label="Close"
+                className="p-1.5 rounded-full bg-white/20 hover:bg-white/30 text-white transition"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="overflow-y-auto flex-1 p-5">
-              {loading && <div className="text-slate-400">Loading…</div>}
-              {loadError && <div className="text-red-600 text-sm">Failed to load: {loadError}</div>}
+            <div className="overflow-y-auto flex-1 p-6 bg-gansid-surface-container-lowest">
+              {loading && <div className="text-slate-400 font-body">Loading…</div>}
+              {loadError && <div className="text-gansid-primary text-sm font-body">Failed to load: {loadError}</div>}
               {!loading && !loadError && (
-                <pre className="whitespace-pre-wrap font-sans text-sm text-slate-700 leading-relaxed">
+                <pre className="whitespace-pre-wrap font-body text-sm text-gansid-on-surface leading-relaxed">
                   {content}
                 </pre>
               )}
             </div>
-            <div className="p-5 border-t flex justify-end">
+            <div className="bg-gansid-primary-gradient px-6 py-4 flex justify-end">
               <button
                 onClick={closeModal}
-                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-500 font-medium"
+                className="px-6 py-2.5 rounded-full bg-white text-gansid-primary font-display font-bold shadow-md hover:scale-[1.02] transition-all"
               >
-                Close
+                I've Read This
               </button>
             </div>
           </div>

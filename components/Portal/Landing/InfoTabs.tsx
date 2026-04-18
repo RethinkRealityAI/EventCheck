@@ -1,18 +1,48 @@
-import { useState } from 'react';
+import { useState, useLayoutEffect, useRef } from 'react';
 import { FloatingToggleTabs } from '../ui/FloatingToggleTabs';
 import { GlassCard } from '../ui/GlassCard';
 import { OrganicAccordion, OrganicAccordionItem } from '../ui/OrganicAccordion';
-import { REGISTRATION_PROCESS, IMPORTANT_NOTICE, GROUP_NOTE, INCLUDES, NOT_INCLUDED, FEES, FAQS, SUPPORT_EMAIL } from './content';
+import { REGISTRATION_PROCESS, IMPORTANT_NOTICE, GROUP_NOTE, INCLUDES, FEES, FAQS, SUPPORT_EMAIL } from './content';
 
 type TabId = 'about' | 'includes' | 'fees' | 'faqs';
+
+const STEP_GRADIENTS = [
+  'bg-[linear-gradient(135deg,#ba0028_0%,#E0243C_100%)] bg-clip-text',     // 01 — pure red
+  'bg-[linear-gradient(135deg,#8b2a5e_0%,#5a3575_100%)] bg-clip-text',      // 02 — pure purple/magenta
+  'bg-[linear-gradient(135deg,#2260a1_0%,#1a4880_100%)] bg-clip-text',     // 03 — pure blue
+];
 
 export function InfoTabs() {
   const [tab, setTab] = useState<TabId>('about');
   const [feeTier, setFeeTier] = useState<'tier1' | 'tier2'>('tier1');
+  const containerRef = useRef<HTMLDivElement>(null);
+  const tabBarTopBeforeSwitch = useRef<number | null>(null);
+
+  // Capture the tab bar's viewport-relative position BEFORE state change,
+  // then after the new content renders, scroll so it's back at the same
+  // viewport position. This anchors the tab bar regardless of whether
+  // the new tab's content is taller or shorter than the previous tab's.
+  const handleTabChange = (id: TabId) => {
+    const container = containerRef.current;
+    tabBarTopBeforeSwitch.current = container ? container.getBoundingClientRect().top : null;
+    setTab(id);
+  };
+
+  useLayoutEffect(() => {
+    if (tabBarTopBeforeSwitch.current === null) return;
+    const container = containerRef.current;
+    if (!container) { tabBarTopBeforeSwitch.current = null; return; }
+    const newTop = container.getBoundingClientRect().top;
+    const delta = newTop - tabBarTopBeforeSwitch.current;
+    if (Math.abs(delta) > 0.5) {
+      window.scrollBy({ top: delta, left: 0, behavior: 'instant' as ScrollBehavior });
+    }
+    tabBarTopBeforeSwitch.current = null;
+  }, [tab]);
   const activeTier = FEES.tiers.find((t) => t.id === feeTier)!;
 
   return (
-    <div className="space-y-8">
+    <div ref={containerRef} className="space-y-8 scroll-mt-8">
       <div className="flex justify-center">
         <FloatingToggleTabs<TabId>
           tabs={[
@@ -22,16 +52,16 @@ export function InfoTabs() {
             { id: 'faqs', label: 'FAQs' },
           ]}
           active={tab}
-          onChange={setTab}
+          onChange={handleTabChange}
         />
       </div>
 
       {tab === 'about' && (
         <div className="space-y-8 viscous-enter">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {REGISTRATION_PROCESS.map((step) => (
+            {REGISTRATION_PROCESS.map((step, i) => (
               <GlassCard key={step.number}>
-                <div className="font-display text-6xl font-black bg-gradient-to-br from-gansid-primary to-gansid-primary-container bg-clip-text text-transparent">{step.number}</div>
+                <div className={`font-display text-6xl font-black text-transparent ${STEP_GRADIENTS[i]}`}>{step.number}</div>
                 <h3 className="font-display text-xl font-semibold mt-3">{step.title}</h3>
                 <p className="font-body text-gansid-on-surface/80 mt-2">{step.body}</p>
               </GlassCard>
@@ -63,14 +93,12 @@ export function InfoTabs() {
           </GlassCard>
           <GlassCard tint="red">
             <h3 className="font-display text-2xl font-semibold mb-4">Not Included</h3>
-            <ul className="space-y-2">
-              {NOT_INCLUDED.map((item) => (
-                <li key={item} className="flex items-start gap-2">
-                  <span className="text-gansid-primary-container">✕</span>
-                  <span className="font-body">{item}</span>
-                </li>
-              ))}
-            </ul>
+            <div className="rounded-gansid-md bg-white/70 p-5 border border-gansid-primary-container/20">
+              <p className="font-body text-gansid-on-surface font-semibold mb-1">Networking events</p>
+              <p className="font-body text-sm text-gansid-on-surface/70">
+                Networking events can be purchased as an add-on in the registration form.
+              </p>
+            </div>
           </GlassCard>
         </div>
       )}

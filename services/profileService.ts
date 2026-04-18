@@ -47,3 +47,20 @@ export async function updateProfile(
   if (error) { console.error('updateProfile', error); return null; }
   return data ? mapProfileFromDb(data) : null;
 }
+
+export async function uploadAvatar(userId: string, file: File): Promise<string | null> {
+  const ext = file.name.split('.').pop() ?? 'png';
+  const path = `avatars/${userId}.${ext}`;
+
+  // Remove any existing avatar at this path (storage will silently 404 if absent)
+  await supabase.storage.from('portal-assets').remove([path]).catch(() => null);
+
+  const { error } = await supabase.storage
+    .from('portal-assets')
+    .upload(path, file, { upsert: true, cacheControl: '3600' });
+  if (error) { console.error('uploadAvatar', error); return null; }
+
+  const { data } = supabase.storage.from('portal-assets').getPublicUrl(path);
+  // Cache-bust so the <img> reloads immediately after overwrite
+  return `${data.publicUrl}?v=${Date.now()}`;
+}
