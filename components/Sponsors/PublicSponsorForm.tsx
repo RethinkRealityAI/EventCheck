@@ -384,7 +384,7 @@ const PublicSponsorForm: React.FC<Props> = ({ form, settings }) => {
               isPrimary: false,
             };
             const regUrl = `${window.location.origin}/#/form/${form.id}?ref=${g.id}`;
-            const ticketDoc = generateTicketPDF(guestAttendee as Attendee, settings, form, regUrl);
+            const ticketDoc = await generateTicketPDF(guestAttendee as Attendee, settings, form, regUrl);
             ticketAttachments.push({
               filename: `Ticket_${g.name.replace(/[^a-z0-9]/gi, '_')}.pdf`,
               content: arrayBufferToBase64(ticketDoc.output('arraybuffer') as ArrayBuffer),

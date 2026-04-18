@@ -43,7 +43,7 @@ const ChequeReceivedModal: React.FC<Props> = ({ attendee, settings, onClose, onC
       for (const g of (data.guests || [])) {
         const guestAttendee = { ...updated, id: g.id, name: g.name, qrPayload: g.qr_payload, isPrimary: false };
         const regUrl = `${window.location.origin}/#/form/${updated.formId}?ref=${g.id}`;
-        const ticketDoc = generateTicketPDF(guestAttendee as any, settings, undefined, regUrl);
+        const ticketDoc = await generateTicketPDF(guestAttendee as any, settings, undefined, regUrl);
         attachments.push({ filename: `Ticket_${g.name.replace(/[^a-z0-9]/gi, '_')}.pdf`, content: arrayBufferToBase64(ticketDoc.output('arraybuffer') as ArrayBuffer), contentType: 'application/pdf' });
       }
 

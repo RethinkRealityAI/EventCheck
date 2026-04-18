@@ -1,12 +1,44 @@
 import jsPDF from 'jspdf';
 import { Attendee, AppSettings, Form } from '../types';
 
-export const generateTicketPDF = (
+// In-memory cache of fetched image URLs → data URLs. jsPDF's addImage only
+// handles data URLs reliably in the browser; an http URL (e.g. a Supabase
+// Storage public URL) has to be fetched and encoded first. Cached so the
+// same logo isn't fetched N times when building N guest tickets in a row.
+const dataUrlCache = new Map<string, string>();
+
+async function toDataUrl(src: string | undefined): Promise<string | undefined> {
+  if (!src) return undefined;
+  if (src.startsWith('data:')) return src;
+  if (!/^https?:\/\//i.test(src)) return undefined;
+
+  const cached = dataUrlCache.get(src);
+  if (cached) return cached;
+
+  try {
+    const response = await fetch(src, { mode: 'cors' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const blob = await response.blob();
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+    dataUrlCache.set(src, dataUrl);
+    return dataUrl;
+  } catch (e) {
+    console.warn('toDataUrl: failed to fetch image', src, e);
+    return undefined;
+  }
+}
+
+export const generateTicketPDF = async (
   attendee: Attendee,
   settings: AppSettings,
   form?: Form,
   registrationUrl?: string
-): jsPDF => {
+): Promise<jsPDF> => {
   const doc = new jsPDF();
 
   // Merge global PDF settings with form-specific overrides
@@ -22,10 +54,11 @@ export const generateTicketPDF = (
   const accentColor = (!attendee.isPrimary && registrationUrl) ? '#C8262A' : primaryColor;
 
   // --- Background Image Handling ---
-  if (pdfConfig.backgroundImage && pdfConfig.backgroundImage.length > 50) {
+  const backgroundDataUrl = await toDataUrl(pdfConfig.backgroundImage);
+  if (backgroundDataUrl && backgroundDataUrl.length > 50) {
     try {
-      const format = pdfConfig.backgroundImage.includes('image/jpeg') ? 'JPEG' : 'PNG';
-      doc.addImage(pdfConfig.backgroundImage, format, 0, 0, pageWidth, pageHeight, undefined, 'FAST');
+      const format = backgroundDataUrl.includes('image/jpeg') ? 'JPEG' : 'PNG';
+      doc.addImage(backgroundDataUrl, format, 0, 0, pageWidth, pageHeight, undefined, 'FAST');
     } catch (e) {
       console.error("PDF Background Error:", e);
     }
@@ -38,10 +71,11 @@ export const generateTicketPDF = (
   let headerTextX = 20;
 
   // --- Logo Handling (Left Side) ---
-  if (pdfConfig.logoUrl && pdfConfig.logoUrl.length > 50) {
+  const logoDataUrl = await toDataUrl(pdfConfig.logoUrl);
+  if (logoDataUrl && logoDataUrl.length > 50) {
     try {
-      const format = pdfConfig.logoUrl.includes('image/jpeg') ? 'JPEG' : 'PNG';
-      doc.addImage(pdfConfig.logoUrl, format, 15, 12, 25, 25, undefined, 'FAST');
+      const format = logoDataUrl.includes('image/jpeg') ? 'JPEG' : 'PNG';
+      doc.addImage(logoDataUrl, format, 15, 12, 25, 25, undefined, 'FAST');
       headerTextX = 45;
     } catch (e) {
       console.error("PDF Logo Error:", e);
@@ -86,11 +120,16 @@ export const generateTicketPDF = (
   const qrY = bodyStartY + 10;
 
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(attendee.qrPayload)}`;
+  const qrDataUrl = await toDataUrl(qrUrl);
   try {
-    doc.addImage(qrUrl, 'PNG', qrX, qrY, qrBoxSize, qrBoxSize);
-    doc.setFontSize(9);
-    doc.setTextColor(primaryColor);
-    doc.text("SCAN FOR ENTRY", qrX + qrBoxSize / 2, qrY + qrBoxSize + 5, { align: 'center' });
+    if (qrDataUrl) {
+      doc.addImage(qrDataUrl, 'PNG', qrX, qrY, qrBoxSize, qrBoxSize);
+      doc.setFontSize(9);
+      doc.setTextColor(primaryColor);
+      doc.text("SCAN FOR ENTRY", qrX + qrBoxSize / 2, qrY + qrBoxSize + 5, { align: 'center' });
+    } else {
+      throw new Error('QR fetch failed');
+    }
   } catch (e) {
     doc.setDrawColor(primaryColor);
     doc.rect(qrX, qrY, qrBoxSize, qrBoxSize);
@@ -107,8 +146,9 @@ export const generateTicketPDF = (
     doc.roundedRect(qrX - 5, regQrY - 10, qrBoxSize + 10, regQrBoxSize + 30, 2, 2, 'F');
 
     const regQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(registrationUrl!)}`;
+    const regQrDataUrl = await toDataUrl(regQrUrl);
     try {
-      doc.addImage(regQrUrl, 'PNG', regQrX, regQrY, regQrBoxSize, regQrBoxSize);
+      if (regQrDataUrl) doc.addImage(regQrDataUrl, 'PNG', regQrX, regQrY, regQrBoxSize, regQrBoxSize);
       doc.setFontSize(8);
       doc.setTextColor(30, 30, 30);
       doc.setFont('helvetica', 'bold');

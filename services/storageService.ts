@@ -331,7 +331,10 @@ export const saveSettings = async (settings: AppSettings): Promise<void> => {
     .from('app_settings')
     .upsert(dbRecord);
 
-  if (error) console.error("Failed to save settings", error);
+  if (error) {
+    console.error("Failed to save settings", error);
+    throw new Error(error.message || 'Failed to save settings');
+  }
 };
 
 export const clearData = async (): Promise<void> => {
@@ -831,6 +834,43 @@ export const deleteCustom3DModel = async (model: Custom3DModel): Promise<void> =
 
 export const getModelPublicUrl = (filePath: string): string => {
   const { data } = supabase.storage.from('3d-models').getPublicUrl(filePath);
+  return data.publicUrl;
+};
+
+// ============================================================
+// Branding assets (PDF logo, PDF background, email header logo)
+// ============================================================
+
+export type BrandingAssetKind = 'pdf-logo' | 'pdf-background' | 'email-header-logo';
+
+/**
+ * Uploads a branding asset (image file) to the public `sponsor-logos` bucket
+ * under `branding/{kind}-{uuid}.{ext}` and returns the public URL.
+ *
+ * Replaces the previous base64-in-JSONB approach which silently truncated /
+ * corrupted large images during upsert and produced "Incomplete or corrupt
+ * PNG file" errors in jsPDF at ticket-generation time.
+ */
+export const uploadBrandingAsset = async (
+  file: File,
+  kind: BrandingAssetKind,
+): Promise<string> => {
+  const ext = (file.name.split('.').pop() || 'png').toLowerCase();
+  const filePath = `branding/${kind}-${crypto.randomUUID()}.${ext}`;
+
+  const { error } = await supabase.storage
+    .from('sponsor-logos')
+    .upload(filePath, file, {
+      contentType: file.type || 'image/png',
+      cacheControl: '3600',
+      upsert: false,
+    });
+
+  if (error) {
+    throw new Error(`Failed to upload ${kind}: ${error.message}`);
+  }
+
+  const { data } = supabase.storage.from('sponsor-logos').getPublicUrl(filePath);
   return data.publicUrl;
 };
 

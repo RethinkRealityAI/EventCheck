@@ -287,6 +287,8 @@ supabase functions deploy verify-payment --project-ref gticuvgclbvhwvpzkuez
 
 If a migration is applied to only one project, the shared codebase will break on the other site.
 
+**Edge function gateway auth** (`supabase/config.toml`): `verify_jwt` is explicitly set per function and MUST be respected on every redeploy — Supabase's default is `true`, and deploying without the config (or without `--no-verify-jwt`) silently re-flips `verify-payment` and `send-ticket-email` back to `verify_jwt: true`, which 401s every public registration and admin manual-ticket email. Current config: `send-ticket-email` and `verify-payment` are `false` (called from unauthenticated public forms and do their own internal validation); `confirm-sponsor-cheque` is `true` (admin-only).
+
 Site-level branding is driven at build time by `config/sites.ts` keyed off `VITE_SITE`. Runtime settings (PayPal creds in secrets, email templates / logos / SMTP in `app_settings`) remain per-Supabase.
 
 ## Dynamic Pricing Engine

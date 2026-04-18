@@ -542,7 +542,7 @@ const PublicRegistration = () => {
       setStep('success');
       if (settings) {
         // No registration URL for already-registered guests
-        const doc = generateTicketPDF(guestAttendee, settings, form);
+        const doc = await generateTicketPDF(guestAttendee, settings, form);
         setPreviewPdfUrl(doc.output('bloburl').toString());
       }
       return;
@@ -751,7 +751,7 @@ const PublicRegistration = () => {
         const attachments = [];
 
         // Primary Ticket PDF
-        const primaryDoc = generateTicketPDF(newAttendee, settings, form);
+        const primaryDoc = await generateTicketPDF(newAttendee, settings, form);
         attachments.push({
           filename: `${purchaserName}_Ticket.pdf`,
           content: arrayBufferToBase64(primaryDoc.output('arraybuffer')),
@@ -759,8 +759,8 @@ const PublicRegistration = () => {
         });
 
         // Guest Ticket PDFs (will be empty for single-ticket or free forms)
-        guestTickets.forEach((gt, idx) => {
-          const guestDoc = generateTicketPDF(gt.attendee, settings, form, gt.registrationUrl);
+        for (const [idx, gt] of guestTickets.entries()) {
+          const guestDoc = await generateTicketPDF(gt.attendee, settings, form, gt.registrationUrl);
           const isPlaceholder = gt.attendee.name.includes('Guest Ticket #');
           const safeName = isPlaceholder
             ? `Guest_${idx + 2}`
@@ -770,7 +770,7 @@ const PublicRegistration = () => {
             content: arrayBufferToBase64(guestDoc.output('arraybuffer')),
             contentType: 'application/pdf'
           });
-        });
+        }
 
         // Send all tickets to the purchaser
         await sendTicketEmail(settings, {
@@ -789,7 +789,7 @@ const PublicRegistration = () => {
             const safeName = isPlaceholder
               ? `Guest_${idx + 2}`
               : gt.attendee.name.replace(/[^a-zA-Z0-9 ]/g, '_');
-            const guestDoc = generateTicketPDF(gt.attendee, settings, form, gt.registrationUrl);
+            const guestDoc = await generateTicketPDF(gt.attendee, settings, form, gt.registrationUrl);
             const guestSubject = (settings.emailGuestSubject || 'Your Ticket for {{event}}')
               .replace(/\{\{event\}\}/g, form.title)
               .replace(/\{\{purchaser\}\}/g, purchaserName)
@@ -822,7 +822,7 @@ const PublicRegistration = () => {
 
     // Generate Preview URL (Primary Ticket)
     if (settings) {
-      const doc = generateTicketPDF(newAttendee, settings, form);
+      const doc = await generateTicketPDF(newAttendee, settings, form);
       setPreviewPdfUrl(doc.output('bloburl').toString());
     }
     } catch (registrationError: any) {
@@ -862,9 +862,9 @@ const PublicRegistration = () => {
     ? (getEnvVar('VITE_PAYPAL_SANDBOX_CLIENT_ID') || getEnvVar('VITE_PAYPAL_CLIENT_ID'))
     : getEnvVar('VITE_PAYPAL_CLIENT_ID')) || settings?.paypalClientId || "";
 
-  const downloadPdf = () => {
+  const downloadPdf = async () => {
     if (generatedTicket && settings) {
-      const doc = generateTicketPDF(generatedTicket, settings, form);
+      const doc = await generateTicketPDF(generatedTicket, settings, form);
       doc.save(`${generatedTicket.name}_Ticket.pdf`);
     }
   };
@@ -1732,15 +1732,15 @@ const PublicRegistration = () => {
                   </div>
                   <button
                     type="button"
-                    onClick={() => {
+                    onClick={async () => {
                       if (settings) {
-                        guestTicketsData.forEach((gt, idx) => {
-                          const doc = generateTicketPDF(gt.attendee, settings, form, gt.registrationUrl);
+                        for (const [idx, gt] of guestTicketsData.entries()) {
+                          const doc = await generateTicketPDF(gt.attendee, settings, form, gt.registrationUrl);
                           const safeName = gt.attendee.name.includes('Guest Ticket #')
                             ? `Guest_${idx + 2}`
                             : gt.attendee.name.replace(/[^a-zA-Z0-9 ]/g, '_');
                           doc.save(`${safeName}_Ticket.pdf`);
-                        });
+                        }
                       }
                     }}
                     className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-indigo-700 transition"
@@ -1803,9 +1803,9 @@ const PublicRegistration = () => {
 
                         <button
                           type="button"
-                          onClick={() => {
+                          onClick={async () => {
                             if (settings) {
-                              const doc = generateTicketPDF(gt.attendee, settings, form, gt.registrationUrl);
+                              const doc = await generateTicketPDF(gt.attendee, settings, form, gt.registrationUrl);
                               doc.save(`${safeName}_Ticket.pdf`);
                             }
                           }}
