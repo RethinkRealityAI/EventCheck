@@ -21,11 +21,11 @@ export function StepperSidebar({ steps, currentIndex, completedSteps, onStepClic
               onClick={() => isReachable && onStepClick?.(i)}
               disabled={!isReachable}
               className={[
-                'shrink-0 h-10 w-10 rounded-full flex items-center justify-center font-display transition-all duration-300 ease-viscous',
+                'shrink-0 h-10 w-10 rounded-full flex items-center justify-center font-display font-bold transition-all duration-300 ease-viscous',
                 isCurrent
-                  ? 'bg-gansid-secondary text-white shadow-invisible-lift'
+                  ? 'bg-gansid-primary-gradient text-white shadow-lg ring-2 ring-gansid-primary/20'
                   : isComplete
-                  ? 'bg-gansid-primary-container text-white'
+                  ? 'bg-gansid-primary-container text-white shadow-md'
                   : 'bg-gansid-surface-container-low text-gansid-on-surface/40',
               ].join(' ')}
               aria-current={isCurrent ? 'step' : undefined}
@@ -35,8 +35,8 @@ export function StepperSidebar({ steps, currentIndex, completedSteps, onStepClic
             <div className="flex flex-col pt-1">
               <span
                 className={[
-                  'text-xs uppercase tracking-wide',
-                  isCurrent ? 'text-gansid-secondary' : 'text-gansid-on-surface/40',
+                  'text-xs uppercase tracking-wide font-display font-semibold',
+                  isCurrent ? 'text-gansid-primary' : 'text-gansid-on-surface/40',
                 ].join(' ')}
               >
                 STEP {i + 1}
@@ -55,11 +55,11 @@ export function StepperSidebar({ steps, currentIndex, completedSteps, onStepClic
             </div>
             {i < steps.length - 1 && (
               <span
-                className="absolute left-5 top-12 w-px h-12"
+                className="absolute left-[19px] top-12 w-[2px] h-12 rounded-full"
                 style={{
                   background: isComplete || isCurrent
-                    ? 'linear-gradient(to bottom, #2260a1, rgba(34, 96, 161, 0.2))'
-                    : 'rgba(26, 28, 28, 0.15)',
+                    ? 'linear-gradient(to bottom, #E0243C, #2260a1)'
+                    : 'rgba(26, 28, 28, 0.12)',
                 }}
               />
             )}

@@ -910,7 +910,7 @@ const PublicRegistration = () => {
 
   return (
     <div
-      className="min-h-screen py-12 px-4 sm:px-6 lg:px-8 flex flex-col items-center relative"
+      className="w-full py-12 px-4 sm:px-6 lg:px-8 flex flex-col items-center relative"
       style={{
         backgroundColor: form.settings?.transparentBackground ? 'transparent' : (form.settings?.formBackgroundColor || '#F3F4F6'),
         backgroundImage: form.settings?.formBackgroundImage ? `url(${form.settings.formBackgroundImage})` : 'none',
@@ -939,7 +939,7 @@ const PublicRegistration = () => {
 
       {step === 'form' && (
         <div
-          className="max-w-xl w-full bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl overflow-hidden relative z-10 border border-white/20"
+          className={`${form.settings?.renderMode === 'stepped' ? 'max-w-5xl' : 'max-w-xl'} w-full bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl overflow-hidden relative z-10 border border-white/20`}
           style={form.settings?.cardBackgroundImage ? {
             backgroundImage: `url(${form.settings.cardBackgroundImage})`,
             backgroundSize: 'cover',
@@ -947,8 +947,8 @@ const PublicRegistration = () => {
           } : {}}
         >
           <div
-            className="px-8 py-8 text-center"
-            style={{ backgroundColor: form.settings?.formHeaderColor || '#4F46E5' }}
+            className={form.settings?.formHeaderColor ? 'px-8 py-8 text-center' : 'bg-gansid-primary-gradient px-8 py-8 text-center'}
+            style={form.settings?.formHeaderColor ? { backgroundColor: form.settings.formHeaderColor } : undefined}
           >
             <h1
               className="text-3xl font-black mb-2"
@@ -1113,24 +1113,26 @@ const PublicRegistration = () => {
               />
             )}
 
-            <div className="pt-4">
-              <button
-                type="submit"
-                disabled={loading || (!isAnyPendingClaim && pricingTemplate != null && (!selectedCategoryId || !activeTier || !activeBracket || dynamicTotal == null)) || (!isAnyPendingClaim && registrationMode === 'group' && (!groupPricingResult?.ok || groupMembers.some(m => !m.name.trim() || !m.email.trim() || !m.countryCode || !m.categoryId)))}
-                className="w-full py-4 text-white rounded-xl font-black uppercase tracking-widest transition shadow-lg flex justify-center items-center gap-2 transform hover:scale-[1.02] active:scale-95 disabled:opacity-70 disabled:grayscale disabled:cursor-not-allowed"
-                style={{ backgroundColor: form.settings?.formAccentColor || '#4F46E5' }}
-              >
-                {loading ? (
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                ) : isAnyPendingClaim ? (
-                  <>Complete Registration <ArrowRight className="w-5 h-5" /></>
-                ) : mode === 'guest' ? (
-                  <>Claim Your Ticket <ArrowRight className="w-5 h-5" /></>
-                ) : (ticketField && paymentTotal > 0) ? (
-                  <>Proceed to Payment <ArrowRight className="w-5 h-5" /></>
-                ) : (form.settings?.submitButtonText || 'Register Now')}
-              </button>
-            </div>
+            {form.settings?.renderMode !== 'stepped' && (
+              <div className="pt-4">
+                <button
+                  type="submit"
+                  disabled={loading || (!isAnyPendingClaim && pricingTemplate != null && (!selectedCategoryId || !activeTier || !activeBracket || dynamicTotal == null)) || (!isAnyPendingClaim && registrationMode === 'group' && (!groupPricingResult?.ok || groupMembers.some(m => !m.name.trim() || !m.email.trim() || !m.countryCode || !m.categoryId)))}
+                  className="w-full py-4 text-white rounded-xl font-black uppercase tracking-widest transition shadow-lg flex justify-center items-center gap-2 transform hover:scale-[1.02] active:scale-95 disabled:opacity-70 disabled:grayscale disabled:cursor-not-allowed"
+                  style={{ backgroundColor: form.settings?.formAccentColor || '#4F46E5' }}
+                >
+                  {loading ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : isAnyPendingClaim ? (
+                    <>Complete Registration <ArrowRight className="w-5 h-5" /></>
+                  ) : mode === 'guest' ? (
+                    <>Claim Your Ticket <ArrowRight className="w-5 h-5" /></>
+                  ) : (ticketField && paymentTotal > 0) ? (
+                    <>Proceed to Payment <ArrowRight className="w-5 h-5" /></>
+                  ) : (form.settings?.submitButtonText || 'Register Now')}
+                </button>
+              </div>
+            )}
           </form>
         </div>
       )}

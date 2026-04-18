@@ -1,12 +1,12 @@
 import type { Form, Attendee, Profile } from '../../../types';
 import { GlassCard } from '../ui/GlassCard';
 import { ViscousButton } from '../ui/ViscousButton';
-import { Link } from 'react-router-dom';
 
 interface Props {
   forms: Form[];
   userAttendees: Attendee[];
   role: Profile['role'];
+  onStartRegistration: (formId: string) => void;
 }
 
 // Map profile role → which form_type values the user should see.
@@ -19,7 +19,7 @@ const ROLE_TO_FORM_TYPES: Record<Profile['role'], string[]> = {
   admin: ['event', 'exhibitor', 'sponsor'],
 };
 
-export function AvailableFormsGrid({ forms, userAttendees, role }: Props) {
+export function AvailableFormsGrid({ forms, userAttendees, role, onStartRegistration }: Props) {
   const allowedTypes = ROLE_TO_FORM_TYPES[role] ?? ['event'];
   const visible = forms.filter((f) => allowedTypes.includes(f.formType ?? 'event'));
 
@@ -38,11 +38,12 @@ export function AvailableFormsGrid({ forms, userAttendees, role }: Props) {
             <GlassCard key={form.id}>
               <h3 className="font-display text-lg font-semibold">{form.title}</h3>
               <p className="font-body text-gansid-on-surface/70 text-sm mt-1 mb-4">{form.description ?? ''}</p>
-              <Link to={`/form/${form.id}`}>
-                <ViscousButton variant={registered ? 'secondary' : 'primary'}>
-                  {registered ? 'View Registration' : 'Start Registration'}
-                </ViscousButton>
-              </Link>
+              <ViscousButton
+                variant={registered ? 'secondary' : 'primary'}
+                onClick={() => onStartRegistration(form.id)}
+              >
+                {registered ? 'View Registration' : 'Start Registration'}
+              </ViscousButton>
             </GlassCard>
           );
         })}

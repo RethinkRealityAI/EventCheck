@@ -122,7 +122,7 @@ export function SteppedFormShell(props: SteppedFormShellProps) {
   }
 
   return (
-    <div className="flex flex-col lg:flex-row gap-8 max-w-6xl mx-auto">
+    <div className="flex flex-col lg:flex-row gap-6 lg:gap-10">
       <aside className="lg:w-64 shrink-0">
         <StepperSidebar
           steps={steps}
@@ -131,19 +131,19 @@ export function SteppedFormShell(props: SteppedFormShellProps) {
           onStepClick={(i) => setCurrentIndex(i)}
         />
       </aside>
-      <div className="flex-1">
-        <div className="bg-white rounded-lg p-8 shadow">
-          <h2 className="text-2xl font-semibold mb-2">{currentStep?.label}</h2>
-          {currentStep?.description && <p className="text-slate-600 mb-6">{currentStep.description}</p>}
+      <div className="flex-1 min-w-0">
+        <div className="bg-white rounded-gansid-lg p-6 md:p-8">
+          <h2 className="text-2xl md:text-3xl font-semibold mb-2 font-display">{currentStep?.label}</h2>
+          {currentStep?.description && <p className="text-gansid-on-surface/60 mb-6 font-body">{currentStep.description}</p>}
           <FormRenderer {...props} filteredFields={currentFields} />
           {isLastStep && props.finalStepContent}
-          {stepError && <p className="mt-4 text-sm text-red-600">{stepError}</p>}
-          <div className="flex justify-between items-center mt-8 pt-6 border-t">
+          {stepError && <p className="mt-4 text-sm text-gansid-primary font-semibold">{stepError}</p>}
+          <div className="flex justify-between items-center mt-8 pt-6 gap-4">
             <button
               type="button"
               onClick={handlePrevious}
               disabled={currentIndex === 0}
-              className="px-6 py-2 rounded-full border border-slate-300 disabled:opacity-40"
+              className="px-6 py-2.5 rounded-full bg-white border border-gansid-outline-variant/40 text-gansid-on-surface font-display font-semibold disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gansid-surface-container-low transition"
             >
               Previous
             </button>
@@ -151,7 +151,7 @@ export function SteppedFormShell(props: SteppedFormShellProps) {
               <button
                 type="button"
                 onClick={handleSubmitClick}
-                className="px-6 py-2 rounded-full bg-red-600 text-white font-semibold"
+                className="px-8 py-2.5 rounded-full bg-gansid-primary-gradient text-white font-display font-bold shadow-lg hover:scale-[1.02] transition-all whitespace-nowrap"
               >
                 Complete Registration
               </button>
@@ -159,7 +159,7 @@ export function SteppedFormShell(props: SteppedFormShellProps) {
               <button
                 type="button"
                 onClick={handleNext}
-                className="px-6 py-2 rounded-full bg-blue-600 text-white font-semibold"
+                className="px-8 py-2.5 rounded-full bg-gansid-primary-gradient text-white font-display font-bold shadow-lg hover:scale-[1.02] transition-all whitespace-nowrap"
               >
                 Next Step →
               </button>
