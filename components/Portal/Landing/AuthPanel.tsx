@@ -12,7 +12,8 @@ export function AuthPanel() {
   const [mode, setMode] = useState<Mode>('signup');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [fullName, setFullName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [role, setRole] = useState<'attendee' | 'exhibitor' | 'sponsor'>('attendee');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -23,7 +24,7 @@ export function AuthPanel() {
     setError(''); setLoading(true);
     const { error: err } = await supabase.auth.signUp({
       email, password,
-      options: { data: { full_name: fullName, role } },
+      options: { data: { full_name: `${firstName} ${lastName}`.trim(), role } },
     });
     setLoading(false);
     if (err) { setError(err.message); return; }
@@ -40,13 +41,10 @@ export function AuthPanel() {
   };
 
   return (
-    <div className="w-full max-w-md lg:sticky lg:top-8 bg-white rounded-gansid-lg p-8 shadow-2xl border border-gansid-outline-variant/30 relative overflow-hidden">
-      {/* Top accent bar */}
-      <div className="absolute top-0 inset-x-0 h-1.5 bg-gansid-primary-gradient" />
-
+    <div className="w-full max-w-md lg:sticky lg:top-8 rounded-gansid-lg p-8 shadow-2xl gradient-border relative">
       <div className="flex justify-center mb-6">
         <FloatingToggleTabs<Mode>
-          tabs={[{ id: 'signup', label: 'Sign Up' }, { id: 'signin', label: 'Sign In' }]}
+          tabs={[{ id: 'signup', label: 'Create Account' }, { id: 'signin', label: 'Sign In' }]}
           active={mode}
           onChange={(id) => { setMode(id); setError(''); setSignupSuccess(false); }}
         />
@@ -61,7 +59,10 @@ export function AuthPanel() {
         </div>
       ) : mode === 'signup' ? (
         <form onSubmit={handleSignup} className="space-y-4">
-          <GlassInput placeholder="Full name" value={fullName} onChange={(e) => setFullName(e.target.value)} required />
+          <div className="grid grid-cols-2 gap-3">
+            <GlassInput placeholder="First name" value={firstName} onChange={(e) => setFirstName(e.target.value)} required />
+            <GlassInput placeholder="Last name" value={lastName} onChange={(e) => setLastName(e.target.value)} required />
+          </div>
           <GlassInput type="email" placeholder="Email address" value={email} onChange={(e) => setEmail(e.target.value)} required />
           <GlassInput type="password" placeholder="Password (min 8 chars)" value={password} minLength={8} onChange={(e) => setPassword(e.target.value)} required />
           <div>

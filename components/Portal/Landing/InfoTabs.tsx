@@ -2,9 +2,15 @@ import { useState } from 'react';
 import { FloatingToggleTabs } from '../ui/FloatingToggleTabs';
 import { GlassCard } from '../ui/GlassCard';
 import { OrganicAccordion, OrganicAccordionItem } from '../ui/OrganicAccordion';
-import { REGISTRATION_PROCESS, IMPORTANT_NOTICE, GROUP_NOTE, INCLUDES, NOT_INCLUDED, FEES, FAQS, SUPPORT_EMAIL } from './content';
+import { REGISTRATION_PROCESS, IMPORTANT_NOTICE, GROUP_NOTE, INCLUDES, FEES, FAQS, SUPPORT_EMAIL } from './content';
 
 type TabId = 'about' | 'includes' | 'fees' | 'faqs';
+
+const STEP_GRADIENTS = [
+  'bg-[linear-gradient(135deg,#ba0028_0%,#E0243C_100%)] bg-clip-text',                           // 01 — red to bright red
+  'bg-[linear-gradient(135deg,#E0243C_0%,#7a3875_60%,#2260a1_100%)] bg-clip-text',               // 02 — red through purple to blue
+  'bg-[linear-gradient(135deg,#2260a1_0%,#1a4880_100%)] bg-clip-text',                           // 03 — blue
+];
 
 export function InfoTabs() {
   const [tab, setTab] = useState<TabId>('about');
@@ -29,9 +35,9 @@ export function InfoTabs() {
       {tab === 'about' && (
         <div className="space-y-8 viscous-enter">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {REGISTRATION_PROCESS.map((step) => (
+            {REGISTRATION_PROCESS.map((step, i) => (
               <GlassCard key={step.number}>
-                <div className="font-display text-6xl font-black bg-gansid-gradient-reverse bg-clip-text text-transparent">{step.number}</div>
+                <div className={`font-display text-6xl font-black text-transparent ${STEP_GRADIENTS[i]}`}>{step.number}</div>
                 <h3 className="font-display text-xl font-semibold mt-3">{step.title}</h3>
                 <p className="font-body text-gansid-on-surface/80 mt-2">{step.body}</p>
               </GlassCard>
@@ -63,14 +69,12 @@ export function InfoTabs() {
           </GlassCard>
           <GlassCard tint="red">
             <h3 className="font-display text-2xl font-semibold mb-4">Not Included</h3>
-            <ul className="space-y-2">
-              {NOT_INCLUDED.map((item) => (
-                <li key={item} className="flex items-start gap-2">
-                  <span className="text-gansid-primary-container">✕</span>
-                  <span className="font-body">{item}</span>
-                </li>
-              ))}
-            </ul>
+            <div className="rounded-gansid-md bg-white/70 p-5 border border-gansid-primary-container/20">
+              <p className="font-body text-gansid-on-surface font-semibold mb-1">Networking events</p>
+              <p className="font-body text-sm text-gansid-on-surface/70">
+                Networking events can be purchased as an add-on in the registration form.
+              </p>
+            </div>
           </GlassCard>
         </div>
       )}

@@ -52,6 +52,22 @@
   background-image: radial-gradient(ellipse at top left, #ba0028 0%, #E0243C 40%, #2260a1 80%);
 }
 
+/*
+  Gradient border pattern: uses the dual-background (content box + border box)
+  trick. The inner white fills the content, the gradient paints only the border.
+*/
+@utility gradient-border {
+  background: linear-gradient(white, white) padding-box,
+              linear-gradient(135deg, #ba0028 0%, #E0243C 60%, #2260a1 100%) border-box;
+  border: 2px solid transparent;
+}
+
+@utility gradient-border-input {
+  background: linear-gradient(white, white) padding-box,
+              linear-gradient(135deg, rgba(186, 0, 40, 0.5), rgba(224, 36, 60, 0.45) 60%, rgba(34, 96, 161, 0.5) 100%) border-box;
+  border: 1.5px solid transparent;
+}
+
 :root {
   --site-primary: #4F46E5;
   --site-accent: #4F46E5;
