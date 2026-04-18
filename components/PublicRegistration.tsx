@@ -31,9 +31,11 @@ import { useAuth } from './AuthContext';
 interface PublicRegistrationProps {
   /** Override the formId that would otherwise come from route params (used when embedded in a modal). */
   formId?: string;
+  /** If provided, a "Return to Portal" button appears on the success screen and invokes this. */
+  onComplete?: () => void;
 }
 
-const PublicRegistration = ({ formId: propFormId }: PublicRegistrationProps = {}) => {
+const PublicRegistration = ({ formId: propFormId, onComplete }: PublicRegistrationProps = {}) => {
   const params = useParams<{ formId: string }>();
   const formId = propFormId ?? params.formId;
   const { user, profile } = useAuth();
@@ -1313,7 +1315,10 @@ const PublicRegistration = ({ formId: propFormId }: PublicRegistrationProps = {}
       })()}
 
       {step === 'success' && generatedTicket && (
-        <div className="max-w-2xl w-full bg-white rounded-2xl shadow-xl overflow-hidden animate-fade-in-up relative z-10">
+        <div className={isSteppedMode
+          ? "flex-1 min-h-0 w-full flex items-start sm:items-center justify-center p-6 overflow-y-auto"
+          : "w-full flex items-center justify-center"}>
+        <div className="max-w-2xl w-full bg-white rounded-2xl shadow-xl overflow-hidden animate-fade-in-up relative z-10 mx-auto">
           {/* ── Success Header ── */}
           <div
             className="w-full h-48 flex flex-col items-center justify-center text-white"
@@ -1505,12 +1510,24 @@ const PublicRegistration = ({ formId: propFormId }: PublicRegistrationProps = {}
             )}
           </div>
 
-          <button
-            onClick={() => window.location.reload()}
-            className="text-gray-500 text-sm font-medium hover:text-gray-900 underline block mx-auto mb-6"
-          >
-            Start New Registration
-          </button>
+          <div className="flex flex-col items-center gap-3 mb-6">
+            {onComplete && (
+              <button
+                type="button"
+                onClick={onComplete}
+                className="px-8 py-3 rounded-full bg-gansid-primary-gradient text-white font-display font-bold shadow-lg hover:scale-[1.02] transition-all"
+              >
+                Return to Portal Dashboard
+              </button>
+            )}
+            <button
+              onClick={() => onComplete ? onComplete() : window.location.reload()}
+              className="text-gray-500 text-sm font-medium hover:text-gray-900 underline"
+            >
+              {onComplete ? 'Close' : 'Start New Registration'}
+            </button>
+          </div>
+        </div>
         </div>
       )}
 

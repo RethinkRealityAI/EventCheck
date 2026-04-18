@@ -1,12 +1,17 @@
 import { useState } from 'react';
+import { Download, Loader2 } from 'lucide-react';
 import type { Profile, Attendee } from '../../../types';
 import { GlassCard } from '../ui/GlassCard';
 import { CredentialBadgeModal } from './CredentialBadgeModal';
+import { getFormById, getSettings } from '../../../services/storageService';
+import { generateTicketPDF } from '../../../utils/pdfGenerator';
 
 interface Props { profile: Profile; attendee: Attendee | null; }
 
 export function CredentialCard({ profile, attendee }: Props) {
   const [open, setOpen] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const initials = (profile.fullName ?? profile.email).split(' ').map((s) => s[0]).join('').slice(0, 2).toUpperCase();
   const roleBadge = profile.role === 'exhibitor' ? 'Exhibitor'
     : profile.role === 'sponsor' ? 'Sponsor'
@@ -40,6 +45,26 @@ export function CredentialCard({ profile, attendee }: Props) {
 
   const qrPayload = (attendee as any).qrPayload ?? attendee.id;
 
+  const handleDownloadPdf = async () => {
+    setDownloading(true);
+    setDownloadError(null);
+    try {
+      const [form, settings] = await Promise.all([
+        getFormById((attendee as any).formId),
+        getSettings(),
+      ]);
+      if (!form || !settings) throw new Error('Ticket template unavailable');
+      const doc = await generateTicketPDF(attendee, settings, form);
+      const safeName = (attendee.name || profile.fullName || 'Attendee').replace(/[^a-zA-Z0-9 ]/g, '_');
+      doc.save(`${safeName}_Ticket.pdf`);
+    } catch (err: any) {
+      console.error('Ticket PDF download failed', err);
+      setDownloadError(err?.message || 'Download failed');
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   return (
     <>
       <GlassCard className="relative overflow-hidden">
@@ -64,7 +89,19 @@ export function CredentialCard({ profile, attendee }: Props) {
               className="rounded-lg"
             />
           </button>
-          <p className="font-body text-xs text-gansid-on-surface/50">Click to enlarge</p>
+          <p className="font-body text-xs text-gansid-on-surface/50">Click QR to enlarge</p>
+          <button
+            type="button"
+            onClick={handleDownloadPdf}
+            disabled={downloading}
+            className="w-full mt-2 flex items-center justify-center gap-2 px-4 py-2.5 rounded-full bg-gansid-primary-gradient text-white font-display font-bold text-sm shadow-md hover:scale-[1.02] transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {downloading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+            {downloading ? 'Preparing…' : 'Download Ticket PDF'}
+          </button>
+          {downloadError && (
+            <p className="font-body text-xs text-gansid-primary">{downloadError}</p>
+          )}
         </div>
       </GlassCard>
       <CredentialBadgeModal open={open} onClose={() => setOpen(false)} profile={profile} attendee={attendee} />

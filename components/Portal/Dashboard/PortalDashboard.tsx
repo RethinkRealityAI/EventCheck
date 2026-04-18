@@ -15,12 +15,18 @@ export function PortalDashboard() {
   const [attendees, setAttendees] = useState<Attendee[]>([]);
   const [forms, setForms] = useState<Form[]>([]);
   const [registerFormId, setRegisterFormId] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     if (!user || !profile || !user.email) return;
     getAttendeesForUser(user.id, user.email).then(setAttendees);
     getPortalForms().then(setForms);
-  }, [user, profile]);
+  }, [user, profile, refreshKey]);
+
+  const handleModalClose = () => {
+    setRegisterFormId(null);
+    setRefreshKey((k) => k + 1);
+  };
 
   if (!profile || !user) return null;
 
@@ -47,7 +53,7 @@ export function PortalDashboard() {
         </aside>
       </div>
       {registerFormId && (
-        <RegisterModal formId={registerFormId} onClose={() => setRegisterFormId(null)} />
+        <RegisterModal formId={registerFormId} onClose={handleModalClose} />
       )}
     </>
   );
