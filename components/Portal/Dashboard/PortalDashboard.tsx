@@ -3,6 +3,7 @@ import { useAuth } from '../../AuthContext';
 import { getAttendeesForUser, getPortalForms } from '../../../services/storageService';
 import type { Attendee, Form } from '../../../types';
 import { WelcomeBlock } from './WelcomeBlock';
+import { VerifyEmailBanner } from './VerifyEmailBanner';
 import { AvailableFormsGrid } from './AvailableFormsGrid';
 import { CredentialCard } from './CredentialCard';
 import { AnnouncementsFeed } from './AnnouncementsFeed';
@@ -27,6 +28,7 @@ export function PortalDashboard() {
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[1.7fr_1fr] gap-8">
+      <VerifyEmailBanner />
       <div className="space-y-8">
         <WelcomeBlock profile={profile} latestAttendee={latestAttendee} />
         <AvailableFormsGrid forms={forms} userAttendees={attendees} roleOrder={roleOrder} />
