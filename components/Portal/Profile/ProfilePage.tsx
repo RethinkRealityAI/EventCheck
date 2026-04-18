@@ -28,6 +28,16 @@ export function ProfilePage() {
 
   if (!profile || !user) return null;
 
+  const attendeeTypeLabel = profile.role === 'exhibitor' ? 'Exhibitor'
+    : profile.role === 'sponsor' ? 'Sponsor'
+    : profile.role === 'admin' ? 'Admin'
+    : 'Delegate';
+  const attendeeTypePillGradient =
+    profile.role === 'exhibitor' ? 'bg-[linear-gradient(135deg,#8b2a5e_0%,#5a3575_100%)]'
+    : profile.role === 'sponsor' ? 'bg-[linear-gradient(135deg,#2260a1_0%,#1a4880_100%)]'
+    : profile.role === 'admin' ? 'bg-[linear-gradient(135deg,#0f172a_0%,#1a4880_100%)]'
+    : 'bg-gansid-primary-gradient';
+
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
@@ -50,7 +60,12 @@ export function ProfilePage() {
 
       {/* Card 1: Profile Photo */}
       <section className="bg-white rounded-gansid-lg p-8 shadow-2xl shadow-gansid-secondary/10 gradient-border">
-        <h2 className="font-display text-xl font-semibold mb-6">Profile Photo</h2>
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="font-display text-xl font-semibold">Profile Photo</h2>
+          <span className={`${attendeeTypePillGradient} text-white font-display text-xs font-bold uppercase tracking-[0.2em] px-4 py-2 rounded-full shadow-lg`}>
+            {attendeeTypeLabel}
+          </span>
+        </div>
         <div className="flex items-center gap-6">
           <div className="relative">
             {avatarUrl ? (
