@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useLayoutEffect, useRef } from 'react';
 import { FloatingToggleTabs } from '../ui/FloatingToggleTabs';
 import { GlassCard } from '../ui/GlassCard';
 import { OrganicAccordion, OrganicAccordionItem } from '../ui/OrganicAccordion';
@@ -7,14 +7,27 @@ import { REGISTRATION_PROCESS, IMPORTANT_NOTICE, GROUP_NOTE, INCLUDES, FEES, FAQ
 type TabId = 'about' | 'includes' | 'fees' | 'faqs';
 
 const STEP_GRADIENTS = [
-  'bg-[linear-gradient(135deg,#ba0028_0%,#E0243C_100%)] bg-clip-text',                           // 01 — red to bright red
-  'bg-[linear-gradient(135deg,#E0243C_0%,#7a3875_60%,#2260a1_100%)] bg-clip-text',               // 02 — red through purple to blue
-  'bg-[linear-gradient(135deg,#2260a1_0%,#1a4880_100%)] bg-clip-text',                           // 03 — blue
+  'bg-[linear-gradient(135deg,#ba0028_0%,#E0243C_100%)] bg-clip-text',     // 01 — pure red
+  'bg-[linear-gradient(135deg,#8b2a5e_0%,#5a3575_100%)] bg-clip-text',      // 02 — pure purple/magenta
+  'bg-[linear-gradient(135deg,#2260a1_0%,#1a4880_100%)] bg-clip-text',     // 03 — pure blue
 ];
 
 export function InfoTabs() {
   const [tab, setTab] = useState<TabId>('about');
   const [feeTier, setFeeTier] = useState<'tier1' | 'tier2'>('tier1');
+  const scrollRestoreRef = useRef<number | null>(null);
+
+  const handleTabChange = (id: TabId) => {
+    scrollRestoreRef.current = window.scrollY;
+    setTab(id);
+  };
+
+  useLayoutEffect(() => {
+    if (scrollRestoreRef.current !== null) {
+      window.scrollTo({ top: scrollRestoreRef.current, behavior: 'instant' as ScrollBehavior });
+      scrollRestoreRef.current = null;
+    }
+  }, [tab]);
   const activeTier = FEES.tiers.find((t) => t.id === feeTier)!;
 
   return (
@@ -28,7 +41,7 @@ export function InfoTabs() {
             { id: 'faqs', label: 'FAQs' },
           ]}
           active={tab}
-          onChange={setTab}
+          onChange={handleTabChange}
         />
       </div>
 
