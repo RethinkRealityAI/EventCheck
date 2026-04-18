@@ -35,23 +35,42 @@ export function SteppedFormShell(props: SteppedFormShellProps) {
       if (typeof parsed.currentIndex === 'number') {
         setCurrentIndex(parsed.currentIndex);
       }
+      if (parsed.registrationMode === 'individual' || parsed.registrationMode === 'group') {
+        props.setRegistrationMode(parsed.registrationMode);
+      }
+      if (typeof parsed.groupSize === 'number') {
+        props.setGroupSize(parsed.groupSize);
+      }
+      if (typeof parsed.groupHasAllInfo === 'boolean') {
+        props.setGroupHasAllInfo(parsed.groupHasAllInfo);
+      }
+      if (Array.isArray(parsed.groupMembers)) {
+        props.setGroupMembers(parsed.groupMembers);
+      }
     } catch {
       /* ignore malformed localStorage */
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storageKey]);
 
-  // Persist answers + currentIndex whenever they change
+  // Persist answers + currentIndex + RMS group state whenever they change
   useEffect(() => {
     try {
       localStorage.setItem(
         storageKey,
-        JSON.stringify({ answers: props.answers, currentIndex }),
+        JSON.stringify({
+          answers: props.answers,
+          currentIndex,
+          registrationMode: props.registrationMode,
+          groupSize: props.groupSize,
+          groupHasAllInfo: props.groupHasAllInfo,
+          groupMembers: props.groupMembers,
+        }),
       );
     } catch {
       /* ignore quota errors */
     }
-  }, [props.answers, currentIndex, storageKey]);
+  }, [props.answers, currentIndex, props.registrationMode, props.groupSize, props.groupHasAllInfo, props.groupMembers, storageKey]);
 
   const clearPersistence = () => {
     try { localStorage.removeItem(storageKey); } catch {}
