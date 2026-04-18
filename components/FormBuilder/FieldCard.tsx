@@ -1,11 +1,12 @@
 import React from 'react';
 import { GripVertical, Settings, Trash2, Ticket } from 'lucide-react';
-import { FormField } from '../../types';
+import { FormField, Form } from '../../types';
 import { FIELD_TYPES } from './FieldToolbox';
 import CountryField from './fields/CountryField';
 
 interface FieldCardProps {
     field: FormField;
+    form?: Form;
     index: number;
     isSelected: boolean;
     onSelect: () => void;
@@ -20,6 +21,7 @@ interface FieldCardProps {
 
 const FieldCard: React.FC<FieldCardProps> = ({
     field,
+    form,
     index,
     isSelected,
     onSelect,
@@ -73,6 +75,11 @@ const FieldCard: React.FC<FieldCardProps> = ({
                         <div className="fb-field-card-badges">
                             {field.required && <span className="fb-badge fb-badge--required">Required</span>}
                             {field.conditional?.enabled && <span className="fb-badge fb-badge--conditional">Conditional</span>}
+                            {field.section && form?.settings?.renderMode === 'stepped' && (
+                                <span className="inline-flex items-center px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded">
+                                    {form.settings.steps?.find((s) => s.id === field.section)?.label ?? field.section}
+                                </span>
+                            )}
                         </div>
                     </div>
 

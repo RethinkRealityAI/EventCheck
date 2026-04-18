@@ -314,6 +314,7 @@ const FormBuilder: React.FC = () => {
                                             <FieldCard
                                                 key={field.id}
                                                 field={field}
+                                                form={form}
                                                 index={index}
                                                 isSelected={editingField?.id === field.id}
                                                 onSelect={() => {
