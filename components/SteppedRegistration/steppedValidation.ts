@@ -5,7 +5,7 @@ export interface ValidateResult {
   error?: string;
 }
 
-const NON_ANSWER_FIELD_TYPES = new Set([
+const NON_ANSWER_FIELD_TYPES: ReadonlySet<string> = new Set([
   'ticket',
   'registration-mode-selector',
 ]);
@@ -18,7 +18,7 @@ export function validateRequired(
   for (const field of fields) {
     if (!isVisible(field)) continue;
     if (!field.required) continue;
-    if (NON_ANSWER_FIELD_TYPES.has(field.type as any)) continue;
+    if (NON_ANSWER_FIELD_TYPES.has(field.type)) continue;
     if (!answers[field.id]) {
       return { ok: false, error: `Please fill in ${field.label}` };
     }
@@ -46,8 +46,8 @@ export function validateRms(
 export interface GroupMember {
   name: string;
   email: string;
-  countryCode?: string;
-  categoryId?: string;
+  countryCode?: string | null;
+  categoryId?: string | null;
 }
 
 export function validateGroupMembers(

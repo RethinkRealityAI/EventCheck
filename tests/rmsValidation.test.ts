@@ -1,12 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import type { FormField } from '../types';
-import { validateRequired, validateRms } from '../components/SteppedRegistration/steppedValidation';
+import { validateRequired, validateRms, validateGroupMembers } from '../components/SteppedRegistration/steppedValidation';
+import type { GroupMember } from '../components/SteppedRegistration/steppedValidation';
 
 describe('RMS field validation', () => {
   it('does NOT require answers[rmsField.id] since its value lives in registrationMode state', () => {
     const rmsField: FormField = {
       id: 'mode-select',
-      type: 'registration-mode-selector' as any,
+      type: 'registration-mode-selector',
       label: 'Registration Type',
       required: true,
     } as any;
@@ -18,7 +19,7 @@ describe('RMS field validation', () => {
   it('reports missing RMS selection via validateRms when registrationMode is null', () => {
     const rmsField: FormField = {
       id: 'mode-select',
-      type: 'registration-mode-selector' as any,
+      type: 'registration-mode-selector',
       label: 'Registration Type',
       required: true,
     } as any;
@@ -30,11 +31,78 @@ describe('RMS field validation', () => {
   it('passes validateRms when registrationMode is set', () => {
     const rmsField: FormField = {
       id: 'mode-select',
-      type: 'registration-mode-selector' as any,
+      type: 'registration-mode-selector',
       label: 'Registration Type',
       required: true,
     } as any;
     expect(validateRms(rmsField, 'individual').ok).toBe(true);
     expect(validateRms(rmsField, 'group').ok).toBe(true);
+  });
+});
+
+describe('validateGroupMembers', () => {
+  const validMember: GroupMember = { name: 'Alice Smith', email: 'alice@example.com', countryCode: 'CA', categoryId: 'cat-1' };
+
+  it('returns ok when registrationMode is individual', () => {
+    const result = validateGroupMembers('individual', [], false);
+    expect(result.ok).toBe(true);
+  });
+
+  it('returns ok when registrationMode is null', () => {
+    const result = validateGroupMembers(null, [], false);
+    expect(result.ok).toBe(true);
+  });
+
+  it('returns error when members array is empty', () => {
+    const result = validateGroupMembers('group', [], false);
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe('Please add at least one group member.');
+  });
+
+  it('returns error when a member has empty name', () => {
+    const members: GroupMember[] = [{ name: '   ', email: 'alice@example.com' }];
+    const result = validateGroupMembers('group', members, false);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('name');
+  });
+
+  it('returns error when a member has whitespace-only name', () => {
+    const members: GroupMember[] = [{ name: '\t', email: 'alice@example.com' }];
+    const result = validateGroupMembers('group', members, false);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('name');
+  });
+
+  it('returns error when a member has valid name but empty email', () => {
+    const members: GroupMember[] = [{ name: 'Alice Smith', email: '' }];
+    const result = validateGroupMembers('group', members, false);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('email');
+  });
+
+  it('returns country error when requireCountryAndCategory is true and countryCode is missing', () => {
+    const members: GroupMember[] = [{ name: 'Alice Smith', email: 'alice@example.com', countryCode: null, categoryId: 'cat-1' }];
+    const result = validateGroupMembers('group', members, true);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('country');
+  });
+
+  it('returns category error when requireCountryAndCategory is true and categoryId is missing', () => {
+    const members: GroupMember[] = [{ name: 'Alice Smith', email: 'alice@example.com', countryCode: 'CA', categoryId: null }];
+    const result = validateGroupMembers('group', members, true);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('category');
+  });
+
+  it('returns ok when requireCountryAndCategory is false and country/category are absent', () => {
+    const members: GroupMember[] = [{ name: 'Alice Smith', email: 'alice@example.com' }];
+    const result = validateGroupMembers('group', members, false);
+    expect(result.ok).toBe(true);
+  });
+
+  it('returns ok when all members are fully valid with requireCountryAndCategory true', () => {
+    const members: GroupMember[] = [validMember, { name: 'Bob Jones', email: 'bob@example.com', countryCode: 'US', categoryId: 'cat-2' }];
+    const result = validateGroupMembers('group', members, true);
+    expect(result.ok).toBe(true);
   });
 });
