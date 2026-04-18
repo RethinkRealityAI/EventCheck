@@ -64,7 +64,6 @@ export interface FormRendererProps {
   // Answers
   answers: Record<string, any>;
   onFieldChange: (fieldId: string, value: any) => void;
-  setAnswers: React.Dispatch<React.SetStateAction<Record<string, any>>>;
 
   // Dynamic pricing
   pricingTemplate: PricingTemplate | null;
@@ -79,7 +78,6 @@ export interface FormRendererProps {
   // Ticket / static pricing state
   ticketQuantities: Record<string, number>;
   onQuantityChange: (itemId: string, qty: number) => void;
-  ticketField: FormField | null;
   promoCode: string;
   setPromoCode: React.Dispatch<React.SetStateAction<string>>;
   appliedPromo: { code: string; value: number; type: 'percent' | 'fixed' } | null;
@@ -141,7 +139,6 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   dynamicTotal,
   ticketQuantities,
   onQuantityChange,
-  ticketField,
   promoCode,
   setPromoCode,
   appliedPromo,

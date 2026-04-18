@@ -24,9 +24,7 @@ import PricingBracketBanner from './Pricing/PricingBracketBanner';
 import LivePriceCategory from './Pricing/LivePriceCategory';
 import AddonsList from './Pricing/AddonsList';
 import RunningTotal from './Pricing/RunningTotal';
-import { FormRenderer } from './SteppedRegistration/FormRenderer';
-
-const EXHIBITOR_STAFF_HIDDEN_FIELD_IDS = new Set(['f_present', 'f_emerg_name', 'f_emerg_phone', 'f_emerg_rel']);
+import { SingleFormShell } from './SteppedRegistration/SingleFormShell';
 
 const PublicRegistration = () => {
   const { formId } = useParams<{ formId: string }>();
@@ -985,9 +983,8 @@ const PublicRegistration = () => {
               </div>
             )}
 
-            <FormRenderer
+            <SingleFormShell
               form={form}
-              filteredFields={form.fields}
               mode={mode}
               isVisible={isVisible}
               isAnyPendingClaim={isAnyPendingClaim}
@@ -1009,7 +1006,6 @@ const PublicRegistration = () => {
               groupTotal={groupTotal}
               answers={answers}
               onFieldChange={handleInputChange}
-              setAnswers={setAnswers}
               pricingTemplate={pricingTemplate}
               selectedCategoryId={selectedCategoryId}
               setSelectedCategoryId={setSelectedCategoryId}
@@ -1020,7 +1016,6 @@ const PublicRegistration = () => {
               dynamicTotal={dynamicTotal}
               ticketQuantities={ticketQuantities}
               onQuantityChange={handleQuantityChange}
-              ticketField={ticketField}
               promoCode={promoCode}
               setPromoCode={setPromoCode}
               appliedPromo={appliedPromo}
