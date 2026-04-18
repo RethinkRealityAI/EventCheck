@@ -45,6 +45,30 @@ components/
     RunningTotal.tsx       — Sticky running total widget
   Consent/                 — Consent checkbox with modal-gated document viewing
     ConsentCheckbox.tsx    — Clickable label → modal → unlock checkbox pattern
+  Portal/                  — GANSID user portal (rendered only when portalEnabled=true)
+    Landing/               — Landing page: AuthPanel, InfoTabs, content constants
+    Dashboard/             — PortalDashboard, WelcomeBlock, CredentialCard,
+                             CredentialBadgeModal, AvailableFormsGrid,
+                             AnnouncementsFeed, QuickLinks
+    Profile/
+      ProfilePage.tsx      — Authenticated profile edit page
+    ResetPassword/
+      ResetPasswordPage.tsx— Password-reset landing (arrives via Supabase email link)
+    PortalLayout.tsx       — Root layout wrapper (<div className="portal-root">)
+    ui/                    — Hand-rolled glass primitives: GlassCard, ViscousButton,
+                             GlassInput, GlassSelect, GlassDialog, FloatingToggleTabs,
+                             OrganicAccordion, StepperSidebar
+  SteppedRegistration/     — Multi-step form infrastructure
+    FormRenderer.tsx       — Extracted field-rendering + submit logic (was inline in
+                             PublicRegistration). Accepts filteredFields param.
+    SingleFormShell.tsx    — Thin wrapper: renders FormRenderer with all fields at once
+    SteppedFormShell.tsx   — Renders FormRenderer one step at a time + sidebar stepper
+    steppedValidation.ts   — Pure helpers: validateRequired, validateRms,
+                             validateGroupMembers, groupFieldsBySection
+  Settings/
+    AnnouncementsTab.tsx   — Announcements list/create/edit/delete/activate + image upload
+  FormBuilder/
+    StepsManager.tsx       — Toggle renderMode, CRUD steps in form settings panel
   Sponsors/                — Sponsor management section
     SponsorsDashboard.tsx  — Admin dashboard shell with stats + 7-tab routing
     SponsorsTable.tsx      — Submission list with status/method filters
@@ -61,6 +85,8 @@ services/
                              getSponsorAttendees, attendee mappers including sponsor fields)
   supabaseClient.ts        — Supabase client initialization
   smtpService.ts           — Email sending via edge function
+  profileService.ts        — Profile fetch/update mappers (portal)
+  announcementService.ts   — Announcement CRUD + image upload to portal-assets (portal)
   database.types.ts        — Generated/maintained DB types (includes sponsor_prospects, sponsor
                              columns on attendees + app_settings, form_type on forms)
 utils/
@@ -93,6 +119,9 @@ supabase/migrations/
   20260414_add_sponsor_tables.sql — Sponsor schema
   20260416000000_add_pricing_templates.sql — Pricing templates table + attendee pricing columns
   20260416120000_extend_form_type_with_exhibitor.sql — form_type CHECK includes 'exhibitor'
+  20260418000000_add_user_portal_schema.sql — profiles table, is_portal_admin(), handle_new_user
+                             trigger, attendees.user_id, forms.show_in_portal, announcements
+                             table, portal-assets bucket RLS, bootstrap admin backfill
 tests/
   sponsorEmailTemplates.test.ts — Template merge + HTML escape + context builders (19 tests)
   createSponsorForm.test.ts     — Sponsor form seed shape + pricing (9 tests)
@@ -104,6 +133,11 @@ tests/
   formTemplates.test.ts         — Template registry + field shape validation (8 tests)
   exhibitorTiers.test.ts        — Tier config + quota validation (5 tests)
   storageMappers.test.ts        — Mapper source-grep guards: no hardcoded ternaries (6 tests)
+  profileService.test.ts        — Profile row ↔ UI mapper correctness (2 tests)
+  announcementService.test.ts   — Announcement filter logic (2 tests)
+  rmsValidation.test.ts         — validateGroupMembers + groupFieldsBySection + RMS validation
+                                   helpers (17 tests)
+  siteConfig.test.ts            — portalEnabled flag + site-conditional routing (2 tests)
 types.ts                   — All TypeScript interfaces (Attendee, Form, AppSettings,
                              PricingTemplate, SponsorProspect, FormField, etc.)
 ```
@@ -324,6 +358,147 @@ To add a template: create `config/formTemplates/build<Name>.ts` that returns a p
 **Critical:** when a template includes a `ticket`-type field, its `ticketConfig` must use
 `items: []` (not `tickets: []`) and include `promoCodes: []`. Run `npm test` after creating
 any template — `tests/formTemplates.test.ts` validates these shapes.
+
+## User Portal
+
+GANSID-only feature, gated on `CURRENT_SITE.portalEnabled` in `config/sites.ts`. Wraps the
+existing registration engine in a user-facing portal with account creation, a stepped
+multi-section form UI, a credential QR dashboard, and an admin-managed announcements feed.
+SCAGO is unaffected — portal routes are NOT registered when `portalEnabled === false`.
+
+Spec: `docs/superpowers/specs/2026-04-18-gansid-user-portal-design.md`
+Plan: `docs/superpowers/plans/2026-04-18-gansid-user-portal.md`
+
+### Routing (site-conditional)
+
+On GANSID (`portalEnabled=true`):
+- `/#/` → `<Landing />` — hero + sign-up/sign-in tab card + Congress info tabs
+- `/#/portal` → `<PortalDashboard />` (ProtectedRoute; redirects to `/#/` if not signed in)
+- `/#/portal/profile` → `<ProfilePage />` (ProtectedRoute)
+- `/#/reset-password` → `<ResetPasswordPage />` (public; arrives via Supabase auth email link)
+- `/#/admin/*` → unchanged (ProtectedRoute, `requireRole='admin'`)
+
+On SCAGO: unchanged (`/#/` still redirects to `/#/admin`; no portal routes registered).
+
+### Auth + profiles
+
+- **Signup:** email + password + role selection (Attendee / Exhibitor / Sponsor) on the
+  landing `<AuthPanel>`; Supabase sends a verification email; `handle_new_user` trigger
+  auto-creates a `profiles` row from signup metadata.
+- **Signin:** same `<AuthPanel>` (Sign In tab) or `/#/login` (admin fallback). Landing signin
+  redirects to `/#/portal`; `/#/login` redirects by role.
+- **Admin role:** set manually via SQL (`UPDATE profiles SET role='admin' WHERE email='...'`)
+  or bootstrapped in the migration (all pre-portal `auth.users` rows are flagged admin).
+- **`AuthContext`** now exposes `{ user, session, profile, loading, signOut, refreshProfile }`.
+  On auth state change, the context fetches the profile row and caches it.
+- **`ProtectedRoute`** gains an optional `requireRole?: 'admin'` prop. Waits for profile to
+  load before evaluating. `/#/admin/*` routes pass `requireRole="admin"`. Existing callers
+  pass no prop and behave identically to today.
+
+### Schema additions — migration `20260418000000_add_user_portal_schema.sql`
+
+- `profiles` table keyed on `auth.users.id` — columns: `role` (`attendee | exhibitor |
+  sponsor | admin`), `full_name`, `organization`, `country_code`, `phone`, `avatar_url`,
+  timestamps. RLS: users read/update own row; admins read all via `is_portal_admin()`.
+- `is_portal_admin()` — SECURITY DEFINER function that avoids RLS recursion when admin
+  policies query the same `profiles` table they protect.
+- `handle_new_user()` trigger on `auth.users INSERT` — inserts a profile row from
+  `raw_user_meta_data`; uses `ON CONFLICT DO NOTHING` to be idempotent.
+- `attendees.user_id UUID` — nullable FK to `auth.users`. Legacy rows stay NULL; new
+  submissions from logged-in users get stamped server-side by `verify-payment`.
+- `forms.show_in_portal BOOLEAN NOT NULL DEFAULT false` — explicit per-form opt-in; prevents
+  test/internal forms from surfacing in the user dashboard.
+- `announcements` table — `site`, `title`, `body`, `image_url`, `is_active`, `published_at`.
+  RLS: public read when `is_active`; admin-only write.
+- Storage bucket `portal-assets` — public read, admin-only upload. Used for announcement
+  images; reserved for future profile avatars.
+- Bootstrap backfill: inserts a `profiles` row (`role='admin'`) for every existing
+  `auth.users` row (pre-portal, every auth user was an admin).
+
+Apply to BOTH project refs (`iigbgbgakevcgilucvbs` SCAGO and `gticuvgclbvhwvpzkuez` GANSID)
+per the multi-site deployment rule.
+
+### Stepped form rendering
+
+Forms opt in via `form.settings.renderMode === 'stepped'` and `form.settings.steps: FormStep[]`.
+`FormField.section` / `FormField.sectionOrder` assign fields to named steps.
+
+- `<SteppedFormShell>` — wraps the extracted `<FormRenderer>`, renders one step at a time with
+  a left-sidebar stepper. Per-step validation via pure helpers in
+  `components/SteppedRegistration/steppedValidation.ts` (`validateRequired`,
+  `validateRms`, `validateGroupMembers`). Previous / Next / Submit footer controls.
+- `<SingleFormShell>` — thin wrapper that renders `<FormRenderer>` with all fields at once
+  (default for non-stepped forms; replaces current PublicRegistration body).
+- `<FormRenderer>` — extracted field-rendering JSX + submit logic previously inline in
+  `PublicRegistration.tsx`. Accepts `filteredFields` so shells can pass a step slice or all
+  fields.
+- **localStorage persistence:** in-progress answers keyed on
+  `gansid-portal-stepper:{formId}:{userId}`; cleared on successful submit AND on signout
+  (AuthContext sweeps all matching keys on auth state change).
+- **FormBuilder UI:** `StepsManager` (toggle `renderMode`, CRUD steps) in form settings;
+  per-field Step dropdown in `FieldPropertiesPanel`; step-assignment pill on `FieldCard`.
+
+### Portal dashboard
+
+Two-column layout (desktop): left ~65%, right ~35% sticky.
+
+- **Left column:** Welcome block (display-typography greeting) → Available Forms grid
+  (cards for all `show_in_portal = true` forms, sorted with user's role-type forms first;
+  each card shows "Start Registration" or "View Registration" based on attendee rows) →
+  Announcements feed (3 most-recent active items for the current site).
+- **Right column:** Credential card — pulls from the latest `payment_status='paid'`
+  attendee row matching `user_id = auth.uid()` or fallback email match; displays `qr_payload`
+  as a large QR. Clicking opens the Credential Badge Modal (full-screen glass card with
+  "Save as Image" via `html2canvas`). No paid attendee row → placeholder card with
+  "Register for Congress" CTA. Quick Links section (static placeholder cards for MVP).
+- **Avatar dropdown** (portal header): Profile → `/#/portal/profile`, Admin Dashboard →
+  `/#/admin` (conditional on `role='admin'`), Sign Out.
+
+### Styling foundation (Viscous Flow design system)
+
+Scoped to portal surfaces via `.portal-root` in `styles/portal.css` — admin and public-form
+surfaces are unaffected.
+
+`tailwind.config.js` extended with GANSID-specific tokens:
+- Colors: `gansid-primary` (#ba0028), `gansid-primary-container` (#E0243C),
+  `gansid-secondary` (#2260a1), surface tones (`gansid-surface`, `gansid-on-surface`, etc.)
+- Typography: `font-display` (Outfit), `font-body` (DM Sans) — loaded via Google Fonts
+- Radii: `rounded-gansid-{md,lg,xl}` (1.5rem / 2rem / 3rem)
+- Utilities: `bg-gansid-primary-gradient`, `shadow-invisible-lift`,
+  `backdrop-blur-viscous` (24px), `ease-viscous`
+
+Hand-rolled primitive components in `components/Portal/ui/` — no third-party UI library
+(shadcn/radix ruled out; would fight the no-line rule):
+`GlassCard` (tints: default/red/blue), `ViscousButton` (primary gradient / secondary glass),
+`GlassInput`, `GlassSelect`, `GlassDialog` (Escape + click-outside), `FloatingToggleTabs`,
+`OrganicAccordion`, `StepperSidebar`.
+
+### verify-payment JWT stamping
+
+When the request carries `Authorization: Bearer <jwt>`, the edge function calls
+`supabase.auth.getUser(jwt)`, verifies the session, and derives `user_id` server-side.
+Primary attendee rows get `user_id = authUserId`; guest placeholder rows stay NULL.
+Anonymous submissions (no header) insert `user_id = NULL`. The client never supplies
+`user_id` in the payload — that would be forgeable.
+
+### Announcements admin
+
+`Settings → Announcements` tab (`AnnouncementsTab.tsx`) — list/create/edit/delete/activate,
+with image upload to `portal-assets/announcements/{uuid}.{ext}`. Site-scoped per
+`CURRENT_SITE.key`. Image URL stored in `announcements.image_url`.
+
+### Conventions / gotchas
+
+- Portal routes register ONLY when `CURRENT_SITE.portalEnabled === true`. Since `CURRENT_SITE`
+  is a build-time constant, portal code is tree-shaken out of the SCAGO bundle entirely.
+- `forms.show_in_portal` defaults to `false` — explicit opt-in per form in FormsManager.
+- `profiles.role` signup values are `attendee | exhibitor | sponsor` only; `admin` is a
+  permission set via SQL (not self-selectable).
+- `html2canvas` dependency added for the Credential Badge Modal's "Save as Image" action.
+- localStorage scoping: `gansid-portal-stepper:{formId}:{userId}` — cleared on submit and
+  signout; restarting from step 1 if localStorage is cleared manually is acceptable.
+- Email verification is a soft block: the portal loads for unverified users (banner shown),
+  but `verify-payment` checks `email_confirmed_at` and rejects unverified sessions with 401.
 
 ## Group Registration Flow
 
