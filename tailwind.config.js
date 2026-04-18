@@ -29,7 +29,12 @@ export default {
                 'viscous': '24px',
             },
             backgroundImage: {
-                'gansid-primary-gradient': 'linear-gradient(135deg, #ba0028, #E0243C)',
+                'gansid-primary-gradient': 'linear-gradient(135deg, #ba0028 0%, #E0243C 60%, #2260a1 100%)',
+                'gansid-gradient-135': 'linear-gradient(135deg, #ba0028 0%, #E0243C 60%, #2260a1 100%)',
+                'gansid-gradient-45': 'linear-gradient(45deg, #ba0028, #E0243C 40%, #2260a1)',
+                'gansid-gradient-reverse': 'linear-gradient(90deg, #2260a1 0%, #E0243C 50%, #ba0028 100%)',
+                'gansid-gradient-swirl': 'conic-gradient(from 180deg at 50% 50%, #ba0028, #E0243C 33%, #2260a1 66%, #ba0028)',
+                'gansid-gradient-radial': 'radial-gradient(ellipse at top left, #ba0028 0%, #E0243C 40%, #2260a1 80%)',
             },
             boxShadow: {
                 'invisible-lift': '0 0 64px -12px rgba(26, 28, 28, 0.06)',

@@ -5,8 +5,9 @@ export function HeroSection() {
     <div className="space-y-6">
       {/* Gradient hero block — no external image required */}
       <div className="relative w-full aspect-[4/3] rounded-gansid-lg overflow-hidden shadow-2xl">
-        <div className="absolute inset-0 bg-gradient-to-br from-gansid-primary via-gansid-primary-container to-gansid-secondary" />
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(255,255,255,0.3),transparent_50%)]" />
+        <div className="absolute inset-0 bg-gansid-gradient-135" />
+        <div className="absolute inset-0 bg-gansid-gradient-swirl opacity-40 mix-blend-overlay" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(255,255,255,0.35),transparent_50%)]" />
         <div className="absolute bottom-6 left-6 right-6 text-white">
           <div className="inline-block px-3 py-1 bg-white/20 backdrop-blur rounded-full text-xs font-display uppercase tracking-widest mb-3">
             Hyderabad · India
@@ -28,7 +29,7 @@ export function HeroSection() {
         </span>
       </div>
       <h1 className="font-display text-5xl md:text-6xl font-bold leading-tight tracking-tight">
-        <span className="bg-gradient-to-r from-gansid-primary via-gansid-primary-container to-gansid-secondary bg-clip-text text-transparent">
+        <span className="bg-gansid-gradient-reverse bg-clip-text text-transparent">
           {HERO.location}
         </span>
       </h1>

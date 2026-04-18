@@ -16,7 +16,8 @@ export function PortalLayout() {
 
   return (
     <div className="portal-root min-h-screen bg-gansid-surface">
-      <header className="bg-gansid-surface-container-lowest/80 backdrop-blur-viscous sticky top-0 z-40 px-6 py-4 flex items-center justify-between">
+      <header className="relative bg-white/80 backdrop-blur-viscous sticky top-0 z-40 px-6 py-4 flex items-center justify-between">
+        <div className="absolute top-0 inset-x-0 h-1 bg-gansid-primary-gradient" />
         <Link to="/portal" className="font-display font-bold text-lg">GANSID Portal</Link>
         <div className="relative">
           <button

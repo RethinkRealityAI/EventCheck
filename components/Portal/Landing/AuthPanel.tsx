@@ -70,7 +70,7 @@ export function AuthPanel() {
               {(['attendee', 'exhibitor', 'sponsor'] as const).map((r) => (
                 <label key={r} className="flex-1">
                   <input type="radio" name="role" value={r} checked={role === r} onChange={() => setRole(r)} className="sr-only peer" />
-                  <span className="block text-center px-3 py-2 rounded-full bg-gansid-surface-container-low cursor-pointer peer-checked:bg-gradient-to-r peer-checked:from-gansid-primary peer-checked:to-gansid-primary-container peer-checked:text-white font-display text-sm capitalize transition-all">
+                  <span className="block text-center px-3 py-2 rounded-full bg-gansid-surface-container-low cursor-pointer peer-checked:bg-gansid-primary-gradient peer-checked:text-white font-display text-sm capitalize transition-all">
                     {r}
                   </span>
                 </label>

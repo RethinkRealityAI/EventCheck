@@ -31,7 +31,7 @@ export function InfoTabs() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {REGISTRATION_PROCESS.map((step) => (
               <GlassCard key={step.number}>
-                <div className="font-display text-6xl font-black bg-gradient-to-br from-gansid-primary to-gansid-primary-container bg-clip-text text-transparent">{step.number}</div>
+                <div className="font-display text-6xl font-black bg-gansid-gradient-reverse bg-clip-text text-transparent">{step.number}</div>
                 <h3 className="font-display text-xl font-semibold mt-3">{step.title}</h3>
                 <p className="font-body text-gansid-on-surface/80 mt-2">{step.body}</p>
               </GlassCard>

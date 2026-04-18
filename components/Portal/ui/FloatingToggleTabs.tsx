@@ -17,7 +17,7 @@ export function FloatingToggleTabs<T extends string>({ tabs, active, onChange }:
             className={[
               'px-6 py-2 rounded-full font-display text-sm font-semibold transition-all duration-300',
               isActive
-                ? 'bg-gansid-primary-gradient text-white shadow-md'
+                ? 'bg-gansid-gradient-reverse text-white shadow-md'
                 : 'text-gansid-on-surface/70 hover:text-gansid-on-surface hover:bg-white/60',
             ].join(' ')}
           >

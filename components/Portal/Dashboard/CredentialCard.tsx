@@ -33,7 +33,8 @@ export function CredentialCard({ profile, attendee }: Props) {
 
   return (
     <>
-      <GlassCard>
+      <GlassCard className="relative overflow-hidden">
+        <div className="absolute -top-20 -right-20 w-48 h-48 rounded-full bg-gansid-gradient-swirl opacity-10 blur-2xl pointer-events-none" />
         <div className="flex flex-col items-center text-center space-y-3">
           <div className="flex items-center justify-between w-full">
             <span className="font-display text-sm uppercase tracking-wider text-gansid-on-surface/50">GANSID '26</span>
