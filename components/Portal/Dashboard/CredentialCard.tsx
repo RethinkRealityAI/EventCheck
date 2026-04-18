@@ -16,12 +16,12 @@ export function CredentialCard({ profile, attendee }: Props) {
     return (
       <GlassCard>
         <div className="flex flex-col items-center text-center space-y-3">
-          <div className="font-display text-sm uppercase tracking-wider text-gansid-on-surface/50">GANSID '26</div>
+          <div className="font-display text-xs uppercase tracking-widest text-gansid-on-surface/50">GANSID Congress 2026</div>
           <div className="h-24 w-24 rounded-full bg-gansid-surface-container-low flex items-center justify-center font-display text-2xl text-gansid-on-surface/40">
             {initials}
           </div>
           <p className="font-body text-gansid-on-surface/70 text-sm">No credential yet.</p>
-          <Link to="/portal">
+          <Link to="/form/gansid-congress-2026">
             <ViscousButton variant="primary">Register for Congress</ViscousButton>
           </Link>
         </div>
@@ -37,7 +37,7 @@ export function CredentialCard({ profile, attendee }: Props) {
         <div className="absolute -top-20 -right-20 w-48 h-48 rounded-full bg-gansid-gradient-swirl opacity-10 blur-2xl pointer-events-none" />
         <div className="flex flex-col items-center text-center space-y-3">
           <div className="flex items-center justify-between w-full">
-            <span className="font-display text-sm uppercase tracking-wider text-gansid-on-surface/50">GANSID '26</span>
+            <span className="font-display text-xs uppercase tracking-widest text-gansid-on-surface/50">GANSID Congress 2026</span>
             <span className="px-3 py-1 text-xs rounded-full bg-gansid-primary-container/20 text-gansid-primary font-display uppercase tracking-wide">{roleBadge}</span>
           </div>
           <div className="h-24 w-24 rounded-full bg-gansid-primary-gradient flex items-center justify-center text-white font-display text-2xl">

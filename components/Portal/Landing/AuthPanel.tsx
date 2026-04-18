@@ -34,10 +34,25 @@ export function AuthPanel() {
   const handleSignin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(''); setLoading(true);
-    const { error: err } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error: err } = await supabase.auth.signInWithPassword({ email, password });
+    if (err) { setLoading(false); setError(err.message); return; }
+
+    const user = data.user;
+    if (!user) { setLoading(false); navigate('/portal'); return; }
+
+    // Check if the user has any existing attendee rows
+    const { count } = await supabase
+      .from('attendees')
+      .select('*', { count: 'exact', head: true })
+      .or(`user_id.eq.${user.id},email.eq.${user.email}`);
+
     setLoading(false);
-    if (err) { setError(err.message); return; }
-    navigate('/portal');
+    if (!count || count === 0) {
+      // First-time user — take them straight to the Congress registration form
+      navigate('/form/gansid-congress-2026');
+    } else {
+      navigate('/portal');
+    }
   };
 
   return (

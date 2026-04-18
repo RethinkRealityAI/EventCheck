@@ -17,8 +17,10 @@ export function PortalLayout() {
   return (
     <div className="portal-root min-h-screen bg-gansid-surface">
       <header className="relative bg-white/80 backdrop-blur-viscous sticky top-0 z-40 px-6 py-4 flex items-center justify-between">
-        <div className="absolute top-0 inset-x-0 h-1 bg-gansid-primary-gradient" />
-        <Link to="/portal" className="font-display font-bold text-lg">GANSID Portal</Link>
+        <div className="absolute top-0 inset-x-0 h-1 bg-[linear-gradient(90deg,#2260a1_0%,#1a4880_50%,#2260a1_100%)]" />
+        <Link to="/portal" className="font-display font-bold text-lg tracking-tight">
+          <span className="text-gansid-secondary">GANSID</span> Congress 2026
+        </Link>
         <div className="relative">
           <button
             type="button"
