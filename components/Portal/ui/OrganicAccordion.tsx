@@ -10,17 +10,19 @@ export function OrganicAccordionItem({ question, children }: AccordionItemProps)
   return (
     <div
       className={[
-        'rounded-gansid-xl transition-all duration-400 ease-viscous overflow-hidden',
-        open ? 'bg-gansid-surface-container-lowest/70 backdrop-blur-viscous shadow-invisible-lift' : 'bg-gansid-surface-container-low',
+        'rounded-gansid-lg transition-all duration-400 overflow-hidden border',
+        open
+          ? 'bg-white border-gansid-secondary/30 shadow-lg'
+          : 'bg-gansid-surface-container-low/60 border-gansid-outline-variant/20 hover:border-gansid-secondary/20',
       ].join(' ')}
     >
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="w-full px-6 py-4 flex items-center justify-between font-display text-left"
+        className="w-full px-6 py-4 flex items-center justify-between font-display text-left font-semibold"
       >
         <span>{question}</span>
-        <span className={`transition-transform duration-300 ${open ? 'rotate-45' : ''}`}>+</span>
+        <span className={`text-gansid-secondary text-2xl transition-transform duration-300 ${open ? 'rotate-45' : ''}`}>+</span>
       </button>
       {open && <div className="px-6 pb-6 text-gansid-on-surface/80 font-body viscous-enter">{children}</div>}
     </div>

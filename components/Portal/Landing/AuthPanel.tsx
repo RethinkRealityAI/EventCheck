@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../../services/supabaseClient';
-import { GlassCard } from '../ui/GlassCard';
 import { FloatingToggleTabs } from '../ui/FloatingToggleTabs';
 import { GlassInput } from '../ui/GlassInput';
 import { ViscousButton } from '../ui/ViscousButton';
@@ -41,7 +40,10 @@ export function AuthPanel() {
   };
 
   return (
-    <GlassCard className="w-full max-w-md lg:sticky lg:top-8">
+    <div className="w-full max-w-md lg:sticky lg:top-8 bg-white rounded-gansid-lg p-8 shadow-2xl border border-gansid-outline-variant/30 relative overflow-hidden">
+      {/* Top accent bar */}
+      <div className="absolute top-0 inset-x-0 h-1.5 bg-gansid-primary-gradient" />
+
       <div className="flex justify-center mb-6">
         <FloatingToggleTabs<Mode>
           tabs={[{ id: 'signup', label: 'Sign Up' }, { id: 'signin', label: 'Sign In' }]}
@@ -68,7 +70,7 @@ export function AuthPanel() {
               {(['attendee', 'exhibitor', 'sponsor'] as const).map((r) => (
                 <label key={r} className="flex-1">
                   <input type="radio" name="role" value={r} checked={role === r} onChange={() => setRole(r)} className="sr-only peer" />
-                  <span className="block text-center px-3 py-2 rounded-full bg-gansid-surface-container-low cursor-pointer peer-checked:bg-gansid-primary-gradient peer-checked:text-white font-display text-sm capitalize">
+                  <span className="block text-center px-3 py-2 rounded-full bg-gansid-surface-container-low cursor-pointer peer-checked:bg-gradient-to-r peer-checked:from-gansid-primary peer-checked:to-gansid-primary-container peer-checked:text-white font-display text-sm capitalize transition-all">
                     {r}
                   </span>
                 </label>
@@ -105,6 +107,6 @@ export function AuthPanel() {
           </ViscousButton>
         </form>
       )}
-    </GlassCard>
+    </div>
   );
 }

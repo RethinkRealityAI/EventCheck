@@ -6,7 +6,7 @@ interface FloatingToggleTabsProps<T extends string> {
 
 export function FloatingToggleTabs<T extends string>({ tabs, active, onChange }: FloatingToggleTabsProps<T>) {
   return (
-    <div className="inline-flex gap-1 bg-gansid-surface-container-low rounded-full p-1">
+    <div className="inline-flex gap-1 bg-gansid-surface-container-low rounded-full p-1 border border-gansid-outline-variant/30 shadow-sm">
       {tabs.map((tab) => {
         const isActive = tab.id === active;
         return (
@@ -15,10 +15,10 @@ export function FloatingToggleTabs<T extends string>({ tabs, active, onChange }:
             type="button"
             onClick={() => onChange(tab.id)}
             className={[
-              'px-5 py-2 rounded-full font-display text-sm transition-all duration-300 ease-viscous',
+              'px-6 py-2 rounded-full font-display text-sm font-semibold transition-all duration-300',
               isActive
-                ? 'bg-gansid-surface-container-lowest text-gansid-on-surface shadow-invisible-lift'
-                : 'text-gansid-on-surface/60 hover:text-gansid-on-surface',
+                ? 'bg-gansid-primary-gradient text-white shadow-md'
+                : 'text-gansid-on-surface/70 hover:text-gansid-on-surface hover:bg-white/60',
             ].join(' ')}
           >
             {tab.label}
