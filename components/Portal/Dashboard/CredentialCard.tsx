@@ -17,7 +17,7 @@ export function CredentialCard({ profile, attendee }: Props) {
       <GlassCard>
         <div className="flex flex-col items-center text-center space-y-3">
           <div className="font-display text-xs uppercase tracking-widest text-gansid-on-surface/50">GANSID Congress 2026</div>
-          <div className="h-24 w-24 rounded-full bg-gansid-surface-container-low flex items-center justify-center font-display text-2xl text-gansid-on-surface/40">
+          <div className="h-24 w-24 rounded-full bg-gansid-primary-gradient flex items-center justify-center font-display text-2xl text-white shadow-lg ring-4 ring-white">
             {initials}
           </div>
           <p className="font-body text-gansid-on-surface/70 text-sm">No credential yet.</p>

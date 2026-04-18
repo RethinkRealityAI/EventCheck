@@ -24,10 +24,8 @@ export function PortalLayout() {
 
       <header className="relative bg-[#239DBB] text-white sticky top-0 z-40 px-6 py-4 flex items-center justify-between shadow-lg">
         <div className="absolute top-0 inset-x-0 h-1 bg-[linear-gradient(90deg,#ba0028_0%,#E0243C_50%,#2260a1_100%)]" />
-        <Link to="/portal" className="font-display font-bold text-xl tracking-tight">
-          <span className="bg-[linear-gradient(135deg,#ffffff_0%,#ffcad6_50%,#ffffff_100%)] bg-clip-text text-transparent drop-shadow-sm">
-            GANSID Congress 2026
-          </span>
+        <Link to="/portal" className="font-display font-bold text-xl tracking-tight text-white drop-shadow-sm">
+          GANSID Congress 2026
         </Link>
         <div className="relative">
           <button
@@ -35,7 +33,7 @@ export function PortalLayout() {
             onClick={() => setMenuOpen((v) => !v)}
             aria-haspopup="menu"
             aria-expanded={menuOpen}
-            className="h-10 w-10 rounded-full bg-white text-gansid-primary font-display flex items-center justify-center shadow-md border-2 border-white/40"
+            className="h-10 w-10 rounded-full bg-gansid-primary-gradient text-white font-display flex items-center justify-center shadow-md ring-2 ring-white/60"
           >
             {initials}
           </button>
