@@ -40,6 +40,7 @@ export type Database = {
                     company_info: Json | null
                     sponsored_awards: Json | null
                     admin_notes: string | null
+                    user_id: string | null
                 }
                 Insert: {
                     id: string
@@ -71,6 +72,7 @@ export type Database = {
                     company_info?: Json | null
                     sponsored_awards?: Json | null
                     admin_notes?: string | null
+                    user_id?: string | null
                 }
                 Update: {
                     id?: string
@@ -102,6 +104,7 @@ export type Database = {
                     company_info?: Json | null
                     sponsored_awards?: Json | null
                     admin_notes?: string | null
+                    user_id?: string | null
                 }
             }
             forms: {
@@ -115,6 +118,7 @@ export type Database = {
                     thank_you_message: string | null
                     fields: Json
                     form_type: string
+                    show_in_portal: boolean
                 }
                 Insert: {
                     id: string
@@ -126,6 +130,7 @@ export type Database = {
                     thank_you_message?: string | null
                     fields: Json
                     form_type?: string
+                    show_in_portal?: boolean
                 }
                 Update: {
                     id?: string
@@ -137,6 +142,7 @@ export type Database = {
                     thank_you_message?: string | null
                     fields?: Json
                     form_type?: string
+                    show_in_portal?: boolean
                 }
             }
             app_settings: {
@@ -454,6 +460,81 @@ export type Database = {
                 }
                 Relationships: []
             }
+            profiles: {
+                Row: {
+                    id: string;
+                    email: string;
+                    full_name: string | null;
+                    role: 'attendee' | 'exhibitor' | 'sponsor' | 'admin';
+                    organization: string | null;
+                    country_code: string | null;
+                    phone: string | null;
+                    avatar_url: string | null;
+                    created_at: string;
+                    updated_at: string;
+                };
+                Insert: {
+                    id: string;
+                    email: string;
+                    full_name?: string | null;
+                    role?: 'attendee' | 'exhibitor' | 'sponsor' | 'admin';
+                    organization?: string | null;
+                    country_code?: string | null;
+                    phone?: string | null;
+                    avatar_url?: string | null;
+                    created_at?: string;
+                    updated_at?: string;
+                };
+                Update: {
+                    id?: string;
+                    email?: string;
+                    full_name?: string | null;
+                    role?: 'attendee' | 'exhibitor' | 'sponsor' | 'admin';
+                    organization?: string | null;
+                    country_code?: string | null;
+                    phone?: string | null;
+                    avatar_url?: string | null;
+                    created_at?: string;
+                    updated_at?: string;
+                };
+                Relationships: [];
+            };
+            announcements: {
+                Row: {
+                    id: string;
+                    site: 'scago' | 'gansid';
+                    title: string;
+                    body: string | null;
+                    image_url: string | null;
+                    is_active: boolean;
+                    published_at: string;
+                    created_at: string;
+                    updated_at: string;
+                };
+                Insert: {
+                    id?: string;
+                    site: 'scago' | 'gansid';
+                    title: string;
+                    body?: string | null;
+                    image_url?: string | null;
+                    is_active?: boolean;
+                    published_at?: string;
+                    created_at?: string;
+                    updated_at?: string;
+                };
+                Update: {
+                    id?: string;
+                    site?: 'scago' | 'gansid';
+                    title?: string;
+                    body?: string | null;
+                    image_url?: string | null;
+                    is_active?: boolean;
+                    published_at?: string;
+                    created_at?: string;
+                    updated_at?: string;
+                };
+                Relationships: [];
+            };
         }
         Views: {
             [_ in never]: never

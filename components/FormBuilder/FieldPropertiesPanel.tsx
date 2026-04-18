@@ -280,6 +280,22 @@ const FieldPropertiesPanel: React.FC<FieldPropertiesPanelProps> = ({ field, form
                     </>
                 )}
 
+                {/* Step assignment — only shown when form is in stepped mode */}
+                {form.settings?.renderMode === 'stepped' && (form.settings.steps?.length ?? 0) > 0 && (
+                    <div className="fb-field-group">
+                        <label className="fb-label">Step</label>
+                        <select
+                            className="fb-input"
+                            value={field.section ?? form.settings.steps![0]?.id ?? ''}
+                            onChange={(e) => update({ section: e.target.value })}
+                        >
+                            {form.settings.steps!.map((s) => (
+                                <option key={s.id} value={s.id}>{s.label}</option>
+                            ))}
+                        </select>
+                    </div>
+                )}
+
                 {/* Ticket Config */}
                 {field.type === 'ticket' && field.ticketConfig && (
                     <TicketConfigEditor field={field} onChange={onChange} />

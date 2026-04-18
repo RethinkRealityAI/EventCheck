@@ -331,7 +331,10 @@ export const saveSettings = async (settings: AppSettings): Promise<void> => {
     .from('app_settings')
     .upsert(dbRecord);
 
-  if (error) console.error("Failed to save settings", error);
+  if (error) {
+    console.error("Failed to save settings", error);
+    throw new Error(error.message || 'Failed to save settings');
+  }
 };
 
 export const clearData = async (): Promise<void> => {
@@ -374,6 +377,7 @@ function mapAttendeeFromDb(db: AttendeeRow): Attendee {
     companyInfo: ((db as any).company_info as any) || undefined,
     sponsoredAwards: ((db as any).sponsored_awards as string[]) || [],
     adminNotes: (db as any).admin_notes || undefined,
+    userId: db.user_id ?? null,
   };
 }
 
@@ -424,7 +428,8 @@ function mapFormFromDb(db: FormRow): Form {
     formType: (db as any).form_type || 'event',
     settings: (db.settings as any), // Cast JSON to specific setting type if needed
     thankYouMessage: db.thank_you_message || undefined,
-    fields: (db.fields as unknown as FormField[]) || []
+    fields: (db.fields as unknown as FormField[]) || [],
+    showInPortal: db.show_in_portal ?? false,
   };
 }
 
@@ -437,7 +442,8 @@ function mapFormToDb(f: Form): FormInsert {
     form_type: f.formType || 'event',
     settings: f.settings as any,
     thank_you_message: f.thankYouMessage,
-    fields: f.fields as any
+    fields: f.fields as any,
+    show_in_portal: f.showInPortal ?? false,
   };
 }
 
@@ -834,6 +840,43 @@ export const getModelPublicUrl = (filePath: string): string => {
   return data.publicUrl;
 };
 
+// ============================================================
+// Branding assets (PDF logo, PDF background, email header logo)
+// ============================================================
+
+export type BrandingAssetKind = 'pdf-logo' | 'pdf-background' | 'email-header-logo';
+
+/**
+ * Uploads a branding asset (image file) to the public `sponsor-logos` bucket
+ * under `branding/{kind}-{uuid}.{ext}` and returns the public URL.
+ *
+ * Replaces the previous base64-in-JSONB approach which silently truncated /
+ * corrupted large images during upsert and produced "Incomplete or corrupt
+ * PNG file" errors in jsPDF at ticket-generation time.
+ */
+export const uploadBrandingAsset = async (
+  file: File,
+  kind: BrandingAssetKind,
+): Promise<string> => {
+  const ext = (file.name.split('.').pop() || 'png').toLowerCase();
+  const filePath = `branding/${kind}-${crypto.randomUUID()}.${ext}`;
+
+  const { error } = await supabase.storage
+    .from('sponsor-logos')
+    .upload(filePath, file, {
+      contentType: file.type || 'image/png',
+      cacheControl: '3600',
+      upsert: false,
+    });
+
+  if (error) {
+    throw new Error(`Failed to upload ${kind}: ${error.message}`);
+  }
+
+  const { data } = supabase.storage.from('sponsor-logos').getPublicUrl(filePath);
+  return data.publicUrl;
+};
+
 function mapCustomModelFromDb(db: Custom3DModelRow): Custom3DModel {
   return {
     id: db.id,
@@ -1057,4 +1100,27 @@ export async function duplicatePricingTemplate(id: string, newName: string): Pro
   if (!original) throw new Error('Template not found');
   const { id: _omit, createdAt: _c, updatedAt: _u, ...rest } = original;
   return createPricingTemplate({ ...rest, name: newName, isActive: true });
+}
+
+// --- Portal Helpers ---
+
+export async function getAttendeesForUser(userId: string, email: string): Promise<Attendee[]> {
+  // Match by user_id OR email so legacy (email-only) attendees surface too
+  const { data, error } = await supabase
+    .from('attendees')
+    .select('*')
+    .or(`user_id.eq.${userId},email.eq.${email}`)
+    .order('created_at', { ascending: false });
+  if (error) { console.error('getAttendeesForUser', error); return []; }
+  return (data ?? []).map(mapAttendeeFromDb);
+}
+
+export async function getPortalForms(): Promise<Form[]> {
+  const { data, error } = await supabase
+    .from('forms')
+    .select('*')
+    .eq('show_in_portal', true)
+    .eq('status', 'active');
+  if (error) { console.error('getPortalForms', error); return []; }
+  return (data ?? []).map(mapFormFromDb);
 }

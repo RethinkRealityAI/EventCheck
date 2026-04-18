@@ -33,6 +33,7 @@ export interface Attendee {
   companyInfo?: CompanyInfo;
   sponsoredAwards?: string[];
   adminNotes?: string;
+  userId?: string | null;
 }
 
 export interface SeatingConfiguration {
@@ -158,6 +159,9 @@ export interface FormField {
     title: string;
     url: string;
   };
+  // stepped-form specific
+  section?: string;        // ID of the step this field belongs to
+  sectionOrder?: number;   // Order within the step (falls back to field.order)
 }
 
 export interface Form {
@@ -169,6 +173,7 @@ export interface Form {
   fields: FormField[];
   createdAt: string;
   status: 'active' | 'draft' | 'closed';
+  showInPortal?: boolean;  // default false; controls portal dashboard visibility
   settings?: {
     ticketPrice?: number;
     currency?: string;
@@ -195,6 +200,8 @@ export interface Form {
       maxSize: number;
     };
     sendGuestConfirmationEmails?: boolean;
+    renderMode?: 'single' | 'stepped';
+    steps?: FormStep[];
   };
   pdfSettings?: Partial<PdfSettings>; // Per-form PDF overrides
   pricingTemplate?: PricingTemplate; // Runtime-attached in getFormById; not persisted in DB
@@ -424,4 +431,39 @@ export interface GroupMemberPricingSelection {
   countryCode: string;
   categoryId: string;
   addonIds: string[];
+}
+
+// ============================================================
+// User Portal
+// ============================================================
+
+export interface Profile {
+  id: string;
+  email: string;
+  fullName: string | null;
+  role: 'attendee' | 'exhibitor' | 'sponsor' | 'admin';
+  organization: string | null;
+  countryCode: string | null;
+  phone: string | null;
+  avatarUrl: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Announcement {
+  id: string;
+  site: 'scago' | 'gansid';
+  title: string;
+  body: string | null;
+  imageUrl: string | null;
+  isActive: boolean;
+  publishedAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FormStep {
+  id: string;
+  label: string;
+  description?: string;
 }

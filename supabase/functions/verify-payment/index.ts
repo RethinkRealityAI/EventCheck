@@ -66,6 +66,34 @@ serve(async (req: Request) => {
       expectedCurrency: legacyExpectedCurrency,
     } = body;
 
+    // ── JWT: derive user_id server-side from Authorization header ──
+    // Anonymous submissions (no auth header) proceed normally with user_id = null.
+    // The client NEVER supplies user_id directly — that would be forgeable.
+    let authUserId: string | null = null;
+    const authHeader = req.headers.get('Authorization');
+    if (authHeader?.startsWith('Bearer ')) {
+      const jwt = authHeader.slice('Bearer '.length);
+      try {
+        const adminClient = createClient(
+          Deno.env.get('SUPABASE_URL')!,
+          Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+        );
+        const { data: userData, error: userErr } = await adminClient.auth.getUser(jwt);
+        if (!userErr && userData?.user) {
+          if (!userData.user.email_confirmed_at) {
+            return new Response(
+              JSON.stringify({ error: 'email_not_verified', message: 'Please verify your email before registering.' }),
+              { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+            );
+          }
+          authUserId = userData.user.id;
+        }
+      } catch (e) {
+        console.error('verify-payment: JWT verification failed', e);
+        // Continue with authUserId = null — anonymous submissions are allowed
+      }
+    }
+
     // ── EXHIBITOR BRANCH: no PayPal, no attendees array — just insert rows ──
     if (body.exhibitorSubmission === true) {
       const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -99,6 +127,7 @@ serve(async (req: Request) => {
         payment_status: 'paid',
         payment_amount: 'PAID EXTERNALLY',
         qr_payload: JSON.stringify({ id: orgId }),
+        user_id: authUserId,
         company_info: {
           orgName: org.orgName,
           tier: org.tier,
@@ -253,6 +282,7 @@ serve(async (req: Request) => {
       if (paymentMethod === 'cheque') {
         primary.payment_status = 'pending';
         primary.payment_amount = `${computedTotal.toFixed(2)} ${currency} (PENDING CHEQUE)`;
+        primary.user_id = authUserId;
         const { error } = await supabase.from('attendees').upsert([primary]);
         if (error) return jsonResponse({ error: error.message }, 500);
         return jsonResponse({
@@ -324,6 +354,7 @@ serve(async (req: Request) => {
       primary.payment_status = 'paid';
       primary.transaction_id = capture.id;
       primary.payment_amount = `${capturedAmount} ${capture.amount.currency_code}`;
+      primary.user_id = authUserId;
 
       // Guest placeholder rows for tiers that include seats
       const seatCount =
@@ -514,6 +545,10 @@ serve(async (req: Request) => {
             pricing_tier: m.tierId,
             pricing_bracket: m.bracketId,
             pricing_category_id: m.categoryId,
+            // Primary submitter gets user_id stamped; pending-claim guests get null
+            // (they'll claim via ?ref= link without auth — a future task can stamp
+            // the claiming user's id at claim time)
+            user_id: i === 0 ? authUserId : null,
           };
         });
 
@@ -681,6 +716,7 @@ serve(async (req: Request) => {
           pricing_bracket: activeBracket.id,
           pricing_tier: activeTier.id,
           pricing_category_id: cat.id,
+          user_id: authUserId,
         }]);
         if (insertErr) {
           console.error('CRITICAL: Dynamic pricing PayPal captured but DB insert failed!', JSON.stringify({
@@ -808,9 +844,11 @@ serve(async (req: Request) => {
         return jsonResponse({ error: 'This registration requires payment. Cannot register as free.' }, 400);
       }
 
-      const stampedAttendees = attendees.map((a: any) => ({
+      const stampedAttendees = attendees.map((a: any, i: number) => ({
         ...a,
         payment_status: 'free',
+        // Primary submitter (index 0) gets user_id; guest placeholder rows get null
+        user_id: i === 0 ? authUserId : null,
       }));
 
       const { error: insertError } = await supabase
@@ -951,11 +989,13 @@ serve(async (req: Request) => {
     }
 
     // --- Save attendees with verified payment info ---
-    const stampedAttendees = attendees.map((a: any) => ({
+    const stampedAttendees = attendees.map((a: any, i: number) => ({
       ...a,
       payment_status: 'paid',
       transaction_id: transactionId,
       payment_amount: `${capturedAmount} ${capturedCurrency}`,
+      // Primary submitter (index 0) gets user_id; guest placeholder rows get null
+      user_id: i === 0 ? authUserId : null,
     }));
 
     const { error: insertError } = await supabase

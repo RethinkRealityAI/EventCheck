@@ -116,44 +116,59 @@ const FormsManager: React.FC = () => {
               <p className="text-sm font-medium text-slate-500 line-clamp-2 mb-4">{form.description}</p>
             </div>
 
-            <div className="p-4 bg-white/40 backdrop-blur-md border-t border-white/60 flex justify-between items-center relative z-10">
-              <div className="flex gap-2">
-                <Link
-                  to={`/admin/builder/${form.id}`}
-                  className="p-2.5 text-slate-500 hover:text-indigo-600 hover:bg-white rounded-xl transition shadow-sm border border-transparent hover:border-indigo-100"
-                  title="Edit Builder"
-                >
-                  <Edit3 className="w-5 h-5" />
-                </Link>
+            <div className="p-4 bg-white/40 backdrop-blur-md border-t border-white/60 flex flex-col gap-2 relative z-10">
+              <div className="flex justify-between items-center">
+                <div className="flex gap-2">
+                  <Link
+                    to={`/admin/builder/${form.id}`}
+                    className="p-2.5 text-slate-500 hover:text-indigo-600 hover:bg-white rounded-xl transition shadow-sm border border-transparent hover:border-indigo-100"
+                    title="Edit Builder"
+                  >
+                    <Edit3 className="w-5 h-5" />
+                  </Link>
+                  <button
+                    onClick={() => setShowEmbedModal(form.id)}
+                    className="p-2.5 text-slate-500 hover:text-indigo-600 hover:bg-white rounded-xl transition shadow-sm border border-transparent hover:border-indigo-100"
+                    title="Get Embed Code"
+                  >
+                    <Code className="w-5 h-5" />
+                  </button>
+                  <Link
+                    to={`/form/${form.id}`}
+                    target="_blank"
+                    className="p-2.5 text-slate-500 hover:text-emerald-600 hover:bg-white rounded-xl transition shadow-sm border border-transparent hover:border-emerald-100"
+                    title="View Public Page"
+                  >
+                    <ExternalLink className="w-5 h-5" />
+                  </Link>
+                  <button
+                    onClick={() => handleDuplicate(form)}
+                    className="p-2.5 text-slate-500 hover:text-blue-600 hover:bg-white rounded-xl transition shadow-sm border border-transparent hover:border-blue-100"
+                    title="Duplicate Form"
+                  >
+                    <Copy className="w-5 h-5" />
+                  </button>
+                </div>
                 <button
-                  onClick={() => setShowEmbedModal(form.id)}
-                  className="p-2.5 text-slate-500 hover:text-indigo-600 hover:bg-white rounded-xl transition shadow-sm border border-transparent hover:border-indigo-100"
-                  title="Get Embed Code"
+                  onClick={() => handleDelete(form.id)}
+                  className="p-2.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition border border-transparent hover:border-red-100"
                 >
-                  <Code className="w-5 h-5" />
-                </button>
-                <Link
-                  to={`/form/${form.id}`}
-                  target="_blank"
-                  className="p-2.5 text-slate-500 hover:text-emerald-600 hover:bg-white rounded-xl transition shadow-sm border border-transparent hover:border-emerald-100"
-                  title="View Public Page"
-                >
-                  <ExternalLink className="w-5 h-5" />
-                </Link>
-                <button
-                  onClick={() => handleDuplicate(form)}
-                  className="p-2.5 text-slate-500 hover:text-blue-600 hover:bg-white rounded-xl transition shadow-sm border border-transparent hover:border-blue-100"
-                  title="Duplicate Form"
-                >
-                  <Copy className="w-5 h-5" />
+                  <Trash2 className="w-5 h-5" />
                 </button>
               </div>
-              <button
-                onClick={() => handleDelete(form.id)}
-                className="p-2.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition border border-transparent hover:border-red-100"
-              >
-                <Trash2 className="w-5 h-5" />
-              </button>
+              <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={form.showInPortal ?? false}
+                  onChange={async (e) => {
+                    const updated = { ...form, showInPortal: e.target.checked };
+                    await saveForm(updated);
+                    const updatedForms = await getForms();
+                    setForms(updatedForms);
+                  }}
+                />
+                <span>Show in portal</span>
+              </label>
             </div>
           </div>
         ))}

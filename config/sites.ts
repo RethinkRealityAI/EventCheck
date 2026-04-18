@@ -9,6 +9,7 @@ export interface SiteConfig {
   logoImage?: string;
   fallbackColors: { primary: string; accent: string };
   supportEmail: string;
+  portalEnabled: boolean;
 }
 
 const CONFIGS: Record<SiteKey, SiteConfig> = {
@@ -19,6 +20,7 @@ const CONFIGS: Record<SiteKey, SiteConfig> = {
     pageTitle: 'EventCheck',
     fallbackColors: { primary: '#4F46E5', accent: '#4F46E5' },
     supportEmail: 'info@scago.ca',
+    portalEnabled: false,
   },
   gansid: {
     key: 'gansid',
@@ -30,8 +32,11 @@ const CONFIGS: Record<SiteKey, SiteConfig> = {
     // Red is the secondary accent (the "CONGRESS" wordmark + blood-drops mark).
     fallbackColors: { primary: '#1E4A8C', accent: '#B3282D' },
     supportEmail: 'congress@inheritedblooddisorders.world',
+    portalEnabled: true,
   },
 };
+
+export const SITES = CONFIGS;
 
 function resolveSiteKey(): SiteKey {
   const raw = import.meta.env.VITE_SITE ?? '';

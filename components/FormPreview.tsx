@@ -9,6 +9,7 @@ import { PayPalScriptProvider, PayPalButtons } from "@paypal/react-paypal-js";
 import { useNotifications } from './NotificationSystem';
 import { generateTicketPDF } from '../utils/pdfGenerator';
 import { sendTicketEmail, arrayBufferToBase64 } from '../services/smtpService';
+import { validateRequired } from './SteppedRegistration/steppedValidation';
 
 interface FormPreviewProps {
     form: Form;
@@ -124,21 +125,18 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
         e.preventDefault();
 
         // Basic validation
-        let isValid = true;
-        for (const field of form.fields) {
-            if (isFieldVisibleInPreview(field) && field.required && !previewAnswers[field.id] && field.type !== 'ticket') {
-                isValid = false;
-            }
+        const requiredCheck = validateRequired(form.fields, previewAnswers, isFieldVisibleInPreview);
+        if (!requiredCheck.ok) {
+            setPreviewError(requiredCheck.error || 'Please fill in all required fields in the preview.');
+            return;
         }
         const ticketField = form.fields.find(f => f.type === 'ticket');
         if (ticketField && ticketField.required) {
             const totalQty = Object.values(previewTicketQuantities).reduce((a: number, b: number) => a + b, 0);
-            if (totalQty === 0) isValid = false;
-        }
-
-        if (!isValid) {
-            setPreviewError('Please fill in all required fields in the preview.');
-            return;
+            if (totalQty === 0) {
+                setPreviewError('Please select at least one ticket.');
+                return;
+            }
         }
         setPreviewError('');
 
@@ -287,7 +285,7 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
                             const registrationUrl = isPlaceholder
                                 ? `${window.location.origin}/#/form/${form.id}?ref=${newAttendee.id}`
                                 : undefined;
-                            const guestDoc = generateTicketPDF(guestAttendee, appSettings, form, registrationUrl);
+                            const guestDoc = await generateTicketPDF(guestAttendee, appSettings, form, registrationUrl);
                             guestTickets.push({ name: guestName, attendee: guestAttendee, pdf: guestDoc });
                         }
                     }
@@ -339,7 +337,7 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
             if (appSettings && appSettings.smtpUser && appSettings.smtpPass) {
                 try {
                     const attachments = [];
-                    const primaryDoc = generateTicketPDF(newAttendee, appSettings, form);
+                    const primaryDoc = await generateTicketPDF(newAttendee, appSettings, form);
                     attachments.push({
                         filename: `${purchaserName}_Ticket.pdf`,
                         content: arrayBufferToBase64(primaryDoc.output('arraybuffer')),
@@ -381,9 +379,9 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
         await finalizePreview(data.orderID, paymentAmountStr);
     };
 
-    const downloadPdf = () => {
+    const downloadPdf = async () => {
         if (lastGeneratedAttendee && appSettings) {
-            const doc = generateTicketPDF(lastGeneratedAttendee, appSettings, form);
+            const doc = await generateTicketPDF(lastGeneratedAttendee, appSettings, form);
             doc.save(`${lastGeneratedAttendee.name}_Ticket.pdf`);
         }
     };
@@ -1002,15 +1000,15 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
                                           </div>
                                           <button
                                             type="button"
-                                            onClick={() => {
+                                            onClick={async () => {
                                               if (appSettings && lastGeneratedAttendee) {
-                                                previewGuestTicketsData.forEach((gt, idx) => {
-                                                  const doc = generateTicketPDF(gt.attendee, appSettings, form, gt.registrationUrl);
+                                                for (const [idx, gt] of previewGuestTicketsData.entries()) {
+                                                  const doc = await generateTicketPDF(gt.attendee, appSettings, form, gt.registrationUrl);
                                                   const safeName = gt.attendee.name.includes('Guest Ticket #')
                                                     ? `Guest_${idx + 2}`
                                                     : gt.attendee.name.replace(/[^a-zA-Z0-9 ]/g, '_');
                                                   doc.save(`${safeName}_Ticket.pdf`);
-                                                });
+                                                }
                                               }
                                             }}
                                             className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-indigo-700 transition"
@@ -1071,9 +1069,9 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
 
                                                 <button
                                                   type="button"
-                                                  onClick={() => {
+                                                  onClick={async () => {
                                                     if (appSettings) {
-                                                      const doc = generateTicketPDF(gt.attendee, appSettings, form, gt.registrationUrl);
+                                                      const doc = await generateTicketPDF(gt.attendee, appSettings, form, gt.registrationUrl);
                                                       doc.save(`${safeName}_Ticket.pdf`);
                                                     }
                                                   }}

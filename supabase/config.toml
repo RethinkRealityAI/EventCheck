@@ -1,0 +1,21 @@
+# Supabase CLI project config.
+# Per-function settings are read by `supabase functions deploy` so every
+# deploy enforces the intended gateway behaviour on both project refs
+# (SCAGO iigbgbgakevcgilucvbs + GANSID gticuvgclbvhwvpzkuez).
+
+# Called from unauthenticated public registration, public sponsor form,
+# public exhibitor form, admin manual-ticket tool, admin resend actions,
+# and the cheque-received flow. Does its own SMTP credential validation.
+[functions.send-ticket-email]
+verify_jwt = false
+
+# Called from unauthenticated public registration / sponsor / exhibitor
+# forms after a PayPal capture. Does its own PayPal order + amount
+# verification server-side.
+[functions.verify-payment]
+verify_jwt = false
+
+# Admin-only. Flips a pending cheque sponsor to paid and writes guest
+# rows, so it legitimately requires an authenticated admin session.
+[functions.confirm-sponsor-cheque]
+verify_jwt = true

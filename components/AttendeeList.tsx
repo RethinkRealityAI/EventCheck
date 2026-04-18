@@ -258,7 +258,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
         },
       };
       setSettings(newSettings);
-      await saveSettings(newSettings);
+      try { await saveSettings(newSettings); } catch (e) { console.error('column pref save failed', e); }
     }
   }, [columnVisibility, settings, selectedFormId]);
 
@@ -275,7 +275,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
         },
       };
       setSettings(newSettings);
-      await saveSettings(newSettings);
+      try { await saveSettings(newSettings); } catch (e) { console.error('column pref save failed', e); }
     }
   }, [allColumns, settings, selectedFormId]);
 
@@ -292,7 +292,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
         },
       };
       setSettings(newSettings);
-      await saveSettings(newSettings);
+      try { await saveSettings(newSettings); } catch (e) { console.error('column pref save failed', e); }
     }
   }, [allColumns, settings, selectedFormId]);
 
@@ -301,8 +301,12 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     const newDefault = selectedFormId === '_all' ? undefined : selectedFormId;
     const newSettings = { ...settings, defaultDashboardFormId: newDefault };
     setSettings(newSettings);
-    await saveSettings(newSettings);
-    showNotification(newDefault ? 'Default form view saved' : 'Default form view cleared', 'success');
+    try {
+      await saveSettings(newSettings);
+      showNotification(newDefault ? 'Default form view saved' : 'Default form view cleared', 'success');
+    } catch (e: any) {
+      showNotification(`Failed to save default form: ${e?.message || 'unknown error'}`, 'error');
+    }
   };
 
   // Close filter picker on click outside

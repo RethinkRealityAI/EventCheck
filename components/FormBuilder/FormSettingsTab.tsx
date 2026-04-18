@@ -3,6 +3,7 @@ import { Plus, X, Settings, Layout, Check, FileText, Eye, CreditCard, AlertCircl
 import QRCode from 'react-qr-code';
 import { Form } from '../../types';
 import RichTextEditor from '../RichTextEditor';
+import { StepsManager } from './StepsManager';
 
 interface FormSettingsTabProps {
     form: Form;
@@ -169,6 +170,18 @@ const FormSettingsTab: React.FC<FormSettingsTabProps> = ({ form, onUpdate, onIma
                                                     onChange={e => onUpdate({ settings: { ...form.settings, currency: e.target.value } })} />
                                                 <CreditCard className="w-5 h-5 text-gray-400 absolute left-3 top-3.5" />
                                             </div>
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700 mb-2">Stepped Registration</label>
+                                        <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
+                                            <StepsManager
+                                                renderMode={form.settings?.renderMode}
+                                                steps={form.settings?.steps ?? []}
+                                                onRenderModeChange={(mode) => onUpdate({ settings: { ...form.settings, renderMode: mode } })}
+                                                onStepsChange={(steps) => onUpdate({ settings: { ...form.settings, steps } })}
+                                            />
                                         </div>
                                     </div>
                                 </div>

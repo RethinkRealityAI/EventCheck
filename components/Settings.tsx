@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Save, CreditCard, Mail, Key, Eye, FileText, Check, Upload, Image as ImageIcon, Send as SendIcon, Users, UserPlus, Menu, PanelLeftClose, PanelLeft, Plus, X, Activity, Server, Database, ShieldCheck, Loader2, CheckSquare, Tag } from 'lucide-react';
 import { AppSettings, DEFAULT_SETTINGS, Attendee } from '../types';
-import { getSettings, saveSettings, getAttendees } from '../services/storageService';
+import { getSettings, saveSettings, getAttendees, uploadBrandingAsset, BrandingAssetKind } from '../services/storageService';
 import PricingTemplatesTab from './Settings/PricingTemplates/PricingTemplatesTab';
+import { AnnouncementsTab } from './Settings/AnnouncementsTab';
 import { sendEmail } from '../services/emailService';
 import { sendTicketEmail } from '../services/smtpService';
 import { supabase } from '../services/supabaseClient';
@@ -12,7 +13,7 @@ import RichTextEditor from './RichTextEditor';
 
 const Settings: React.FC = () => {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
-  const [activeTab, setActiveTab] = useState<'general' | 'email' | 'pdf' | 'diagnostics' | 'pricing-templates'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'email' | 'pdf' | 'diagnostics' | 'pricing-templates' | 'announcements'>('general');
   const [previewMode, setPreviewMode] = useState<'ticket' | 'invite'>('ticket');
   const [dummyAttendee, setDummyAttendee] = useState<Attendee | null>(null);
   const [allAttendees, setAllAttendees] = useState<Attendee[]>([]);
@@ -66,28 +67,53 @@ const Settings: React.FC = () => {
     setSettings(prev => ({ ...prev, pdfSettings: { ...prev.pdfSettings, [field]: value } }));
   };
 
+  const [uploading, setUploading] = useState<null | 'emailHeaderLogo' | 'pdfLogo' | 'pdfBackground'>(null);
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    await saveSettings(settings);
-    showNotification('Settings saved successfully', 'success');
+    try {
+      await saveSettings(settings);
+      showNotification('Settings saved successfully', 'success');
+    } catch (err: any) {
+      showNotification(`Failed to save settings: ${err?.message || 'unknown error'}`, 'error');
+    }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, field: 'emailHeaderLogo' | 'pdfLogo' | 'pdfBackground') => {
+  const handleFileUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+    field: 'emailHeaderLogo' | 'pdfLogo' | 'pdfBackground',
+  ) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    e.target.value = '';
 
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const base64 = reader.result as string;
-      if (field === 'emailHeaderLogo') {
-        handleChange('emailHeaderLogo', base64);
-      } else if (field === 'pdfLogo') {
-        handlePdfChange('logoUrl', base64);
-      } else if (field === 'pdfBackground') {
-        handlePdfChange('backgroundImage', base64);
-      }
+    const kindMap: Record<typeof field, BrandingAssetKind> = {
+      emailHeaderLogo: 'email-header-logo',
+      pdfLogo: 'pdf-logo',
+      pdfBackground: 'pdf-background',
     };
-    reader.readAsDataURL(file);
+
+    setUploading(field);
+    try {
+      const publicUrl = await uploadBrandingAsset(file, kindMap[field]);
+      let nextSettings: AppSettings;
+      if (field === 'emailHeaderLogo') {
+        nextSettings = { ...settings, emailHeaderLogo: publicUrl };
+      } else if (field === 'pdfLogo') {
+        nextSettings = { ...settings, pdfSettings: { ...settings.pdfSettings, logoUrl: publicUrl } };
+      } else {
+        nextSettings = { ...settings, pdfSettings: { ...settings.pdfSettings, backgroundImage: publicUrl } };
+      }
+      setSettings(nextSettings);
+      // Persist immediately so the URL is saved even if the user forgets to
+      // hit the main Save button — matches how uploads are expected to behave.
+      await saveSettings(nextSettings);
+      showNotification('Image uploaded and saved', 'success');
+    } catch (err: any) {
+      showNotification(`Upload failed: ${err?.message || 'unknown error'}`, 'error');
+    } finally {
+      setUploading(null);
+    }
   };
 
   const previewHtml = React.useMemo(() => {
@@ -228,13 +254,13 @@ const Settings: React.FC = () => {
     }
   };
 
-  const handlePdfPreview = (previewAsGuest = false) => {
+  const handlePdfPreview = async (previewAsGuest = false) => {
     if (dummyAttendee) {
       const attendeeForPreview = previewAsGuest
         ? { ...dummyAttendee, isPrimary: false, name: `Guest of ${dummyAttendee.name}`, ticketType: `Guest of ${dummyAttendee.name}` }
         : dummyAttendee;
       const registrationUrl = previewAsGuest ? `https://example.com/register/form-1?ref=${dummyAttendee.id}` : undefined;
-      const doc = generateTicketPDF(attendeeForPreview, settings, undefined, registrationUrl);
+      const doc = await generateTicketPDF(attendeeForPreview, settings, undefined, registrationUrl);
       window.open(doc.output('bloburl'), '_blank');
     }
   };
@@ -360,6 +386,13 @@ const Settings: React.FC = () => {
                 <Tag className="w-5 h-5 flex-shrink-0" /> {isSidebarOpen && <span className="truncate">Pricing Templates</span>}
               </button>
             )}
+
+            <button
+              onClick={() => setActiveTab('announcements')}
+              className={`w-full text-left px-4 py-3 rounded-xl flex items-center gap-3 font-semibold transition-all ${activeTab === 'announcements' ? 'bg-white text-indigo-600 shadow-sm border border-gray-100' : 'text-gray-600 hover:bg-white/60'}`}
+            >
+              <SendIcon className="w-5 h-5 flex-shrink-0" /> {isSidebarOpen && <span className="truncate">Announcements</span>}
+            </button>
           </div>
         </div>
 
@@ -563,10 +596,10 @@ const Settings: React.FC = () => {
                             No Logo
                           </div>
                         )}
-                        <label className="cursor-pointer">
+                        <label className={`cursor-pointer ${uploading === 'emailHeaderLogo' ? 'opacity-60 pointer-events-none' : ''}`}>
                           <div className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700 text-sm font-bold shadow-sm transition">
-                            <Upload className="w-4 h-4" />
-                            <span>{settings.emailHeaderLogo ? 'Replace' : 'Upload Logo'}</span>
+                            {uploading === 'emailHeaderLogo' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                            <span>{uploading === 'emailHeaderLogo' ? 'Uploading…' : settings.emailHeaderLogo ? 'Replace' : 'Upload Logo'}</span>
                           </div>
                           <input type="file" className="hidden" accept="image/*" onChange={(e) => handleFileUpload(e, 'emailHeaderLogo')} />
                         </label>
@@ -707,8 +740,9 @@ const Settings: React.FC = () => {
                     ) : (
                       <div className="h-12 w-32 bg-gray-100 border border-dashed border-gray-300 rounded flex items-center justify-center text-[10px] text-gray-400">NO LOGO</div>
                     )}
-                    <label className="cursor-pointer bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition shadow-sm">
-                      <ImageIcon className="w-4 h-4" /> {settings.pdfSettings?.logoUrl ? 'Change Logo' : 'Upload Logo'}
+                    <label className={`cursor-pointer bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition shadow-sm ${uploading === 'pdfLogo' ? 'opacity-60 pointer-events-none' : ''}`}>
+                      {uploading === 'pdfLogo' ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImageIcon className="w-4 h-4" />}
+                      {uploading === 'pdfLogo' ? 'Uploading…' : settings.pdfSettings?.logoUrl ? 'Change Logo' : 'Upload Logo'}
                       <input type="file" className="hidden" accept="image/*" onChange={(e) => handleFileUpload(e, 'pdfLogo')} />
                     </label>
                   </div>
@@ -742,8 +776,9 @@ const Settings: React.FC = () => {
                       </div>
                     )}
 
-                    <label className="cursor-pointer bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition shadow-sm">
-                      <Upload className="w-4 h-4" /> {settings.pdfSettings?.backgroundImage ? 'Replace BG' : 'Upload BG'}
+                    <label className={`cursor-pointer bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition shadow-sm ${uploading === 'pdfBackground' ? 'opacity-60 pointer-events-none' : ''}`}>
+                      {uploading === 'pdfBackground' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                      {uploading === 'pdfBackground' ? 'Uploading…' : settings.pdfSettings?.backgroundImage ? 'Replace BG' : 'Upload BG'}
                       <input type="file" className="hidden" accept="image/*" onChange={(e) => handleFileUpload(e, 'pdfBackground')} />
                     </label>
                   </div>
@@ -809,6 +844,12 @@ const Settings: React.FC = () => {
           {activeTab === 'pricing-templates' && settings.feature_pricing_templates && (
             <div className="animate-fade-in-up">
               <PricingTemplatesTab />
+            </div>
+          )}
+
+          {activeTab === 'announcements' && (
+            <div className="animate-fade-in-up">
+              <AnnouncementsTab />
             </div>
           )}
 
