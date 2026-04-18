@@ -1,4 +1,5 @@
 import React from 'react';
+import { Sparkles } from 'lucide-react';
 import { formatPrice } from '../../utils/pricing';
 import type { PricingTemplate } from '../../types';
 
@@ -11,14 +12,35 @@ export default function RunningTotal({
   tier: { name: string } | null;
 }) {
   if (total == null) return null;
+  const bracketName = bracket?.name ?? '';
+  const isEarlyBird = /early/i.test(bracketName);
   return (
-    <div className="sticky bottom-4 mt-6 p-4 bg-white shadow-lg rounded-xl border flex items-center justify-between">
-      <div>
-        <div className="text-xs text-slate-500 uppercase tracking-wider">Total</div>
-        <div className="text-2xl font-bold">{formatPrice(total, template.currency)}</div>
-        {bracket && tier && (
-          <div className="text-xs text-slate-500 mt-0.5">{bracket.name} · {tier.name}</div>
-        )}
+    <div className="sticky bottom-4 mt-6 p-4 bg-white shadow-lg rounded-2xl border border-gansid-outline-variant/30 flex items-center justify-between gap-4">
+      <div className="min-w-0">
+        <div className="text-[11px] font-display text-gansid-on-surface/50 uppercase tracking-wider mb-1">Total</div>
+        <div className="text-2xl font-display font-bold text-gansid-on-surface">
+          {formatPrice(total, template.currency)}
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5 mt-2">
+          {bracket && (
+            <span
+              className={[
+                'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-display font-semibold',
+                isEarlyBird
+                  ? 'bg-gansid-primary-gradient text-white shadow-sm'
+                  : 'bg-gansid-secondary/10 text-gansid-secondary',
+              ].join(' ')}
+            >
+              {isEarlyBird && <Sparkles className="w-3 h-3" />}
+              {bracket.name}
+            </span>
+          )}
+          {tier && (
+            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-display font-semibold bg-gansid-surface-container-low text-gansid-on-surface/70">
+              {tier.name}
+            </span>
+          )}
+        </div>
       </div>
     </div>
   );

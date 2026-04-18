@@ -13,7 +13,10 @@ interface Props {
 
 export function CredentialBadgeModal({ open, onClose, profile, attendee }: Props) {
   const badgeRef = useRef<HTMLDivElement>(null);
-  const roleBadge = profile.role === 'exhibitor' ? 'Exhibitor' : profile.role === 'sponsor' ? 'Sponsor' : 'Delegate';
+  const roleBadge = profile.role === 'exhibitor' ? 'Exhibitor'
+    : profile.role === 'sponsor' ? 'Sponsor'
+    : profile.role === 'admin' ? 'Admin'
+    : 'Attendee';
   const qrPayload = (attendee as any).qrPayload ?? attendee.id;
 
   const handleSave = async () => {

@@ -262,8 +262,12 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
           );
         }
 
-        // Hide all non-RMS fields until a mode is chosen (when there is an RMS field)
-        if (rmsField && registrationMode === null) return null;
+        // Hide all non-RMS fields until a mode is chosen — only in single-page mode.
+        // Stepped mode gates progression naturally via Next button validation, and the
+        // RMS field lives on its own step so this guard would otherwise hide every field
+        // on earlier steps until the user reaches the RMS step.
+        const isSteppedMode = form.settings?.renderMode === 'stepped';
+        if (!isSteppedMode && rmsField && registrationMode === null) return null;
 
         // Pending-claim: render usedForPricing country field as read-only (locked post-payment)
         if (isPendingClaim && field.type === 'country' && field.usedForPricing) {
@@ -280,11 +284,18 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
           );
         }
 
+        // Long / complex fields span both columns of the parent grid; short
+        // single-input fields occupy one column so two can sit side-by-side.
+        const FULL_WIDTH_TYPES = new Set([
+          'textarea', 'ticket', 'radio', 'checkbox', 'boolean', 'registration-mode-selector',
+        ]);
+        const colSpan = FULL_WIDTH_TYPES.has(field.type as any) ? 'sm:col-span-2' : '';
+
         return (
-        <div key={field.id}>
+        <div key={field.id} className={colSpan}>
           {field.type !== 'ticket' && field.type !== 'country' && (
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              {field.label} {field.required && <span className="text-red-500">*</span>}
+            <label className="block text-xs font-display font-semibold text-gansid-on-surface/70 uppercase tracking-wide mb-1.5">
+              {field.label} {field.required && <span className="text-gansid-primary">*</span>}
             </label>
           )}
 
@@ -300,7 +311,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
             />
           ) : field.type === 'textarea' ? (
             <textarea
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+              className="w-full px-4 py-2.5 rounded-xl gradient-border-input focus:outline-none focus:ring-2 focus:ring-gansid-secondary/40 font-body text-sm"
               rows={3}
               placeholder={field.placeholder}
               value={answers[field.id] || ''}
@@ -308,7 +319,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
             />
           ) : field.type === 'select' ? (
             <select
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+              className="w-full px-4 py-2.5 rounded-full gradient-border-input focus:outline-none focus:ring-2 focus:ring-gansid-secondary/40 font-body text-sm"
               value={answers[field.id] || ''}
               onChange={e => onFieldChange(field.id, e.target.value)}
             >
@@ -626,37 +637,59 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
             </div>
             )
           ) : field.type === 'radio' ? (
-            <div className="space-y-2 mt-2">
-              {field.options?.map(opt => (
-                <label key={opt} className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="radio"
-                    name={field.id}
-                    checked={answers[field.id] === opt}
-                    onChange={() => onFieldChange(field.id, opt)}
-                    className="text-indigo-600 focus:ring-indigo-500"
-                  />
-                  <span className="text-sm text-gray-700">{opt}</span>
-                </label>
-              ))}
+            <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {field.options?.map(opt => {
+                const isSelected = answers[field.id] === opt;
+                return (
+                  <label
+                    key={opt}
+                    className={[
+                      'flex items-center gap-2 cursor-pointer rounded-full px-4 py-2.5 border-2 transition',
+                      isSelected
+                        ? 'border-gansid-primary bg-gansid-primary-container/10 font-semibold'
+                        : 'border-gansid-outline-variant/40 hover:border-gansid-primary/50',
+                    ].join(' ')}
+                  >
+                    <input
+                      type="radio"
+                      name={field.id}
+                      checked={isSelected}
+                      onChange={() => onFieldChange(field.id, opt)}
+                      className="accent-gansid-primary"
+                    />
+                    <span className="text-sm text-gansid-on-surface">{opt}</span>
+                  </label>
+                );
+              })}
             </div>
           ) : field.type === 'checkbox' ? (
-            <div className="space-y-2 mt-2">
-              {field.options?.map(opt => (
-                <label key={opt} className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={answers[field.id]?.includes(opt)}
-                    onChange={(e) => {
-                      const current = answers[field.id] || [];
-                      if (e.target.checked) onFieldChange(field.id, [...current, opt]);
-                      else onFieldChange(field.id, current.filter((v: string) => v !== opt));
-                    }}
-                    className="text-indigo-600 focus:ring-indigo-500"
-                  />
-                  <span className="text-sm text-gray-700">{opt}</span>
-                </label>
-              ))}
+            <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {field.options?.map(opt => {
+                const isChecked = answers[field.id]?.includes(opt);
+                return (
+                  <label
+                    key={opt}
+                    className={[
+                      'flex items-center gap-2 cursor-pointer rounded-full px-4 py-2.5 border-2 transition',
+                      isChecked
+                        ? 'border-gansid-secondary bg-gansid-secondary/10 font-semibold'
+                        : 'border-gansid-outline-variant/40 hover:border-gansid-secondary/50',
+                    ].join(' ')}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={(e) => {
+                        const current = answers[field.id] || [];
+                        if (e.target.checked) onFieldChange(field.id, [...current, opt]);
+                        else onFieldChange(field.id, current.filter((v: string) => v !== opt));
+                      }}
+                      className="accent-gansid-secondary"
+                    />
+                    <span className="text-sm text-gansid-on-surface">{opt}</span>
+                  </label>
+                );
+              })}
             </div>
           ) : field.type === 'boolean' ? (
             field.consentModal && field.linkText ? (
@@ -682,11 +715,11 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
             )
           ) : (
             <div className="relative">
-              {field.type === 'address' && <MapPin className="absolute left-3 top-3 w-4 h-4 text-gray-400" />}
+              {field.type === 'address' && <MapPin className="absolute left-3 top-3 w-4 h-4 text-gansid-on-surface/40 z-10" />}
               <input
                 type={field.type === 'number' ? 'number' : field.type === 'email' ? 'email' : field.type === 'phone' ? 'tel' : 'text'}
                 inputMode={field.type === 'text' && field.validation === 'int' ? 'numeric' : undefined}
-                className={`w-full ${field.type === 'address' ? 'pl-10' : 'px-3'} py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition`}
+                className={`w-full ${field.type === 'address' ? 'pl-10 pr-4' : 'px-4'} py-2.5 rounded-full gradient-border-input focus:outline-none focus:ring-2 focus:ring-gansid-secondary/40 font-body text-sm`}
                 placeholder={field.placeholder}
                 value={answers[field.id] || ''}
                 onChange={e => onFieldChange(field.id, e.target.value)}

@@ -298,14 +298,14 @@ serve(async (req: Request) => {
 
       const paypalMode = (Deno.env.get('PAYPAL_MODE') || '').toLowerCase();
       const allAreTest = attendees.every((a: any) => a.is_test === true);
+      const origin = (req.headers.get('origin') || '').toLowerCase();
+      const isLocalhost = origin !== '' && (origin.includes('localhost') || origin.includes('127.0.0.1'));
       let useSandbox: boolean;
-      if (paypalMode === 'production') useSandbox = false;
+      if (isLocalhost) useSandbox = true;
+      else if (paypalMode === 'production') useSandbox = false;
       else if (paypalMode === 'sandbox') useSandbox = true;
       else if (allAreTest) useSandbox = true;
-      else {
-        const origin = (req.headers.get('origin') || '').toLowerCase();
-        useSandbox = origin !== '' && (origin.includes('localhost') || origin.includes('127.0.0.1'));
-      }
+      else useSandbox = false;
       const PAYPAL_CLIENT_ID = (useSandbox ? (Deno.env.get('PAYPAL_SANDBOX_CLIENT_ID') || Deno.env.get('PAYPAL_CLIENT_ID')) : Deno.env.get('PAYPAL_CLIENT_ID'))?.trim() || '';
       const PAYPAL_CLIENT_SECRET = (useSandbox ? (Deno.env.get('PAYPAL_SANDBOX_CLIENT_SECRET') || Deno.env.get('PAYPAL_CLIENT_SECRET')) : Deno.env.get('PAYPAL_CLIENT_SECRET'))?.trim() || '';
       const PAYPAL_API_BASE = Deno.env.get('PAYPAL_API_BASE') || (useSandbox ? 'https://api-m.sandbox.paypal.com' : 'https://api-m.paypal.com');
@@ -331,7 +331,10 @@ serve(async (req: Request) => {
       });
       const capData = await capResp.json();
       if (!capResp.ok || capData.status !== 'COMPLETED') {
-        return jsonResponse({ error: 'PayPal capture failed', details: capData }, 502);
+        const issue = capData?.details?.[0]?.issue || capData?.name || capData?.message || 'unknown';
+        const debugId = capData?.debug_id || '';
+        console.error('[verify-payment sponsor] PayPal capture failed', JSON.stringify({ issue, debugId, useSandbox, apiBase: PAYPAL_API_BASE, clientIdTail: PAYPAL_CLIENT_ID.slice(-6), orderId: paypalOrderId }));
+        return jsonResponse({ error: `PayPal capture failed: ${issue}${debugId ? ` (debug_id: ${debugId})` : ''}`, details: capData, diagnostic: { useSandbox, clientIdTail: PAYPAL_CLIENT_ID.slice(-6) } }, 502);
       }
       const capture = capData.purchase_units?.[0]?.payments?.captures?.[0];
       if (!capture) return jsonResponse({ error: 'No capture data' }, 502);
@@ -489,14 +492,14 @@ serve(async (req: Request) => {
         if (!paypalOrderId) return jsonResponse({ error: 'paypalOrderId required for group payment' }, 400);
         const ppMode = (Deno.env.get('PAYPAL_MODE') || '').toLowerCase();
         const allTest = attendees.every((a: any) => a.is_test === true);
+        const ppOrigin = (req.headers.get('origin') || '').toLowerCase();
+        const ppIsLocal = ppOrigin !== '' && (ppOrigin.includes('localhost') || ppOrigin.includes('127.0.0.1'));
         let ppSandbox: boolean;
-        if (ppMode === 'production') ppSandbox = false;
+        if (ppIsLocal) ppSandbox = true;
+        else if (ppMode === 'production') ppSandbox = false;
         else if (ppMode === 'sandbox') ppSandbox = true;
         else if (allTest) ppSandbox = true;
-        else {
-          const origin = (req.headers.get('origin') || '').toLowerCase();
-          ppSandbox = origin !== '' && (origin.includes('localhost') || origin.includes('127.0.0.1'));
-        }
+        else ppSandbox = false;
         const PP_CLIENT_ID = (ppSandbox ? (Deno.env.get('PAYPAL_SANDBOX_CLIENT_ID') || Deno.env.get('PAYPAL_CLIENT_ID')) : Deno.env.get('PAYPAL_CLIENT_ID'))?.trim() || '';
         const PP_CLIENT_SECRET = (ppSandbox ? (Deno.env.get('PAYPAL_SANDBOX_CLIENT_SECRET') || Deno.env.get('PAYPAL_CLIENT_SECRET')) : Deno.env.get('PAYPAL_CLIENT_SECRET'))?.trim() || '';
         const PP_API_BASE = Deno.env.get('PAYPAL_API_BASE') || (ppSandbox ? 'https://api-m.sandbox.paypal.com' : 'https://api-m.paypal.com');
@@ -515,7 +518,12 @@ serve(async (req: Request) => {
           headers: { 'Authorization': `Bearer ${ppToken}`, 'Content-Type': 'application/json' },
         });
         const ppCapData = await ppCapResp.json();
-        if (!ppCapResp.ok || ppCapData.status !== 'COMPLETED') return jsonResponse({ error: 'PayPal capture failed', details: ppCapData }, 502);
+        if (!ppCapResp.ok || ppCapData.status !== 'COMPLETED') {
+          const issue = ppCapData?.details?.[0]?.issue || ppCapData?.name || ppCapData?.message || 'unknown';
+          const debugId = ppCapData?.debug_id || '';
+          console.error('[verify-payment] PayPal capture failed', JSON.stringify({ issue, debugId, useSandbox: ppSandbox, apiBase: PP_API_BASE, clientIdTail: PP_CLIENT_ID.slice(-6), orderId: paypalOrderId }));
+          return jsonResponse({ error: `PayPal capture failed: ${issue}${debugId ? ` (debug_id: ${debugId})` : ''}`, details: ppCapData, diagnostic: { useSandbox: ppSandbox, clientIdTail: PP_CLIENT_ID.slice(-6) } }, 502);
+        }
         const ppCapture = ppCapData.purchase_units?.[0]?.payments?.captures?.[0];
         if (!ppCapture) return jsonResponse({ error: 'No capture data in PayPal response' }, 502);
         const capturedCents = Math.round(Number(ppCapture.amount?.value ?? 0) * 100);
@@ -636,14 +644,14 @@ serve(async (req: Request) => {
 
         const ppMode = (Deno.env.get('PAYPAL_MODE') || '').toLowerCase();
         const allTest = attendees.every((a: any) => a.is_test === true);
+        const ppOrigin = (req.headers.get('origin') || '').toLowerCase();
+        const ppIsLocal = ppOrigin !== '' && (ppOrigin.includes('localhost') || ppOrigin.includes('127.0.0.1'));
         let ppSandbox: boolean;
-        if (ppMode === 'production') ppSandbox = false;
+        if (ppIsLocal) ppSandbox = true;
+        else if (ppMode === 'production') ppSandbox = false;
         else if (ppMode === 'sandbox') ppSandbox = true;
         else if (allTest) ppSandbox = true;
-        else {
-          const origin = (req.headers.get('origin') || '').toLowerCase();
-          ppSandbox = origin !== '' && (origin.includes('localhost') || origin.includes('127.0.0.1'));
-        }
+        else ppSandbox = false;
 
         const PP_CLIENT_ID = (
           ppSandbox
@@ -679,7 +687,10 @@ serve(async (req: Request) => {
         });
         const ppCapData = await ppCapResp.json();
         if (!ppCapResp.ok || ppCapData.status !== 'COMPLETED') {
-          return jsonResponse({ error: 'PayPal capture failed', details: ppCapData }, 502);
+          const issue = ppCapData?.details?.[0]?.issue || ppCapData?.name || ppCapData?.message || 'unknown';
+          const debugId = ppCapData?.debug_id || '';
+          console.error('[verify-payment dyn-single] PayPal capture failed', JSON.stringify({ issue, debugId, useSandbox: ppSandbox, apiBase: PP_API_BASE, clientIdTail: PP_CLIENT_ID.slice(-6), orderId: paypalOrderId }));
+          return jsonResponse({ error: `PayPal capture failed: ${issue}${debugId ? ` (debug_id: ${debugId})` : ''}`, details: ppCapData, diagnostic: { useSandbox: ppSandbox, clientIdTail: PP_CLIENT_ID.slice(-6) } }, 502);
         }
         const ppCapture = ppCapData.purchase_units?.[0]?.payments?.captures?.[0];
         if (!ppCapture) return jsonResponse({ error: 'No capture data in PayPal response' }, 502);
@@ -875,11 +886,17 @@ serve(async (req: Request) => {
       return jsonResponse({ error: 'Missing required field: paypalOrderId for paid registration' }, 400);
     }
 
-    // Determine PayPal environment — PAYPAL_MODE overrides, then test-mode check, then Origin auto-detect
+    // Determine PayPal environment — localhost is ALWAYS sandbox (safety), then PAYPAL_MODE, then test-mode, then Origin auto-detect
     const paypalMode = (Deno.env.get('PAYPAL_MODE') || '').toLowerCase();
     const allAreTest = attendees.every((a: any) => a.is_test === true);
+    const originHeader = (req.headers.get('origin') || '').toLowerCase();
+    const isLocalhost = originHeader !== '' && (originHeader.includes('localhost') || originHeader.includes('127.0.0.1'));
     let useSandbox: boolean;
-    if (paypalMode === 'production') {
+    if (isLocalhost) {
+      // Dev machines run the client with sandbox PayPal credentials; forcing production
+      // here would try to capture a sandbox order against production API and 502.
+      useSandbox = true;
+    } else if (paypalMode === 'production') {
       useSandbox = false;
     } else if (paypalMode === 'sandbox') {
       useSandbox = true;
@@ -890,8 +907,7 @@ serve(async (req: Request) => {
       // Auto-detect from Origin header — default to PRODUCTION if origin is missing or unknown.
       // Privacy browsers/extensions can strip Origin headers, so missing origin must NOT
       // fall back to sandbox (which would break real payments).
-      const origin = (req.headers.get('origin') || '').toLowerCase();
-      useSandbox = origin !== '' && (origin.includes('localhost') || origin.includes('127.0.0.1'));
+      useSandbox = false;
     }
 
     console.log(`[verify-payment] mode=${mode}, useSandbox=${useSandbox}, origin=${(req.headers.get('origin') || '').toLowerCase()}, formId=${formId || 'legacy'}, attendees=${attendees.length}`);
@@ -945,10 +961,13 @@ serve(async (req: Request) => {
     const captureData = await captureResponse.json();
 
     if (!captureResponse.ok || captureData.status !== 'COMPLETED') {
-      console.error('PayPal capture not completed or failed:', captureData);
+      const issue = captureData?.details?.[0]?.issue || captureData?.name || captureData?.message || 'unknown';
+      const debugId = captureData?.debug_id || '';
+      console.error('[verify-payment static] PayPal capture failed', JSON.stringify({ issue, debugId, useSandbox, apiBase: PAYPAL_API_BASE, clientIdTail: PAYPAL_CLIENT_ID.slice(-6), orderId: paypalOrderId }));
       return jsonResponse({
-        error: 'Payment was not completed or PayPal API rejected the request',
-        details: captureData.status || captureData.error_description || captureData.message || 'Unknown error',
+        error: `PayPal capture failed: ${issue}${debugId ? ` (debug_id: ${debugId})` : ''}`,
+        details: captureData,
+        diagnostic: { useSandbox, clientIdTail: PAYPAL_CLIENT_ID.slice(-6) },
       }, 502);
     }
 

@@ -11,7 +11,7 @@ export function CredentialCard({ profile, attendee }: Props) {
   const roleBadge = profile.role === 'exhibitor' ? 'Exhibitor'
     : profile.role === 'sponsor' ? 'Sponsor'
     : profile.role === 'admin' ? 'Admin'
-    : 'Delegate';
+    : 'Attendee';
   const rolePillGradient =
     profile.role === 'exhibitor' ? 'bg-[linear-gradient(135deg,#8b2a5e_0%,#5a3575_100%)]'
     : profile.role === 'sponsor' ? 'bg-[linear-gradient(135deg,#2260a1_0%,#1a4880_100%)]'

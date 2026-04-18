@@ -15,23 +15,34 @@ const STEP_GRADIENTS = [
 export function InfoTabs() {
   const [tab, setTab] = useState<TabId>('about');
   const [feeTier, setFeeTier] = useState<'tier1' | 'tier2'>('tier1');
-  const scrollRestoreRef = useRef<number | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const tabBarTopBeforeSwitch = useRef<number | null>(null);
 
+  // Capture the tab bar's viewport-relative position BEFORE state change,
+  // then after the new content renders, scroll so it's back at the same
+  // viewport position. This anchors the tab bar regardless of whether
+  // the new tab's content is taller or shorter than the previous tab's.
   const handleTabChange = (id: TabId) => {
-    scrollRestoreRef.current = window.scrollY;
+    const container = containerRef.current;
+    tabBarTopBeforeSwitch.current = container ? container.getBoundingClientRect().top : null;
     setTab(id);
   };
 
   useLayoutEffect(() => {
-    if (scrollRestoreRef.current !== null) {
-      window.scrollTo({ top: scrollRestoreRef.current, behavior: 'instant' as ScrollBehavior });
-      scrollRestoreRef.current = null;
+    if (tabBarTopBeforeSwitch.current === null) return;
+    const container = containerRef.current;
+    if (!container) { tabBarTopBeforeSwitch.current = null; return; }
+    const newTop = container.getBoundingClientRect().top;
+    const delta = newTop - tabBarTopBeforeSwitch.current;
+    if (Math.abs(delta) > 0.5) {
+      window.scrollBy({ top: delta, left: 0, behavior: 'instant' as ScrollBehavior });
     }
+    tabBarTopBeforeSwitch.current = null;
   }, [tab]);
   const activeTier = FEES.tiers.find((t) => t.id === feeTier)!;
 
   return (
-    <div className="space-y-8">
+    <div ref={containerRef} className="space-y-8 scroll-mt-8">
       <div className="flex justify-center">
         <FloatingToggleTabs<TabId>
           tabs={[

@@ -1109,8 +1109,8 @@ export async function getAttendeesForUser(userId: string, email: string): Promis
   // Run two queries + merge instead of PostgREST .or() because email values
   // with special chars (@, +, .) can confuse the parser and return 400s.
   const [byUserId, byEmail] = await Promise.all([
-    supabase.from('attendees').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
-    email ? supabase.from('attendees').select('*').eq('email', email).order('created_at', { ascending: false }) : Promise.resolve({ data: [], error: null } as any),
+    supabase.from('attendees').select('*').eq('user_id', userId).order('registered_at', { ascending: false }),
+    email ? supabase.from('attendees').select('*').eq('email', email).order('registered_at', { ascending: false }) : Promise.resolve({ data: [], error: null } as any),
   ]);
   if (byUserId.error) console.error('getAttendeesForUser byUserId', byUserId.error);
   if (byEmail.error) console.error('getAttendeesForUser byEmail', byEmail.error);
