@@ -26,9 +26,11 @@ import AddonsList from './Pricing/AddonsList';
 import RunningTotal from './Pricing/RunningTotal';
 import { SingleFormShell } from './SteppedRegistration/SingleFormShell';
 import { SteppedFormShell } from './SteppedRegistration/SteppedFormShell';
+import { useAuth } from './AuthContext';
 
 const PublicRegistration = () => {
   const { formId } = useParams<{ formId: string }>();
+  const { user } = useAuth();
   const [form, setForm] = useState<Form | null>(null);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [answers, setAnswers] = useState<Record<string, any>>({});
@@ -1042,6 +1044,8 @@ const PublicRegistration = () => {
                 setDonatedTables={setDonatedTables}
                 setSelectedCountryCode={setSelectedCountryCode}
                 onSubmit={doSubmit}
+                userId={user?.id ?? null}
+                onRestoreAnswers={(restored) => setAnswers(restored)}
               />
             ) : (
               <SingleFormShell

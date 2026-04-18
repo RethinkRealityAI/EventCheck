@@ -42,6 +42,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }, []);
 
     const signOut = async () => {
+        try {
+            const keys: string[] = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key?.startsWith('gansid-portal-stepper:')) keys.push(key);
+            }
+            for (const k of keys) localStorage.removeItem(k);
+        } catch {
+            /* ignore — best-effort sweep */
+        }
         await supabase.auth.signOut();
     };
 

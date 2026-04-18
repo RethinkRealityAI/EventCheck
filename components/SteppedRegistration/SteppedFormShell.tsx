@@ -1,4 +1,4 @@
-import { useState, useMemo, type ReactNode } from 'react';
+import { useState, useMemo, useEffect, type ReactNode } from 'react';
 import { FormRenderer, type FormRendererProps } from './FormRenderer';
 import { StepperSidebar } from '../Portal/ui/StepperSidebar';
 import { groupFieldsBySection, validateRequired, validateRms, validateGroupMembers, type GroupMember } from './steppedValidation';
@@ -6,6 +6,8 @@ import { groupFieldsBySection, validateRequired, validateRms, validateGroupMembe
 interface SteppedFormShellProps extends Omit<FormRendererProps, 'filteredFields'> {
   onSubmit: () => void | Promise<void>;
   finalStepContent?: ReactNode;
+  userId?: string | null;                                       // stable cache key
+  onRestoreAnswers?: (answers: Record<string, any>) => void;   // called when localStorage restores
 }
 
 export function SteppedFormShell(props: SteppedFormShellProps) {
@@ -17,6 +19,43 @@ export function SteppedFormShell(props: SteppedFormShellProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [completedSteps, setCompletedSteps] = useState<Set<number>>(new Set());
   const [stepError, setStepError] = useState('');
+
+  const userId = props.userId ?? 'anon';
+  const storageKey = `gansid-portal-stepper:${props.form.id}:${userId}`;
+
+  // Restore progress from localStorage on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (!saved) return;
+      const parsed = JSON.parse(saved);
+      if (parsed.answers && typeof parsed.answers === 'object') {
+        props.onRestoreAnswers?.(parsed.answers);
+      }
+      if (typeof parsed.currentIndex === 'number') {
+        setCurrentIndex(parsed.currentIndex);
+      }
+    } catch {
+      /* ignore malformed localStorage */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storageKey]);
+
+  // Persist answers + currentIndex whenever they change
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        storageKey,
+        JSON.stringify({ answers: props.answers, currentIndex }),
+      );
+    } catch {
+      /* ignore quota errors */
+    }
+  }, [props.answers, currentIndex, storageKey]);
+
+  const clearPersistence = () => {
+    try { localStorage.removeItem(storageKey); } catch {}
+  };
 
   const currentStep = steps[currentIndex];
   const currentFields = currentStep ? fieldsByStep[currentStep.id] ?? [] : [];
@@ -55,6 +94,7 @@ export function SteppedFormShell(props: SteppedFormShellProps) {
     if (!validateCurrentStep()) return;
     setCompletedSteps(prev => new Set(prev).add(currentIndex));
     await props.onSubmit();
+    clearPersistence();
   };
 
   if (steps.length === 0) {
