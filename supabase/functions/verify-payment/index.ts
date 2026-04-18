@@ -80,6 +80,12 @@ serve(async (req: Request) => {
         );
         const { data: userData, error: userErr } = await adminClient.auth.getUser(jwt);
         if (!userErr && userData?.user) {
+          if (!userData.user.email_confirmed_at) {
+            return new Response(
+              JSON.stringify({ error: 'email_not_verified', message: 'Please verify your email before registering.' }),
+              { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+            );
+          }
           authUserId = userData.user.id;
         }
       } catch (e) {
