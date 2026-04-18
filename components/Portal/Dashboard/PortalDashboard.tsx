@@ -24,14 +24,13 @@ export function PortalDashboard() {
 
   const latestPaidAttendee = attendees.find((a) => a.paymentStatus === 'paid') ?? null;
   const latestAttendee = attendees[0] ?? null;
-  const roleOrder = profile.role === 'admin' ? 'attendee' : (profile.role as 'attendee' | 'exhibitor' | 'sponsor');
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[1.7fr_1fr] gap-8">
       <VerifyEmailBanner />
       <div className="space-y-8">
         <WelcomeBlock profile={profile} latestAttendee={latestAttendee} />
-        <AvailableFormsGrid forms={forms} userAttendees={attendees} roleOrder={roleOrder} />
+        <AvailableFormsGrid forms={forms} userAttendees={attendees} role={profile.role} />
         <AnnouncementsFeed />
       </div>
       <aside className="space-y-6">
