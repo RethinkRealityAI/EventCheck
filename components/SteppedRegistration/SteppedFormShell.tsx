@@ -8,6 +8,10 @@ interface SteppedFormShellProps extends Omit<FormRendererProps, 'filteredFields'
   finalStepContent?: ReactNode;
   userId?: string | null;                                       // stable cache key
   onRestoreAnswers?: (answers: Record<string, any>) => void;   // called when localStorage restores
+  /** If provided, renders a "Save & Close" button that fires this callback. Progress
+   *  is already in localStorage (auto-saved on every change); this is the explicit-intent
+   *  exit so users are confident their work is preserved. */
+  onSaveAndClose?: () => void;
 }
 
 export function SteppedFormShell(props: SteppedFormShellProps) {
@@ -53,7 +57,8 @@ export function SteppedFormShell(props: SteppedFormShellProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storageKey]);
 
-  // Persist answers + currentIndex + RMS group state whenever they change
+  // Persist answers + currentIndex + RMS group state whenever they change.
+  // `savedAt` lets the portal show "resumed from [time]" context without re-parsing the full payload.
   useEffect(() => {
     try {
       localStorage.setItem(
@@ -65,6 +70,7 @@ export function SteppedFormShell(props: SteppedFormShellProps) {
           groupSize: props.groupSize,
           groupHasAllInfo: props.groupHasAllInfo,
           groupMembers: props.groupMembers,
+          savedAt: Date.now(),
         }),
       );
     } catch {
@@ -152,7 +158,7 @@ export function SteppedFormShell(props: SteppedFormShellProps) {
       {/* Fixed footer: always visible at the bottom of the modal card */}
       <div className="shrink-0 border-t border-gansid-outline-variant/20 bg-gansid-surface-container-lowest px-6 md:px-8 py-4 flex flex-col gap-3">
         {stepError && <p className="text-sm text-gansid-primary font-semibold">{stepError}</p>}
-        <div className="flex justify-between items-center gap-4">
+        <div className="flex flex-wrap justify-between items-center gap-3">
           <button
             type="button"
             onClick={handlePrevious}
@@ -164,23 +170,35 @@ export function SteppedFormShell(props: SteppedFormShellProps) {
           <div className="flex items-center gap-2 text-xs font-display text-gansid-on-surface/50 uppercase tracking-wider">
             Step {currentIndex + 1} of {steps.length}
           </div>
-          {isLastStep ? (
-            <button
-              type="button"
-              onClick={handleSubmitClick}
-              className="px-8 py-2.5 rounded-full bg-gansid-primary-gradient text-white font-display font-bold shadow-lg hover:scale-[1.02] transition-all whitespace-nowrap"
-            >
-              Complete Registration
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={handleNext}
-              className="px-8 py-2.5 rounded-full bg-gansid-primary-gradient text-white font-display font-bold shadow-lg hover:scale-[1.02] transition-all whitespace-nowrap"
-            >
-              Next Step →
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {props.onSaveAndClose && (
+              <button
+                type="button"
+                onClick={props.onSaveAndClose}
+                className="px-4 py-2.5 rounded-full bg-white border border-gansid-outline-variant/40 text-gansid-on-surface/70 font-display font-semibold text-sm hover:bg-gansid-surface-container-low transition"
+                title="Your progress is saved automatically — you can come back from the portal anytime."
+              >
+                Save & Close
+              </button>
+            )}
+            {isLastStep ? (
+              <button
+                type="button"
+                onClick={handleSubmitClick}
+                className="px-8 py-2.5 rounded-full bg-gansid-primary-gradient text-white font-display font-bold shadow-lg hover:scale-[1.02] transition-all whitespace-nowrap"
+              >
+                Complete Registration
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleNext}
+                className="px-8 py-2.5 rounded-full bg-gansid-primary-gradient text-white font-display font-bold shadow-lg hover:scale-[1.02] transition-all whitespace-nowrap"
+              >
+                Next Step →
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

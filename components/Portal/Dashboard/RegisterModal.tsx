@@ -40,7 +40,7 @@ export function RegisterModal({ formId, onClose }: Props) {
         >
           <X className="h-5 w-5" />
         </button>
-        <PublicRegistration formId={formId} onComplete={onClose} />
+        <PublicRegistration formId={formId} onComplete={onClose} onSaveAndClose={onClose} />
       </div>
     </div>
   );

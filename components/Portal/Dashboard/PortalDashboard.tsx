@@ -43,7 +43,8 @@ export function PortalDashboard() {
             forms={forms}
             userAttendees={attendees}
             role={profile.role}
-            onStartRegistration={(id) => setRegisterFormId(id)}
+            userId={user.id}
+            onStartRegistration={(id, _opts) => setRegisterFormId(id)}
           />
           <AnnouncementsFeed />
         </div>

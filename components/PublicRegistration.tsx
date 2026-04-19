@@ -33,9 +33,13 @@ interface PublicRegistrationProps {
   formId?: string;
   /** If provided, a "Return to Portal" button appears on the success screen and invokes this. */
   onComplete?: () => void;
+  /** If provided, a "Save & Close" button appears in the stepper footer and invokes this.
+   *  Progress is already in localStorage (auto-saved); this exists purely so users are
+   *  confident their work is preserved without having to hit X. */
+  onSaveAndClose?: () => void;
 }
 
-const PublicRegistration = ({ formId: propFormId, onComplete }: PublicRegistrationProps = {}) => {
+const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: PublicRegistrationProps = {}) => {
   const params = useParams<{ formId: string }>();
   const formId = propFormId ?? params.formId;
   const { user, profile } = useAuth();
@@ -1150,6 +1154,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete }: PublicRegistrati
                 onSubmit={doSubmit}
                 userId={user?.id ?? null}
                 onRestoreAnswers={(restored) => setAnswers(restored)}
+                onSaveAndClose={onSaveAndClose}
               />
             ) : (
               <SingleFormShell
