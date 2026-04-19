@@ -163,8 +163,12 @@ export function SteppedFormShell(props: SteppedFormShellProps) {
   const handleSubmitClick = async () => {
     if (!validateCurrentStep()) return;
     setCompletedSteps(prev => new Set(prev).add(currentIndex));
+    // Important: do NOT clear persistence here. For paid flows onSubmit only
+    // routes to the payment screen — PayPal capture happens after this returns.
+    // If we cleared here and the user then cancelled payment, they'd lose all
+    // their answers. PublicRegistration clears progress on the confirmed success
+    // transition instead, which covers both free and paid paths correctly.
     await props.onSubmit();
-    clearPersistence();
   };
 
   if (steps.length === 0) {

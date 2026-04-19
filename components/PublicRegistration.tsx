@@ -4,6 +4,7 @@ import { FormField, AppSettings, Attendee, Form, DynamicPricingSelection } from 
 import type { PricingTemplate } from '../types';
 import { resolveBracket, resolveTier, computeTotal, formatPrice } from '../utils/pricing';
 import { computeGroupTotal, type GroupMemberPricingInput } from '../utils/groupPricing';
+import { clearAllProgress } from '../utils/registrationProgress';
 import CountryField from './FormBuilder/fields/CountryField';
 import { getCountryName } from '../utils/countries';
 import GroupPersonRow from './Group/GroupPersonRow';
@@ -501,6 +502,8 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
         }).catch(() => {/* ignore — email is best-effort */});
 
         setGeneratedTicket({ ...loadedRefAttendee, answers });
+        // Confirmed success — wipe any cross-device draft so portal stops showing "Resume".
+        if (form) clearAllProgress(form.id, user?.id ?? null);
         setStep('success');
       } catch (err: any) {
         setError(err.message || 'An unexpected error occurred. Please try again.');
@@ -607,6 +610,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
       await saveAttendee(guestAttendee);
       setGeneratedTicket(guestAttendee);
       setLoading(false);
+      if (form) clearAllProgress(form.id, user?.id ?? null);
       setStep('success');
       if (settings) {
         // No registration URL for already-registered guests
@@ -926,6 +930,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
     }
 
     setLoading(false);
+    if (form) clearAllProgress(form.id, user?.id ?? null);
     setStep('success');
 
     // Generate Preview URL (Primary Ticket)
