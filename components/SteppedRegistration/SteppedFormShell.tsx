@@ -21,6 +21,17 @@ export function SteppedFormShell(props: SteppedFormShellProps) {
     () => groupFieldsBySection(props.form.fields, steps),
     [props.form.fields, steps],
   );
+
+  // Locate the step that hosts the group-enabled RMS field so we can hint at it
+  // on earlier steps. Users might not realize group registration is an option
+  // if it's buried in step 4.
+  const rmsStepIndex = useMemo(() => {
+    const rms = props.form.fields.find((f: any) => f.type === 'registration-mode-selector' && ((f as any).groupEnabled ?? true));
+    if (!rms) return -1;
+    const sec = (rms as any).section;
+    if (!sec) return 0;
+    return steps.findIndex(s => s.id === sec);
+  }, [props.form.fields, steps]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [completedSteps, setCompletedSteps] = useState<Set<number>>(new Set());
   const [stepError, setStepError] = useState('');
@@ -192,6 +203,16 @@ export function SteppedFormShell(props: SteppedFormShellProps) {
           <div className="flex-1 min-w-0">
             <h2 className="text-2xl md:text-3xl font-semibold mb-1 font-display">{currentStep?.label}</h2>
             {currentStep?.description && <p className="text-gansid-on-surface/60 mb-5 font-body">{currentStep.description}</p>}
+            {rmsStepIndex > 0 && currentIndex < rmsStepIndex && props.registrationMode !== 'group' && (
+              <div className="mb-5 rounded-2xl border border-gansid-secondary/30 bg-gansid-secondary/10 px-4 py-3 flex items-start gap-3">
+                <span className="text-gansid-secondary mt-0.5 flex-shrink-0" aria-hidden>👥</span>
+                <p className="text-sm font-body text-gansid-on-surface/80">
+                  <strong className="font-display text-gansid-secondary">Registering a group?</strong>{' '}
+                  This form is currently set up for you personally. If you're also registering additional people
+                  (up to 5), you'll be able to add them on <strong>step {rmsStepIndex + 1} ({steps[rmsStepIndex]?.label})</strong>.
+                </p>
+              </div>
+            )}
             {/* 2-column grid on desktop — FormRenderer wraps each field in a div,
                 short inputs (text/email/phone/number) naturally share rows, long
                 fields (textarea, radio groups, ticket) stretch full-width via
