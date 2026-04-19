@@ -36,8 +36,16 @@ components/
     ExhibitorStaffRow.tsx   — Per-staff name + email row
     ExhibitorsTab.tsx       — Admin dashboard Exhibitors tab
   Group/                   — Group registration UX components
-    GroupPersonRow.tsx      — Per-person row with live pricing
-    GroupShortcutsToggle.tsx— "Same country" / "Same category" batch toggles
+    GroupPersonRow.tsx      — Per-person row. Resolves tier from the MEMBER's own
+                              countryCode (not the purchaser's) so displayed prices
+                              are correct across regions.
+    GroupShortcutsToggle.tsx— "Same country" / "Same category" batch toggles. Shows
+                              an amber warning callout when "same category" is checked
+                              but countries differ — clarifies that each person's
+                              actual price resolves from their own country's tier.
+    GuestFullDetailsInline.tsx — Per-guest accordion with every personal field except
+                              RMS/ticket/identity. Rendered when purchaser checks
+                              "Yes — I have each additional person's details on hand".
   Pricing/                 — Dynamic pricing UI components
     PricingBracketBanner.tsx— "Early Bird — ends Jun 30" subtle banner
     LivePriceCategory.tsx  — Category dropdown with live per-person prices
@@ -82,13 +90,21 @@ components/
     createSponsorForm.ts   — Seed helper: generates a sponsor-typed Form with all 14 items
 services/
   storageService.ts        — Supabase CRUD (forms, attendees, settings, sponsor prospects,
-                             getSponsorAttendees, attendee mappers including sponsor fields)
+                             getSponsorAttendees, attendee mappers including sponsor fields).
+                             getAttendeesForUser uses `registered_at` ordering (attendees has
+                             no `created_at` column).
   supabaseClient.ts        — Supabase client initialization
-  smtpService.ts           — Email sending via edge function
+  smtpService.ts           — Email sending via edge function. Forwards the response body on
+                             non-2xx so the client can surface the real SMTP error.
   profileService.ts        — Profile fetch/update mappers (portal)
   announcementService.ts   — Announcement CRUD + image upload to portal-assets (portal)
+  registrationDraftService.ts — Cross-device draft load/save/clear. Writes to registration_drafts
+                             DB table, RLS-protected per user_id. Explicit Save & Close persists;
+                             auto-save continues to localStorage per keystroke.
   database.types.ts        — Generated/maintained DB types (includes sponsor_prospects, sponsor
-                             columns on attendees + app_settings, form_type on forms)
+                             columns on attendees + app_settings, form_type on forms,
+                             registration_drafts, new email_guest_claim_* + email_guest_confirmed_*
+                             template columns)
 utils/
   pdfGenerator.ts          — jsPDF ticket PDF generation
   receiptGenerator.ts      — jsPDF itemized sponsor receipt (paid/pending, HST line)
@@ -98,6 +114,9 @@ utils/
                              formatPrice. Covered by tests/pricing.test.ts
   countries.ts             — ISO 3166-1 alpha-2 list (195 entries) + lookup helpers
   groupPricing.ts          — computeGroupTotal: sums per-person pricing for group registrations
+  registrationProgress.ts  — readSavedProgress/hasSavedProgress/clearSavedProgress (localStorage)
+                             + clearAllProgress (combines localStorage + DB draft cleanup).
+                             Key format: `gansid-portal-stepper:{formId}:{userId}`.
 config/
   sites.ts                 — Per-site branding config keyed off VITE_SITE (scago / gansid)
   formTemplates.ts         — Form template registry + availableTemplatesForSite()
@@ -122,6 +141,15 @@ supabase/migrations/
   20260418000000_add_user_portal_schema.sql — profiles table, is_portal_admin(), handle_new_user
                              trigger, attendees.user_id, forms.show_in_portal, announcements
                              table, portal-assets bucket RLS, bootstrap admin backfill
+  20260419000000_add_registration_drafts.sql — registration_drafts table (user_id, form_id, state
+                             jsonb) with RLS + auto-update trigger for cross-device resume
+  20260419100000_auto_link_attendees_on_signup.sql — AFTER INSERT trigger on auth.users:
+                             backfills attendees.user_id on matching email. Covers "guest signs
+                             up later" path. Also adds email_guest_claim_* + email_guest_confirmed_*
+                             columns to app_settings.
+  20260419110000_link_attendee_to_existing_user.sql — BEFORE INSERT trigger on attendees:
+                             sets user_id from auth.users when email matches. Covers
+                             "user had account before buying ticket" path.
 tests/
   sponsorEmailTemplates.test.ts — Template merge + HTML escape + context builders (19 tests)
   createSponsorForm.test.ts     — Sponsor form seed shape + pricing (9 tests)
@@ -502,27 +530,82 @@ with image upload to `portal-assets/announcements/{uuid}.{ext}`. Site-scoped per
 
 ## Group Registration Flow
 
-Triggered by the `registration-mode-selector` (RMS) field type on a form. A form may have at most one RMS field (builder enforces via `hasRmsField` flag in the toolbox). The public form renders an Individual/Group radio selector; selecting Group reveals a nested UX: size picker (2–`groupMaxSize`), "I have all their details now" checkbox, per-person rows, and "same country" / "same category" shortcut toggles.
+Triggered by the `registration-mode-selector` (RMS) field type on a form. A form may have at most one RMS field (builder enforces via `hasRmsField` flag in the toolbox).
 
-- **Inline mode** (`groupHasAllInfo = true`) — contact fills every person's full registration inline
-- **Send-links mode** (default) — contact enters Name + Email + Country + Category for each; pending-claim guests receive a link to complete their personal details
+**Conceptual model (updated April 2026):** the purchaser IS ALWAYS registered through the main form for themselves. Group mode adds 1–5 ADDITIONAL registrants. So `groupMembers[]` holds ONLY the additional people — the purchaser is NOT an element of this array. Total attendees = 1 + `groupMembers.length`.
 
-Contact pays one PayPal capture for the group total (sum of per-person prices computed by `computeGroupTotal` in `utils/groupPricing.ts`). `verify-payment` re-resolves prices server-side and inserts N attendee rows sharing a `transaction_id`:
-- Primary (`is_primary = true`)
-- Guests (`primary_attendee_id = primary.id`, `guest_type = 'pending-claim'` for send-links or `null` for inline)
+The public form renders an Individual / "Register additional people" radio. Selecting the latter reveals: size picker (1–`groupMaxSize`), **"Yes — I have each additional person's details on hand"** checkbox, per-person rows, and "same country" / "same category" shortcut toggles.
 
-**Claim flow:** pending-claim guests click `?ref=<attendeeId>` → PublicRegistration detects `guestType === 'pending-claim'` → pre-fills + locks their name/email/country/category → shows remaining personal fields → submit updates the row + flips `guest_type` to `'claimed'` + invokes `send-ticket-email` with `mode: 'guest-claim-completed'` (ships the ticket to the guest and notifies the primary).
+- **Inline mode** (`groupHasAllInfo = true`) — each guest row expands via `GuestFullDetailsInline.tsx` to show every personal question (dietary, emergency, presenting, consents). Saved to `m.fullAnswers`.
+- **Send-links mode** (default) — purchaser enters only Name + Email + Country + Category per guest. Pending-claim rows get claim-link emails.
 
-**Emails:** `send-ticket-email` has two extra modes:
-- `mode: 'group-invite'` — short "complete your registration" email fired by `verify-payment` for each pending-claim guest after a successful group capture
-- `mode: 'guest-claim-completed'` — sends the ticket to the now-claimed guest + a "X has completed their registration" note to the primary
+**Per-member tier resolution**: each `GroupPersonRow` calls `resolveTier(template, m.countryCode)` to derive the row's tier from the MEMBER's own country (NOT the purchaser's). Displayed prices are accurate across regions. `GroupShortcutsToggle` derives tier from `sharedCountry` when "all same country" is checked; shows an amber warning callout when "all same category" is on but countries differ.
 
-**Admin dashboard:** `AttendeeList` renders group primaries with expand/collapse chevrons; expanded rows show indented guests with status badges (Pending / Completed / Pre-filled) and per-guest actions (copy registration link, resend invitation, mark complete).
+Purchaser pays one PayPal capture for the group total (sum of per-person prices computed by `computeGroupTotal(template, [purchaser_selection, ...members])` in `utils/groupPricing.ts`). The client prepends the purchaser's own selection to `groupPricingSelections` before sending; the server's existing group branch requires `length >= 2` and treats index 0 as primary.
+
+`verify-payment` re-resolves prices server-side and inserts N+1 attendee rows sharing a `transaction_id`:
+- Primary (`is_primary = true`, `user_id = authUserId`, full `answers` from main form)
+- Guests (`primary_attendee_id = primary.id`, `guest_type = 'pending-claim'` for send-links or `null` for inline, `user_id = NULL` initially)
+
+**Purchaser gets all tickets as backup**: client generates PDFs for the purchaser AND every additional registrant after successful verify-payment, attaches them all to the purchaser's email (matches the landing-page promise). Each inline guest ALSO receives an individual email with ONLY their own PDF (using `settings.emailGuestConfirmedSubject/Body` = Template X).
+
+**Claim flow (pending-claim only):** guest clicks link → `PublicRegistration` detects `guestType === 'pending-claim'` → pre-fills + locks name/email/country/category → shows remaining personal fields → a blue "Create a portal account?" panel appears (default checked, password input). On submit:
+1. `.update({ answers, guest_type: 'claimed' })` on the attendee row; if already signed in with matching email, `user_id` is also set
+2. If signup opted-in: `supabase.auth.signUp({email, password, data: {full_name, role: 'attendee'}})` — DB trigger then auto-links via email match
+3. `send-ticket-email` fires `mode: 'guest-claim-completed'` → server sends a ticket email with inline QR image + notifies primary
+
+**Emails:** `send-ticket-email` has three group-related modes:
+- `mode: 'group-invite'` — fires for each pending-claim guest right after verify-payment captures. Uses admin-configurable Template Y (`app_settings.email_guest_claim_*`) with placeholders `{{name}} {{purchaser}} {{event}} {{complete_url}} {{signup_url}}`.
+- `mode: 'guest-claim-completed'` — sends QR-embedded ticket confirmation to the newly-claimed guest + notification to primary.
+- Inline guests are NOT emailed by the server — the CLIENT sends them their Template X email with a real PDF immediately after verify-payment.
+
+**Admin dashboard:** `AttendeeList` has a **"Groups"** tab with a count badge (filters to primaries-with-guests, excludes sponsor/exhibitor groups). Primaries in Live and Groups tabs display a **"GROUP OF N"** badge. Expanded rows show guests with status badges (Pending / Completed / Pre-filled) and per-guest actions (copy registration link, resend invitation, mark complete).
 
 Seed for the GANSID Individual/Group form lives (non-committed) in `tmp/seed-gansid-form.sql`.
 
 Spec: `docs/superpowers/specs/2026-04-16-form-templates-and-group-registration-design.md`
 Plan: `docs/superpowers/plans/2026-04-16-form-templates-and-group-registration.md`
+
+## Cross-device draft resume
+
+Users can walk away mid-registration and pick up on another device.
+
+- **localStorage** (auto-saved per keystroke): `gansid-portal-stepper:{formId}:{userId}` — answers, currentIndex, RMS group state, timestamp
+- **DB draft** (explicit Save & Close): `registration_drafts` table with `(user_id, form_id)` unique key, state jsonb, RLS `user_id = auth.uid()`. Auto-updated_at trigger.
+- On form mount: `SteppedFormShell` loads both sources and applies whichever has the newer `savedAt`
+- Portal's `AvailableFormsGrid` merges the two sources to show "Resume Registration (step N of M, last saved X ago)" + "Or start over" link
+- `clearAllProgress(formId, userId)` wipes both; called ONLY at confirmed `setStep('success')` so payment-screen abandonment preserves the draft
+
+## Account auto-linking
+
+Attendee rows and auth.users are linked by email bidirectionally via DB triggers (migrations `20260419100000` + `20260419110000`).
+
+- **User signs up AFTER receiving ticket**: AFTER INSERT on auth.users → backfills `attendees.user_id = NEW.id WHERE email = NEW.email AND user_id IS NULL`
+- **User had account BEFORE ticket was purchased**: BEFORE INSERT on attendees → if `user_id IS NULL`, looks up auth.users by email and sets `NEW.user_id = existing_user.id`
+- **Guest claims ticket while signed in with matching email**: client explicitly sets `user_id = user.id` in the claim update
+- **Optional signup during claim**: pending-claim guest sees blue "Create a portal account" panel (default checked), enters password → `supabase.auth.signUp` → trigger auto-links
+
+All three paths converge: every paid attendee ends up linked to a portal account if one exists for the email.
+
+## GANSID Congress 2026 — deployment-specific
+
+| Property | Value |
+|---|---|
+| Site key | `gansid` (set VITE_SITE on Netlify) |
+| Netlify site | `gansid.netlify.app` |
+| Supabase project ref | `gticuvgclbvhwvpzkuez` |
+| Parent site (embeds iframe) | `https://inheritedblooddisorders.world/congress-2026/registration` |
+| Pricing template | `c569ab4f-883b-42e9-8892-4405fa67217e` (tiers: Tier 1 = Asia/Africa/SA/CA/MX, Tier 2 = US/CA/Europe/ANZ + Israel + Japan; brackets: Early Bird → Regular → On-site) |
+| Main registration form | `gansid-congress-2026` (status=draft until launch; form.settings.renderMode=stepped with 5 steps) |
+| Exhibitor form | `gansid-congress-2026-exhibitors` |
+| Step order | 1. Registration Type (RMS), 2. Personal Details, 3. Affiliation & Role, 4. Needs & Preferences, 5. Consent & Payment |
+| Admin account bootstrap | profiles row role='admin' set manually via SQL for `tech@sicklecellanemia.ca` + `dapo.ajisafe@gmail.com` |
+| PAYPAL_MODE secret | `production` (live PayPal Client ID + Secret set). Sandbox keys retained for localhost-dev auto-fallback. |
+| PayPal live client ID on Netlify | `VITE_PAYPAL_CLIENT_ID` set to live app; `VITE_PAYPAL_ENV=live` |
+| SMTP | IONOS on `dapo.a@taskopglobalconsulting.com` (app_settings smtp_* + email_from_name="GANSID Congress 2026"). Custom-SMTP toggle DISABLED in Supabase Auth pending DKIM setup on that domain. |
+| Supabase Auth Site URL | `https://gansid.netlify.app` |
+| Supabase Auth Redirect URLs allowlist | `https://gansid.netlify.app/**` + `http://localhost:{3000,3001,5173}/#/**` |
+| Iframe integration | Parent site adds `<iframe allow="payment; clipboard-write; publickey-credentials-get" src="https://gansid.netlify.app/">` . Our Permissions-Policy + CSP frame-ancestors * permit this. |
 
 ## Exhibitor Form
 
