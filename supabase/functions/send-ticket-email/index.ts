@@ -193,16 +193,26 @@ serve(async (req: Request) => {
                 .maybeSingle();
             const eventName = form?.title || 'the event';
 
-            // 1. Send a personal ticket confirmation to the claimed guest
+            // 1. Send a personal ticket confirmation to the claimed guest.
+            // QR is embedded as an image (external service) so the guest can scan directly
+            // from their email at check-in — no PDF attachment is produced on this path
+            // since the edge function doesn't have a PDF library, but the QR image is the
+            // functional equivalent for entry.
             let ticketOk = true;
             try {
+                const qrData = attendee.qr_payload || attendee.id;
+                const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(qrData)}`;
                 const subject = `Your registration for ${eventName} is confirmed`;
                 const html = `
                     <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
                       <h2>Hi ${attendee.name || 'there'},</h2>
                       <p>Thank you for completing your registration for <strong>${eventName}</strong>!</p>
-                      <p>You are all set. Please bring this confirmation (or the QR code on your ticket) to the event for check-in.</p>
+                      <p>Your check-in QR code is below. Present this email at the entrance — the team will scan it.</p>
+                      <div style="text-align:center;margin:24px 0;">
+                        <img src="${qrImageUrl}" alt="Check-in QR code" width="240" height="240" style="border:1px solid #e5e7eb;border-radius:8px;padding:8px;background:#fff;" />
+                      </div>
                       <p style="color:#666;font-size:13px;">Registration ID: ${attendee.id}</p>
+                      <p style="color:#666;font-size:13px;">If the QR image doesn't load, reply to this email and we'll resend your ticket.</p>
                     </div>
                 `;
                 await sendSimpleEmail({ to: attendee.email, subject, html });

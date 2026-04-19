@@ -771,6 +771,10 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
       verifyBody.pricingSelection = pricingSelection;
     }
 
+    // Track IDs we generate for each group member so we can reuse them
+    // post-success for PDF generation (purchaser-backup attachments + per-guest emails).
+    const groupGuestRows: Array<{ id: string; name: string; email: string; qrPayload: string; isInline: boolean }> = [];
+
     if (pricingTemplate && registrationMode === 'group' && groupMembers.length > 0) {
       // Group mode: purchaser (main form) + N additional registrants.
       // Server's group branch requires groupPricingSelections.length >= 2, so we
@@ -797,6 +801,14 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
         },
         ...groupMembers.map(m => {
           const guestId = crypto.randomUUID();
+          const qrPayload = JSON.stringify({ id: guestId, invoiceId, formId: form.id, action: 'checkin' });
+          groupGuestRows.push({
+            id: guestId,
+            name: m.name || `${purchaserName} - Guest Ticket`,
+            email: m.email || '',
+            qrPayload,
+            isInline: !!groupHasAllInfo,
+          });
           return {
             id: guestId,
             form_id: form.id,
@@ -805,7 +817,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
             email: m.email || purchaserEmail,
             ticket_type: 'Registration',
             registered_at: new Date().toISOString(),
-            qr_payload: JSON.stringify({ id: guestId, invoiceId, formId: form.id, action: 'checkin' }),
+            qr_payload: qrPayload,
             is_primary: false,
             guest_type: groupHasAllInfo ? null : 'pending-claim',
             answers: groupHasAllInfo && m.fullAnswers ? m.fullAnswers : null,
@@ -884,14 +896,84 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
           });
         }
 
-        // Send all tickets to the purchaser
+        // Group mode: attach PDFs for every additional registrant so the purchaser
+        // gets the whole stack as a backup (matches the "main group registrant will
+        // always receive every ticket as a backup" promise on the landing page).
+        // Per-guest emails (with their individual PDF) are sent further below.
+        const groupGuestPdfs: Array<{ guestId: string; email: string; name: string; pdfBase64: string; isInline: boolean }> = [];
+        if (registrationMode === 'group' && groupGuestRows.length > 0) {
+          for (const g of groupGuestRows) {
+            const guestAttendee: Attendee = {
+              id: g.id,
+              formId: form.id,
+              formTitle: form.title,
+              name: g.name,
+              email: g.email || purchaserEmail,
+              ticketType: 'Registration',
+              registeredAt: new Date().toISOString(),
+              qrPayload: g.qrPayload,
+              paymentStatus: 'paid',
+              transactionId: newAttendee.transactionId,
+              paymentAmount: newAttendee.paymentAmount,
+              answers: {},
+              isPrimary: false,
+              primaryAttendeeId: newAttendee.id,
+            };
+            // Placeholder registration URL so pending-claim guests can be invited
+            // from the PDF if the purchaser forwards it.
+            const claimUrl = g.isInline ? undefined : `${window.location.origin}/#/form/${form.id}?ref=${g.id}`;
+            const doc = await generateTicketPDF(guestAttendee, settings, form, claimUrl);
+            const pdfBase64 = arrayBufferToBase64(doc.output('arraybuffer'));
+            const safeName = g.name.replace(/[^a-zA-Z0-9 ]/g, '_') || 'Guest';
+            attachments.push({
+              filename: `${safeName}_Ticket.pdf`,
+              content: pdfBase64,
+              contentType: 'application/pdf',
+            });
+            groupGuestPdfs.push({ guestId: g.id, email: g.email, name: g.name, pdfBase64, isInline: g.isInline });
+          }
+        }
+
+        // Send all tickets to the purchaser (their own + every group guest's PDF as backup)
+        const hasGroupGuests = groupGuestPdfs.length > 0;
+        const purchaserMessage = hasGroupGuests
+          ? `Thank you for your ${paymentStatus === 'paid' ? 'purchase' : 'registration'}! Your ticket plus ${groupGuestPdfs.length} additional ${groupGuestPdfs.length === 1 ? 'ticket is' : 'tickets are'} attached as a backup. Each additional registrant will also receive their own ticket or registration link by email directly — you don't need to forward anything.`
+          : `Thank you for your ${paymentStatus === 'paid' ? 'purchase' : 'registration'}! Attached ${attachments.length === 1 ? 'is your ticket' : `are your ${attachments.length} tickets`}.${guestTickets.length > 0 ? ` ${(settings.emailPurchaserGuestNote || "We've also included your guest tickets as a backup. Named guests will receive their own ticket by email directly. For any unnamed guests, you can forward their ticket or share the registration link on it so they can provide their details.")}` : ''}`;
         await sendTicketEmail(settings, {
           to: purchaserEmail,
           subject: `${form.title} Ticket(s)`,
           name: purchaserName,
-          message: `Thank you for your ${paymentStatus === 'paid' ? 'purchase' : 'registration'}! Attached ${attachments.length === 1 ? 'is your ticket' : `are your ${attachments.length} tickets`}.${guestTickets.length > 0 ? ` ${(settings.emailPurchaserGuestNote || "We've also included your guest tickets as a backup. Named guests will receive their own ticket by email directly. For any unnamed guests, you can forward their ticket or share the registration link on it so they can provide their details.")}` : ''}`,
+          message: purchaserMessage,
           attachments
         });
+
+        // Group-mode: send each inline registrant their own ticket directly.
+        // Pending-claim registrants get a claim-link email from the server instead —
+        // their ticket is issued once they complete their details via that link.
+        for (const g of groupGuestPdfs) {
+          if (!g.isInline) continue;
+          if (!g.email || g.email === purchaserEmail || g.email === 'unknown@example.com') continue;
+          const guestSubject = (settings.emailGuestSubject || 'Your Ticket for {{event}}')
+            .replace(/\{\{event\}\}/g, form.title)
+            .replace(/\{\{purchaser\}\}/g, purchaserName)
+            .replace(/\{\{name\}\}/g, g.name);
+          const guestBody = (settings.emailGuestBody || 'Great news! {{purchaser}} has registered you for {{event}}. Your ticket is attached — please bring it with you to the event. You can scan the QR code on your ticket for entry.')
+            .replace(/\{\{event\}\}/g, form.title)
+            .replace(/\{\{purchaser\}\}/g, purchaserName)
+            .replace(/\{\{name\}\}/g, g.name);
+          const safeName = g.name.replace(/[^a-zA-Z0-9 ]/g, '_') || 'Guest';
+          await sendTicketEmail(settings, {
+            to: g.email,
+            subject: guestSubject,
+            name: g.name,
+            message: guestBody,
+            attachments: [{
+              filename: `${safeName}_Ticket.pdf`,
+              content: g.pdfBase64,
+              contentType: 'application/pdf',
+            }],
+          });
+        }
 
         // Also email individual named guests directly
         for (let idx = 0; idx < guestTickets.length; idx++) {

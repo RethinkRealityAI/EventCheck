@@ -570,23 +570,23 @@ serve(async (req: Request) => {
           }, 500);
         }
 
-        // Fire-and-forget emails for EVERY additional registrant.
-        //   - pending-claim guests → 'group-invite' (link to complete their own details)
-        //   - inline guests (purchaser filled their details) → 'guest-claim-completed' (ticket-ready confirmation)
-        // Either way, every additional registrant gets an email addressed directly to them.
-        const additionalGuests = rows.filter((r: any) => r.id !== primaryId);
-        if (additionalGuests.length > 0) {
+        // Fire-and-forget claim-link emails for pending-claim guests only.
+        // Inline guests (purchaser already filled all their details) get their
+        // actual ticket PDF from the client flow — sending a server email here
+        // would duplicate. The client's SMTP integration runs post-verify and
+        // handles inline-guest delivery with full branded PDFs.
+        const pendingGuests = rows.filter((r: any) => r.id !== primaryId && r.guest_type === 'pending-claim');
+        if (pendingGuests.length > 0) {
           const emailFnUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/send-ticket-email`;
-          for (const g of additionalGuests) {
-            const emailMode = g.guest_type === 'pending-claim' ? 'group-invite' : 'guest-claim-completed';
+          for (const g of pendingGuests) {
             fetch(emailFnUrl, {
               method: 'POST',
               headers: {
                 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
                 'Content-Type': 'application/json',
               },
-              body: JSON.stringify({ mode: emailMode, attendeeId: g.id, origin: req.headers.get('origin') ?? '' }),
-            }).catch(e => console.warn('Group guest email failed', e));
+              body: JSON.stringify({ mode: 'group-invite', attendeeId: g.id, origin: req.headers.get('origin') ?? '' }),
+            }).catch(e => console.warn('Group invite email failed', e));
           }
         }
 
