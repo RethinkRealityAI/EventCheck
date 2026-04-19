@@ -13,9 +13,9 @@ export const REGISTRATION_PROCESS = [
   { number: '03', title: 'Finalize', body: 'Submit your payment details. Your information is not saved if you exit before completion — complete in one sitting.' },
 ];
 
-export const IMPORTANT_NOTICE = 'Before you start completing the registration form, kindly ensure that you have readily available your relevant card, bank transfer, and billing details. Our system does not save your information if you exit the registration form before completion, so we recommend completing your registration in one sitting.';
+export const IMPORTANT_NOTICE = 'Before beginning the registration form, please ensure that your payment details (card or bank transfer) and billing information are readily available. The system does not save incomplete entries; therefore, we recommend completing the registration in a single session.';
 
-export const GROUP_NOTE = 'Group Registration: Corporations and organizations may register 5 or more participants at a time. All registration information will be sent to the group contact person only, who will then be responsible for the distribution of information to each group member. No documentation will be sent directly to the group participants (unless specifically requested).';
+export const GROUP_NOTE = 'Group Registration: The person who purchases the tickets will receive all of them. If they provide the name and email address for each person they are registering, those individuals will also receive their own ticket along with a link to complete any remaining personal details for their own registration. The main group registrant will always receive every ticket as a backup.';
 
 export const INCLUDES = [
   'Full access to all scientific and educational sessions',

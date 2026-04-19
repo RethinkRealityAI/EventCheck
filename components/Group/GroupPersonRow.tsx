@@ -31,7 +31,7 @@ export default function GroupPersonRow(p: Props) {
     <div className="border rounded-lg p-3 space-y-2">
       <div className="flex justify-between items-center">
         <div className="font-medium text-sm">
-          {p.isPrimary ? 'You (Contact)' : `Registrant ${p.index + 1}`}
+          Additional Registrant {p.index + 1}
         </div>
         {displayPrice && <div className="text-sm font-semibold text-indigo-700">{displayPrice}</div>}
       </div>

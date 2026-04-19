@@ -20,16 +20,20 @@ interface Props {
 export default function GroupShortcutsToggle(p: Props) {
   return (
     <div className="border rounded-lg p-3 bg-slate-50 space-y-2">
+      <p className="text-xs text-slate-600 leading-relaxed">
+        Form default is a different country and registration category for each person. Only check the
+        boxes below if either applies to <strong>every</strong> additional registrant.
+      </p>
       <label className="flex items-center gap-2 text-sm">
         <input type="checkbox" checked={p.allSameCountry} onChange={e => p.onToggleCountry(e.target.checked)} />
-        All members are from the same country
+        All additional registrants are from the same country
       </label>
       {p.allSameCountry && (
-        <CountryField label="Country (all members)" value={p.sharedCountry} onChange={p.onSharedCountry} />
+        <CountryField label="Country (all additional registrants)" value={p.sharedCountry} onChange={p.onSharedCountry} />
       )}
       <label className="flex items-center gap-2 text-sm">
         <input type="checkbox" checked={p.allSameCategory} onChange={e => p.onToggleCategory(e.target.checked)} />
-        All members are the same category
+        All additional registrants are the same category
       </label>
       {p.allSameCategory && p.tier && p.bracket && (
         <select

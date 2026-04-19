@@ -90,11 +90,15 @@ const PublicRegistration = ({ formId: propFormId, onComplete }: PublicRegistrati
   const rmsField = form?.fields?.find((f: any) => f.type === 'registration-mode-selector') ?? null;
 
   const [registrationMode, setRegistrationMode] = useState<'individual' | 'group' | null>(null);
-  const [groupSize, setGroupSize] = useState<number>(2);
+  // `groupSize` = number of ADDITIONAL people the purchaser is registering (1..5).
+  // The purchaser themselves is always registered separately via the main form.
+  const [groupSize, setGroupSize] = useState<number>(1);
   const [groupHasAllInfo, setGroupHasAllInfo] = useState<boolean>(false);
   const [groupAllSameCountry, setGroupAllSameCountry] = useState<boolean>(false);
   const [groupAllSameCategory, setGroupAllSameCategory] = useState<boolean>(false);
 
+  // `groupMembers` now holds ONLY the additional registrants — the purchaser is
+  // NOT an element of this array. Length is driven by `groupSize`.
   const [groupMembers, setGroupMembers] = useState<Array<{
     name: string;
     email: string;
@@ -103,7 +107,6 @@ const PublicRegistration = ({ formId: propFormId, onComplete }: PublicRegistrati
     addonIds: string[];
     fullAnswers?: Record<string, any>;
   }>>([
-    { name: '', email: '', countryCode: '', categoryId: null, addonIds: [] },
     { name: '', email: '', countryCode: '', categoryId: null, addonIds: [] },
   ]);
 
@@ -114,14 +117,24 @@ const PublicRegistration = ({ formId: propFormId, onComplete }: PublicRegistrati
     ? computeTotal(pricingTemplate, selectedCategoryId, activeTier, activeBracket, selectedAddonIds)
     : null;
 
+  // When in group mode, total = purchaser's own price (from main form's country/category)
+  // + sum of each additional registrant's price. We prepend the purchaser's selection
+  // to the list so computeGroupTotal handles the full N+1 computation atomically.
   const groupPricingResult = (pricingTemplate && registrationMode === 'group')
     ? computeGroupTotal(
         pricingTemplate,
-        groupMembers.map(m => ({
-          countryCode: m.countryCode,
-          categoryId: m.categoryId ?? '',
-          addonIds: m.addonIds,
-        })),
+        [
+          {
+            countryCode: selectedCountryCode,
+            categoryId: selectedCategoryId ?? '',
+            addonIds: selectedAddonIds,
+          },
+          ...groupMembers.map(m => ({
+            countryCode: m.countryCode,
+            categoryId: m.categoryId ?? '',
+            addonIds: m.addonIds,
+          })),
+        ],
         new Date(),
       )
     : null;
@@ -751,19 +764,47 @@ const PublicRegistration = ({ formId: propFormId, onComplete }: PublicRegistrati
     }
 
     if (pricingTemplate && registrationMode === 'group' && groupMembers.length > 0) {
-      verifyBody.groupPricingSelections = groupMembers.map(m => ({
-        countryCode: m.countryCode,
-        categoryId: m.categoryId ?? '',
-        addonIds: m.addonIds,
-      }));
-      verifyBody.attendees = groupMembers.map((m, i) => ({
-        name: m.name,
-        email: m.email,
-        ticket_type: 'Registration',
-        is_primary: i === 0,
-        guest_type: i === 0 ? null : (groupHasAllInfo ? null : 'pending-claim'),
-        answers: groupHasAllInfo && m.fullAnswers ? m.fullAnswers : null,
-      }));
+      // Group mode: purchaser (main form) + N additional registrants.
+      // Server's group branch requires groupPricingSelections.length >= 2, so we
+      // prepend the purchaser's own selection. The purchaser is the primary
+      // attendee and carries the full main-form answers; additional people are
+      // guests (pending-claim unless `groupHasAllInfo` is set).
+      verifyBody.groupPricingSelections = [
+        {
+          countryCode: selectedCountryCode,
+          categoryId: selectedCategoryId ?? '',
+          addonIds: selectedAddonIds,
+        },
+        ...groupMembers.map(m => ({
+          countryCode: m.countryCode,
+          categoryId: m.categoryId ?? '',
+          addonIds: m.addonIds,
+        })),
+      ];
+      verifyBody.attendees = [
+        {
+          ...mapAttendeeToDb(newAttendee),
+          is_primary: true,
+          guest_type: null,
+        },
+        ...groupMembers.map(m => {
+          const guestId = crypto.randomUUID();
+          return {
+            id: guestId,
+            form_id: form.id,
+            form_title: form.title,
+            name: m.name || `${purchaserName} - Guest Ticket`,
+            email: m.email || purchaserEmail,
+            ticket_type: 'Registration',
+            registered_at: new Date().toISOString(),
+            qr_payload: JSON.stringify({ id: guestId, invoiceId, formId: form.id, action: 'checkin' }),
+            is_primary: false,
+            guest_type: groupHasAllInfo ? null : 'pending-claim',
+            answers: groupHasAllInfo && m.fullAnswers ? m.fullAnswers : null,
+            is_test: false,
+          };
+        }),
+      ];
     }
 
     // Pass the current session's access_token so the edge function can derive

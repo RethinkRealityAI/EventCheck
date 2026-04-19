@@ -56,7 +56,7 @@ describe('validateGroupMembers', () => {
   it('returns error when members array is empty', () => {
     const result = validateGroupMembers('group', [], false);
     expect(result.ok).toBe(false);
-    expect(result.error).toBe('Please add at least one group member.');
+    expect(result.error).toBe('Please add at least one additional registrant.');
   });
 
   it('returns error when a member has empty name', () => {

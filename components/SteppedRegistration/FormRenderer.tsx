@@ -187,7 +187,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                   <label className="flex items-center gap-2 text-sm">
                     <input type="radio" name={field.id} checked={registrationMode === 'group'}
                       onChange={() => setRegistrationMode('group')} />
-                    {(field as any).groupLabel || `Group — up to ${(field as any).groupMaxSize ?? 5} people`}
+                    {(field as any).groupLabel || `Register additional people (up to ${(field as any).groupMaxSize ?? 5})`}
                   </label>
                 )}
               </div>
@@ -195,9 +195,12 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
               {registrationMode === 'group' && pricingTemplate && (
                 <div className="space-y-4 border-l-4 border-indigo-200 pl-4 mt-3">
                   <div>
-                    <label className="block text-sm font-medium mb-1">How many people total?</label>
-                    <div className="flex gap-2">
-                      {[2, 3, 4, 5].filter(n => n <= ((field as any).groupMaxSize ?? 5)).map(n => (
+                    <label className="block text-sm font-medium mb-1">How many additional people are you registering?</label>
+                    <p className="text-xs text-slate-500 mb-2">
+                      You'll complete the rest of this form for <strong>yourself</strong>. Register up to {(field as any).groupMaxSize ?? 5} additional people here — they'll each get their own ticket.
+                    </p>
+                    <div className="flex gap-2 flex-wrap">
+                      {[1, 2, 3, 4, 5].filter(n => n <= ((field as any).groupMaxSize ?? 5)).map(n => (
                         <button type="button" key={n} onClick={() => setGroupSize(n)}
                           className={`px-3 py-1 rounded border text-sm ${groupSize === n ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white border-slate-300'}`}>
                           {n}
@@ -209,10 +212,10 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                   <label className="flex items-center gap-2 text-sm">
                     <input type="checkbox" checked={groupHasAllInfo}
                       onChange={e => setGroupHasAllInfo(e.target.checked)} />
-                    I have all their details now and want to fill them in
+                    I have each additional registrant's full details and want to fill them in now
                   </label>
                   <p className="text-xs text-slate-500 -mt-1">
-                    If unchecked, we'll capture basic pricing info now and email each person a link to complete their details later. Payment is up-front regardless.
+                    If unchecked, we'll capture basic pricing info now and email each additional person a link to complete their details later. Payment is up-front regardless.
                   </p>
 
                   <GroupShortcutsToggle
@@ -234,7 +237,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                       <GroupPersonRow
                         key={i}
                         index={i}
-                        isPrimary={i === 0}
+                        isPrimary={false}
                         template={pricingTemplate}
                         tier={activeTier}
                         bracket={activeBracket}
@@ -252,7 +255,9 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
 
                   {groupTotal != null && (
                     <div className="sticky bottom-4 p-4 bg-white shadow-lg rounded-xl border flex items-center justify-between">
-                      <div className="text-xs text-slate-500 uppercase tracking-wider">Group total ({groupMembers.length} people)</div>
+                      <div className="text-xs text-slate-500 uppercase tracking-wider">
+                        Total ({1 + groupMembers.length} people — you + {groupMembers.length} additional)
+                      </div>
                       <div className="text-2xl font-bold">{formatPrice(groupTotal, pricingTemplate.currency)}</div>
                     </div>
                   )}

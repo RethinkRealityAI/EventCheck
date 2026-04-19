@@ -82,18 +82,18 @@ export function validateGroupMembers(
 ): ValidateResult {
   if (registrationMode !== 'group') return { ok: true };
   if (groupMembers.length === 0) {
-    return { ok: false, error: 'Please add at least one group member.' };
+    return { ok: false, error: 'Please add at least one additional registrant.' };
   }
   for (const m of groupMembers) {
     if (!m.name?.trim()) {
-      return { ok: false, error: 'Please provide a name for every group member.' };
+      return { ok: false, error: 'Please provide a name for every additional registrant.' };
     }
     if (!m.email?.trim()) {
-      return { ok: false, error: 'Please provide an email for every group member.' };
+      return { ok: false, error: 'Please provide an email for every additional registrant.' };
     }
     if (requireCountryAndCategory) {
-      if (!m.countryCode) return { ok: false, error: 'Please select a country for every group member.' };
-      if (!m.categoryId) return { ok: false, error: 'Please select a category for every group member.' };
+      if (!m.countryCode) return { ok: false, error: 'Please select a country for every additional registrant.' };
+      if (!m.categoryId) return { ok: false, error: 'Please select a category for every additional registrant.' };
     }
   }
   return { ok: true };
