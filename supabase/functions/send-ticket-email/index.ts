@@ -126,50 +126,53 @@ serve(async (req: Request) => {
         const body = await req.json();
 
         // ── GROUP INVITE: send registration-completion link to a pending-claim guest ──
+        // Uses admin-configurable Template Y from app_settings.email_guest_claim_*.
+        // Placeholders supported: {{name}}, {{purchaser}}, {{event}}, {{complete_url}}, {{signup_url}}
         if (body.mode === 'group-invite') {
             const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
             const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
             const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
             const { data: guest, error: gErr } = await supabase
-                .from('attendees')
-                .select('*')
-                .eq('id', body.attendeeId)
-                .maybeSingle();
+                .from('attendees').select('*').eq('id', body.attendeeId).maybeSingle();
             if (gErr || !guest) return jsonResponse({ error: 'Guest not found' }, 404);
 
             const { data: primary } = await supabase
-                .from('attendees')
-                .select('name, email')
-                .eq('id', guest.primary_attendee_id)
-                .maybeSingle();
+                .from('attendees').select('name, email').eq('id', guest.primary_attendee_id).maybeSingle();
 
             const { data: form } = await supabase
-                .from('forms')
-                .select('title')
-                .eq('id', guest.form_id)
-                .maybeSingle();
+                .from('forms').select('title').eq('id', guest.form_id).maybeSingle();
             const eventName = form?.title || 'the event';
 
+            const { data: appSettings } = await supabase
+                .from('app_settings').select('*').eq('id', 1).maybeSingle();
+            const smtpConfig = appSettings
+                ? { host: appSettings.smtp_host, port: Number(appSettings.smtp_port || 587), user: appSettings.smtp_user, pass: appSettings.smtp_pass, fromName: (appSettings as any).email_from_name || 'SCAGO' }
+                : undefined;
+
             const origin = body.origin || '';
-            const registrationLink = `${origin}/#/form/${guest.form_id}?ref=${guest.id}`;
+            const completeUrl = `${origin}/#/form/${guest.form_id}?ref=${guest.id}`;
+            const signupUrl = `${origin}/#/`;
 
-            const subject = `Complete your registration for ${eventName}`;
-            const html = `
-                <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
-                  <h2>Hi ${guest.name || 'there'},</h2>
-                  <p><strong>${primary?.name || 'A colleague'}</strong> has registered you for <strong>${eventName}</strong>.</p>
-                  <p>Your registration is paid. Please click below to complete your personal details (dietary restrictions, emergency contact, consent).</p>
-                  <p style="text-align:center;margin:24px 0;">
-                    <a href="${registrationLink}" style="display:inline-block;padding:12px 24px;background:#1E4A8C;color:white;border-radius:6px;text-decoration:none;font-weight:600;">
-                      Complete my registration
-                    </a>
-                  </p>
-                  <p style="color:#666;font-size:13px;">Or copy this link into your browser:<br>${registrationLink}</p>
-                </div>
-            `;
+            const rawSubject = (appSettings as any)?.email_guest_claim_subject || 'Complete your registration for {{event}}';
+            const rawBody = (appSettings as any)?.email_guest_claim_body || `<p>Hi {{name}},</p><p><strong>{{purchaser}}</strong> has purchased your ticket for <strong>{{event}}</strong>. Your ticket is attached and will be fully confirmed once you complete a few personal details:</p><p style="text-align:center;margin:24px 0;"><a href="{{complete_url}}" style="display:inline-block;padding:12px 24px;background:#1E4A8C;color:#fff;text-decoration:none;border-radius:6px;font-weight:600;">Complete my registration</a></p><p>You can also create a portal account with this same email so you can view your ticket and updates anytime: <a href="{{signup_url}}">{{signup_url}}</a></p>`;
 
-            await sendSimpleEmail({ to: guest.email, subject, html });
+            const replace = (s: string) => s
+                .replace(/\{\{name\}\}/g, guest.name || 'there')
+                .replace(/\{\{purchaser\}\}/g, primary?.name || 'A colleague')
+                .replace(/\{\{event\}\}/g, eventName)
+                .replace(/\{\{complete_url\}\}/g, completeUrl)
+                .replace(/\{\{signup_url\}\}/g, signupUrl);
+            const subject = replace(rawSubject);
+            const body_html = replace(rawBody);
+            const html = generateEmailTemplate({
+                title: eventName,
+                greeting: `Hi ${guest.name || 'there'}`,
+                content: body_html,
+                fromName: smtpConfig?.fromName,
+            });
+
+            await sendSimpleEmail({ to: guest.email, subject, html, smtpConfig });
             return jsonResponse({ ok: true });
         }
 

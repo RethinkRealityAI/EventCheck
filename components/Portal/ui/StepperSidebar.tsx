@@ -9,7 +9,7 @@ interface StepperSidebarProps {
 
 export function StepperSidebar({ steps, currentIndex, completedSteps, onStepClick }: StepperSidebarProps) {
   return (
-    <nav className="flex flex-col gap-6 py-4" aria-label="Registration steps">
+    <nav className="flex flex-col gap-10 py-6" aria-label="Registration steps">
       {steps.map((step, i) => {
         const isCurrent = i === currentIndex;
         const isComplete = completedSteps.has(i);
@@ -21,7 +21,7 @@ export function StepperSidebar({ steps, currentIndex, completedSteps, onStepClic
               onClick={() => isReachable && onStepClick?.(i)}
               disabled={!isReachable}
               className={[
-                'shrink-0 h-10 w-10 rounded-full flex items-center justify-center font-display font-bold transition-all duration-300 ease-viscous',
+                'shrink-0 h-12 w-12 rounded-full flex items-center justify-center font-display font-bold text-lg transition-all duration-300 ease-viscous',
                 isCurrent
                   ? 'bg-gansid-primary-gradient text-white shadow-lg ring-2 ring-gansid-primary/20'
                   : isComplete
@@ -32,7 +32,7 @@ export function StepperSidebar({ steps, currentIndex, completedSteps, onStepClic
             >
               {isComplete ? '✓' : i + 1}
             </button>
-            <div className="flex flex-col pt-1">
+            <div className="flex flex-col pt-1.5">
               <span
                 className={[
                   'text-xs uppercase tracking-wide font-display font-semibold',
@@ -43,7 +43,7 @@ export function StepperSidebar({ steps, currentIndex, completedSteps, onStepClic
               </span>
               <span
                 className={[
-                  'font-display font-semibold',
+                  'font-display font-semibold text-base',
                   isCurrent ? 'text-gansid-on-surface' : 'text-gansid-on-surface/50',
                 ].join(' ')}
               >
@@ -55,7 +55,7 @@ export function StepperSidebar({ steps, currentIndex, completedSteps, onStepClic
             </div>
             {i < steps.length - 1 && (
               <span
-                className="absolute left-[19px] top-12 w-[2px] h-12 rounded-full"
+                className="absolute left-[23px] top-14 w-[2px] h-16 rounded-full"
                 style={{
                   background: isComplete || isCurrent
                     ? 'linear-gradient(to bottom, #E0243C, #2260a1)'

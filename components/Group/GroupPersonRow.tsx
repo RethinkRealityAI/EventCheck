@@ -1,12 +1,15 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import CountryField from '../FormBuilder/fields/CountryField';
-import { formatPrice } from '../../utils/pricing';
-import type { PricingTemplate, PricingTier, DateBracket } from '../../types';
+import { formatPrice, resolveTier } from '../../utils/pricing';
+import type { PricingTemplate, PricingTier, DateBracket, FormField } from '../../types';
+import GuestFullDetailsInline from './GuestFullDetailsInline';
 
 interface Props {
   index: number;
   isPrimary: boolean;
   template: PricingTemplate;
+  /** Purchaser's active tier — ONLY used as a fallback when the member has no country set.
+   *  The member's own tier is resolved from their own countryCode. */
   tier: PricingTier | null;
   bracket: DateBracket | null;
   name: string;
@@ -16,14 +19,26 @@ interface Props {
   hasAllInfo: boolean;
   hideCountry: boolean;
   hideCategory: boolean;
-  onChange: (patch: Partial<{ name: string; email: string; countryCode: string; categoryId: string | null }>) => void;
+  /** Only rendered when hasAllInfo=true. Supplies the full form field list so the inline
+   *  panel can render every per-guest question except RMS/ticket/identity-fields. */
+  formFields?: FormField[];
+  fullAnswers?: Record<string, any>;
+  onChange: (patch: Partial<{ name: string; email: string; countryCode: string; categoryId: string | null; fullAnswers: Record<string, any> }>) => void;
 }
 
 export default function GroupPersonRow(p: Props) {
+  // Resolve this MEMBER's tier from their own country code. Using the purchaser's
+  // tier (passed in via `p.tier`) would mis-price anyone in a different region —
+  // server-side total is still correct, but displayed row price was misleading.
+  const memberTier = useMemo<PricingTier | null>(() => {
+    if (p.countryCode) return resolveTier(p.template, p.countryCode);
+    return p.tier; // fallback until the member picks a country
+  }, [p.template, p.countryCode, p.tier]);
+
   const displayPrice = (() => {
-    if (!p.tier || !p.bracket || !p.categoryId) return null;
+    if (!memberTier || !p.bracket || !p.categoryId) return null;
     const cat = p.template.categories.find(c => c.id === p.categoryId);
-    const cents = cat?.prices?.[p.tier.id]?.[p.bracket.id];
+    const cents = cat?.prices?.[memberTier.id]?.[p.bracket.id];
     return typeof cents === 'number' ? formatPrice(cents, p.template.currency) : null;
   })();
 
@@ -45,12 +60,12 @@ export default function GroupPersonRow(p: Props) {
         <CountryField label="Country" value={p.countryCode}
           onChange={code => p.onChange({ countryCode: code })} />
       )}
-      {!p.hideCategory && p.tier && p.bracket && (
+      {!p.hideCategory && memberTier && p.bracket && (
         <select value={p.categoryId ?? ''} onChange={e => p.onChange({ categoryId: e.target.value })}
           className="w-full border rounded px-2 py-1 text-sm">
           <option value="">Select category…</option>
           {p.template.categories.map(cat => {
-            const cents = cat.prices?.[p.tier!.id]?.[p.bracket!.id];
+            const cents = cat.prices?.[memberTier.id]?.[p.bracket!.id];
             return (
               <option key={cat.id} value={cat.id}>
                 {cat.name}{typeof cents === 'number' ? ` — ${formatPrice(cents, p.template.currency)}` : ''}
@@ -59,11 +74,12 @@ export default function GroupPersonRow(p: Props) {
           })}
         </select>
       )}
-      {p.hasAllInfo && !p.isPrimary && (
-        <p className="text-xs text-slate-400 italic">
-          Additional fields (dietary, consent, etc.) for this person will appear on their ticket only
-          after they receive and confirm their registration link.
-        </p>
+      {p.hasAllInfo && p.formFields && (
+        <GuestFullDetailsInline
+          formFields={p.formFields}
+          fullAnswers={p.fullAnswers ?? {}}
+          onChange={(full) => p.onChange({ fullAnswers: full })}
+        />
       )}
     </div>
   );

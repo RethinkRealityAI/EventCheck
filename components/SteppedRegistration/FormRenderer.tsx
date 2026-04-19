@@ -173,51 +173,56 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
         // Registration Mode Selector field — always render so visitor can pick a path
         if (field.type === 'registration-mode-selector') {
           return (
-            <div key={field.id} className="space-y-3">
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                {field.label} {field.required && <span className="text-red-500">*</span>}
+            <div key={field.id} className="sm:col-span-2 space-y-4">
+              <label className="block text-xs font-display font-semibold text-gansid-on-surface/70 uppercase tracking-wide mb-1.5">
+                {field.label} {field.required && <span className="text-gansid-primary">*</span>}
               </label>
-              <div className="flex gap-4">
-                <label className="flex items-center gap-2 text-sm">
-                  <input type="radio" name={field.id} checked={registrationMode === 'individual'}
+              <div className="flex flex-wrap gap-3">
+                <label className={`flex items-center gap-2 px-4 py-2.5 rounded-full border-2 cursor-pointer transition ${registrationMode === 'individual' ? 'border-gansid-primary bg-gansid-primary-container/10 font-semibold' : 'border-gansid-outline-variant/40 hover:border-gansid-primary/50'}`}>
+                  <input type="radio" name={field.id} className="accent-gansid-primary" checked={registrationMode === 'individual'}
                     onChange={() => setRegistrationMode('individual')} />
-                  {(field as any).individualLabel || 'Individual — just me'}
+                  <span className="text-sm text-gansid-on-surface">{(field as any).individualLabel || 'Individual — just me'}</span>
                 </label>
                 {((field as any).groupEnabled ?? true) && (
-                  <label className="flex items-center gap-2 text-sm">
-                    <input type="radio" name={field.id} checked={registrationMode === 'group'}
+                  <label className={`flex items-center gap-2 px-4 py-2.5 rounded-full border-2 cursor-pointer transition ${registrationMode === 'group' ? 'border-gansid-primary bg-gansid-primary-container/10 font-semibold' : 'border-gansid-outline-variant/40 hover:border-gansid-primary/50'}`}>
+                    <input type="radio" name={field.id} className="accent-gansid-primary" checked={registrationMode === 'group'}
                       onChange={() => setRegistrationMode('group')} />
-                    {(field as any).groupLabel || `Register additional people (up to ${(field as any).groupMaxSize ?? 5})`}
+                    <span className="text-sm text-gansid-on-surface">{(field as any).groupLabel || `Register additional people (up to ${(field as any).groupMaxSize ?? 5})`}</span>
                   </label>
                 )}
               </div>
 
               {registrationMode === 'group' && pricingTemplate && (
-                <div className="space-y-4 border-l-4 border-indigo-200 pl-4 mt-3">
+                <div className="space-y-4 mt-2">
                   <div>
-                    <label className="block text-sm font-medium mb-1">How many additional people are you registering?</label>
-                    <p className="text-xs text-slate-500 mb-2">
+                    <label className="block text-xs font-display font-semibold text-gansid-on-surface/70 uppercase tracking-wide mb-1.5">How many additional people are you registering?</label>
+                    <p className="text-sm text-gansid-on-surface/70 font-body mb-3">
                       You'll complete the rest of this form for <strong>yourself</strong>. Register up to {(field as any).groupMaxSize ?? 5} additional people here — they'll each get their own ticket.
                     </p>
                     <div className="flex gap-2 flex-wrap">
                       {[1, 2, 3, 4, 5].filter(n => n <= ((field as any).groupMaxSize ?? 5)).map(n => (
                         <button type="button" key={n} onClick={() => setGroupSize(n)}
-                          className={`px-3 py-1 rounded border text-sm ${groupSize === n ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white border-slate-300'}`}>
+                          className={`px-4 py-2 rounded-full border-2 text-sm font-display font-semibold transition ${groupSize === n ? 'bg-gansid-primary-gradient text-white border-transparent shadow-md' : 'bg-white border-gansid-outline-variant/40 text-gansid-on-surface hover:border-gansid-primary/50'}`}>
                           {n}
                         </button>
                       ))}
                     </div>
                   </div>
 
-                  <label className="flex items-start gap-2 text-sm">
-                    <input type="checkbox" className="mt-0.5" checked={groupHasAllInfo}
-                      onChange={e => setGroupHasAllInfo(e.target.checked)} />
-                    <span>Do you want to fill out the full registration for each additional person now?</span>
-                  </label>
-                  <p className="text-xs text-slate-500 -mt-1 pl-6">
-                    If left unchecked, each additional person will receive an email to complete their own registration details.
-                    Either way, you pay for every ticket upfront and each person receives their own ticket by email.
-                  </p>
+                  <div className="rounded-xl border border-gansid-outline-variant/30 bg-gansid-surface-container-lowest p-4 space-y-2">
+                    <label className="flex items-start gap-2 text-sm font-body text-gansid-on-surface">
+                      <input type="checkbox" className="mt-0.5 accent-gansid-primary" checked={groupHasAllInfo}
+                        onChange={e => setGroupHasAllInfo(e.target.checked)} />
+                      <span>
+                        <strong>Yes</strong> — I have each additional person's details on hand and want to fill their full registration out now.
+                      </span>
+                    </label>
+                    <p className="text-sm text-gansid-on-surface/70 font-body pl-6 leading-relaxed">
+                      If checked, each guest row below will expand with all registration questions (dietary, emergency contact, consents, etc.). Each guest still receives their own ticket by email and can optionally create a portal account.
+                      <br />
+                      If left unchecked (default), each person receives an email to complete their own registration details — no portal account required, though signup is offered. Either way, you pay upfront for every ticket.
+                    </p>
+                  </div>
 
                   <GroupShortcutsToggle
                     template={pricingTemplate}
@@ -249,19 +254,17 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                         hasAllInfo={groupHasAllInfo}
                         hideCountry={groupAllSameCountry}
                         hideCategory={groupAllSameCategory}
+                        formFields={form.fields}
+                        fullAnswers={m.fullAnswers}
                         onChange={patch => setGroupMembers(prev => prev.map((row, j) => j === i ? { ...row, ...patch } : row))}
                       />
                     ))}
                   </div>
 
-                  {groupTotal != null && (
-                    <div className="sticky bottom-4 p-4 bg-white shadow-lg rounded-xl border flex items-center justify-between">
-                      <div className="text-xs text-slate-500 uppercase tracking-wider">
-                        Total ({1 + groupMembers.length} people — you + {groupMembers.length} additional)
-                      </div>
-                      <div className="text-2xl font-bold">{formatPrice(groupTotal, pricingTemplate.currency)}</div>
-                    </div>
-                  )}
+                  {/* Grand total is shown once on the final Consent & Payment step
+                      (RunningTotal inside the ticket field). Showing a duplicate here
+                      would be incomplete anyway — the purchaser's own country/category
+                      aren't guaranteed to be filled when this step runs. */}
                 </div>
               )}
             </div>
@@ -350,9 +353,13 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                 />
                 <RunningTotal
                   template={pricingTemplate}
-                  total={dynamicTotal}
+                  total={registrationMode === 'group' ? groupTotal : dynamicTotal}
                   bracket={activeBracket}
                   tier={activeTier}
+                  // In group mode the total sums across members who can be in
+                  // different tiers — don't show a single tier pill or it'd mislead.
+                  showTier={registrationMode !== 'group'}
+                  label={registrationMode === 'group' ? `Total (${1 + groupMembers.length} people — you + ${groupMembers.length} additional)` : undefined}
                 />
               </div>
             ) : (

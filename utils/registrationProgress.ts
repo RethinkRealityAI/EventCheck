@@ -55,12 +55,13 @@ export function clearSavedProgress(formId: string, userId: string | null | undef
  * Used after a confirmed successful registration so stale drafts don't linger.
  * The DB clear is fire-and-forget — a failure here shouldn't block the success UX.
  */
+import { clearDraft as clearDbDraft } from '../services/registrationDraftService';
+
 export async function clearAllProgress(formId: string, userId: string | null | undefined): Promise<void> {
   clearSavedProgress(formId, userId);
   if (userId) {
     try {
-      const { clearDraft } = await import('../services/registrationDraftService');
-      await clearDraft(formId);
+      await clearDbDraft(formId);
     } catch {
       /* ignore — success path continues */
     }

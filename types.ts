@@ -239,6 +239,13 @@ export interface AppSettings {
   // Guest Ticket Email (sent directly to named guests)
   emailGuestSubject: string;
   emailGuestBody: string;
+  // Group-only email templates — distinct from the purchaser-guest "named guest" email above
+  // Template Y: pending-claim guests (claim link + payment context). Placeholders: {{event}}, {{purchaser}}, {{name}}, {{complete_url}}, {{signup_url}}.
+  emailGuestClaimSubject: string;
+  emailGuestClaimBody: string;
+  // Template X: inline-completed guests (ticket ready). Same placeholders as Y minus complete_url; adds {{signup_url}}.
+  emailGuestConfirmedSubject: string;
+  emailGuestConfirmedBody: string;
   // Purchaser backup note (appended when guest tickets are included)
   emailPurchaserGuestNote: string;
 
@@ -292,6 +299,14 @@ export const DEFAULT_SETTINGS: AppSettings = {
   emailGuestSubject: 'Your Ticket for {{event}}',
   emailGuestBody: 'Great news! {{purchaser}} has registered you for {{event}}. Your ticket is attached — please bring it with you to the event. You can scan the QR code on your ticket for entry.',
   emailPurchaserGuestNote: "We've also included your guest tickets as a backup. Named guests will receive their own ticket by email directly. For any unnamed guests, you can forward their ticket or share the registration link on it so they can provide their details.",
+
+  // Group Template Y — pending-claim (needs to complete their own details)
+  emailGuestClaimSubject: 'Complete your registration for {{event}}',
+  emailGuestClaimBody: '<p>Hi {{name}},</p><p><strong>{{purchaser}}</strong> has purchased your ticket for <strong>{{event}}</strong>. Your ticket is attached and will be fully confirmed once you complete a few personal details:</p><p style="text-align:center;margin:24px 0;"><a href="{{complete_url}}" style="display:inline-block;padding:12px 24px;background:#1E4A8C;color:#fff;text-decoration:none;border-radius:6px;font-weight:600;">Complete my registration</a></p><p>You can also create a portal account with this same email so you can view your ticket and updates anytime: <a href="{{signup_url}}">{{signup_url}}</a></p><p>See you at the Congress!</p>',
+
+  // Group Template X — inline completed (ticket ready, no further action required)
+  emailGuestConfirmedSubject: 'Your ticket for {{event}} is confirmed',
+  emailGuestConfirmedBody: '<p>Hi {{name}},</p><p><strong>{{purchaser}}</strong> has registered you for <strong>{{event}}</strong> and has already provided your details — you are all set. Your ticket is attached; please present the QR code at the entrance.</p><p>If you would like to create a portal account with this email address to view your ticket or get updates anytime, you can do so here: <a href="{{signup_url}}">{{signup_url}}</a></p><p>See you at the Congress!</p>',
 
   emailInvitationSubject: 'You are invited!',
   emailInvitationBody: '<p>Hi there,</p><p>We would love for you to join us at <strong>{{event}}</strong>.</p><p>Please click the link below to register:</p><p><a href="{{link}}" style="color: #4F46E5;">Register Now</a></p><p>Best regards,<br>The Team</p>',

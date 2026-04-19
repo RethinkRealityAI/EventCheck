@@ -41,11 +41,18 @@ interface PublicRegistrationProps {
 }
 
 const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: PublicRegistrationProps = {}) => {
+  // Embedded = rendered inside the portal RegisterModal (which sets onComplete).
+  // Non-embedded = standalone public URL (`/#/form/<id>`) — gets full-page card styling.
+  const isEmbedded = !!onComplete;
   const params = useParams<{ formId: string }>();
   const formId = propFormId ?? params.formId;
   const { user, profile } = useAuth();
   const [form, setForm] = useState<Form | null>(null);
   const [settings, setSettings] = useState<AppSettings | null>(null);
+  // Prevents the "Form not found" flash during the initial fetch. Only flips true
+  // AFTER the first fetch effect has finished — at that point, form being null
+  // genuinely means the record doesn't exist.
+  const [initialLoadComplete, setInitialLoadComplete] = useState(false);
   const [answers, setAnswers] = useState<Record<string, any>>({});
   const [step, setStep] = useState<'form' | 'payment' | 'success'>('form');
   const [loading, setLoading] = useState(false);
@@ -74,6 +81,10 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   const [skipGuestDetails, setSkipGuestDetails] = useState(false);
   const [isFirstGuestPurchaser, setIsFirstGuestPurchaser] = useState(true);
 
+  // Claim-time portal signup (offered to pending-claim guests when they complete their details)
+  const [claimSignupOptIn, setClaimSignupOptIn] = useState(true);
+  const [claimSignupPassword, setClaimSignupPassword] = useState('');
+
   // Guest Mode State (when registering from a link)
   const location = useLocation();
   const searchParams = new URLSearchParams(location.search);
@@ -89,7 +100,23 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   const pricingTemplate: PricingTemplate | null = (form as any)?.pricingTemplate ?? null;
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [selectedAddonIds, setSelectedAddonIds] = useState<string[]>([]);
-  const [selectedCountryCode, setSelectedCountryCode] = useState<string>('');
+  // `selectedCountryCode` is DERIVED from `answers[<usedForPricing country field>]`.
+  // Tracking it as independent state caused two stale-read bugs:
+  //   1. Draft restore populated `answers` but didn't sync `selectedCountryCode` →
+  //      tier resolved to nothing → pricing wouldn't recompute until user re-clicked.
+  //   2. Prefill from profile only set this state, but `answers` would override it
+  //      later if the form had its own country input.
+  // The setter is retained for backward-compat with FormRenderer callers that want
+  // to force a value (e.g. static forms without a country field in answers).
+  const [selectedCountryCodeOverride, setSelectedCountryCode] = useState<string>('');
+  const selectedCountryCode = (() => {
+    const pricingCountryField = form?.fields?.find((f: any) => f.type === 'country' && (f as any).usedForPricing);
+    if (pricingCountryField) {
+      const fromAnswers = (answers[pricingCountryField.id] as string) ?? '';
+      if (fromAnswers) return fromAnswers;
+    }
+    return selectedCountryCodeOverride;
+  })();
 
   // Detect RMS field on the form
   const rmsField = form?.fields?.find((f: any) => f.type === 'registration-mode-selector') ?? null;
@@ -242,6 +269,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
             setAnswers(refAttendee.answers);
           }
           setLoading(false);
+          setInitialLoadComplete(true);
           return;
         }
 
@@ -300,6 +328,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
         }
       }
       setLoading(false);
+      setInitialLoadComplete(true);
     };
     fetch();
   }, [formId, guestRef]);
@@ -483,17 +512,56 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
         const newGuestType = isExhibitorStaffPending ? 'exhibitor-staff-claimed' : 'claimed';
         const emailMode = isExhibitorStaffPending ? 'exhibitor-staff-claim-completed' : 'guest-claim-completed';
 
+        // If the guest is already signed in AND their auth email matches the
+        // attendee row's email, backlink their user_id now. The DB trigger only
+        // fires on NEW auth.users inserts, so pre-existing users would otherwise
+        // stay unlinked on the attendee row after claiming.
+        const claimUpdate: Record<string, any> = {
+          answers,
+          guest_type: newGuestType,
+        };
+        if (
+          !isExhibitorStaffPending
+          && user?.id
+          && user.email
+          && loadedRefAttendee.email
+          && user.email.toLowerCase() === loadedRefAttendee.email.toLowerCase()
+          && !(loadedRefAttendee as any).userId
+        ) {
+          claimUpdate.user_id = user.id;
+        }
         const { error: updateError } = await supabase
           .from('attendees')
-          .update({
-            answers,
-            guest_type: newGuestType,
-          })
+          .update(claimUpdate)
           .eq('id', loadedRefAttendee.id);
 
         if (updateError) {
           setError(updateError.message || 'Failed to save your registration. Please try again.');
           return;
+        }
+
+        // Optional portal signup during claim. If user opted in AND isn't already
+        // signed in, create an auth user with their attendee email. The DB trigger
+        // `link_attendees_to_new_user` backfills user_id on every matching
+        // attendee row automatically — no client-side linking needed.
+        if (claimSignupOptIn && !user && loadedRefAttendee.email && claimSignupPassword.length >= 8) {
+          try {
+            await supabase.auth.signUp({
+              email: loadedRefAttendee.email,
+              password: claimSignupPassword,
+              options: {
+                data: {
+                  full_name: loadedRefAttendee.name ?? '',
+                  role: 'attendee',
+                },
+                emailRedirectTo: `${window.location.origin}/#/portal`,
+              },
+            });
+            // Verification email goes out automatically. The trigger already ran
+            // on auth.users INSERT — their attendee row now has user_id set.
+          } catch (signupErr) {
+            console.warn('Optional portal signup during claim failed (continuing):', signupErr);
+          }
         }
 
         // Fire-and-forget personal confirmation email via send-ticket-email.
@@ -950,23 +1018,24 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
         // Group-mode: send each inline registrant their own ticket directly.
         // Pending-claim registrants get a claim-link email from the server instead —
         // their ticket is issued once they complete their details via that link.
+        // Template X (emailGuestConfirmedSubject/Body) is admin-configurable.
+        const signupUrl = `${window.location.origin}/#/`;
         for (const g of groupGuestPdfs) {
           if (!g.isInline) continue;
           if (!g.email || g.email === purchaserEmail || g.email === 'unknown@example.com') continue;
-          const guestSubject = (settings.emailGuestSubject || 'Your Ticket for {{event}}')
+          const subjectTpl = settings.emailGuestConfirmedSubject || 'Your ticket for {{event}} is confirmed';
+          const bodyTpl = settings.emailGuestConfirmedBody || '<p>Hi {{name}},</p><p><strong>{{purchaser}}</strong> has registered you for <strong>{{event}}</strong>. Your ticket is attached.</p><p>Create a portal account here to view your ticket anytime: <a href="{{signup_url}}">{{signup_url}}</a></p>';
+          const replace = (s: string) => s
             .replace(/\{\{event\}\}/g, form.title)
             .replace(/\{\{purchaser\}\}/g, purchaserName)
-            .replace(/\{\{name\}\}/g, g.name);
-          const guestBody = (settings.emailGuestBody || 'Great news! {{purchaser}} has registered you for {{event}}. Your ticket is attached — please bring it with you to the event. You can scan the QR code on your ticket for entry.')
-            .replace(/\{\{event\}\}/g, form.title)
-            .replace(/\{\{purchaser\}\}/g, purchaserName)
-            .replace(/\{\{name\}\}/g, g.name);
+            .replace(/\{\{name\}\}/g, g.name)
+            .replace(/\{\{signup_url\}\}/g, signupUrl);
           const safeName = g.name.replace(/[^a-zA-Z0-9 ]/g, '_') || 'Guest';
           await sendTicketEmail(settings, {
             to: g.email,
-            subject: guestSubject,
+            subject: replace(subjectTpl),
             name: g.name,
-            message: guestBody,
+            message: replace(bodyTpl),
             attachments: [{
               filename: `${safeName}_Ticket.pdf`,
               content: g.pdfBase64,
@@ -1064,9 +1133,25 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
     }
   };
 
-  if (!form || !settings) return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100">
-      <p className="text-gray-500">Form not found or unavailable.</p>
+  // While the initial fetch is in flight, show a subtle loader — NOT the "not found"
+  // copy. That message only fires if the fetch has genuinely completed with no form.
+  if (!initialLoadComplete || !settings) return (
+    <div className="min-h-screen flex items-center justify-center bg-gansid-surface-container-lowest">
+      <div className="flex flex-col items-center gap-3">
+        <Loader2 className="w-8 h-8 text-gansid-primary animate-spin" />
+        <p className="text-sm font-body text-gansid-on-surface/60">Loading your form…</p>
+      </div>
+    </div>
+  );
+
+  if (!form) return (
+    <div className="min-h-screen flex items-center justify-center bg-gansid-surface-container-lowest">
+      <div className="bg-white p-8 rounded-gansid-xl shadow-md text-center max-w-md">
+        <p className="font-display text-lg font-semibold text-gansid-on-surface mb-2">Form not found</p>
+        <p className="font-body text-sm text-gansid-on-surface/60">
+          This registration form doesn't exist or has been removed. Please check the link and try again.
+        </p>
+      </div>
     </div>
   );
 
@@ -1091,9 +1176,13 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
 
   return (
     <div
-      className={isSteppedMode
-        ? "w-full h-full flex flex-col relative min-h-0"
-        : "w-full py-12 px-4 sm:px-6 lg:px-8 flex flex-col items-center relative"}
+      className={
+        isSteppedMode
+          ? (isEmbedded
+              ? "w-full h-full flex flex-col relative min-h-0"
+              : "w-full min-h-screen py-6 md:py-10 px-3 sm:px-6 lg:px-8 flex justify-center relative portal-root bg-gradient-to-br from-gansid-surface-container-lowest via-white to-gansid-secondary/5")
+          : "w-full py-12 px-4 sm:px-6 lg:px-8 flex flex-col items-center relative"
+      }
       style={isSteppedMode ? undefined : {
         backgroundColor: form.settings?.transparentBackground ? 'transparent' : (form.settings?.formBackgroundColor || '#F3F4F6'),
         backgroundImage: form.settings?.formBackgroundImage ? `url(${form.settings.formBackgroundImage})` : 'none',
@@ -1122,9 +1211,13 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
 
       {step === 'form' && (
         <div
-          className={isSteppedMode
-            ? 'w-full h-full flex flex-col relative z-10 min-h-0'
-            : 'max-w-xl w-full bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl overflow-hidden relative z-10 border border-white/20'}
+          className={
+            isSteppedMode
+              ? (isEmbedded
+                  ? 'w-full h-full flex flex-col relative z-10 min-h-0'
+                  : 'w-full lg:w-[80vw] max-w-[1600px] mx-auto bg-white rounded-gansid-xl shadow-2xl flex flex-col relative z-10 overflow-hidden min-h-[640px] lg:min-h-[80vh] max-h-[calc(100vh-3rem)] self-start')
+              : 'max-w-xl w-full bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl overflow-hidden relative z-10 border border-white/20'
+          }
           style={!isSteppedMode && form.settings?.cardBackgroundImage ? {
             backgroundImage: `url(${form.settings.cardBackgroundImage})`,
             backgroundSize: 'cover',
@@ -1132,11 +1225,11 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
           } : {}}
         >
           <div
-            className={`${isSteppedMode ? 'shrink-0 ' : ''}${form.settings?.formHeaderColor ? 'px-8 py-6 text-center' : 'bg-gansid-primary-gradient px-8 py-6 text-center'}`}
+            className={`${isSteppedMode ? 'shrink-0 px-6 py-4 md:py-5 text-center ' : 'px-8 py-6 text-center '}${form.settings?.formHeaderColor ? '' : 'bg-gansid-primary-gradient'}`}
             style={form.settings?.formHeaderColor ? { backgroundColor: form.settings.formHeaderColor } : undefined}
           >
             <h1
-              className={`${isSteppedMode ? 'text-2xl' : 'text-3xl'} font-black mb-1`}
+              className={`${isSteppedMode ? 'text-xl md:text-2xl' : 'text-3xl'} font-black mb-0.5`}
               style={{ color: form.settings?.formTitleColor || '#FFFFFF' }}
             >
               {form.settings?.formTitle || form.title}
@@ -1299,11 +1392,46 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
               />
             )}
 
+            {/* Pending-claim guests can optionally create a portal account during the claim flow.
+                Default ON — the DB trigger links their auth.users row back to their attendee row
+                on signup, so portal access "just works" once they verify their email. */}
+            {isAnyPendingClaim && !user && loadedRefAttendee?.email && !isExhibitorStaffPending && (
+              <div className="mb-4 p-4 rounded-xl bg-indigo-50 border border-indigo-200 space-y-3">
+                <label className="flex items-start gap-2 text-sm text-indigo-900">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={claimSignupOptIn}
+                    onChange={(e) => setClaimSignupOptIn(e.target.checked)}
+                  />
+                  <span>
+                    <strong>Create a portal account</strong> so you can view your ticket and event updates anytime.
+                    <br />
+                    <span className="text-xs text-indigo-700">Uses your ticket email ({loadedRefAttendee.email}). Recommended.</span>
+                  </span>
+                </label>
+                {claimSignupOptIn && (
+                  <div>
+                    <label className="block text-xs font-semibold text-indigo-900 mb-1">Choose a password (min. 8 characters)</label>
+                    <input
+                      type="password"
+                      minLength={8}
+                      value={claimSignupPassword}
+                      onChange={(e) => setClaimSignupPassword(e.target.value)}
+                      placeholder="••••••••"
+                      className="w-full px-3 py-2 border border-indigo-200 rounded-lg text-sm bg-white"
+                    />
+                    <p className="text-[11px] text-indigo-700 mt-1">You'll receive a verification email to activate your account.</p>
+                  </div>
+                )}
+              </div>
+            )}
+
             {form.settings?.renderMode !== 'stepped' && (
               <div className="pt-4">
                 <button
                   type="submit"
-                  disabled={loading || (!isAnyPendingClaim && pricingTemplate != null && (!selectedCategoryId || !activeTier || !activeBracket || dynamicTotal == null)) || (!isAnyPendingClaim && registrationMode === 'group' && (!groupPricingResult?.ok || groupMembers.some(m => !m.name.trim() || !m.email.trim() || !m.countryCode || !m.categoryId)))}
+                  disabled={loading || (!isAnyPendingClaim && pricingTemplate != null && (!selectedCategoryId || !activeTier || !activeBracket || dynamicTotal == null)) || (!isAnyPendingClaim && registrationMode === 'group' && (!groupPricingResult?.ok || groupMembers.some(m => !m.name.trim() || !m.email.trim() || !m.countryCode || !m.categoryId))) || (isAnyPendingClaim && claimSignupOptIn && !user && !isExhibitorStaffPending && claimSignupPassword.length > 0 && claimSignupPassword.length < 8)}
                   className="w-full py-4 text-white rounded-xl font-black uppercase tracking-widest transition shadow-lg flex justify-center items-center gap-2 transform hover:scale-[1.02] active:scale-95 disabled:opacity-70 disabled:grayscale disabled:cursor-not-allowed"
                   style={{ backgroundColor: form.settings?.formAccentColor || '#4F46E5' }}
                 >

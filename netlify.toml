@@ -19,3 +19,8 @@
     Content-Security-Policy = "frame-ancestors *;"
     X-XSS-Protection = "1; mode=block"
     Referrer-Policy = "strict-origin-when-cross-origin"
+    # Explicitly grant payment + WebAuthn capabilities to any embedding origin.
+    # Chrome and Safari strip these features by default on cross-origin iframes,
+    # which would break PayPal Checkout + any future passkey signup inside the
+    # GANSID Congress embed on inheritedblooddisorders.world.
+    Permissions-Policy = "payment=*, publickey-credentials-get=*"

@@ -680,6 +680,43 @@ const Settings: React.FC = () => {
                         <textarea className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm" rows={3}
                           value={settings.emailPurchaserGuestNote} onChange={e => handleChange('emailPurchaserGuestNote', e.target.value)} />
                       </div>
+
+                      {/* ── Group-registration templates ── */}
+                      <div className="border-t border-gray-200 pt-6 mt-2">
+                        <h4 className="text-sm font-bold text-gray-900 mb-1">Group — Needs Details (pending-claim)</h4>
+                        <p className="text-xs text-gray-500 mb-3">
+                          Sent to each additional registrant when the purchaser didn't fill their details. Includes a claim link so the guest can complete their own registration and optionally sign up for the portal.
+                          Placeholders: <code className="bg-gray-100 px-1 rounded">{'{{name}}'}</code> <code className="bg-gray-100 px-1 rounded">{'{{purchaser}}'}</code> <code className="bg-gray-100 px-1 rounded">{'{{event}}'}</code> <code className="bg-gray-100 px-1 rounded">{'{{complete_url}}'}</code> <code className="bg-gray-100 px-1 rounded">{'{{signup_url}}'}</code>
+                        </p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Subject</label>
+                        <input type="text" className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
+                          value={settings.emailGuestClaimSubject} onChange={e => handleChange('emailGuestClaimSubject', e.target.value)} />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Body (HTML)</label>
+                        <textarea className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm" rows={6}
+                          value={settings.emailGuestClaimBody} onChange={e => handleChange('emailGuestClaimBody', e.target.value)} />
+                      </div>
+
+                      <div className="border-t border-gray-200 pt-6 mt-2">
+                        <h4 className="text-sm font-bold text-gray-900 mb-1">Group — Details Already Filled (inline)</h4>
+                        <p className="text-xs text-gray-500 mb-3">
+                          Sent to each additional registrant when the purchaser filled their full details inline. No claim needed — ticket is ready. Also offers portal signup.
+                          Placeholders: <code className="bg-gray-100 px-1 rounded">{'{{name}}'}</code> <code className="bg-gray-100 px-1 rounded">{'{{purchaser}}'}</code> <code className="bg-gray-100 px-1 rounded">{'{{event}}'}</code> <code className="bg-gray-100 px-1 rounded">{'{{signup_url}}'}</code>
+                        </p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Subject</label>
+                        <input type="text" className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
+                          value={settings.emailGuestConfirmedSubject} onChange={e => handleChange('emailGuestConfirmedSubject', e.target.value)} />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Body (HTML)</label>
+                        <textarea className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm" rows={6}
+                          value={settings.emailGuestConfirmedBody} onChange={e => handleChange('emailGuestConfirmedBody', e.target.value)} />
+                      </div>
                     </div>
                   )}
                 </div>
