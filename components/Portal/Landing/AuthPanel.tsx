@@ -24,7 +24,13 @@ export function AuthPanel() {
     setError(''); setLoading(true);
     const { error: err } = await supabase.auth.signUp({
       email, password,
-      options: { data: { full_name: `${firstName} ${lastName}`.trim(), role } },
+      options: {
+        data: { full_name: `${firstName} ${lastName}`.trim(), role },
+        // Supabase's verification link redirects here after token confirmation.
+        // Without this, Supabase uses the project's default Site URL which may
+        // not be set or may not match the current deployment (landing vs portal).
+        emailRedirectTo: `${window.location.origin}/#/portal`,
+      },
     });
     setLoading(false);
     if (err) { setError(err.message); return; }
