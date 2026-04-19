@@ -5,6 +5,8 @@ import { X } from 'lucide-react';
 interface Props {
   formId: string;
   onClose: () => void;
+  /** Fired when the user clicks "Save & Close" inside the stepper. Falls back to onClose if omitted. */
+  onSaveAndClose?: () => void;
 }
 
 /**
@@ -12,7 +14,7 @@ interface Props {
  * formId is passed as a prop rather than read from useParams, so the component
  * can live inside the existing HashRouter tree without a MemoryRouter wrapper.
  */
-export function RegisterModal({ formId, onClose }: Props) {
+export function RegisterModal({ formId, onClose, onSaveAndClose }: Props) {
   useEffect(() => {
     const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', onEsc);
@@ -40,7 +42,7 @@ export function RegisterModal({ formId, onClose }: Props) {
         >
           <X className="h-5 w-5" />
         </button>
-        <PublicRegistration formId={formId} onComplete={onClose} onSaveAndClose={onClose} />
+        <PublicRegistration formId={formId} onComplete={onClose} onSaveAndClose={onSaveAndClose ?? onClose} />
       </div>
     </div>
   );

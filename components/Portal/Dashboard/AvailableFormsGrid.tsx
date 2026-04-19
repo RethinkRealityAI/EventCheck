@@ -3,6 +3,7 @@ import type { Form, Attendee, Profile } from '../../../types';
 import { GlassCard } from '../ui/GlassCard';
 import { ViscousButton } from '../ui/ViscousButton';
 import { readSavedProgress, clearSavedProgress, type SavedProgress } from '../../../utils/registrationProgress';
+import { listDraftSummaries, clearDraft } from '../../../services/registrationDraftService';
 
 interface Props {
   forms: Form[];
@@ -49,17 +50,44 @@ export function AvailableFormsGrid({ forms, userAttendees, role, userId, onStart
     .filter((f) => allowedTypes.includes(f.formType ?? 'event'))
     .filter((f) => !completedFormIds.has(f.id));
 
-  // Read saved-progress state per form. Re-check whenever the visible list changes
-  // (e.g. after a registration completes and the form disappears from the list).
+  // Read saved-progress state per form. Merges localStorage (per-browser) with
+  // DB drafts (cross-device) — whichever is newer wins for the indicator.
+  // Re-check whenever the visible list changes (e.g. after a registration completes).
   const [savedByForm, setSavedByForm] = useState<Record<string, SavedProgress | null>>({});
   useEffect(() => {
-    const next: Record<string, SavedProgress | null> = {};
-    for (const f of visible) next[f.id] = readSavedProgress(f.id, userId);
-    setSavedByForm(next);
+    let cancelled = false;
+    (async () => {
+      const local: Record<string, SavedProgress | null> = {};
+      for (const f of visible) local[f.id] = readSavedProgress(f.id, userId);
+
+      let remote: Record<string, { currentIndex: number; savedAt: number }> = {};
+      if (userId) {
+        try { remote = await listDraftSummaries(); } catch {/* ignore */}
+      }
+      if (cancelled) return;
+
+      const merged: Record<string, SavedProgress | null> = {};
+      for (const f of visible) {
+        const l = local[f.id];
+        const r = remote[f.id];
+        if (l && r) {
+          merged[f.id] = (r.savedAt ?? 0) > (l.savedAt ?? 0)
+            ? { currentIndex: r.currentIndex, totalSteps: 0, savedAt: r.savedAt }
+            : l;
+        } else if (r) {
+          merged[f.id] = { currentIndex: r.currentIndex, totalSteps: 0, savedAt: r.savedAt };
+        } else {
+          merged[f.id] = l;
+        }
+      }
+      setSavedByForm(merged);
+    })();
+    return () => { cancelled = true; };
   }, [visible.map((f) => f.id).join('|'), userId]);
 
   const handleStartOver = (formId: string) => {
     clearSavedProgress(formId, userId);
+    if (userId) clearDraft(formId).catch(() => {});
     setSavedByForm((prev) => ({ ...prev, [formId]: null }));
     onStartRegistration(formId, { fresh: true });
   };

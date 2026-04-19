@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '../../AuthContext';
 import { getAttendeesForUser, getPortalForms } from '../../../services/storageService';
 import type { Attendee, Form } from '../../../types';
+import { useNotifications } from '../../NotificationSystem';
 import { WelcomeBlock } from './WelcomeBlock';
 import { VerifyEmailBanner } from './VerifyEmailBanner';
 import { AvailableFormsGrid } from './AvailableFormsGrid';
@@ -12,6 +13,7 @@ import { RegisterModal } from './RegisterModal';
 
 export function PortalDashboard() {
   const { profile, user } = useAuth();
+  const { showNotification } = useNotifications();
   const [attendees, setAttendees] = useState<Attendee[]>([]);
   const [forms, setForms] = useState<Form[]>([]);
   const [registerFormId, setRegisterFormId] = useState<string | null>(null);
@@ -26,6 +28,12 @@ export function PortalDashboard() {
   const handleModalClose = () => {
     setRegisterFormId(null);
     setRefreshKey((k) => k + 1);
+  };
+
+  const handleSaveAndClose = () => {
+    setRegisterFormId(null);
+    setRefreshKey((k) => k + 1);
+    showNotification('Progress saved — resume anytime from your portal.', 'success');
   };
 
   if (!profile || !user) return null;
@@ -54,7 +62,7 @@ export function PortalDashboard() {
         </aside>
       </div>
       {registerFormId && (
-        <RegisterModal formId={registerFormId} onClose={handleModalClose} />
+        <RegisterModal formId={registerFormId} onClose={handleModalClose} onSaveAndClose={handleSaveAndClose} />
       )}
     </>
   );

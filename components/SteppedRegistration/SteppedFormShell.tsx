@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, type ReactNode } from 'react';
 import { FormRenderer, type FormRendererProps } from './FormRenderer';
 import { StepperSidebar } from '../Portal/ui/StepperSidebar';
 import { groupFieldsBySection, validateRequired, validateRms, validateGroupMembers, type GroupMember } from './steppedValidation';
+import { loadDraft, saveDraft, clearDraft } from '../../services/registrationDraftService';
 
 interface SteppedFormShellProps extends Omit<FormRendererProps, 'filteredFields'> {
   onSubmit: () => void | Promise<void>;
@@ -27,35 +28,56 @@ export function SteppedFormShell(props: SteppedFormShellProps) {
   const userId = props.userId ?? 'anon';
   const storageKey = `gansid-portal-stepper:${props.form.id}:${userId}`;
 
-  // Restore progress from localStorage on mount
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(storageKey);
-      if (!saved) return;
-      const parsed = JSON.parse(saved);
-      if (parsed.answers && typeof parsed.answers === 'object') {
-        props.onRestoreAnswers?.(parsed.answers);
-      }
-      if (typeof parsed.currentIndex === 'number') {
-        setCurrentIndex(parsed.currentIndex);
-      }
-      if (parsed.registrationMode === 'individual' || parsed.registrationMode === 'group') {
-        props.setRegistrationMode(parsed.registrationMode);
-      }
-      if (typeof parsed.groupSize === 'number') {
-        props.setGroupSize(parsed.groupSize);
-      }
-      if (typeof parsed.groupHasAllInfo === 'boolean') {
-        props.setGroupHasAllInfo(parsed.groupHasAllInfo);
-      }
-      if (Array.isArray(parsed.groupMembers)) {
-        props.setGroupMembers(parsed.groupMembers);
-      }
-    } catch {
-      /* ignore malformed localStorage */
+  // Restore progress on mount. Order of preference:
+  //   1. localStorage (this browser, up-to-date per keystroke)
+  //   2. DB draft (cross-device, updated on Save & Close)
+  // Whichever is NEWER wins when both exist.
+  const applyRestored = (parsed: any) => {
+    if (parsed.answers && typeof parsed.answers === 'object') {
+      props.onRestoreAnswers?.(parsed.answers);
     }
+    if (typeof parsed.currentIndex === 'number') {
+      setCurrentIndex(parsed.currentIndex);
+    }
+    if (parsed.registrationMode === 'individual' || parsed.registrationMode === 'group') {
+      props.setRegistrationMode(parsed.registrationMode);
+    }
+    if (typeof parsed.groupSize === 'number') {
+      props.setGroupSize(parsed.groupSize);
+    }
+    if (typeof parsed.groupHasAllInfo === 'boolean') {
+      props.setGroupHasAllInfo(parsed.groupHasAllInfo);
+    }
+    if (Array.isArray(parsed.groupMembers)) {
+      props.setGroupMembers(parsed.groupMembers);
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      let local: any = null;
+      try {
+        const raw = localStorage.getItem(storageKey);
+        if (raw) local = JSON.parse(raw);
+      } catch {
+        /* ignore */
+      }
+
+      let remote: any = null;
+      if (props.userId) {
+        try { remote = await loadDraft(props.form.id); } catch {/* ignore */}
+      }
+      if (cancelled) return;
+
+      const localAt = local?.savedAt ?? 0;
+      const remoteAt = remote?.savedAt ?? 0;
+      const winner = remoteAt > localAt ? remote : local;
+      if (winner) applyRestored(winner);
+    })();
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storageKey]);
+  }, [storageKey, props.form.id, props.userId]);
 
   // Persist answers + currentIndex + RMS group state whenever they change.
   // `savedAt` lets the portal show "resumed from [time]" context without re-parsing the full payload.
@@ -80,6 +102,29 @@ export function SteppedFormShell(props: SteppedFormShellProps) {
 
   const clearPersistence = () => {
     try { localStorage.removeItem(storageKey); } catch {}
+    // Fire-and-forget DB cleanup so successful submits don't leave stale drafts
+    // that make the portal show a phantom "Resume" prompt.
+    if (props.userId) clearDraft(props.form.id).catch(() => {});
+  };
+
+  // Persist to DB on explicit Save & Close — that's the cross-device resume guarantee.
+  const handleSaveAndClose = async () => {
+    if (props.userId) {
+      try {
+        await saveDraft(props.userId, props.form.id, {
+          answers: props.answers,
+          currentIndex,
+          registrationMode: props.registrationMode,
+          groupSize: props.groupSize,
+          groupHasAllInfo: props.groupHasAllInfo,
+          groupMembers: props.groupMembers,
+          savedAt: Date.now(),
+        });
+      } catch (e) {
+        console.warn('Save & Close: DB draft save failed — progress remains in localStorage only', e);
+      }
+    }
+    props.onSaveAndClose?.();
   };
 
   const currentStep = steps[currentIndex];
@@ -174,7 +219,7 @@ export function SteppedFormShell(props: SteppedFormShellProps) {
             {props.onSaveAndClose && (
               <button
                 type="button"
-                onClick={props.onSaveAndClose}
+                onClick={handleSaveAndClose}
                 className="px-4 py-2.5 rounded-full bg-white border border-gansid-outline-variant/40 text-gansid-on-surface/70 font-display font-semibold text-sm hover:bg-gansid-surface-container-low transition"
                 title="Your progress is saved automatically — you can come back from the portal anytime."
               >
