@@ -27,7 +27,9 @@ function generateEmailTemplate(data: {
     greeting: string;
     content: string;
     attachmentNote?: string; // if provided, render as the callout; if undefined, suppress the callout
+    fromName?: string;
 }) {
+    const footerName = (data.fromName && data.fromName.trim()) ? data.fromName : 'SCAGO';
     return `
     <!DOCTYPE html>
     <html>
@@ -69,7 +71,7 @@ function generateEmailTemplate(data: {
               <!-- Footer -->
               <tr>
                 <td style="background-color: #f8f9fb; padding: 24px 40px; text-align: center; border-top: 1px solid #eaedf0;">
-                  <p style="margin: 0; font-size: 12px; color: #8c95a1;">This email was sent by SCAGO Event Management.</p>
+                  <p style="margin: 0; font-size: 12px; color: #8c95a1;">This email was sent by ${footerName}.</p>
                 </td>
               </tr>
             </table>
@@ -378,6 +380,7 @@ serve(async (req: Request) => {
             greeting: `Hello ${email.name}`,
             content: `<p>${email.message}</p>`,
             attachmentNote: hasAttachments ? 'Attachment included — please review the PDF.' : undefined,
+            fromName,
         });
 
         // Nodemailer accepts base64 natively
