@@ -209,13 +209,14 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                     </div>
                   </div>
 
-                  <label className="flex items-center gap-2 text-sm">
-                    <input type="checkbox" checked={groupHasAllInfo}
+                  <label className="flex items-start gap-2 text-sm">
+                    <input type="checkbox" className="mt-0.5" checked={groupHasAllInfo}
                       onChange={e => setGroupHasAllInfo(e.target.checked)} />
-                    I have each additional registrant's full details and want to fill them in now
+                    <span>Do you want to fill out the full registration for each additional person now?</span>
                   </label>
-                  <p className="text-xs text-slate-500 -mt-1">
-                    If unchecked, we'll capture basic pricing info now and email each additional person a link to complete their details later. Payment is up-front regardless.
+                  <p className="text-xs text-slate-500 -mt-1 pl-6">
+                    If left unchecked, each additional person will receive an email to complete their own registration details.
+                    Either way, you pay for every ticket upfront and each person receives their own ticket by email.
                   </p>
 
                   <GroupShortcutsToggle

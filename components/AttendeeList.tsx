@@ -101,7 +101,7 @@ const STANDARD_COLUMNS: ColumnDef[] = [
 
 const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading = false, onRefresh }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState<'live' | 'test' | 'donated' | 'tables' | 'sponsor-tickets' | 'exhibitors'>('live');
+  const [activeTab, setActiveTab] = useState<'live' | 'test' | 'donated' | 'tables' | 'sponsor-tickets' | 'exhibitors' | 'groups'>('live');
   const [selectedAttendee, setSelectedAttendee] = useState<Attendee | null>(null);
   const { showNotification } = useNotifications();
   const [showExportModal, setShowExportModal] = useState(false);
@@ -231,6 +231,37 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     [attendees]
   );
 
+  // Primary IDs that have at least one associated guest row = "groups"
+  // Excludes sponsor groups (they have their own tab) and exhibitor orgs (different tab).
+  const groupPrimaryIds = useMemo(() => {
+    const guestsByPrimary = new Map<string, number>();
+    for (const a of attendees) {
+      if (a.primaryAttendeeId && !a.isTest) {
+        guestsByPrimary.set(a.primaryAttendeeId, (guestsByPrimary.get(a.primaryAttendeeId) ?? 0) + 1);
+      }
+    }
+    const ids = new Set<string>();
+    for (const [pid] of guestsByPrimary) {
+      const primary = attendees.find(a => a.id === pid);
+      if (!primary || primary.isTest) continue;
+      if (primary.sponsorTier) continue; // sponsor groups live in sponsor-tickets tab
+      if (primary.ticketType === 'Exhibitor') continue; // exhibitor orgs live in exhibitors tab
+      ids.add(pid);
+    }
+    return ids;
+  }, [attendees]);
+
+  // Count of guests per primary — used for "Group of N" badge on Live tab
+  const guestCountByPrimary = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const a of attendees) {
+      if (a.primaryAttendeeId) {
+        counts.set(a.primaryAttendeeId, (counts.get(a.primaryAttendeeId) ?? 0) + 1);
+      }
+    }
+    return counts;
+  }, [attendees]);
+
   const hasExhibitorForms = forms.some(f => (f as any).formType === 'exhibitor');
 
   const allColumns = useMemo(() => [...STANDARD_COLUMNS, ...dynamicColumns], [dynamicColumns]);
@@ -359,6 +390,10 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     else if (activeTab === 'donated') matchesTab = !isTest && ((a.donatedSeats || 0) > 0 || (a.donatedTables || 0) > 0);
     else if (activeTab === 'tables') matchesTab = !isTest;
     else if (activeTab === 'sponsor-tickets') matchesTab = !a.isPrimary && !!a.primaryAttendeeId && sponsorPrimaryIds.has(a.primaryAttendeeId);
+    else if (activeTab === 'groups') {
+      // Show group primaries + their guests, so admins can see whole groups at a glance
+      matchesTab = !isTest && (groupPrimaryIds.has(a.id) || (!!a.primaryAttendeeId && groupPrimaryIds.has(a.primaryAttendeeId)));
+    }
     else matchesTab = !isTest;
 
     const matchesStatus = statusFilter === 'all'
@@ -528,6 +563,13 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                 className={`px-3 py-1 text-xs font-medium rounded-md transition ${activeTab === 'sponsor-tickets' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
               >
                 Sponsor Tickets
+              </button>
+              <button
+                onClick={() => { setActiveTab('groups'); setCurrentPage(1); }}
+                className={`px-3 py-1 text-xs font-medium rounded-md transition flex items-center gap-1 ${activeTab === 'groups' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
+              >
+                Groups
+                {groupPrimaryIds.size > 0 && <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{groupPrimaryIds.size}</span>}
               </button>
               <button
                 onClick={() => { setActiveTab('test'); setCurrentPage(1); }}
@@ -1049,6 +1091,11 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                               </button>
                             )}
                             <div className="font-medium text-gray-900">{attendee.name}</div>
+                            {!isGuestRow && groupPrimaryIds.has(attendee.id) && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-700">
+                                GROUP OF {1 + (guestCountByPrimary.get(attendee.id) ?? 0)}
+                              </span>
+                            )}
                             {attendee.isPrimary === false && !isGuestRow && (
                               <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-700">GUEST</span>
                             )}
