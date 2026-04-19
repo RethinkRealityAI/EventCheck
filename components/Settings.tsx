@@ -658,7 +658,11 @@ const Settings: React.FC = () => {
                     <div className="border-t border-gray-200 pt-6 mt-2 space-y-4">
                       <div>
                         <h4 className="text-sm font-bold text-gray-900 mb-1">Guest Ticket Email</h4>
-                        <p className="text-xs text-gray-500 mb-3">Sent directly to named guests when the purchaser provides their email. Supports placeholders: <code className="bg-gray-100 px-1 rounded">{'{{event}}'}</code> <code className="bg-gray-100 px-1 rounded">{'{{purchaser}}'}</code> <code className="bg-gray-100 px-1 rounded">{'{{name}}'}</code></p>
+                        <p className="text-xs text-gray-500 mb-3">
+                          Sent directly to each named additional registrant — both static-ticket "guests" and group-mode inline registrants whose details the purchaser filled in.
+                          Pending-claim registrants receive a separate claim-link email (not this one) until they complete their own details.
+                          Supports placeholders: <code className="bg-gray-100 px-1 rounded">{'{{event}}'}</code> <code className="bg-gray-100 px-1 rounded">{'{{purchaser}}'}</code> <code className="bg-gray-100 px-1 rounded">{'{{name}}'}</code>
+                        </p>
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">Guest Email Subject</label>
