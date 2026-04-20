@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../../services/supabaseClient';
 import { FloatingToggleTabs } from '../ui/FloatingToggleTabs';
@@ -19,9 +19,54 @@ export function AuthPanel() {
   const [loading, setLoading] = useState(false);
   const [signupSuccess, setSignupSuccess] = useState(false);
 
+  // Resend verification state — shared between the signup-success screen and
+  // the "Email not confirmed" signin recovery path.
+  const [resending, setResending] = useState(false);
+  const [resendMsg, setResendMsg] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
+  const [cooldownSec, setCooldownSec] = useState(0);
+  const [showResendOnSignin, setShowResendOnSignin] = useState(false);
+
+  useEffect(() => {
+    if (cooldownSec <= 0) return;
+    const id = setInterval(() => setCooldownSec((s) => Math.max(0, s - 1)), 1000);
+    return () => clearInterval(id);
+  }, [cooldownSec]);
+
+  const resetResendState = () => {
+    setResendMsg(null);
+    setCooldownSec(0);
+    setShowResendOnSignin(false);
+  };
+
+  const handleResend = async () => {
+    if (!email || cooldownSec > 0 || resending) return;
+    setResending(true); setResendMsg(null);
+    const { error: err } = await supabase.auth.resend({
+      type: 'signup',
+      email,
+      options: { emailRedirectTo: `${window.location.origin}/#/portal` },
+    });
+    setResending(false);
+    if (err) {
+      const secMatch = err.message.match(/(\d+)\s*second/i);
+      if (secMatch) {
+        setCooldownSec(Number(secMatch[1]));
+        setResendMsg({ kind: 'error', text: `Please wait ${secMatch[1]}s before requesting another email.` });
+      } else if (/rate limit|too many/i.test(err.message)) {
+        setResendMsg({ kind: 'error', text: 'Hourly email limit reached. Please try again in an hour.' });
+      } else {
+        setResendMsg({ kind: 'error', text: err.message });
+      }
+    } else {
+      setCooldownSec(60);
+      setResendMsg({ kind: 'success', text: 'Verification email sent. Please check your inbox (and spam folder).' });
+    }
+  };
+
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(''); setLoading(true);
+    resetResendState();
     const { error: err } = await supabase.auth.signUp({
       email, password,
       options: {
@@ -40,8 +85,24 @@ export function AuthPanel() {
   const handleSignin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(''); setLoading(true);
+    setShowResendOnSignin(false);
     const { data, error: err } = await supabase.auth.signInWithPassword({ email, password });
-    if (err) { setLoading(false); setError(err.message); return; }
+    if (err) {
+      setLoading(false);
+      // Supabase's canonical code is the truth; regex is a backstop for older
+      // server versions. Tightened to avoid matching unrelated "verification"
+      // phrases that could surface in other auth errors.
+      const code = (err as { code?: string }).code;
+      const unverified = code === 'email_not_confirmed'
+        || /email not confirmed/i.test(err.message);
+      if (unverified) {
+        setShowResendOnSignin(true);
+        setError('Your email isn\u2019t verified yet. Check your inbox for the link, or resend it below.');
+      } else {
+        setError(err.message);
+      }
+      return;
+    }
 
     const user = data.user;
     if (!user) { setLoading(false); navigate('/portal'); return; }
@@ -61,13 +122,19 @@ export function AuthPanel() {
     }
   };
 
+  const resendLabel = resending
+    ? 'Sending\u2026'
+    : cooldownSec > 0
+      ? `Resend in ${cooldownSec}s`
+      : 'Resend verification email';
+
   return (
     <div className="w-full max-w-md lg:sticky lg:top-8 rounded-gansid-lg p-8 shadow-2xl gradient-border relative">
       <div className="flex justify-center mb-6">
         <FloatingToggleTabs<Mode>
           tabs={[{ id: 'signup', label: 'Create Account' }, { id: 'signin', label: 'Sign In' }]}
           active={mode}
-          onChange={(id) => { setMode(id); setError(''); setSignupSuccess(false); }}
+          onChange={(id) => { setMode(id); setError(''); setSignupSuccess(false); resetResendState(); }}
         />
       </div>
 
@@ -77,6 +144,23 @@ export function AuthPanel() {
           <p className="font-body text-gansid-on-surface/70">
             We've sent a verification link to <strong>{email}</strong>. Click it to complete your registration.
           </p>
+          <p className="font-body text-sm text-gansid-on-surface/50">
+            Didn't get it? Check your spam folder or resend below.
+          </p>
+          <ViscousButton
+            type="button"
+            variant="primary"
+            className="w-full"
+            disabled={resending || cooldownSec > 0}
+            onClick={handleResend}
+          >
+            {resendLabel}
+          </ViscousButton>
+          {resendMsg && (
+            <p className={`text-sm font-body ${resendMsg.kind === 'success' ? 'text-gansid-secondary' : 'text-gansid-primary'}`}>
+              {resendMsg.text}
+            </p>
+          )}
         </div>
       ) : mode === 'signup' ? (
         <form onSubmit={handleSignup} className="space-y-4">
@@ -124,6 +208,24 @@ export function AuthPanel() {
             </button>
           </div>
           {error && <p className="text-sm text-gansid-primary">{error}</p>}
+          {showResendOnSignin && (
+            <>
+              <ViscousButton
+                type="button"
+                variant="primary"
+                className="w-full"
+                disabled={resending || cooldownSec > 0 || !email}
+                onClick={handleResend}
+              >
+                {resendLabel}
+              </ViscousButton>
+              {resendMsg && (
+                <p className={`text-sm font-body ${resendMsg.kind === 'success' ? 'text-gansid-secondary' : 'text-gansid-primary'}`}>
+                  {resendMsg.text}
+                </p>
+              )}
+            </>
+          )}
           <ViscousButton type="submit" variant="primary" className="w-full" disabled={loading}>
             {loading ? 'Signing in…' : 'Sign In'}
           </ViscousButton>

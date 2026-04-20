@@ -238,28 +238,78 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                     onSharedCategory={id => setGroupMembers(prev => prev.map(m => ({ ...m, categoryId: id })))}
                   />
 
-                  <div className="space-y-2">
-                    {groupMembers.map((m, i) => (
-                      <GroupPersonRow
-                        key={i}
-                        index={i}
-                        isPrimary={false}
-                        template={pricingTemplate}
-                        tier={activeTier}
-                        bracket={activeBracket}
-                        name={m.name}
-                        email={m.email}
-                        countryCode={m.countryCode}
-                        categoryId={m.categoryId}
-                        hasAllInfo={groupHasAllInfo}
-                        hideCountry={groupAllSameCountry}
-                        hideCategory={groupAllSameCategory}
-                        formFields={form.fields}
-                        fullAnswers={m.fullAnswers}
-                        onChange={patch => setGroupMembers(prev => prev.map((row, j) => j === i ? { ...row, ...patch } : row))}
-                      />
-                    ))}
-                  </div>
+                  {(() => {
+                    const consentFields = groupHasAllInfo
+                      ? form.fields.filter(f => f.type === 'boolean' && f.consentModal && f.linkText)
+                      : [];
+                    const isBulkChecked = (fieldId: string) =>
+                      groupMembers.length > 0
+                      && groupMembers.every(m => m.fullAnswers?.[fieldId] === true);
+                    const bulkHiddenIds = new Set(
+                      consentFields.filter(f => isBulkChecked(f.id)).map(f => f.id),
+                    );
+                    const toggleBulkConsent = (fieldId: string, v: boolean) => {
+                      setGroupMembers(prev => prev.map(m => ({
+                        ...m,
+                        fullAnswers: { ...(m.fullAnswers ?? {}), [fieldId]: v },
+                      })));
+                    };
+
+                    return (
+                      <>
+                        {consentFields.length > 0 && (
+                          <div className="rounded-xl border border-gansid-primary/25 bg-gansid-primary/5 p-4 space-y-2.5">
+                            <div className="font-display font-semibold text-sm text-gansid-primary">
+                              Consent on behalf of all additional registrants
+                            </div>
+                            <p className="font-body text-xs text-gansid-on-surface/70 leading-relaxed">
+                              Open and accept once below to apply to every additional registrant. Uncheck
+                              to capture consent per person in their own section.
+                            </p>
+                            <div className="space-y-2 pt-1">
+                              {consentFields.map(f => (
+                                <ConsentCheckbox
+                                  key={f.id}
+                                  id={`bulk-consent-${f.id}`}
+                                  label={f.label.replace(f.linkText!, '').trim()}
+                                  linkText={f.linkText!}
+                                  modalTitle={f.consentModal!.title}
+                                  modalUrl={f.consentModal!.url}
+                                  checked={isBulkChecked(f.id)}
+                                  onChange={v => toggleBulkConsent(f.id, v)}
+                                  required={f.required}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="space-y-2">
+                          {groupMembers.map((m, i) => (
+                            <GroupPersonRow
+                              key={i}
+                              index={i}
+                              isPrimary={false}
+                              template={pricingTemplate}
+                              tier={activeTier}
+                              bracket={activeBracket}
+                              name={m.name}
+                              email={m.email}
+                              countryCode={m.countryCode}
+                              categoryId={m.categoryId}
+                              hasAllInfo={groupHasAllInfo}
+                              hideCountry={groupAllSameCountry}
+                              hideCategory={groupAllSameCategory}
+                              formFields={form.fields}
+                              fullAnswers={m.fullAnswers}
+                              hideFieldIds={groupHasAllInfo ? bulkHiddenIds : undefined}
+                              onChange={patch => setGroupMembers(prev => prev.map((row, j) => j === i ? { ...row, ...patch } : row))}
+                            />
+                          ))}
+                        </div>
+                      </>
+                    );
+                  })()}
 
                   {/* Grand total is shown once on the final Consent & Payment step
                       (RunningTotal inside the ticket field). Showing a duplicate here

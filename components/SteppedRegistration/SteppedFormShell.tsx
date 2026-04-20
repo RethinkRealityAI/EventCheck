@@ -142,7 +142,12 @@ export function SteppedFormShell(props: SteppedFormShellProps) {
       if (!rms.ok) { setStepError(rms.error!); return false; }
 
       const groupMembers = (props.groupMembers ?? []) as GroupMember[];
-      const grp = validateGroupMembers(props.registrationMode, groupMembers, Boolean(props.pricingTemplate));
+      const grp = validateGroupMembers(
+        props.registrationMode,
+        groupMembers,
+        Boolean(props.pricingTemplate),
+        { hasAllInfo: props.groupHasAllInfo, formFields: props.form.fields },
+      );
       if (!grp.ok) { setStepError(grp.error!); return false; }
     }
 

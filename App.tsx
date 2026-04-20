@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { HashRouter, Routes, Route, Link, useLocation, Navigate, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, QrCode, ClipboardList, LogOut, Settings as SettingsIcon, ExternalLink, Menu, X, ChevronLeft, ChevronRight, Loader2, Rows3, Users, Handshake } from 'lucide-react';
+import { LayoutDashboard, QrCode, ClipboardList, LogOut, Settings as SettingsIcon, ExternalLink, Menu, X, ChevronLeft, ChevronRight, Loader2, Rows3, Users, Handshake, UserCircle, Shield, KeyRound } from 'lucide-react';
 import ManualTicketTool from './components/ManualTicketTool';
 import AttendeeList from './components/AttendeeList';
 import Scanner from './components/Scanner';
@@ -21,6 +21,15 @@ import { PortalLayout } from './components/Portal/PortalLayout';
 import { PortalDashboard } from './components/Portal/Dashboard/PortalDashboard';
 import { ProfilePage } from './components/Portal/Profile/ProfilePage';
 import { ResetPasswordPage } from './components/Portal/ResetPassword/ResetPasswordPage';
+import AdminsManagement from './components/Admins/AdminsManagement';
+import ChangePasswordPage from './components/ChangePasswordPage';
+import {
+  canAccessPage,
+  canManageAdmins,
+  firstAccessiblePage,
+  isSuperAdmin,
+  type AdminPageKey,
+} from './utils/adminPermissions';
 
 const NavLink = ({ to, icon: Icon, children, collapsed }: { to: string, icon: any, children?: React.ReactNode, collapsed?: boolean }) => {
   const location = useLocation();
@@ -138,7 +147,7 @@ const DashboardStats = ({ attendees }: { attendees: Attendee[] }) => {
 };
 
 const AdminLayout = () => {
-  const { signOut } = useAuth();
+  const { signOut, profile } = useAuth();
   const [attendees, setAttendees] = useState<Attendee[]>([]);
   const [forms, setForms] = useState<Form[]>([]);
   const [loading, setLoading] = useState(true);
@@ -147,6 +156,15 @@ const AdminLayout = () => {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
   const [isSidebarPinned, setIsSidebarPinned] = useState(false);
   const navigate = useNavigate();
+
+  // Per-page access flags for sidebar rendering.
+  const canSeeDashboard = canAccessPage(profile, 'dashboard');
+  const canSeeForms = canAccessPage(profile, 'forms');
+  const canSeeSponsors = canAccessPage(profile, 'sponsors');
+  const canSeeSeating = canAccessPage(profile, 'seating');
+  const canSeeGenerateQr = canAccessPage(profile, 'generateQr');
+  const canSeeSettings = canAccessPage(profile, 'settings');
+  const canSeeAdmins = canManageAdmins(profile);
 
   const handleLogout = async () => {
     await signOut();
@@ -212,23 +230,46 @@ const AdminLayout = () => {
       <div className="lg:hidden fixed bottom-6 left-1/2 transform -translate-x-1/2 z-50 flex flex-col items-center">
         {isMobileMenuOpen && (
           <div className="bg-slate-900/80 backdrop-blur-2xl p-2 rounded-2xl shadow-2xl shadow-indigo-900/20 border border-slate-700/50 flex items-center gap-2 mb-4 animate-in slide-in-from-bottom-4 zoom-in-95 duration-200">
-            <Link to="/admin" onClick={() => setIsMobileMenuOpen(false)} className="p-3 text-slate-300 hover:text-white hover:bg-slate-800/80 rounded-xl transition-all">
-              <LayoutDashboard className="w-6 h-6" />
-            </Link>
-            <Link to="/admin/forms" onClick={() => setIsMobileMenuOpen(false)} className="p-3 text-slate-300 hover:text-white hover:bg-slate-800/80 rounded-xl transition-all">
-              <ClipboardList className="w-6 h-6" />
-            </Link>
-            <Link to="/admin/seating" onClick={() => setIsMobileMenuOpen(false)} className="p-3 text-slate-300 hover:text-white hover:bg-slate-800/80 rounded-xl transition-all">
-              <Rows3 className="w-6 h-6" />
-            </Link>
-            <Link to="/admin/sponsors" onClick={() => setIsMobileMenuOpen(false)} className="p-3 text-slate-300 hover:text-white hover:bg-slate-800/80 rounded-xl transition-all">
-              <Handshake className="w-6 h-6" />
-            </Link>
+            {canSeeDashboard && (
+              <Link to="/admin" onClick={() => setIsMobileMenuOpen(false)} className="p-3 text-slate-300 hover:text-white hover:bg-slate-800/80 rounded-xl transition-all">
+                <LayoutDashboard className="w-6 h-6" />
+              </Link>
+            )}
+            {canSeeForms && (
+              <Link to="/admin/forms" onClick={() => setIsMobileMenuOpen(false)} className="p-3 text-slate-300 hover:text-white hover:bg-slate-800/80 rounded-xl transition-all">
+                <ClipboardList className="w-6 h-6" />
+              </Link>
+            )}
+            {canSeeSeating && (
+              <Link to="/admin/seating" onClick={() => setIsMobileMenuOpen(false)} className="p-3 text-slate-300 hover:text-white hover:bg-slate-800/80 rounded-xl transition-all">
+                <Rows3 className="w-6 h-6" />
+              </Link>
+            )}
+            {canSeeSponsors && (
+              <Link to="/admin/sponsors" onClick={() => setIsMobileMenuOpen(false)} className="p-3 text-slate-300 hover:text-white hover:bg-slate-800/80 rounded-xl transition-all">
+                <Handshake className="w-6 h-6" />
+              </Link>
+            )}
             <button onClick={() => { setShowScanner(true); setIsMobileMenuOpen(false); }} className="p-3 bg-indigo-600 text-white rounded-xl shadow-lg shadow-indigo-500/20 hover:bg-indigo-500 transition-all">
               <QrCode className="w-6 h-6" />
             </button>
-            <Link to="/admin/settings" onClick={() => setIsMobileMenuOpen(false)} className="p-3 text-slate-300 hover:text-white hover:bg-slate-800/80 rounded-xl transition-all">
-              <SettingsIcon className="w-6 h-6" />
+            {canSeeSettings && (
+              <Link to="/admin/settings" onClick={() => setIsMobileMenuOpen(false)} className="p-3 text-slate-300 hover:text-white hover:bg-slate-800/80 rounded-xl transition-all">
+                <SettingsIcon className="w-6 h-6" />
+              </Link>
+            )}
+            {canSeeAdmins && (
+              <Link to="/admin/admins" onClick={() => setIsMobileMenuOpen(false)} className="p-3 text-amber-300 hover:text-white hover:bg-slate-800/80 rounded-xl transition-all" title="Admin Management">
+                <Shield className="w-6 h-6" />
+              </Link>
+            )}
+            {CURRENT_SITE.portalEnabled && (
+              <Link to="/portal" onClick={() => setIsMobileMenuOpen(false)} className="p-3 text-slate-300 hover:text-white hover:bg-slate-800/80 rounded-xl transition-all" title="User Portal">
+                <UserCircle className="w-6 h-6" />
+              </Link>
+            )}
+            <Link to="/change-password" onClick={() => setIsMobileMenuOpen(false)} className="p-3 text-slate-300 hover:text-white hover:bg-slate-800/80 rounded-xl transition-all" title="Change password">
+              <KeyRound className="w-6 h-6" />
             </Link>
             <button onClick={handleLogout} className="p-3 text-red-400 hover:bg-slate-800/80 rounded-xl transition-all">
               <LogOut className="w-6 h-6" />
@@ -291,12 +332,46 @@ const AdminLayout = () => {
         </div>
 
         <nav className="flex-1 px-3 space-y-2 mt-4 lg:mt-2 overflow-y-auto overflow-x-hidden custom-scrollbar">
-          <NavLink to="/admin" icon={LayoutDashboard} collapsed={isSidebarCollapsed && !isSidebarPinned}>Dashboard</NavLink>
-          <NavLink to="/admin/forms" icon={ClipboardList} collapsed={isSidebarCollapsed && !isSidebarPinned}>Manage Forms</NavLink>
-          <NavLink to="/admin/sponsors" icon={Handshake} collapsed={isSidebarCollapsed && !isSidebarPinned}>Sponsors</NavLink>
-          <NavLink to="/admin/seating" icon={Rows3} collapsed={isSidebarCollapsed && !isSidebarPinned}>Seating Chart</NavLink>
-          <NavLink to="/admin/generate-qr" icon={QrCode} collapsed={isSidebarCollapsed && !isSidebarPinned}>Generate QR</NavLink>
-          <NavLink to="/admin/settings" icon={SettingsIcon} collapsed={isSidebarCollapsed && !isSidebarPinned}>Settings</NavLink>
+          {canSeeDashboard && <NavLink to="/admin" icon={LayoutDashboard} collapsed={isSidebarCollapsed && !isSidebarPinned}>Dashboard</NavLink>}
+          {canSeeForms && <NavLink to="/admin/forms" icon={ClipboardList} collapsed={isSidebarCollapsed && !isSidebarPinned}>Manage Forms</NavLink>}
+          {canSeeSponsors && <NavLink to="/admin/sponsors" icon={Handshake} collapsed={isSidebarCollapsed && !isSidebarPinned}>Sponsors</NavLink>}
+          {canSeeSeating && <NavLink to="/admin/seating" icon={Rows3} collapsed={isSidebarCollapsed && !isSidebarPinned}>Seating Chart</NavLink>}
+          {canSeeGenerateQr && <NavLink to="/admin/generate-qr" icon={QrCode} collapsed={isSidebarCollapsed && !isSidebarPinned}>Generate QR</NavLink>}
+          {canSeeSettings && <NavLink to="/admin/settings" icon={SettingsIcon} collapsed={isSidebarCollapsed && !isSidebarPinned}>Settings</NavLink>}
+
+          {canSeeAdmins && (
+            <div className="pt-3 mt-3 border-t border-slate-700/50 mx-2">
+              <Link
+                to="/admin/admins"
+                className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all group text-amber-300 hover:bg-slate-800 hover:text-amber-200 ${(isSidebarCollapsed && !isSidebarPinned) ? 'justify-center' : ''}`}
+                title="Admin Management"
+              >
+                <Shield className="w-5 h-5 transition-transform group-hover:scale-110" />
+                <span className={`font-medium whitespace-nowrap transition-all duration-300 ${(isSidebarCollapsed && !isSidebarPinned) ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}>Admins</span>
+              </Link>
+            </div>
+          )}
+
+          <div className="pt-4 mt-4 border-t border-slate-700/50 mx-2 space-y-2">
+            {CURRENT_SITE.portalEnabled && (
+              <Link
+                to="/portal"
+                className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all group text-slate-400 hover:bg-slate-800 hover:text-white ${(isSidebarCollapsed && !isSidebarPinned) ? 'justify-center' : ''}`}
+                title="User Portal"
+              >
+                <UserCircle className="w-5 h-5 transition-transform group-hover:scale-110" />
+                <span className={`font-medium whitespace-nowrap transition-all duration-300 ${(isSidebarCollapsed && !isSidebarPinned) ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}>User Portal</span>
+              </Link>
+            )}
+            <Link
+              to="/change-password"
+              className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all group text-slate-400 hover:bg-slate-800 hover:text-white ${(isSidebarCollapsed && !isSidebarPinned) ? 'justify-center' : ''}`}
+              title="Change password"
+            >
+              <KeyRound className="w-5 h-5 transition-transform group-hover:scale-110" />
+              <span className={`font-medium whitespace-nowrap transition-all duration-300 ${(isSidebarCollapsed && !isSidebarPinned) ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}>Change Password</span>
+            </Link>
+          </div>
 
           <div className="pt-4 mt-4 border-t border-slate-700/50 mx-2">
             <button
@@ -327,51 +402,56 @@ const AdminLayout = () => {
         <div className="p-4 lg:p-6 w-full mx-auto">
           <Routes>
             <Route path="/" element={
-              <>
-                <header className="mb-8 flex justify-between items-center bg-gradient-to-r from-indigo-600 to-indigo-800 p-8 rounded-3xl shadow-2xl shadow-indigo-600/20 text-white relative overflow-hidden border border-indigo-500/30">
-                  <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
-                  <div className="absolute -right-10 -top-20 opacity-20 transform rotate-12 scale-150 pointer-events-none">
-                    <LayoutDashboard strokeWidth={1.5} className="w-64 h-64 text-white" />
-                  </div>
-                  <div className="relative z-10">
-                    <div className="inline-block bg-white/20 backdrop-blur-md px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase mb-3 border border-white/20 shadow-sm text-indigo-50">
-                      LIVE EVENT HUB
+              <ProtectedRoute requirePage="dashboard">
+                <>
+                  <header className="mb-8 flex justify-between items-center bg-gradient-to-r from-indigo-600 to-indigo-800 p-8 rounded-3xl shadow-2xl shadow-indigo-600/20 text-white relative overflow-hidden border border-indigo-500/30">
+                    <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
+                    <div className="absolute -right-10 -top-20 opacity-20 transform rotate-12 scale-150 pointer-events-none">
+                      <LayoutDashboard strokeWidth={1.5} className="w-64 h-64 text-white" />
                     </div>
-                    <h2 className="text-4xl font-extrabold text-white mb-2 drop-shadow-md tracking-tight">Event Dashboard</h2>
-                    <p className="text-indigo-100 font-medium tracking-wide text-lg max-w-lg">
-                      Real-time overview of attendance, ticket statuses, and analytics.
-                    </p>
-                  </div>
-                </header>
-                <DashboardStats attendees={attendees} />
-                <AttendeeList attendees={attendees} forms={forms} isLoading={loading} onRefresh={refreshAttendees} />
-              </>
+                    <div className="relative z-10">
+                      <div className="inline-block bg-white/20 backdrop-blur-md px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase mb-3 border border-white/20 shadow-sm text-indigo-50">
+                        LIVE EVENT HUB
+                      </div>
+                      <h2 className="text-4xl font-extrabold text-white mb-2 drop-shadow-md tracking-tight">Event Dashboard</h2>
+                      <p className="text-indigo-100 font-medium tracking-wide text-lg max-w-lg">
+                        Real-time overview of attendance, ticket statuses, and analytics.
+                      </p>
+                    </div>
+                  </header>
+                  <DashboardStats attendees={attendees} />
+                  <AttendeeList attendees={attendees} forms={forms} isLoading={loading} onRefresh={refreshAttendees} />
+                </>
+              </ProtectedRoute>
             } />
-            <Route path="/forms" element={<FormsManager />} />
-            <Route path="/sponsors" element={<SponsorsDashboard />} />
-            <Route path="/builder/:formId" element={<FormBuilder />} />
+            <Route path="/forms" element={<ProtectedRoute requirePage="forms"><FormsManager /></ProtectedRoute>} />
+            <Route path="/sponsors" element={<ProtectedRoute requirePage="sponsors"><SponsorsDashboard /></ProtectedRoute>} />
+            <Route path="/builder/:formId" element={<ProtectedRoute requirePage="forms"><FormBuilder /></ProtectedRoute>} />
             <Route path="/generate-qr" element={
-              <>
-                <header className="mb-8 flex justify-between items-center bg-gradient-to-r from-violet-600 to-indigo-700 p-8 rounded-3xl shadow-2xl shadow-violet-600/20 text-white relative overflow-hidden border border-violet-500/30">
-                  <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
-                  <div className="absolute -right-10 -top-20 opacity-20 transform rotate-12 scale-150 pointer-events-none">
-                    <QrCode strokeWidth={1.5} className="w-64 h-64 text-white" />
-                  </div>
-                  <div className="relative z-10">
-                    <div className="inline-block bg-white/20 backdrop-blur-md px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase mb-3 border border-white/20 shadow-sm text-violet-50">
-                      TICKET TOOLS
+              <ProtectedRoute requirePage="generateQr">
+                <>
+                  <header className="mb-8 flex justify-between items-center bg-gradient-to-r from-violet-600 to-indigo-700 p-8 rounded-3xl shadow-2xl shadow-violet-600/20 text-white relative overflow-hidden border border-violet-500/30">
+                    <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
+                    <div className="absolute -right-10 -top-20 opacity-20 transform rotate-12 scale-150 pointer-events-none">
+                      <QrCode strokeWidth={1.5} className="w-64 h-64 text-white" />
                     </div>
-                    <h2 className="text-4xl font-extrabold text-white mb-2 drop-shadow-md tracking-tight">Manual Ticket Management</h2>
-                    <p className="text-indigo-100 font-medium tracking-wide text-lg max-w-lg">
-                      Generate QR codes for existing users and manage ticket delivery.
-                    </p>
-                  </div>
-                </header>
-                <ManualTicketTool />
-              </>
+                    <div className="relative z-10">
+                      <div className="inline-block bg-white/20 backdrop-blur-md px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase mb-3 border border-white/20 shadow-sm text-violet-50">
+                        TICKET TOOLS
+                      </div>
+                      <h2 className="text-4xl font-extrabold text-white mb-2 drop-shadow-md tracking-tight">Manual Ticket Management</h2>
+                      <p className="text-indigo-100 font-medium tracking-wide text-lg max-w-lg">
+                        Generate QR codes for existing users and manage ticket delivery.
+                      </p>
+                    </div>
+                  </header>
+                  <ManualTicketTool />
+                </>
+              </ProtectedRoute>
             } />
-            <Route path="/settings" element={<Settings />} />
-            <Route path="/seating" element={<SeatingConfigurator />} />
+            <Route path="/settings" element={<ProtectedRoute requirePage="settings"><Settings /></ProtectedRoute>} />
+            <Route path="/seating" element={<ProtectedRoute requirePage="seating"><SeatingConfigurator /></ProtectedRoute>} />
+            <Route path="/admins" element={<ProtectedRoute requireSuperAdmin><AdminsManagement /></ProtectedRoute>} />
           </Routes>
         </div>
       </main>
@@ -390,22 +470,44 @@ const AdminLayout = () => {
 interface ProtectedRouteProps {
   children: React.ReactElement;
   requireRole?: 'admin';
+  /** If set, only super_admins may render the children. */
+  requireSuperAdmin?: boolean;
+  /** If set, the caller must have permission to access this admin page. */
+  requirePage?: AdminPageKey;
 }
 
-const ProtectedRoute = ({ children, requireRole }: ProtectedRouteProps) => {
+const ProtectedRoute = ({ children, requireRole, requireSuperAdmin, requirePage }: ProtectedRouteProps) => {
   const { user, profile, loading } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
     if (loading) return;
     if (!user) {
-      navigate(CURRENT_SITE.portalEnabled ? '/' : '/login', { replace: true });
+      // Admin routes always fall back to /login — portal-enabled sites too.
+      // Routing unsigned-in admins through Landing/AuthPanel is convoluted:
+      // it defaults to the signup tab (attendee role), so existing admins
+      // would bounce through /portal before reaching the dashboard.
+      navigate(requireRole === 'admin' ? '/login' : (CURRENT_SITE.portalEnabled ? '/' : '/login'), { replace: true });
       return;
     }
-    if (requireRole === 'admin' && profile !== null && profile.role !== 'admin') {
+    // Admin role gate: admin AND super_admin both qualify.
+    if (requireRole === 'admin' && profile !== null && profile.role !== 'admin' && profile.role !== 'super_admin') {
       navigate(CURRENT_SITE.portalEnabled ? '/portal' : '/', { replace: true });
+      return;
     }
-  }, [user, profile, loading, requireRole, navigate]);
+    // Super-admin-only pages (admin management).
+    if (requireSuperAdmin && profile !== null && profile.role !== 'super_admin') {
+      // Kick back to an accessible admin page, or portal/home if none.
+      const fallback = firstAccessiblePage(profile);
+      navigate(fallback ? (fallback === 'dashboard' ? '/admin' : `/admin/${fallback === 'generateQr' ? 'generate-qr' : fallback}`) : (CURRENT_SITE.portalEnabled ? '/portal' : '/'), { replace: true });
+      return;
+    }
+    // Per-page permission gate (admin only — super_admin bypasses via canAccessPage).
+    if (requirePage && profile !== null && !canAccessPage(profile, requirePage)) {
+      const fallback = firstAccessiblePage(profile);
+      navigate(fallback ? (fallback === 'dashboard' ? '/admin' : `/admin/${fallback === 'generateQr' ? 'generate-qr' : fallback}`) : (CURRENT_SITE.portalEnabled ? '/portal' : '/'), { replace: true });
+    }
+  }, [user, profile, loading, requireRole, requireSuperAdmin, requirePage, navigate]);
 
   if (loading) {
     return (
@@ -418,7 +520,7 @@ const ProtectedRoute = ({ children, requireRole }: ProtectedRouteProps) => {
   if (!user) return null;
 
   // Still fetching profile? Wait before evaluating role.
-  if (user && profile === null && requireRole) {
+  if (user && profile === null && (requireRole || requireSuperAdmin || requirePage)) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center">
         <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
@@ -426,7 +528,9 @@ const ProtectedRoute = ({ children, requireRole }: ProtectedRouteProps) => {
     );
   }
 
-  if (requireRole === 'admin' && profile?.role !== 'admin') return null;
+  if (requireRole === 'admin' && profile?.role !== 'admin' && profile?.role !== 'super_admin') return null;
+  if (requireSuperAdmin && !isSuperAdmin(profile)) return null;
+  if (requirePage && !canAccessPage(profile, requirePage)) return null;
 
   return <>{children}</>;
 };
@@ -463,6 +567,18 @@ export default function App() {
 
             {/* Public Form Route */}
             <Route path="/form/:formId" element={<PublicRegistration />} />
+
+            {/* Change password — any signed-in user can reach this. Primarily
+                used by SCAGO admins (no portal surface) + as a fallback link
+                anywhere we don't want to depend on portalEnabled. */}
+            <Route
+              path="/change-password"
+              element={
+                <ProtectedRoute>
+                  <ChangePasswordPage />
+                </ProtectedRoute>
+              }
+            />
 
             {/* Admin Routes */}
             <Route

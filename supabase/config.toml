@@ -19,3 +19,10 @@ verify_jwt = false
 # rows, so it legitimately requires an authenticated admin session.
 [functions.confirm-sponsor-cheque]
 verify_jwt = true
+
+# Super-admin-only. Creates new auth.users rows + stamps them with
+# role='admin' + per-page permissions. Uses service-role inside the
+# function body. Gateway must require a JWT so the function can identify
+# the caller and enforce the super_admin gate.
+[functions.admin-invite]
+verify_jwt = true

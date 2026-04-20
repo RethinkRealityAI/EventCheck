@@ -11,6 +11,13 @@ export function mapProfileFromDb(row: any): Profile {
     countryCode: row.country_code,
     phone: row.phone,
     avatarUrl: row.avatar_url,
+    // admin_permissions is jsonb — Postgres returns it as a parsed object, but
+    // defensively handle a string payload for anyone running psql manually.
+    adminPermissions: row.admin_permissions == null
+      ? null
+      : typeof row.admin_permissions === 'string'
+        ? JSON.parse(row.admin_permissions)
+        : row.admin_permissions,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

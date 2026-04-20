@@ -163,6 +163,9 @@ export type Database = {
                     email_footer_text: string | null
                     email_invitation_subject: string | null
                     email_invitation_body: string | null
+                    email_reminder_subject: string | null
+                    email_reminder_body: string | null
+                    dashboard_tab_prefs: Json | null
                     pdf_settings: Json | null
                     sponsor_invitation_subject: string | null
                     sponsor_invitation_body: string | null
@@ -195,6 +198,9 @@ export type Database = {
                     email_footer_text?: string | null
                     email_invitation_subject?: string | null
                     email_invitation_body?: string | null
+                    email_reminder_subject?: string | null
+                    email_reminder_body?: string | null
+                    dashboard_tab_prefs?: Json | null
                     pdf_settings?: Json | null
                     sponsor_invitation_subject?: string | null
                     sponsor_invitation_body?: string | null
@@ -227,6 +233,9 @@ export type Database = {
                     email_footer_text?: string | null
                     email_invitation_subject?: string | null
                     email_invitation_body?: string | null
+                    email_reminder_subject?: string | null
+                    email_reminder_body?: string | null
+                    dashboard_tab_prefs?: Json | null
                     pdf_settings?: Json | null
                     sponsor_invitation_subject?: string | null
                     sponsor_invitation_body?: string | null
@@ -465,11 +474,12 @@ export type Database = {
                     id: string;
                     email: string;
                     full_name: string | null;
-                    role: 'attendee' | 'exhibitor' | 'sponsor' | 'admin';
+                    role: 'attendee' | 'exhibitor' | 'sponsor' | 'admin' | 'super_admin';
                     organization: string | null;
                     country_code: string | null;
                     phone: string | null;
                     avatar_url: string | null;
+                    admin_permissions: unknown | null;
                     created_at: string;
                     updated_at: string;
                 };
@@ -477,11 +487,12 @@ export type Database = {
                     id: string;
                     email: string;
                     full_name?: string | null;
-                    role?: 'attendee' | 'exhibitor' | 'sponsor' | 'admin';
+                    role?: 'attendee' | 'exhibitor' | 'sponsor' | 'admin' | 'super_admin';
                     organization?: string | null;
                     country_code?: string | null;
                     phone?: string | null;
                     avatar_url?: string | null;
+                    admin_permissions?: unknown | null;
                     created_at?: string;
                     updated_at?: string;
                 };
@@ -489,11 +500,12 @@ export type Database = {
                     id?: string;
                     email?: string;
                     full_name?: string | null;
-                    role?: 'attendee' | 'exhibitor' | 'sponsor' | 'admin';
+                    role?: 'attendee' | 'exhibitor' | 'sponsor' | 'admin' | 'super_admin';
                     organization?: string | null;
                     country_code?: string | null;
                     phone?: string | null;
                     avatar_url?: string | null;
+                    admin_permissions?: unknown | null;
                     created_at?: string;
                     updated_at?: string;
                 };

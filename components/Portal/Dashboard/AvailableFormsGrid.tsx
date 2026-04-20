@@ -22,6 +22,7 @@ const ROLE_TO_FORM_TYPES: Record<Profile['role'], string[]> = {
   exhibitor: ['exhibitor'],
   sponsor: ['sponsor'],
   admin: ['event', 'exhibitor', 'sponsor'],
+  super_admin: ['event', 'exhibitor', 'sponsor'],
 };
 
 // Completed = user already has a confirmed (paid or free) submission for this form.

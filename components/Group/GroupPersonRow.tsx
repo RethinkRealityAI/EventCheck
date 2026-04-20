@@ -23,6 +23,9 @@ interface Props {
    *  panel can render every per-guest question except RMS/ticket/identity-fields. */
   formFields?: FormField[];
   fullAnswers?: Record<string, any>;
+  /** Field ids to omit from the inline accordion — used for bulk-consent
+   *  where the purchaser accepts T&C once for all additional registrants. */
+  hideFieldIds?: Set<string>;
   onChange: (patch: Partial<{ name: string; email: string; countryCode: string; categoryId: string | null; fullAnswers: Record<string, any> }>) => void;
 }
 
@@ -79,6 +82,8 @@ export default function GroupPersonRow(p: Props) {
           formFields={p.formFields}
           fullAnswers={p.fullAnswers ?? {}}
           onChange={(full) => p.onChange({ fullAnswers: full })}
+          rowKey={p.index}
+          hideFieldIds={p.hideFieldIds}
         />
       )}
     </div>

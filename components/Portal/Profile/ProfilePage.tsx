@@ -5,6 +5,7 @@ import { COUNTRIES } from '../../../utils/countries';
 import { GlassInput } from '../ui/GlassInput';
 import { GlassSelect } from '../ui/GlassSelect';
 import { ViscousButton } from '../ui/ViscousButton';
+import { ChangePasswordForm } from '../../ChangePasswordForm';
 
 export function ProfilePage() {
   const { profile, user, refreshProfile } = useAuth();
@@ -30,11 +31,13 @@ export function ProfilePage() {
 
   const attendeeTypeLabel = profile.role === 'exhibitor' ? 'Exhibitor'
     : profile.role === 'sponsor' ? 'Sponsor'
+    : profile.role === 'super_admin' ? 'Super Admin'
     : profile.role === 'admin' ? 'Admin'
     : 'Attendee';
   const attendeeTypePillGradient =
     profile.role === 'exhibitor' ? 'bg-[linear-gradient(135deg,#8b2a5e_0%,#5a3575_100%)]'
     : profile.role === 'sponsor' ? 'bg-[linear-gradient(135deg,#2260a1_0%,#1a4880_100%)]'
+    : profile.role === 'super_admin' ? 'bg-[linear-gradient(135deg,#78350f_0%,#b45309_100%)]'
     : profile.role === 'admin' ? 'bg-[linear-gradient(135deg,#0f172a_0%,#1a4880_100%)]'
     : 'bg-gansid-primary-gradient';
 
@@ -140,6 +143,15 @@ export function ProfilePage() {
           <p className="text-xs text-gansid-on-surface/40 mt-4">Role changes require support.</p>
         </section>
       </div>
+
+      {/* Change Password */}
+      <section className="bg-white rounded-gansid-lg p-6 shadow-2xl shadow-gansid-secondary/10 gradient-border mt-6 max-w-2xl">
+        <h2 className="font-display text-lg font-semibold mb-1">Change Password</h2>
+        <p className="font-body text-sm text-gansid-on-surface/60 mb-4">
+          Update the password you use to sign in. You&apos;ll be asked to enter your current password first.
+        </p>
+        <ChangePasswordForm theme="portal" />
+      </section>
     </div>
   );
 }

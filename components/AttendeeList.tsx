@@ -9,6 +9,10 @@ import AttendeeModal from './AttendeeModal';
 import AddAttendeeModal from './AddAttendeeModal';
 import ColumnVisibilityDropdown, { ColumnDef } from './ColumnVisibilityDropdown';
 import ExhibitorsTab from './Exhibitor/ExhibitorsTab';
+import SignupsTab from './Signups/SignupsTab';
+import { CURRENT_SITE } from '../config/sites';
+import DashboardTabsConfig, { resolveVisibleTabs, type DashboardTabId } from './DashboardTabsConfig';
+import { Settings as SettingsIcon } from 'lucide-react';
 
 // ── Group-registration helpers ──────────────────────────────────────────────
 
@@ -101,7 +105,8 @@ const STANDARD_COLUMNS: ColumnDef[] = [
 
 const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading = false, onRefresh }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState<'live' | 'test' | 'donated' | 'tables' | 'sponsor-tickets' | 'exhibitors' | 'groups'>('live');
+  const [activeTab, setActiveTab] = useState<'live' | 'test' | 'donated' | 'tables' | 'sponsor-tickets' | 'exhibitors' | 'groups' | 'signups'>('live');
+  const [tabsConfigOpen, setTabsConfigOpen] = useState(false);
   const [selectedAttendee, setSelectedAttendee] = useState<Attendee | null>(null);
   const { showNotification } = useNotifications();
   const [showExportModal, setShowExportModal] = useState(false);
@@ -232,7 +237,12 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
   );
 
   // Primary IDs that have at least one associated guest row = "groups"
-  // Excludes sponsor groups (they have their own tab) and exhibitor orgs (different tab).
+  // Excludes sponsor groups (they have their own tab), exhibitor orgs (different tab),
+  // AND static-ticket multi-seat table purchasers (SCAGO-style "Table for 8" buys).
+  // The Groups tab is specifically for the dynamic-pricing group-mode flow (RMS field
+  // set to 'group'), which always stamps `pricing_template_id` on the primary attendee.
+  // Static-ticket purchases never touch dynamic pricing, so a missing pricingTemplateId
+  // cleanly distinguishes them.
   const groupPrimaryIds = useMemo(() => {
     const guestsByPrimary = new Map<string, number>();
     for (const a of attendees) {
@@ -246,6 +256,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
       if (!primary || primary.isTest) continue;
       if (primary.sponsorTier) continue; // sponsor groups live in sponsor-tickets tab
       if (primary.ticketType === 'Exhibitor') continue; // exhibitor orgs live in exhibitors tab
+      if (!primary.pricingTemplateId) continue; // static-ticket table purchases live in tables/live only
       ids.add(pid);
     }
     return ids;
@@ -263,6 +274,27 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
   }, [attendees]);
 
   const hasExhibitorForms = forms.some(f => (f as any).formType === 'exhibitor');
+
+  // Resolved tab list — driven by admin prefs + site-availability gates.
+  // Memoized so the active-tab fallback effect below doesn't fire on every render.
+  const visibleTabs = useMemo(
+    () => resolveVisibleTabs(settings?.dashboardTabPrefs, {
+      hasExhibitorForms,
+      portalEnabled: CURRENT_SITE.portalEnabled,
+    }),
+    [settings?.dashboardTabPrefs, hasExhibitorForms],
+  );
+
+  // If the admin hides (or site availability strips) the currently-active tab,
+  // jump to the first visible one. In an effect — setState during render is
+  // fragile and triggers React warnings in strict mode.
+  useEffect(() => {
+    if (visibleTabs.length === 0) return;
+    if (!visibleTabs.find(t => t.id === activeTab)) {
+      setActiveTab(visibleTabs[0].id as typeof activeTab);
+    }
+  }, [visibleTabs, activeTab]);
+
 
   const allColumns = useMemo(() => [...STANDARD_COLUMNS, ...dynamicColumns], [dynamicColumns]);
 
@@ -539,52 +571,37 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
           <div className="flex flex-col gap-3">
             <h2 className="font-semibold text-lg text-gray-900">Registered Attendees</h2>
             <div className="flex items-center gap-1 bg-white/50 backdrop-blur-sm p-1 rounded-lg w-fit border border-white/40">
+              {visibleTabs.map(meta => {
+                const isActive = activeTab === meta.id;
+                const activeCls = meta.id === 'donated'
+                  ? 'bg-white text-emerald-600 shadow-sm'
+                  : 'bg-white text-indigo-600 shadow-sm';
+                return (
+                  <button
+                    key={meta.id}
+                    onClick={() => { setActiveTab(meta.id as typeof activeTab); setCurrentPage(1); }}
+                    className={`px-3 py-1 text-xs font-medium rounded-md transition flex items-center gap-1 ${isActive ? activeCls : 'text-gray-500 hover:text-gray-900'}`}
+                    title={meta.description}
+                  >
+                    {meta.id === 'tables' && <LayoutDashboard className="w-3 h-3" />}
+                    {meta.label}
+                    {meta.id === 'donated' && totalDonatedCount > 0 && (
+                      <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{totalDonatedCount}</span>
+                    )}
+                    {meta.id === 'groups' && groupPrimaryIds.size > 0 && (
+                      <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{groupPrimaryIds.size}</span>
+                    )}
+                  </button>
+                );
+              })}
               <button
-                onClick={() => { setActiveTab('live'); setCurrentPage(1); }}
-                className={`px-3 py-1 text-xs font-medium rounded-md transition ${activeTab === 'live' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
+                onClick={() => setTabsConfigOpen(true)}
+                className="px-2 py-1 text-gray-400 hover:text-indigo-600 hover:bg-white rounded-md transition"
+                title="Customize tabs — reorder or hide"
+                aria-label="Customize dashboard tabs"
               >
-                Live
+                <SettingsIcon className="w-3.5 h-3.5" />
               </button>
-              <button
-                onClick={() => { setActiveTab('donated'); setCurrentPage(1); }}
-                className={`px-3 py-1 text-xs font-medium rounded-md transition flex items-center gap-1 ${activeTab === 'donated' ? 'bg-white text-emerald-600 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
-              >
-                Donated
-                {totalDonatedCount > 0 && <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{totalDonatedCount}</span>}
-              </button>
-              <button
-                onClick={() => { setActiveTab('tables'); setCurrentPage(1); }}
-                className={`px-3 py-1 text-xs font-medium rounded-md transition flex items-center gap-1 ${activeTab === 'tables' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
-              >
-                <LayoutDashboard className="w-3 h-3" /> Tables
-              </button>
-              <button
-                onClick={() => { setActiveTab('sponsor-tickets'); setCurrentPage(1); }}
-                className={`px-3 py-1 text-xs font-medium rounded-md transition ${activeTab === 'sponsor-tickets' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
-              >
-                Sponsor Tickets
-              </button>
-              <button
-                onClick={() => { setActiveTab('groups'); setCurrentPage(1); }}
-                className={`px-3 py-1 text-xs font-medium rounded-md transition flex items-center gap-1 ${activeTab === 'groups' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
-              >
-                Groups
-                {groupPrimaryIds.size > 0 && <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{groupPrimaryIds.size}</span>}
-              </button>
-              <button
-                onClick={() => { setActiveTab('test'); setCurrentPage(1); }}
-                className={`px-3 py-1 text-xs font-medium rounded-md transition ${activeTab === 'test' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
-              >
-                Test
-              </button>
-              {hasExhibitorForms && (
-                <button
-                  onClick={() => { setActiveTab('exhibitors'); setCurrentPage(1); }}
-                  className={`px-3 py-1 text-xs font-medium rounded-md transition ${activeTab === 'exhibitors' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
-                >
-                  Exhibitors
-                </button>
-              )}
               {/* Separator */}
               <div className="h-5 w-px bg-gray-300/50 mx-1"></div>
               {/* Form Selector */}
@@ -612,59 +629,63 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative flex-1 min-w-[200px]">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search..."
-                className="pl-9 pr-4 py-2 border border-white/40 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none w-full bg-white/80 backdrop-blur-sm"
-                value={searchTerm}
-                onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }}
+          {/* Attendee-table controls — hidden on the Signups tab since that view
+              has its own filter + search bar. */}
+          {activeTab !== 'signups' && (
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative flex-1 min-w-[200px]">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search..."
+                  className="pl-9 pr-4 py-2 border border-white/40 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none w-full bg-white/80 backdrop-blur-sm"
+                  value={searchTerm}
+                  onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }}
+                />
+              </div>
+
+              <select
+                value={itemsPerPage}
+                onChange={e => { setItemsPerPage(Number(e.target.value)); setCurrentPage(1); }}
+                className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value={10}>10 per page</option>
+                <option value={25}>25 per page</option>
+                <option value={50}>50 per page</option>
+                <option value={100}>100 per page</option>
+              </select>
+
+              <ColumnVisibilityDropdown
+                columns={allColumns}
+                visibleColumns={columnVisibility}
+                onToggle={handleToggleColumn}
+                onShowAll={handleShowAllColumns}
+                onHideAll={handleHideAllColumns}
               />
+
+              <button
+                onClick={() => setShowAddModal(true)}
+                className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition shadow-sm"
+                title="Add attendee manually"
+              >
+                <Plus className="w-4 h-4" />
+                <span className="hidden sm:inline">Add</span>
+              </button>
+
+              <button
+                onClick={() => setShowExportModal(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition shadow-sm"
+                title="Export as CSV"
+              >
+                <Download className="w-4 h-4" />
+                <span className="hidden sm:inline">Export</span>
+              </button>
             </div>
-
-            <select
-              value={itemsPerPage}
-              onChange={e => { setItemsPerPage(Number(e.target.value)); setCurrentPage(1); }}
-              className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-indigo-500"
-            >
-              <option value={10}>10 per page</option>
-              <option value={25}>25 per page</option>
-              <option value={50}>50 per page</option>
-              <option value={100}>100 per page</option>
-            </select>
-
-            <ColumnVisibilityDropdown
-              columns={allColumns}
-              visibleColumns={columnVisibility}
-              onToggle={handleToggleColumn}
-              onShowAll={handleShowAllColumns}
-              onHideAll={handleHideAllColumns}
-            />
-
-            <button
-              onClick={() => setShowAddModal(true)}
-              className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition shadow-sm"
-              title="Add attendee manually"
-            >
-              <Plus className="w-4 h-4" />
-              <span className="hidden sm:inline">Add</span>
-            </button>
-
-            <button
-              onClick={() => setShowExportModal(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition shadow-sm"
-              title="Export as CSV"
-            >
-              <Download className="w-4 h-4" />
-              <span className="hidden sm:inline">Export</span>
-            </button>
-          </div>
+          )}
         </div>
 
         {/* Filters Row */}
-        {activeTab === 'tables' ? (
+        {activeTab === 'signups' ? null : activeTab === 'tables' ? (
           <div className="flex flex-wrap items-center gap-2 text-sm bg-white/50 backdrop-blur-sm p-3 rounded-lg border border-white/40">
             <button
               onClick={handleExpandAll}
@@ -838,7 +859,18 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
 
       {/* Table Content */}
       <div className="overflow-x-auto flex-1 custom-scrollbar">
-        {activeTab === 'exhibitors' ? (
+        {activeTab === 'signups' ? (
+          <div className="p-4">
+            {settings ? (
+              <SignupsTab settings={settings} forms={forms} />
+            ) : (
+              <div className="p-12 text-center text-gray-400">
+                <Loader2 className="w-8 h-8 mx-auto mb-2 animate-spin text-indigo-500" />
+                <p>Loading…</p>
+              </div>
+            )}
+          </div>
+        ) : activeTab === 'exhibitors' ? (
           <div className="p-4">
             <ExhibitorsTab attendees={attendees} forms={forms} onRefresh={onRefresh} />
           </div>
@@ -1254,6 +1286,19 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
             // The parent component's polling will pick up the new attendee
             setShowAddModal(false);
           }}
+        />
+      )}
+
+      {tabsConfigOpen && settings && (
+        <DashboardTabsConfig
+          settings={settings}
+          gates={{ hasExhibitorForms, portalEnabled: CURRENT_SITE.portalEnabled }}
+          onSave={async (next) => {
+            const updated = { ...settings, dashboardTabPrefs: next };
+            await saveSettings(updated);
+            setSettings(updated);
+          }}
+          onClose={() => setTabsConfigOpen(false)}
         />
       )}
 

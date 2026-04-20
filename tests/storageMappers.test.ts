@@ -48,6 +48,18 @@ describe('storageService mapper source guards', () => {
     // mapFormToDb should also use f.formType not a ternary
     expect(source).toMatch(/form_type:\s*f\.formType/);
   });
+
+  /**
+   * Bug 3 — the Groups admin tab was surfacing static-ticket table purchasers
+   *          alongside real dynamic-pricing group-mode registrations, because
+   *          the discriminator was "primary has guests" — which is true for
+   *          both flows. Fix: map pricing_template_id onto the client Attendee
+   *          and gate the Groups tab on primary.pricingTemplateId being set.
+   *          This guard ensures the mapper still carries the field.
+   */
+  it('mapAttendeeFromDb must expose pricing_template_id as pricingTemplateId', () => {
+    expect(source).toMatch(/pricingTemplateId:\s*\(db as any\)\.pricing_template_id/);
+  });
 });
 
 /**

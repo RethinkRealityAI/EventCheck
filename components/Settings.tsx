@@ -14,7 +14,7 @@ import RichTextEditor from './RichTextEditor';
 const Settings: React.FC = () => {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [activeTab, setActiveTab] = useState<'general' | 'email' | 'pdf' | 'diagnostics' | 'pricing-templates' | 'announcements'>('general');
-  const [previewMode, setPreviewMode] = useState<'ticket' | 'invite'>('ticket');
+  const [previewMode, setPreviewMode] = useState<'ticket' | 'invite' | 'reminder'>('ticket');
   const [dummyAttendee, setDummyAttendee] = useState<Attendee | null>(null);
   const [allAttendees, setAllAttendees] = useState<Attendee[]>([]);
 
@@ -116,8 +116,25 @@ const Settings: React.FC = () => {
     }
   };
 
+  const templateForMode = (mode: typeof previewMode) =>
+    mode === 'ticket' ? settings.emailBodyTemplate
+    : mode === 'invite' ? settings.emailInvitationBody
+    : settings.emailReminderBody;
+  const subjectForMode = (mode: typeof previewMode) =>
+    mode === 'ticket' ? settings.emailSubject
+    : mode === 'invite' ? settings.emailInvitationSubject
+    : settings.emailReminderSubject;
+  const subjectKeyForMode = (mode: typeof previewMode): keyof AppSettings =>
+    mode === 'ticket' ? 'emailSubject'
+    : mode === 'invite' ? 'emailInvitationSubject'
+    : 'emailReminderSubject';
+  const bodyKeyForMode = (mode: typeof previewMode): keyof AppSettings =>
+    mode === 'ticket' ? 'emailBodyTemplate'
+    : mode === 'invite' ? 'emailInvitationBody'
+    : 'emailReminderBody';
+
   const previewHtml = React.useMemo(() => {
-    const template = previewMode === 'ticket' ? settings.emailBodyTemplate : settings.emailInvitationBody;
+    const template = templateForMode(previewMode);
     let manualOverride: Attendee | null = null;
     if (recipientMode === 'manual' && manualRecipientsList.length > 0) {
       manualOverride = {
@@ -158,7 +175,7 @@ const Settings: React.FC = () => {
   }, [settings, previewMode, recipientMode, manualRecipientsList, dummyAttendee]);
 
   const generatePreviewHtmlForAttendee = (attendee: Attendee | null) => {
-    const template = previewMode === 'ticket' ? settings.emailBodyTemplate : settings.emailInvitationBody;
+    const template = templateForMode(previewMode);
     const target = attendee || dummyAttendee;
 
     const name = target?.name || 'Valued Guest';
@@ -236,7 +253,7 @@ const Settings: React.FC = () => {
       }
 
       let sentCount = 0;
-      const subject = previewMode === 'ticket' ? settings.emailSubject : settings.emailInvitationSubject;
+      const subject = subjectForMode(previewMode);
 
       for (const target of targets) {
         const html = generatePreviewHtmlForAttendee(target.attendee || null);
@@ -470,7 +487,7 @@ const Settings: React.FC = () => {
                 {/* Send Email Panel */}
                 <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 flex-shrink-0">
                   <h3 className="font-bold text-indigo-900 mb-3 flex items-center gap-2">
-                    <SendIcon className="w-4 h-4" /> Send {previewMode === 'ticket' ? 'Ticket' : 'Invitation'} Email
+                    <SendIcon className="w-4 h-4" /> Send {previewMode === 'ticket' ? 'Ticket' : previewMode === 'invite' ? 'Invitation' : 'Reminder'} Email
                   </h3>
 
                   <div className="flex gap-2 mb-4 bg-white p-1 rounded-lg border border-indigo-100">
@@ -575,13 +592,32 @@ const Settings: React.FC = () => {
                     >
                       Invitation / Marketing
                     </button>
+                    <button
+                      onClick={() => setPreviewMode('reminder')}
+                      className={`px-4 py-2 text-sm font-medium rounded-lg transition ${previewMode === 'reminder' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+                    >
+                      Registration Reminder
+                    </button>
                   </div>
+
+                  {previewMode === 'reminder' && (
+                    <div className="p-3 rounded-lg bg-indigo-50 border border-indigo-100 text-xs text-indigo-900 leading-relaxed">
+                      Sent from the Signups tab to nudge users who created a portal account but haven&rsquo;t completed their registration.
+                      Placeholders you can use in the subject or body:{' '}
+                      <code className="px-1 bg-white rounded">{'{{name}}'}</code>,{' '}
+                      <code className="px-1 bg-white rounded">{'{{event}}'}</code>,{' '}
+                      <code className="px-1 bg-white rounded">{'{{step}}'}</code>,{' '}
+                      <code className="px-1 bg-white rounded">{'{{total_steps}}'}</code>,{' '}
+                      <code className="px-1 bg-white rounded">{'{{resume_url}}'}</code>,{' '}
+                      <code className="px-1 bg-white rounded">{'{{signup_url}}'}</code>.
+                    </div>
+                  )}
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Subject Line</label>
                     <input type="text" className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
-                      value={previewMode === 'ticket' ? settings.emailSubject : settings.emailInvitationSubject}
-                      onChange={e => handleChange(previewMode === 'ticket' ? 'emailSubject' : 'emailInvitationSubject', e.target.value)}
+                      value={subjectForMode(previewMode) as string}
+                      onChange={e => handleChange(subjectKeyForMode(previewMode) as any, e.target.value as any)}
                     />
                   </div>
 
@@ -640,8 +676,8 @@ const Settings: React.FC = () => {
                   <div className="flex-1 flex flex-col min-h-0">
                     <label className="block text-sm font-medium text-gray-700 mb-1">Body Content</label>
                     <RichTextEditor
-                      value={previewMode === 'ticket' ? settings.emailBodyTemplate : settings.emailInvitationBody}
-                      onChange={(val) => handleChange(previewMode === 'ticket' ? 'emailBodyTemplate' : 'emailInvitationBody', val)}
+                      value={templateForMode(previewMode)}
+                      onChange={(val) => handleChange(bodyKeyForMode(previewMode) as any, val as any)}
                       className="flex-1 min-h-[300px]"
                       placeholder="Draft your email content here..."
                     />

@@ -15,11 +15,13 @@ export function CredentialCard({ profile, attendee }: Props) {
   const initials = (profile.fullName ?? profile.email).split(' ').map((s) => s[0]).join('').slice(0, 2).toUpperCase();
   const roleBadge = profile.role === 'exhibitor' ? 'Exhibitor'
     : profile.role === 'sponsor' ? 'Sponsor'
+    : profile.role === 'super_admin' ? 'Super Admin'
     : profile.role === 'admin' ? 'Admin'
     : 'Attendee';
   const rolePillGradient =
     profile.role === 'exhibitor' ? 'bg-[linear-gradient(135deg,#8b2a5e_0%,#5a3575_100%)]'
     : profile.role === 'sponsor' ? 'bg-[linear-gradient(135deg,#2260a1_0%,#1a4880_100%)]'
+    : profile.role === 'super_admin' ? 'bg-[linear-gradient(135deg,#78350f_0%,#b45309_100%)]'
     : profile.role === 'admin' ? 'bg-[linear-gradient(135deg,#0f172a_0%,#1a4880_100%)]'
     : 'bg-gansid-primary-gradient';
 

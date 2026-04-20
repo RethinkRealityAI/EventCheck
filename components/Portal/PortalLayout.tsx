@@ -40,7 +40,7 @@ export function PortalLayout() {
           {menuOpen && (
             <div role="menu" className="absolute right-0 mt-2 glass rounded-gansid-lg p-2 min-w-[200px] shadow-invisible-lift text-gansid-on-surface">
               <Link to="/portal/profile" onClick={() => setMenuOpen(false)} className="block px-3 py-2 hover:bg-gansid-surface-container-low rounded">Profile</Link>
-              {profile?.role === 'admin' && (
+              {(profile?.role === 'admin' || profile?.role === 'super_admin') && (
                 <Link to="/admin" onClick={() => setMenuOpen(false)} className="block px-3 py-2 hover:bg-gansid-surface-container-low rounded">Admin Dashboard</Link>
               )}
               <button

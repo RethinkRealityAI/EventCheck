@@ -105,6 +105,162 @@ describe('validateGroupMembers', () => {
     const result = validateGroupMembers('group', members, true);
     expect(result.ok).toBe(true);
   });
+
+  // --- hasAllInfo (inline group mode) — required field enforcement on each
+  // member's fullAnswers against the form's field list ---
+  describe('with hasAllInfo inline-mode', () => {
+    const requiredText: FormField = {
+      id: 'f_dietary', type: 'text', label: 'Dietary restrictions', required: true,
+    } as any;
+    const consentBool: FormField = {
+      id: 'f_terms', type: 'boolean', label: 'I agree to the T&C', required: true,
+      consentModal: { title: 'T&C', url: '/tc.md' }, linkText: 'T&C',
+    } as any;
+    const optionalText: FormField = {
+      id: 'f_note', type: 'text', label: 'Note', required: false,
+    } as any;
+    // A conditional field: only required when f_medical === 'yes'
+    const conditionalText: FormField = {
+      id: 'f_emerg', type: 'text', label: 'Emergency contact', required: true,
+      conditional: { enabled: true, fieldId: 'f_medical', value: 'yes' },
+    } as any;
+    const medicalField: FormField = {
+      id: 'f_medical', type: 'radio', label: 'Medical?', required: false, options: ['yes', 'no'],
+    } as any;
+
+    it('fails when required text missing on a guest', () => {
+      const members: GroupMember[] = [
+        { name: 'Alice', email: 'a@x.com', fullAnswers: { f_terms: true /* missing f_dietary */ } },
+      ];
+      const result = validateGroupMembers('group', members, false, {
+        hasAllInfo: true,
+        formFields: [requiredText, consentBool],
+      });
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain('Dietary restrictions');
+      expect(result.error).toContain('additional registrant 1');
+    });
+
+    it('fails when required consent boolean is false', () => {
+      const members: GroupMember[] = [
+        { name: 'Alice', email: 'a@x.com', fullAnswers: { f_dietary: 'Vegan', f_terms: false } },
+      ];
+      const result = validateGroupMembers('group', members, false, {
+        hasAllInfo: true,
+        formFields: [requiredText, consentBool],
+      });
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain('T&C');
+    });
+
+    it('passes when required consent boolean is true', () => {
+      const members: GroupMember[] = [
+        { name: 'Alice', email: 'a@x.com', fullAnswers: { f_dietary: 'Vegan', f_terms: true } },
+      ];
+      const result = validateGroupMembers('group', members, false, {
+        hasAllInfo: true,
+        formFields: [requiredText, consentBool],
+      });
+      expect(result.ok).toBe(true);
+    });
+
+    it('skips conditional fields that are not visible for this guest', () => {
+      // f_emerg is required only when f_medical=yes; this guest said no → skip
+      const members: GroupMember[] = [
+        { name: 'Alice', email: 'a@x.com', fullAnswers: { f_medical: 'no' /* no f_emerg */ } },
+      ];
+      const result = validateGroupMembers('group', members, false, {
+        hasAllInfo: true,
+        formFields: [medicalField, conditionalText],
+      });
+      expect(result.ok).toBe(true);
+    });
+
+    it('enforces conditional fields that ARE visible for this guest', () => {
+      const members: GroupMember[] = [
+        { name: 'Alice', email: 'a@x.com', fullAnswers: { f_medical: 'yes' /* no f_emerg */ } },
+      ];
+      const result = validateGroupMembers('group', members, false, {
+        hasAllInfo: true,
+        formFields: [medicalField, conditionalText],
+      });
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain('Emergency contact');
+    });
+
+    it('ignores optional fields regardless of value', () => {
+      const members: GroupMember[] = [
+        { name: 'Alice', email: 'a@x.com', fullAnswers: {} },
+      ];
+      const result = validateGroupMembers('group', members, false, {
+        hasAllInfo: true,
+        formFields: [optionalText],
+      });
+      expect(result.ok).toBe(true);
+    });
+
+    it('names the correct guest index in error messages', () => {
+      const members: GroupMember[] = [
+        { name: 'Alice', email: 'a@x.com', fullAnswers: { f_dietary: 'Vegan', f_terms: true } }, // complete
+        { name: 'Bob', email: 'b@x.com', fullAnswers: { f_terms: true /* missing f_dietary */ } }, // incomplete
+      ];
+      const result = validateGroupMembers('group', members, false, {
+        hasAllInfo: true,
+        formFields: [requiredText, consentBool],
+      });
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain('additional registrant 2');
+    });
+
+    it('skips identity fields (f_fname/_lname/_email/_country suffixes)', () => {
+      // Required identity-suffix fields should be skipped by the inline
+      // validator since they're captured at the top of each row.
+      const nameField: FormField = {
+        id: 'f_custom_fname', type: 'text', label: 'First name', required: true,
+      } as any;
+      const members: GroupMember[] = [
+        { name: 'Alice', email: 'a@x.com', fullAnswers: {} },
+      ];
+      const result = validateGroupMembers('group', members, false, {
+        hasAllInfo: true,
+        formFields: [nameField],
+      });
+      expect(result.ok).toBe(true);
+    });
+
+    it('skips non-answer field types (ticket, rms, country)', () => {
+      const ticketField: FormField = {
+        id: 'tkt', type: 'ticket', label: 'Ticket', required: true,
+      } as any;
+      const countryField: FormField = {
+        id: 'f_country', type: 'country', label: 'Country', required: true,
+      } as any;
+      const rmsField: FormField = {
+        id: 'rms', type: 'registration-mode-selector', label: 'Mode', required: true,
+      } as any;
+      const members: GroupMember[] = [
+        { name: 'Alice', email: 'a@x.com', fullAnswers: {} },
+      ];
+      const result = validateGroupMembers('group', members, false, {
+        hasAllInfo: true,
+        formFields: [ticketField, countryField, rmsField],
+      });
+      expect(result.ok).toBe(true);
+    });
+
+    it('does NOT validate fullAnswers when hasAllInfo is false', () => {
+      // Send-links mode: the purchaser hasn't filled the inline details,
+      // so the required-field check should be skipped entirely.
+      const members: GroupMember[] = [
+        { name: 'Alice', email: 'a@x.com', fullAnswers: {} },
+      ];
+      const result = validateGroupMembers('group', members, false, {
+        hasAllInfo: false,
+        formFields: [requiredText, consentBool],
+      });
+      expect(result.ok).toBe(true);
+    });
+  });
 });
 
 describe('groupFieldsBySection', () => {

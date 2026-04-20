@@ -34,6 +34,11 @@ export interface Attendee {
   sponsoredAwards?: string[];
   adminNotes?: string;
   userId?: string | null;
+  /** Populated ONLY by dynamic-pricing submissions (group-mode or solo). Used
+   *  as the discriminator between "group-mode primary with guests" (GANSID)
+   *  and "static-ticket table purchaser with guest placeholder seats" (SCAGO).
+   *  Null/undefined on static-ticket registrations. */
+  pricingTemplateId?: string | null;
 }
 
 export interface SeatingConfiguration {
@@ -253,6 +258,12 @@ export interface AppSettings {
   emailInvitationSubject: string;
   emailInvitationBody: string; // HTML supported
 
+  // "Complete your registration" reminder — admins send from the Signups tab to
+  // nudge portal users who signed up but haven't completed their registration.
+  // Placeholders: {{name}}, {{event}}, {{resume_url}}, {{signup_url}}, {{step}}, {{total_steps}}.
+  emailReminderSubject: string;
+  emailReminderBody: string; // HTML supported
+
   // Sponsor Email Templates
   sponsorInvitationSubject: string;
   sponsorInvitationBody: string;
@@ -274,6 +285,11 @@ export interface AppSettings {
   // Dashboard Preferences
   defaultDashboardFormId?: string;
   dashboardColumnPrefs?: Record<string, Record<string, boolean>>;
+  /** Per-deployment attendee-list tab layout. `order` is the admin-chosen
+   *  tab order (ids); `hidden` is the admin-hidden subset. Conditional tabs
+   *  (exhibitors, signups) still respect their own site-availability gates —
+   *  admins can't force-show a tab that has no data. */
+  dashboardTabPrefs?: { order?: string[]; hidden?: string[] };
 
   // Feature flags
   feature_pricing_templates?: boolean;
@@ -310,6 +326,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
 
   emailInvitationSubject: 'You are invited!',
   emailInvitationBody: '<p>Hi there,</p><p>We would love for you to join us at <strong>{{event}}</strong>.</p><p>Please click the link below to register:</p><p><a href="{{link}}" style="color: #4F46E5;">Register Now</a></p><p>Best regards,<br>The Team</p>',
+
+  emailReminderSubject: 'Complete your registration for {{event}}',
+  emailReminderBody: '<p>Hi {{name}},</p><p>Just a friendly reminder — your registration for <strong>{{event}}</strong> isn\u2019t complete yet. You left off at step {{step}} of {{total_steps}}.</p><p style="text-align:center;margin:24px 0;"><a href="{{resume_url}}" style="display:inline-block;padding:12px 24px;background:#ba0028;color:#fff;text-decoration:none;border-radius:6px;font-weight:600;">Resume my registration</a></p><p>Prefer to start fresh? Sign in here: <a href="{{signup_url}}">{{signup_url}}</a></p><p>We look forward to seeing you at the Congress.</p>',
 
   defaultDashboardFormId: undefined,
   dashboardColumnPrefs: {},
@@ -454,15 +473,34 @@ export interface GroupMemberPricingSelection {
 // User Portal
 // ============================================================
 
+export type UserRole = 'attendee' | 'exhibitor' | 'sponsor' | 'admin' | 'super_admin';
+
+/**
+ * Per-admin page-level permissions, stored on profiles.admin_permissions.
+ * NULL / undefined for non-admins and super_admins; super_admin access is
+ * implicit-all. The canonical shape lives in utils/adminPermissions.ts.
+ */
+export interface AdminPermissions {
+  pages: {
+    dashboard: boolean;
+    forms: boolean;
+    sponsors: boolean;
+    seating: boolean;
+    generateQr: boolean;
+    settings: boolean;
+  };
+}
+
 export interface Profile {
   id: string;
   email: string;
   fullName: string | null;
-  role: 'attendee' | 'exhibitor' | 'sponsor' | 'admin';
+  role: UserRole;
   organization: string | null;
   countryCode: string | null;
   phone: string | null;
   avatarUrl: string | null;
+  adminPermissions: AdminPermissions | null;
   createdAt: string;
   updatedAt: string;
 }

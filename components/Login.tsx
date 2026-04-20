@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { supabase } from '../services/supabaseClient';
 import { QrCode, Mail, Lock, Loader2, ChevronRight } from 'lucide-react';
 import { useNotifications } from './NotificationSystem';
 import { useNavigate } from 'react-router-dom';
 import { CURRENT_SITE } from '../config/sites';
+import { useAuth } from './AuthContext';
 
 const Login = () => {
     const [email, setEmail] = useState('');
@@ -11,6 +12,20 @@ const Login = () => {
     const [loading, setLoading] = useState(false);
     const { showNotification } = useNotifications();
     const navigate = useNavigate();
+    const { user, profile, loading: authLoading } = useAuth();
+
+    // If already signed in, send the user where they belong instead of
+    // making them re-authenticate. Admins → /admin; non-admins on portal
+    // sites → /portal; non-admins on non-portal sites → /.
+    useEffect(() => {
+        if (authLoading || !user) return;
+        // super_admin and admin both land in /admin. Anyone else → portal/home.
+        if (profile?.role === 'admin' || profile?.role === 'super_admin') {
+            navigate('/admin', { replace: true });
+        } else if (profile !== null) {
+            navigate(CURRENT_SITE.portalEnabled ? '/portal' : '/', { replace: true });
+        }
+    }, [user, profile, authLoading, navigate]);
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();

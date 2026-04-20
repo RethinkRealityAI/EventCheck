@@ -272,6 +272,8 @@ export const getSettings = async (): Promise<AppSettings> => {
     emailGuestConfirmedBody: (data as any).email_guest_confirmed_body || DEFAULT_SETTINGS.emailGuestConfirmedBody,
     emailInvitationSubject: data.email_invitation_subject || '',
     emailInvitationBody: data.email_invitation_body || '',
+    emailReminderSubject: (data as any).email_reminder_subject || DEFAULT_SETTINGS.emailReminderSubject,
+    emailReminderBody: (data as any).email_reminder_body || DEFAULT_SETTINGS.emailReminderBody,
     sponsorInvitationSubject: (data as any).sponsor_invitation_subject || DEFAULT_SETTINGS.sponsorInvitationSubject,
     sponsorInvitationBody: (data as any).sponsor_invitation_body || DEFAULT_SETTINGS.sponsorInvitationBody,
     sponsorConfirmationPaidSubject: (data as any).sponsor_confirmation_paid_subject || DEFAULT_SETTINGS.sponsorConfirmationPaidSubject,
@@ -288,6 +290,7 @@ export const getSettings = async (): Promise<AppSettings> => {
     pdfSettings: pdfSettings,
     defaultDashboardFormId: (data as any).default_dashboard_form_id || undefined,
     dashboardColumnPrefs: ((data as any).dashboard_column_prefs as Record<string, Record<string, boolean>>) || {},
+    dashboardTabPrefs: ((data as any).dashboard_tab_prefs as { order?: string[]; hidden?: string[] }) || undefined,
   };
 
   return settings;
@@ -319,9 +322,12 @@ export const saveSettings = async (settings: AppSettings): Promise<void> => {
     email_purchaser_guest_note: settings.emailPurchaserGuestNote,
     email_invitation_subject: settings.emailInvitationSubject,
     email_invitation_body: settings.emailInvitationBody,
+    email_reminder_subject: settings.emailReminderSubject,
+    email_reminder_body: settings.emailReminderBody,
     pdf_settings: settings.pdfSettings as unknown as Database['public']['Tables']['app_settings']['Row']['pdf_settings'],
     default_dashboard_form_id: settings.defaultDashboardFormId || null,
     dashboard_column_prefs: settings.dashboardColumnPrefs || {},
+    dashboard_tab_prefs: (settings.dashboardTabPrefs as unknown as Database['public']['Tables']['app_settings']['Row']['dashboard_tab_prefs']) ?? null,
     sponsor_invitation_subject: settings.sponsorInvitationSubject,
     sponsor_invitation_body: settings.sponsorInvitationBody,
     sponsor_confirmation_paid_subject: settings.sponsorConfirmationPaidSubject,
@@ -388,6 +394,7 @@ function mapAttendeeFromDb(db: AttendeeRow): Attendee {
     sponsoredAwards: ((db as any).sponsored_awards as string[]) || [],
     adminNotes: (db as any).admin_notes || undefined,
     userId: db.user_id ?? null,
+    pricingTemplateId: (db as any).pricing_template_id ?? null,
   };
 }
 
@@ -1144,4 +1151,146 @@ export async function getPortalForms(): Promise<Form[]> {
     .eq('show_in_portal', true);
   if (error) { console.error('getPortalForms', error); return []; }
   return (data ?? []).map(mapFormFromDb);
+}
+
+/**
+ * Row shape for the admin "Signups" tab — one row per profile (portal user),
+ * with derived fields describing whether they've paid, what their latest
+ * in-progress draft looks like, and the sort-relevant last-activity time.
+ */
+export interface PortalUser {
+  userId: string;
+  email: string;
+  fullName: string;
+  role: 'attendee' | 'exhibitor' | 'sponsor' | 'admin';
+  signupDate: string;            // profile.created_at ISO
+  hasPaidTicket: boolean;
+  ticketCount: number;
+  mostRecentTicketFormId: string | null;
+  mostRecentTicketFormTitle: string | null;
+  /** Latest in-progress draft (if any) — only populated while the user has
+   *  NOT yet completed registration for that form. */
+  draft: {
+    formId: string;
+    formTitle: string | null;
+    currentIndex: number;
+    totalSteps: number | null;
+    updatedAt: string;
+  } | null;
+  /** max(profile.updated_at, latest ticket.registered_at, draft.updated_at) —
+   *  drives default sort order in the Signups tab. */
+  lastActivityAt: string;
+}
+
+/**
+ * Fetch every portal signup (profile row) with derived ticket + draft status
+ * for the Signups admin tab. Relies on admin RLS policies on profiles,
+ * attendees, and registration_drafts.
+ */
+export async function getPortalUsers(): Promise<PortalUser[]> {
+  // Intentionally NOT filtering by is_primary — a group guest whose ticket was
+  // bought by someone else still counts as "Registered" (they have a paid
+  // attendee row via their user_id/email on the guest row). If we filtered to
+  // primaries, those users would incorrectly show as "Not started".
+  const [profilesRes, attendeesRes, draftsRes, formsRes] = await Promise.all([
+    supabase.from('profiles').select('*').neq('role', 'admin'),
+    supabase.from('attendees').select('id, user_id, email, form_id, payment_status, registered_at, is_primary'),
+    supabase.from('registration_drafts').select('*'),
+    supabase.from('forms').select('id, title'),
+  ]);
+
+  if (profilesRes.error) { console.error('getPortalUsers profiles', profilesRes.error); return []; }
+
+  const profiles = profilesRes.data ?? [];
+  const attendees = attendeesRes.data ?? [];
+  const drafts = draftsRes.data ?? [];
+  const forms = formsRes.data ?? [];
+
+  const formTitleById = new Map<string, string>();
+  for (const f of forms) formTitleById.set(f.id, f.title || '');
+
+  // Index attendees by user_id and by lowercased email so legacy email-only
+  // rows still attach to the matching profile.
+  const attendeesByUser = new Map<string, any[]>();
+  const attendeesByEmail = new Map<string, any[]>();
+  for (const a of attendees) {
+    if (a.payment_status !== 'paid') continue;
+    if (a.user_id) {
+      const arr = attendeesByUser.get(a.user_id) ?? [];
+      arr.push(a);
+      attendeesByUser.set(a.user_id, arr);
+    }
+    if (a.email) {
+      const key = a.email.toLowerCase();
+      const arr = attendeesByEmail.get(key) ?? [];
+      arr.push(a);
+      attendeesByEmail.set(key, arr);
+    }
+  }
+
+  const draftsByUser = new Map<string, any[]>();
+  for (const d of drafts) {
+    const arr = draftsByUser.get(d.user_id) ?? [];
+    arr.push(d);
+    draftsByUser.set(d.user_id, arr);
+  }
+
+  return profiles.map((p: any): PortalUser => {
+    const byUser = attendeesByUser.get(p.id) ?? [];
+    const byEmail = p.email ? (attendeesByEmail.get(String(p.email).toLowerCase()) ?? []) : [];
+    // Dedupe — user_id match and email match can overlap
+    const seen = new Set<string>();
+    const userTickets = [...byUser, ...byEmail].filter((a: any) => {
+      if (seen.has(a.id)) return false;
+      seen.add(a.id);
+      return true;
+    });
+
+    userTickets.sort((a: any, b: any) =>
+      new Date(b.registered_at).getTime() - new Date(a.registered_at).getTime(),
+    );
+    const mostRecentTicket = userTickets[0];
+
+    // Latest in-progress draft. We intentionally surface it even if the user
+    // now has a paid ticket (they may have started registering for a DIFFERENT
+    // form and left it mid-way).
+    const userDrafts = (draftsByUser.get(p.id) ?? []).slice().sort((a: any, b: any) =>
+      new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+    );
+    const rawDraft = userDrafts[0];
+    const draft = rawDraft ? (() => {
+      const state = rawDraft.state || {};
+      return {
+        formId: rawDraft.form_id,
+        formTitle: formTitleById.get(rawDraft.form_id) ?? null,
+        currentIndex: typeof state.currentIndex === 'number' ? state.currentIndex : 0,
+        totalSteps: null as number | null, // Form shape lookup would add a 4th round-trip; filled on the client if needed
+        updatedAt: rawDraft.updated_at,
+      };
+    })() : null;
+
+    const candidates = [
+      p.updated_at || p.created_at,
+      mostRecentTicket?.registered_at,
+      draft?.updatedAt,
+    ].filter(Boolean) as string[];
+    const lastActivityAt = candidates
+      .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] ?? p.created_at;
+
+    return {
+      userId: p.id,
+      email: p.email ?? '',
+      fullName: p.full_name ?? '',
+      role: (p.role as PortalUser['role']) ?? 'attendee',
+      signupDate: p.created_at,
+      hasPaidTicket: userTickets.length > 0,
+      ticketCount: userTickets.length,
+      mostRecentTicketFormId: mostRecentTicket?.form_id ?? null,
+      mostRecentTicketFormTitle: mostRecentTicket?.form_id
+        ? (formTitleById.get(mostRecentTicket.form_id) ?? null)
+        : null,
+      draft,
+      lastActivityAt,
+    };
+  });
 }

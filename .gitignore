@@ -17,6 +17,11 @@ dist-ssr
 tmp/
 supabase/.temp/
 
+# AI assistant memory / project notes — per-dev, not shared source of truth
+CLAUDE.md
+GEMINI.md
+AGENTS.md
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

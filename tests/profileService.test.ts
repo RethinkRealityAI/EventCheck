@@ -12,8 +12,33 @@ describe('mapProfileFromDb', () => {
     expect(p).toEqual({
       id: 'u-1', email: 'x@y.z', fullName: 'Test', role: 'attendee',
       organization: 'ACME', countryCode: 'IN', phone: null,
-      avatarUrl: null, createdAt: 't', updatedAt: 't',
+      avatarUrl: null, adminPermissions: null,
+      createdAt: 't', updatedAt: 't',
     });
+  });
+
+  it('parses admin_permissions jsonb when present (object)', () => {
+    const row = {
+      id: 'u-3', email: 'admin@x.com', full_name: 'Admin', role: 'admin',
+      organization: null, country_code: null, phone: null,
+      avatar_url: null, created_at: 't', updated_at: 't',
+      admin_permissions: { pages: { dashboard: true, forms: true, sponsors: false, seating: false, generateQr: false, settings: false } },
+    };
+    const p = mapProfileFromDb(row);
+    expect(p.adminPermissions?.pages.forms).toBe(true);
+    expect(p.adminPermissions?.pages.settings).toBe(false);
+  });
+
+  it('parses admin_permissions jsonb when stored as a string', () => {
+    const row = {
+      id: 'u-4', email: 'admin@x.com', full_name: 'Admin', role: 'admin',
+      organization: null, country_code: null, phone: null,
+      avatar_url: null, created_at: 't', updated_at: 't',
+      admin_permissions: '{"pages":{"dashboard":true,"forms":false,"sponsors":false,"seating":false,"generateQr":false,"settings":true}}',
+    };
+    const p = mapProfileFromDb(row);
+    expect(p.adminPermissions?.pages.settings).toBe(true);
+    expect(p.adminPermissions?.pages.forms).toBe(false);
   });
 
   it('preserves null/undefined for optional fields', () => {
