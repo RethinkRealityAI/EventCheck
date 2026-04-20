@@ -10,10 +10,10 @@ export const HERO = {
 export const REGISTRATION_PROCESS = [
   { number: '01', title: 'Account Setup', body: 'Create your user account to access the Congress portal and registration form.' },
   { number: '02', title: 'Details & Tier', body: 'Complete the registration form with your personal and professional details. Your tier is resolved by country.' },
-  { number: '03', title: 'Finalize', body: 'Submit your payment details. Your information is not saved if you exit before completion — complete in one sitting.' },
+  { number: '03', title: 'Finalize', body: 'Submit your payment. We accept PayPal and all major credit cards. Your progress is saved as you go — feel free to start, save, and return to complete your registration at any time.' },
 ];
 
-export const IMPORTANT_NOTICE = 'Before beginning the registration form, please ensure that your payment details (card or bank transfer) and billing information are readily available. The system does not save incomplete entries; therefore, we recommend completing the registration in a single session.';
+export const IMPORTANT_NOTICE = 'Before beginning the registration form, please ensure that your payment details and billing information are readily available. We accept PayPal and all major credit cards. If you do not yet have a PayPal account, we recommend creating one — it allows you to connect whichever bank account or card of your choice. PayPal is also our recommended fallback if you experience any difficulties with a direct credit card payment. Your registration progress is saved automatically, so you can start, pause, and return to complete your registration at any time.';
 
 export const GROUP_NOTE = 'Group Registration: The person who purchases the tickets will receive all of them. If they provide the name and email address for each person they are registering, those individuals will also receive their own ticket along with a link to complete any remaining personal details for their own registration. The main group registrant will always receive every ticket as a backup.';
 
