@@ -7,6 +7,8 @@ import { generateReceiptPDF } from '../../utils/receiptGenerator';
 import { generateTicketPDF } from '../../utils/pdfGenerator';
 import { sendTicketEmail, arrayBufferToBase64 } from '../../services/smtpService';
 import { buildSponsorEmailContext, mergeTemplate } from '../../utils/sponsorEmailTemplates';
+import { buildSponsorExtras } from '../../utils/paypalOrderMeta';
+import { CURRENT_SITE } from '../../config/sites';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -576,18 +578,34 @@ const PublicSponsorForm: React.FC<Props> = ({ form, settings }) => {
                 >
                   <PayPalButtons
                     style={{ layout: 'vertical', shape: 'rect', tagline: false }}
-                    createOrder={(_data, actions) =>
-                      actions.order.create({
+                    createOrder={(_data, actions) => {
+                      const sponsorExtras = buildSponsorExtras({
+                        form,
+                        selectedItems: allItems
+                          .map(item => ({ item, qty: ticketQuantities[item.id] ?? 0 }))
+                          .filter(({ qty }) => qty > 0),
+                        hstAmount: hst,
+                        totalWithHst,
+                        currency,
+                        sitePrefix: CURRENT_SITE.key,
+                      });
+                      return actions.order.create({
                         intent: 'CAPTURE',
                         purchase_units: [
                           {
-                            amount: { currency_code: currency, value: totalWithHst.toFixed(2) },
-                            description: `Sponsorship – ${form.title}`,
+                            amount: {
+                              currency_code: currency,
+                              value: totalWithHst.toFixed(2),
+                              ...(sponsorExtras.breakdown ? { breakdown: sponsorExtras.breakdown } : {}),
+                            },
+                            description: sponsorExtras.description,
+                            invoice_id: sponsorExtras.invoice_id,
+                            ...(sponsorExtras.items ? { items: sponsorExtras.items } : {}),
                           },
                         ],
                         application_context: { shipping_preference: 'NO_SHIPPING' },
-                      })
-                    }
+                      });
+                    }}
                     onApprove={onPayPalApprove}
                     onCancel={() =>
                       setSubmitError('Payment was cancelled. You can try again when ready.')

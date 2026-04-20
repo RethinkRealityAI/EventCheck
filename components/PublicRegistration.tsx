@@ -28,6 +28,12 @@ import RunningTotal from './Pricing/RunningTotal';
 import { SingleFormShell } from './SteppedRegistration/SingleFormShell';
 import { SteppedFormShell } from './SteppedRegistration/SteppedFormShell';
 import { useAuth } from './AuthContext';
+import { CURRENT_SITE } from '../config/sites';
+import {
+  buildStaticTicketExtras,
+  buildDynamicSingleExtras,
+  buildDynamicGroupExtras,
+} from '../utils/paypalOrderMeta';
 
 interface PublicRegistrationProps {
   /** Override the formId that would otherwise come from route params (used when embedded in a modal). */
@@ -467,6 +473,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
       registrationMode,
       groupMembers,
       Boolean(pricingTemplate),
+      { hasAllInfo: groupHasAllInfo, formFields: form.fields },
     );
     if (!groupCheck.ok) {
       setError(groupCheck.error!);
@@ -1515,30 +1522,100 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                   }}
                   createOrder={(data, actions) => {
                     if (pricingTemplate && registrationMode === 'group' && groupTotal != null) {
+                      const groupExtras = buildDynamicGroupExtras({
+                        form,
+                        template: pricingTemplate,
+                        members: [
+                          {
+                            countryCode: selectedCountryCode,
+                            categoryId: selectedCategoryId ?? '',
+                            addonIds: selectedAddonIds,
+                            displayName: 'You',
+                          },
+                          ...groupMembers.map(m => ({
+                            countryCode: m.countryCode,
+                            categoryId: m.categoryId ?? '',
+                            addonIds: m.addonIds,
+                            displayName: m.name,
+                          })),
+                        ],
+                        groupTotalCents: groupTotal,
+                        sitePrefix: CURRENT_SITE.key,
+                      });
                       return actions.order.create({
-                        purchase_units: [{ amount: { currency_code: pricingTemplate.currency, value: (groupTotal / 100).toFixed(2) } }],
+                        purchase_units: [{
+                          amount: {
+                            currency_code: pricingTemplate.currency,
+                            value: (groupTotal / 100).toFixed(2),
+                            ...(groupExtras.breakdown ? { breakdown: groupExtras.breakdown } : {}),
+                          },
+                          description: groupExtras.description,
+                          invoice_id: groupExtras.invoice_id,
+                          ...(groupExtras.items ? { items: groupExtras.items } : {}),
+                        }],
                         intent: 'CAPTURE',
                       });
                     }
                     if (pricingTemplate && dynamicTotal != null) {
+                      const dynExtras = buildDynamicSingleExtras({
+                        form,
+                        template: pricingTemplate,
+                        countryCode: selectedCountryCode,
+                        categoryId: selectedCategoryId ?? '',
+                        addonIds: selectedAddonIds,
+                        dynamicTotalCents: dynamicTotal,
+                        sitePrefix: CURRENT_SITE.key,
+                      });
                       return actions.order.create({
                         purchase_units: [{
                           amount: {
                             currency_code: pricingTemplate.currency,
                             value: (dynamicTotal / 100).toFixed(2),
+                            ...(dynExtras.breakdown ? { breakdown: dynExtras.breakdown } : {}),
                           },
+                          description: dynExtras.description,
+                          invoice_id: dynExtras.invoice_id,
+                          ...(dynExtras.items ? { items: dynExtras.items } : {}),
                         }],
                         intent: 'CAPTURE',
                       });
                     }
+                    const staticCurrency = ticketField?.ticketConfig?.currency || "USD";
+                    // Compute pre-discount subtotal + discount separately so the
+                    // PayPal breakdown can show the promo line explicitly. The
+                    // helper's guard already falls back to desc-only if the math
+                    // doesn't reconcile within half a cent.
+                    const rawSubtotal = (ticketField?.ticketConfig?.items ?? [])
+                      .reduce((acc, it) => acc + it.price * (ticketQuantities[it.id] || 0), 0);
+                    const rawDiscount = appliedPromo
+                      ? (appliedPromo.type === 'percent'
+                          ? rawSubtotal * (appliedPromo.value / 100)
+                          : appliedPromo.value)
+                      : 0;
+                    // Clamp so rawSubtotal - discount never goes negative
+                    // (matches ticketSubtotal's Math.max(0, …) clamp).
+                    const discountAmount = Math.min(Math.max(0, rawDiscount), rawSubtotal);
+                    const staticExtras = buildStaticTicketExtras({
+                      form,
+                      ticketItems: ticketField?.ticketConfig?.items ?? [],
+                      ticketQuantities,
+                      currency: staticCurrency,
+                      paymentTotal,
+                      sitePrefix: CURRENT_SITE.key,
+                      discountAmount,
+                    });
                     return actions.order.create({
                       intent: "CAPTURE",
                       purchase_units: [
                         {
                           amount: {
-                            currency_code: ticketField?.ticketConfig?.currency || "USD",
+                            currency_code: staticCurrency,
                             value: paymentTotal.toFixed(2),
-                          }
+                            ...(staticExtras.breakdown ? { breakdown: staticExtras.breakdown } : {}),
+                          },
+                          description: staticExtras.description,
+                          invoice_id: staticExtras.invoice_id,
+                          ...(staticExtras.items ? { items: staticExtras.items } : {}),
                         }
                       ],
                       application_context: {
