@@ -183,7 +183,9 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   // Pending-claim: group guest completing their personal details post-purchase
   const isPendingClaim = (loadedRefAttendee as any)?.guestType === 'pending-claim';
   const isExhibitorStaffPending = (loadedRefAttendee as any)?.guestType === 'exhibitor-staff-pending';
-  const isAnyPendingClaim = isPendingClaim || isExhibitorStaffPending;
+  const isStaffClaim = (loadedRefAttendee as any)?.guestType === 'staff-pending'
+                     || (loadedRefAttendee as any)?.guestType === 'staff-claimed';
+  const isAnyPendingClaim = isPendingClaim || isExhibitorStaffPending || isStaffClaim;
 
   // Sync groupMembers array length when groupSize changes
   useEffect(() => {
@@ -266,14 +268,22 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
         let refAttendee = await getAttendee(guestRef);
 
         // Pending-claim: group guest with guest_type='pending-claim' OR exhibitor staff with
-        // guest_type='exhibitor-staff-pending' completes their own details
-        const pendingClaimTypes = ['pending-claim', 'exhibitor-staff-pending'];
+        // guest_type='exhibitor-staff-pending' OR sponsor-exhibitor combined staff with
+        // guest_type='staff-pending' completes their own details
+        const pendingClaimTypes = ['pending-claim', 'exhibitor-staff-pending', 'staff-pending'];
         if (refAttendee && pendingClaimTypes.includes((refAttendee as any).guestType) && refAttendee.formId === formId) {
           setLoadedRefAttendee(refAttendee);
           setMode('guest');
           // Pre-fill answers from whatever was saved at purchase time
           if (refAttendee.answers && Object.keys(refAttendee.answers).length > 0) {
             setAnswers(refAttendee.answers);
+          }
+          // Fetch the primary org row so staff-claim headlines can show orgName.
+          // Harmless for other pending-claim types too — the UI reads it
+          // conditionally.
+          if (refAttendee.primaryAttendeeId) {
+            const primary = await getAttendee(refAttendee.primaryAttendeeId);
+            if (primary) setFetchedPrimaryAttendee(primary);
           }
           setLoading(false);
           setInitialLoadComplete(true);
@@ -513,12 +523,21 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   const doSubmit = async () => {
     if (!validate()) return;
 
-    // Pending-claim: update attendee row in-place, flip guest_type to 'claimed' (or 'exhibitor-staff-claimed')
+    // Pending-claim: update attendee row in-place, flip guest_type to 'claimed'
+    // (group), 'exhibitor-staff-claimed', or 'staff-claimed' (sponsor-exhibitor combined)
     if (isAnyPendingClaim && loadedRefAttendee) {
       setLoading(true);
       try {
-        const newGuestType = isExhibitorStaffPending ? 'exhibitor-staff-claimed' : 'claimed';
-        const emailMode = isExhibitorStaffPending ? 'exhibitor-staff-claim-completed' : 'guest-claim-completed';
+        const newGuestType = isStaffClaim
+          ? 'staff-claimed'
+          : isExhibitorStaffPending
+            ? 'exhibitor-staff-claimed'
+            : 'claimed';
+        const emailMode = isStaffClaim
+          ? 'staff-claim-completed'
+          : isExhibitorStaffPending
+            ? 'exhibitor-staff-claim-completed'
+            : 'guest-claim-completed';
 
         // If the guest is already signed in AND their auth email matches the
         // attendee row's email, backlink their user_id now. The DB trigger only
@@ -573,9 +592,50 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
         }
 
         // Fire-and-forget personal confirmation email via send-ticket-email.
-        supabase.functions.invoke('send-ticket-email', {
-          body: { mode: emailMode, attendeeId: loadedRefAttendee.id },
-        }).catch(() => {/* ignore — email is best-effort */});
+        // The `staff-claim-completed` mode (sponsor-exhibitor combined form) expects
+        // caller-supplied fields (to/name/orgName/eventName/attachments) rather than
+        // doing its own DB lookup. Other modes (guest-claim-completed,
+        // exhibitor-staff-claim-completed) look up by attendeeId internally.
+        if (isStaffClaim) {
+          try {
+            const orgName = fetchedPrimaryAttendee?.companyInfo?.orgName || 'the organization';
+            const eventName = CURRENT_SITE.displayName || form?.title || 'the Congress';
+            const attachments: Array<{ filename: string; content: string; contentType?: string }> = [];
+            if (settings && form) {
+              try {
+                const ticketDoc = await generateTicketPDF(
+                  { ...loadedRefAttendee, answers } as Attendee,
+                  settings,
+                  form,
+                );
+                attachments.push({
+                  filename: `${(loadedRefAttendee.name || 'Staff').replace(/[^a-z0-9]/gi, '_')}_Ticket.pdf`,
+                  content: arrayBufferToBase64(ticketDoc.output('arraybuffer') as ArrayBuffer),
+                  contentType: 'application/pdf',
+                });
+              } catch (pdfErr) {
+                // PDF generation is non-critical — still send the confirmation email.
+                console.warn('Staff ticket PDF generation failed (sending without attachment):', pdfErr);
+              }
+            }
+            supabase.functions.invoke('send-ticket-email', {
+              body: {
+                mode: emailMode,
+                to: loadedRefAttendee.email,
+                name: loadedRefAttendee.name,
+                orgName,
+                eventName,
+                attachments,
+              },
+            }).catch(() => {/* ignore — email is best-effort */});
+          } catch (emailErr) {
+            console.warn('Staff claim-completed email dispatch failed (continuing):', emailErr);
+          }
+        } else {
+          supabase.functions.invoke('send-ticket-email', {
+            body: { mode: emailMode, attendeeId: loadedRefAttendee.id },
+          }).catch(() => {/* ignore — email is best-effort */});
+        }
 
         setGeneratedTicket({ ...loadedRefAttendee, answers });
         // Confirmed success — wipe any cross-device draft so portal stops showing "Resume".
@@ -1263,7 +1323,25 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
 
             {isAnyPendingClaim && (
               <div className="mb-4 p-3 rounded-lg bg-blue-50 border border-blue-200 text-sm text-blue-900">
-                {isExhibitorStaffPending
+                {isStaffClaim ? (() => {
+                  const orgName = fetchedPrimaryAttendee?.companyInfo?.orgName || 'the organization';
+                  const eventName = CURRENT_SITE.displayName || form?.title || 'the Congress';
+                  const staffCategoryRaw = (loadedRefAttendee as any)?.answers?.staffCategory
+                    ?? (answers as any)?.staffCategory
+                    ?? null;
+                  const staffCategoryLabel = staffCategoryRaw === 'hall_only' ? 'Hall-Only'
+                    : staffCategoryRaw === 'full_access' ? 'Full-Access'
+                    : staffCategoryRaw === 'sponsor_seat' ? 'Sponsor Seat'
+                    : null;
+                  return (
+                    <>
+                      <div>You've been registered as staff for <strong>{orgName}</strong> at <strong>{eventName}</strong>. Please complete your personal details below.</div>
+                      {staffCategoryLabel && (
+                        <div className="mt-1 text-xs text-blue-800">Staff category: <strong>{staffCategoryLabel}</strong></div>
+                      )}
+                    </>
+                  );
+                })() : isExhibitorStaffPending
                   ? 'Your organization has registered you for the GANSID Congress. Please complete your personal details below.'
                   : 'Your registration has been paid for as part of a group. Please complete your personal details below.'}
               </div>
