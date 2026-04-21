@@ -17,12 +17,18 @@ ALTER TABLE attendees
     'booth_3x6_inline', 'booth_nonprofit', 'booth_commercial_publishers'
   ));
 
--- 3. Extend guest_type CHECK to cover new staff states
+-- 3. Extend guest_type CHECK to cover new staff states.
+-- Preserves legacy values already present in production data:
+--   'adult' / 'child'       — legacy age-group guests (predates the portal work)
+--   'pending-claim' / 'claimed' — group-flow guest claim states
+--   'exhibitor-staff-*'      — legacy exhibitor form staff states
+-- Plus new sponsor_exhibitor combined-form states: 'staff-pending' / 'staff-claimed'.
 ALTER TABLE attendees
   DROP CONSTRAINT IF EXISTS attendees_guest_type_check;
 ALTER TABLE attendees
   ADD CONSTRAINT attendees_guest_type_check
   CHECK (guest_type IS NULL OR guest_type IN (
+    'adult', 'child',
     'pending-claim', 'claimed',
     'exhibitor-staff-pending', 'exhibitor-staff-claimed',
     'staff-pending', 'staff-claimed'
