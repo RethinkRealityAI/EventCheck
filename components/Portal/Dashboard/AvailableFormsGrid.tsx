@@ -19,10 +19,10 @@ interface Props {
 // their chosen registration track.
 const ROLE_TO_FORM_TYPES: Record<Profile['role'], string[]> = {
   attendee: ['event'],
-  exhibitor: ['exhibitor'],
-  sponsor: ['sponsor'],
-  admin: ['event', 'exhibitor', 'sponsor'],
-  super_admin: ['event', 'exhibitor', 'sponsor'],
+  exhibitor: ['exhibitor', 'sponsor_exhibitor'],
+  sponsor: ['sponsor', 'sponsor_exhibitor'],
+  admin: ['event', 'exhibitor', 'sponsor', 'sponsor_exhibitor'],
+  super_admin: ['event', 'exhibitor', 'sponsor', 'sponsor_exhibitor'],
 };
 
 // Completed = user already has a confirmed (paid or free) submission for this form.
