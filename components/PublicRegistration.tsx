@@ -19,6 +19,7 @@ import { sendTicketEmail, arrayBufferToBase64 } from '../services/smtpService';
 import QRCode from 'react-qr-code';
 import PublicSponsorForm from './Sponsors/PublicSponsorForm';
 import PublicExhibitorForm from './Exhibitor/PublicExhibitorForm';
+import PublicSponsorExhibitorForm from './SponsorExhibitor/PublicSponsorExhibitorForm';
 import ConsentCheckbox from './Consent/ConsentCheckbox';
 import { validateRequired, validateRms, validateGroupMembers } from './SteppedRegistration/steppedValidation';
 import PricingBracketBanner from './Pricing/PricingBracketBanner';
@@ -1177,6 +1178,10 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
 
   if (form.formType === 'exhibitor' && !guestRef) {
     return <PublicExhibitorForm form={form} />;
+  }
+
+  if (form.formType === 'sponsor_exhibitor' && !guestRef) {
+    return <PublicSponsorExhibitorForm form={form} settings={settings} />;
   }
 
   const isSteppedMode = form.settings?.renderMode === 'stepped';
