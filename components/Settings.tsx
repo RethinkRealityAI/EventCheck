@@ -753,6 +753,43 @@ const Settings: React.FC = () => {
                         <textarea className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm" rows={6}
                           value={settings.emailGuestConfirmedBody} onChange={e => handleChange('emailGuestConfirmedBody', e.target.value)} />
                       </div>
+
+                      {/* ── Staff (sponsor_exhibitor combined form) templates ── */}
+                      <div className="border-t border-gray-200 pt-6 mt-2">
+                        <h4 className="text-sm font-bold text-gray-900 mb-1">Staff Invitation Email</h4>
+                        <p className="text-xs text-gray-500 mb-3">
+                          Sent to each sponsor/exhibitor staff member from the combined form when the primary didn't fill their details. Includes a claim link so the staff member can complete their own registration and optionally sign up for the portal.
+                          Placeholders: <code className="bg-gray-100 px-1 rounded">{'{{name}}'}</code> <code className="bg-gray-100 px-1 rounded">{'{{purchaser}}'}</code> <code className="bg-gray-100 px-1 rounded">{'{{org_name}}'}</code> <code className="bg-gray-100 px-1 rounded">{'{{event}}'}</code> <code className="bg-gray-100 px-1 rounded">{'{{category}}'}</code> <code className="bg-gray-100 px-1 rounded">{'{{complete_url}}'}</code> <code className="bg-gray-100 px-1 rounded">{'{{signup_url}}'}</code>
+                        </p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Subject</label>
+                        <input type="text" className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
+                          value={settings.emailStaffInviteSubject || ''} onChange={e => handleChange('emailStaffInviteSubject', e.target.value)} />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Body (HTML)</label>
+                        <textarea className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm font-mono text-xs" rows={8}
+                          value={settings.emailStaffInviteBody || ''} onChange={e => handleChange('emailStaffInviteBody', e.target.value)} />
+                      </div>
+
+                      <div className="border-t border-gray-200 pt-6 mt-2">
+                        <h4 className="text-sm font-bold text-gray-900 mb-1">Staff Confirmation Email</h4>
+                        <p className="text-xs text-gray-500 mb-3">
+                          Sent to a sponsor/exhibitor staff member after they've completed (or been pre-filled into) their registration. Delivers their QR-enabled ticket confirmation.
+                          Placeholders: <code className="bg-gray-100 px-1 rounded">{'{{name}}'}</code> <code className="bg-gray-100 px-1 rounded">{'{{org_name}}'}</code> <code className="bg-gray-100 px-1 rounded">{'{{event}}'}</code>
+                        </p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Subject</label>
+                        <input type="text" className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
+                          value={settings.emailStaffConfirmedSubject || ''} onChange={e => handleChange('emailStaffConfirmedSubject', e.target.value)} />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Body (HTML)</label>
+                        <textarea className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm font-mono text-xs" rows={8}
+                          value={settings.emailStaffConfirmedBody || ''} onChange={e => handleChange('emailStaffConfirmedBody', e.target.value)} />
+                      </div>
                     </div>
                   )}
                 </div>
