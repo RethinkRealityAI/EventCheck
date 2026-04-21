@@ -63,7 +63,7 @@ describe('form templates', () => {
   // Regression guard: Bug 1 — mapper silently dropped unknown form_type values.
   // This test catches any template that uses an unrecognized formType value.
   it('every template formType is a recognized value', () => {
-    const VALID_FORM_TYPES = ['event', 'sponsor', 'exhibitor'];
+    const VALID_FORM_TYPES = ['event', 'sponsor', 'exhibitor', 'sponsor_exhibitor'];
     for (const t of TEMPLATES) {
       const form = t.build() as any;
       if (form.formType !== undefined) {
@@ -73,6 +73,18 @@ describe('form templates', () => {
         ).toContain(form.formType);
       }
     }
+  });
+
+  it('gansid-sponsor-exhibitor template declares form_type sponsor_exhibitor', () => {
+    const template = TEMPLATES.find(t => t.key === 'gansid-sponsor-exhibitor');
+    expect(template).toBeDefined();
+    const built = template!.build();
+    expect((built as any).formType).toBe('sponsor_exhibitor');
+  });
+
+  it('gansid-sponsor-exhibitor template is gansid-only', () => {
+    const tpl = TEMPLATES.find(t => t.key === 'gansid-sponsor-exhibitor');
+    expect(tpl?.siteFilter).toEqual(['gansid']);
   });
 
   it('every template with a ticket field has ticketConfig.promoCodes array', () => {
