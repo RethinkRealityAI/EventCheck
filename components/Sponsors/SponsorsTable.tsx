@@ -3,6 +3,7 @@ import { Attendee, AppSettings } from '../../types';
 import { Search } from 'lucide-react';
 import SponsorDetailModal from './SponsorDetailModal';
 import ChequeReceivedModal from './ChequeReceivedModal';
+import { getBoothType } from '../../config/formTemplates/boothTypes';
 
 interface Props {
   sponsors: Attendee[];
@@ -66,7 +67,14 @@ export const SponsorsTable: React.FC<Props> = ({ sponsors, settings, onChanged }
               <tr key={s.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => setDetailFor(s)}>
                 <td className="px-4 py-3 font-semibold">{s.companyInfo?.orgName || s.name}</td>
                 <td className="px-4 py-3">{s.companyInfo?.contactName || '—'}<div className="text-xs text-slate-500">{s.email}</div></td>
-                <td className="px-4 py-3"><ItemBadges items={s.sponsorItems || []} /></td>
+                <td className="px-4 py-3">
+                  <ItemBadges items={s.sponsorItems || []} />
+                  {s.exhibitorBoothType && (
+                    <div className="mt-1 text-[11px] text-slate-500">
+                      Booth: <span className="font-medium text-slate-700">{getBoothType(s.exhibitorBoothType)?.label ?? s.exhibitorBoothType}</span>
+                    </div>
+                  )}
+                </td>
                 <td className="px-4 py-3 font-semibold">{s.paymentAmount || '—'}</td>
                 <td className="px-4 py-3 capitalize">{s.paymentMethod === 'cheque' ? 'Cheque' : 'PayPal'}</td>
                 <td className="px-4 py-3"><StatusBadge status={s.paymentStatus} /></td>

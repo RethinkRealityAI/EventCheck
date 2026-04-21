@@ -924,18 +924,66 @@ function mapCustomModelFromDb(db: Custom3DModelRow): Custom3DModel {
 // ============================================================
 
 export const getSponsorAttendees = async (): Promise<Attendee[]> => {
-  const { data, error } = await supabase
+  // Returns primary attendees that should appear in the Sponsors admin tab:
+  //   a) Legacy sponsor-form rows (sponsor_tier IS NOT NULL)
+  //   b) Combined sponsor_exhibitor rows (may have sponsor_tier OR only booth —
+  //      but they still belong under the sponsor tab since they represent a
+  //      commercial engagement with a sponsor option on the combined form)
+  //
+  // Fetch the union and de-dupe client-side; Supabase `.or()` on mixed-column
+  // filters is awkward when combining an `is null` check with `.in()`.
+  const { data: sponsorRows, error: sponsorError } = await supabase
     .from('attendees')
     .select('*')
     .not('sponsor_tier', 'is', null)
     .eq('is_primary', true)
     .order('registered_at', { ascending: false });
 
-  if (error) {
-    console.error('Failed to load sponsor attendees', error);
+  if (sponsorError) {
+    console.error('Failed to load sponsor attendees', sponsorError);
     return [];
   }
-  return (data || []).map(mapAttendeeFromDb);
+
+  // Pull combined-form primaries via joined form lookup. Attendees table has no
+  // form_type column itself — we have to filter in JS after fetching rows for
+  // sponsor_exhibitor form ids.
+  const { data: combinedForms, error: formsError } = await supabase
+    .from('forms')
+    .select('id')
+    .in('form_type', ['sponsor_exhibitor']);
+
+  if (formsError) {
+    console.error('Failed to load combined-form ids for sponsor tab', formsError);
+    return (sponsorRows || []).map(mapAttendeeFromDb);
+  }
+
+  const combinedFormIds = (combinedForms || []).map((f: any) => f.id);
+  let combinedRows: any[] = [];
+  if (combinedFormIds.length > 0) {
+    const { data, error } = await supabase
+      .from('attendees')
+      .select('*')
+      .in('form_id', combinedFormIds)
+      .eq('is_primary', true)
+      .order('registered_at', { ascending: false });
+    if (error) {
+      console.error('Failed to load sponsor_exhibitor attendees', error);
+    } else {
+      combinedRows = data || [];
+    }
+  }
+
+  // De-dupe by id (a sponsor_exhibitor row with sponsor_tier set is in both lists)
+  const seen = new Set<string>();
+  const merged: any[] = [];
+  for (const r of [...(sponsorRows || []), ...combinedRows]) {
+    if (seen.has(r.id)) continue;
+    seen.add(r.id);
+    merged.push(r);
+  }
+  // Preserve newest-first ordering
+  merged.sort((a, b) => String(b.registered_at).localeCompare(String(a.registered_at)));
+  return merged.map(mapAttendeeFromDb);
 };
 
 // ============================================================
