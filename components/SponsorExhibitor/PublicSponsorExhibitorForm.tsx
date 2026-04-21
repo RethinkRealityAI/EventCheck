@@ -98,7 +98,74 @@ export default function PublicSponsorExhibitorForm({ form, settings }: Props) {
     consents,
   });
 
+  // Per-step validation. Returns [] when the step can advance, or an array of
+  // error messages to show inline. The user was able to skip steps before this.
+  const [stepError, setStepError] = useState<string | null>(null);
+  const isEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
+  const validateCurrentStep = (): string[] => {
+    const errs: string[] = [];
+    switch (currentStepId) {
+      case 'type':
+        if (!registrationType) errs.push('Please choose Sponsor or Exhibitor.');
+        break;
+      case 'organization':
+        if (!org.orgName.trim()) errs.push('Organization Name is required.');
+        if (!org.contactName.trim()) errs.push('Contact Name is required.');
+        if (!org.email.trim()) errs.push('Contact Email is required.');
+        else if (!isEmail(org.email)) errs.push('Contact Email is not a valid email address.');
+        break;
+      case 'tier':
+        if (!sponsorTier) errs.push('Please select a sponsorship tier.');
+        break;
+      case 'booth':
+        if (!boothType) errs.push('Please select a booth type.');
+        break;
+      case 'staff':
+        if (staff.length === 0) {
+          errs.push('Add at least one staff member, or go back and continue later from your portal.');
+        }
+        staff.forEach((s, i) => {
+          const n = i + 1;
+          const hasAny = s.name.trim() || s.email.trim();
+          if (!hasAny) return; // empty placeholder is allowed (creates staff-pending slot)
+          if (!s.name.trim()) errs.push(`Staff #${n}: name is required.`);
+          if (!s.email.trim()) errs.push(`Staff #${n}: email is required.`);
+          else if (!isEmail(s.email)) errs.push(`Staff #${n}: email is not a valid address.`);
+          if (hasAllDetails && !hasAny) {
+            errs.push(`Staff #${n}: fill in name + email when "details on hand" is checked.`);
+          }
+        });
+        break;
+      case 'consents':
+        if (!consents.terms) errs.push('You must accept the Terms & Conditions.');
+        if (!consents.disclaimer) errs.push('You must accept the Disclaimer & Liability Waiver.');
+        if (!consents.photo) errs.push('You must acknowledge the photo/video consent.');
+        break;
+      default:
+        break;
+    }
+    return errs;
+  };
+  const tryAdvance = () => {
+    const errs = validateCurrentStep();
+    if (errs.length) {
+      setStepError(errs.join(' '));
+      return;
+    }
+    setStepError(null);
+    setStep(safeStep + 1);
+  };
+  // Clear the inline error whenever the user navigates away from the step.
+  useEffect(() => { setStepError(null); }, [currentStepId]);
+
   const onSubmit = async () => {
+    // Block submit if the Review step itself is reachable but an earlier step
+    // has gaps (e.g. user clicked the stepper sidebar to jump here).
+    const stepErrs = validateCurrentStep();
+    if (stepErrs.length) {
+      setStepError(stepErrs.join(' '));
+      return;
+    }
     const payload = buildPayload();
     const v = validateSubmission(payload);
     if (!v.ok) {
@@ -251,26 +318,46 @@ export default function PublicSponsorExhibitorForm({ form, settings }: Props) {
           steps={stepperSteps}
           currentIndex={safeStep}
           completedSteps={completedSteps}
-          onStepClick={(i) => setStep(i)}
+          onStepClick={(i) => {
+            // Allow going BACK freely. Forward jumps must validate the
+            // current step first so the user can't skip required fields.
+            if (i <= safeStep) {
+              setStepError(null);
+              setStep(i);
+              return;
+            }
+            const errs = validateCurrentStep();
+            if (errs.length) {
+              setStepError(errs.join(' '));
+              return;
+            }
+            setStepError(null);
+            setStep(i);
+          }}
         />
       </aside>
       <main className="flex-1 px-5 py-5 lg:px-10 lg:py-8 max-w-4xl mx-auto w-full">
         <header className="mb-5">
-          <h1 className="font-display font-bold leading-[1.1] tracking-tight text-[clamp(1.75rem,3.6vw,2.75rem)] whitespace-nowrap overflow-hidden text-ellipsis bg-gansid-primary-gradient bg-clip-text text-transparent">
+          <h1 className="font-display font-bold leading-[1.15] tracking-tight text-xl sm:text-2xl lg:text-[1.75rem] bg-gansid-primary-gradient bg-clip-text text-transparent">
             {form.title}
           </h1>
           {form.description && (
-            <p className="text-gansid-on-surface/70 mt-1.5 font-body text-sm lg:text-base leading-snug">
+            <p className="text-gansid-on-surface/70 mt-2 font-body text-sm lg:text-base leading-snug">
               {form.description}
             </p>
           )}
         </header>
         <GlassCard className="p-5 lg:p-7">
           {stepContent()}
+          {stepError && (
+            <div className="mt-4 p-3 rounded bg-red-50 border border-red-200 text-sm text-red-900 font-body">
+              {stepError}
+            </div>
+          )}
           <div className="flex justify-between items-center mt-6 pt-5 border-t border-gansid-on-surface/10">
             <ViscousButton
               variant="secondary"
-              onClick={() => setStep(Math.max(0, safeStep - 1))}
+              onClick={() => { setStepError(null); setStep(Math.max(0, safeStep - 1)); }}
               disabled={safeStep === 0}
             >
               Previous
@@ -279,7 +366,7 @@ export default function PublicSponsorExhibitorForm({ form, settings }: Props) {
               Step {safeStep + 1} of {stepperSteps.length}
             </span>
             {safeStep < stepperSteps.length - 1 ? (
-              <ViscousButton variant="primary" onClick={() => setStep(safeStep + 1)}>
+              <ViscousButton variant="primary" onClick={tryAdvance}>
                 Next
               </ViscousButton>
             ) : (

@@ -37,12 +37,11 @@ export default function StepExhibitorBooth({ value, onChange }: Props) {
       </label>
 
       {booth && (
-        <div className="p-4 rounded-gansid-md bg-gansid-secondary/5 border border-gansid-secondary/20 font-body space-y-1.5">
-          <div className="text-sm">
-            <strong>Price:</strong> {booth.priceDisplay} {booth.currency}{' '}
-            <span className="text-gansid-on-surface/50">(paid externally)</span>
+        <div className="p-4 rounded-gansid-md bg-gansid-secondary/5 border border-gansid-secondary/20 font-body space-y-2">
+          <div className="text-sm font-display font-semibold text-gansid-on-surface/80">
+            Included registrations
           </div>
-          <div className="grid grid-cols-2 gap-2 pt-1">
+          <div className="grid grid-cols-2 gap-2">
             <div className="rounded-lg bg-white/60 border border-gansid-on-surface/10 px-3 py-2">
               <div className="text-xs uppercase tracking-wide text-gansid-on-surface/60">Hall-Only</div>
               <div className="font-display font-bold text-xl text-gansid-primary">{booth.hallOnlyQuota}</div>
