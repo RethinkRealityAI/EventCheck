@@ -1174,6 +1174,24 @@ export async function getStaffForPrimary(primaryId: string): Promise<Attendee[]>
   return (data || []).map(mapAttendeeFromDb);
 }
 
+/**
+ * Batch lookup — used to resolve `primary_attendee_id` references so the
+ * portal can derive a "Staff — {OrgName}" badge for users who are staff of
+ * a sponsor/exhibitor primary.
+ */
+export async function getAttendeesByIds(ids: string[]): Promise<Attendee[]> {
+  if (!ids.length) return [];
+  const { data, error } = await supabase
+    .from('attendees')
+    .select('*')
+    .in('id', ids);
+  if (error) {
+    console.error('getAttendeesByIds', error);
+    return [];
+  }
+  return (data || []).map(mapAttendeeFromDb);
+}
+
 export async function getPortalForms(): Promise<Form[]> {
   // Show any portal-enabled form regardless of status (draft/active) — the portal
   // dashboard surface is already admin-curated via show_in_portal.

@@ -4,6 +4,7 @@ import {
   getAttendeesForUser,
   getPortalForms,
   getStaffForPrimary,
+  getAttendeesByIds,
   getAttendee,
   updateAttendeeFields,
 } from '../../../services/storageService';
@@ -26,6 +27,7 @@ export function PortalDashboard() {
   const [attendees, setAttendees] = useState<Attendee[]>([]);
   const [forms, setForms] = useState<Form[]>([]);
   const [staffRows, setStaffRows] = useState<Attendee[]>([]);
+  const [primariesById, setPrimariesById] = useState<Record<string, Attendee>>({});
   const [registerFormId, setRegisterFormId] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
@@ -53,6 +55,45 @@ export function PortalDashboard() {
     }
     getStaffForPrimary(userPrimary.id).then(setStaffRows);
   }, [userPrimary, refreshKey]);
+
+  // Resolve primaries referenced by any of the user's attendee rows. This
+  // powers the derived "Staff — {OrgName}" badge when the user is a staff
+  // member of a sponsor/exhibitor org (not a primary themselves).
+  useEffect(() => {
+    const ids = Array.from(
+      new Set(
+        attendees
+          .map((a) => a.primaryAttendeeId)
+          .filter((v): v is string => !!v)
+      )
+    );
+    if (!ids.length) {
+      setPrimariesById({});
+      return;
+    }
+    getAttendeesByIds(ids).then((list) => {
+      setPrimariesById(
+        Object.fromEntries(list.map((p) => [p.id, p]))
+      );
+    });
+  }, [attendees]);
+
+  const staffOrg = useMemo<string | null>(() => {
+    if (userPrimary) return null; // user IS a primary, not staff
+    const paid = attendees
+      .filter((a) => a.paymentStatus === 'paid')
+      .slice()
+      .sort((a, b) =>
+        (b.registeredAt || '').localeCompare(a.registeredAt || '')
+      )[0];
+    if (!paid?.primaryAttendeeId) return null;
+    const p = primariesById[paid.primaryAttendeeId];
+    if (!p) return null;
+    if (p.sponsorTier || p.exhibitorBoothType) {
+      return p.companyInfo?.orgName || null;
+    }
+    return null;
+  }, [attendees, primariesById, userPrimary]);
 
   const handleFillIn = async (
     id: string,
@@ -119,7 +160,7 @@ export function PortalDashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-[1.7fr_1fr] gap-8">
         <VerifyEmailBanner />
         <div className="space-y-8">
-          <WelcomeBlock profile={profile} latestAttendee={latestAttendee} />
+          <WelcomeBlock profile={profile} latestAttendee={latestAttendee} staffOrg={staffOrg} />
           {userPrimary && (
             <TeamTable
               primary={userPrimary}

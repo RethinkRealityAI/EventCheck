@@ -1,7 +1,13 @@
 import type { Profile, Attendee } from '../../../types';
 import { GlassCard } from '../ui/GlassCard';
 
-interface Props { profile: Profile; latestAttendee: Attendee | null; }
+interface Props {
+  profile: Profile;
+  latestAttendee: Attendee | null;
+  /** Derived org name when the user is staff of a sponsor/exhibitor org —
+   *  triggers the "Staff — {OrgName}" pill + "Attending with …" sub-line. */
+  staffOrg?: string | null;
+}
 
 function daysUntilCongress(): number {
   const congressDate = new Date('2026-10-23T00:00:00Z');
@@ -10,7 +16,7 @@ function daysUntilCongress(): number {
   return Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
 }
 
-export function WelcomeBlock({ profile, latestAttendee }: Props) {
+export function WelcomeBlock({ profile, latestAttendee, staffOrg }: Props) {
   const firstName = (profile.fullName ?? profile.email).split(' ')[0];
   const subhead = !latestAttendee
     ? 'Complete your Congress registration to receive your credential.'
@@ -23,11 +29,27 @@ export function WelcomeBlock({ profile, latestAttendee }: Props) {
   return (
     <div className="space-y-6">
       <div>
+        <div className="flex items-center gap-2 mb-2">
+          {staffOrg ? (
+            <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gansid-secondary/10 text-gansid-secondary text-xs font-semibold">
+              Staff &mdash; {staffOrg}
+            </span>
+          ) : (
+            <span className="inline-flex px-3 py-1 rounded-full bg-gansid-on-surface/5 text-xs capitalize text-gansid-on-surface/70">
+              {profile?.role || 'Attendee'}
+            </span>
+          )}
+        </div>
         <h1 className="font-display font-bold text-4xl md:text-5xl leading-tight">
           <span className="text-gansid-secondary">Welcome back,</span>{' '}
           <span className="bg-gansid-primary-gradient bg-clip-text text-transparent">{firstName}</span>
         </h1>
         <p className="font-body text-gansid-on-surface/70 mt-3 text-lg">{subhead}</p>
+        {staffOrg && (
+          <p className="font-body text-sm text-gansid-on-surface/70 mt-1">
+            Attending with <strong>{staffOrg}</strong>
+          </p>
+        )}
       </div>
       <GlassCard tint="blue">
         <div className="flex items-center justify-between">
