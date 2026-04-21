@@ -273,7 +273,13 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     return counts;
   }, [attendees]);
 
-  const hasExhibitorForms = forms.some(f => (f as any).formType === 'exhibitor');
+  // Include combined sponsor_exhibitor forms — the GANSID template refactor replaced
+  // the standalone exhibitor form with the combined type, and combined-form primaries
+  // that picked a booth belong in the Exhibitors tab.
+  const hasExhibitorForms = forms.some(f => {
+    const t = (f as any).formType;
+    return t === 'exhibitor' || t === 'sponsor_exhibitor';
+  });
 
   // Resolved tab list — driven by admin prefs + site-availability gates.
   // Memoized so the active-tab fallback effect below doesn't fire on every render.
@@ -417,16 +423,23 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     const matchesForm = selectedFormId === '_all' || a.formId === selectedFormId;
 
     const isTest = !!a.isTest;
+    // Sponsor/exhibitor staff rows carry form_id = staffFormId (an event form) so they'd
+    // otherwise show up in the Live tab as placeholder-named ghost rows. They belong to
+    // the Exhibitors tab (rendered by ExhibitorsTab, which joins via primary_attendee_id).
+    const isStaffRow = a.guestType === 'staff-pending'
+      || a.guestType === 'staff-claimed'
+      || a.guestType === 'exhibitor-staff-pending'
+      || a.guestType === 'exhibitor-staff-claimed';
     let matchesTab = false;
     if (activeTab === 'test') matchesTab = isTest;
     else if (activeTab === 'donated') matchesTab = !isTest && ((a.donatedSeats || 0) > 0 || (a.donatedTables || 0) > 0);
-    else if (activeTab === 'tables') matchesTab = !isTest;
+    else if (activeTab === 'tables') matchesTab = !isTest && !isStaffRow;
     else if (activeTab === 'sponsor-tickets') matchesTab = !a.isPrimary && !!a.primaryAttendeeId && sponsorPrimaryIds.has(a.primaryAttendeeId);
     else if (activeTab === 'groups') {
       // Show group primaries + their guests, so admins can see whole groups at a glance
-      matchesTab = !isTest && (groupPrimaryIds.has(a.id) || (!!a.primaryAttendeeId && groupPrimaryIds.has(a.primaryAttendeeId)));
+      matchesTab = !isTest && !isStaffRow && (groupPrimaryIds.has(a.id) || (!!a.primaryAttendeeId && groupPrimaryIds.has(a.primaryAttendeeId)));
     }
-    else matchesTab = !isTest;
+    else matchesTab = !isTest && !isStaffRow;
 
     const matchesStatus = statusFilter === 'all'
       ? true

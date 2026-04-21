@@ -229,9 +229,14 @@ export default function TeamTable({ primary, staff, onFillIn }: Props) {
                             }
                           >
                             <option value="">Category…</option>
-                            <option value="hall_only">Hall-Only</option>
-                            <option value="full_access">Full-Access</option>
-                            <option value="sponsor_seat">Sponsor Seat</option>
+                            {primary.exhibitorBoothType ? (
+                              <>
+                                <option value="hall_only">Hall-Only</option>
+                                <option value="full_access">Full-Access</option>
+                              </>
+                            ) : (
+                              <option value="sponsor_seat">Sponsor Seat</option>
+                            )}
                           </select>
                         </div>
                         <div className="mt-2 flex gap-2 justify-end">
