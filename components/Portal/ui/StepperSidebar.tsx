@@ -10,13 +10,14 @@ interface StepperSidebarProps {
 export function StepperSidebar({ steps, currentIndex, completedSteps, onStepClick }: StepperSidebarProps) {
   return (
     <nav
-      className="flex flex-row lg:flex-col gap-0 lg:gap-10 py-2 lg:py-6"
+      className="flex flex-row lg:flex-col gap-0 lg:gap-0 py-2 lg:py-4 w-full lg:h-full lg:justify-between lg:min-h-[520px]"
       aria-label="Registration steps"
     >
       {steps.map((step, i) => {
         const isCurrent = i === currentIndex;
         const isComplete = completedSteps.has(i);
         const isReachable = isComplete || i <= currentIndex;
+        const isLast = i === steps.length - 1;
         return (
           <div
             key={step.id}
@@ -27,9 +28,9 @@ export function StepperSidebar({ steps, currentIndex, completedSteps, onStepClic
               onClick={() => isReachable && onStepClick?.(i)}
               disabled={!isReachable}
               className={[
-                'relative z-10 shrink-0 h-9 w-9 lg:h-12 lg:w-12 rounded-full flex items-center justify-center font-display font-bold text-sm lg:text-lg transition-all duration-300 ease-viscous',
+                'relative z-10 shrink-0 h-9 w-9 lg:h-14 lg:w-14 rounded-full flex items-center justify-center font-display font-bold text-sm lg:text-xl transition-all duration-300 ease-viscous',
                 isCurrent
-                  ? 'bg-gansid-primary-gradient text-white shadow-lg ring-2 ring-gansid-primary/20'
+                  ? 'bg-gansid-primary-gradient text-white shadow-lg ring-4 ring-gansid-primary/15'
                   : isComplete
                   ? 'bg-gansid-primary-container text-white shadow-md'
                   : 'bg-gansid-surface-container-low text-gansid-on-surface/40',
@@ -38,10 +39,10 @@ export function StepperSidebar({ steps, currentIndex, completedSteps, onStepClic
             >
               {isComplete ? '✓' : i + 1}
             </button>
-            <div className="flex flex-col items-center lg:items-start text-center lg:text-left min-w-0 max-w-full lg:pt-1.5">
+            <div className="flex flex-col items-center lg:items-start text-center lg:text-left min-w-0 max-w-full lg:pt-2 lg:pb-1">
               <span
                 className={[
-                  'hidden lg:block text-xs uppercase tracking-wide font-display font-semibold',
+                  'hidden lg:block text-[11px] uppercase tracking-[0.1em] font-display font-semibold',
                   isCurrent ? 'text-gansid-primary' : 'text-gansid-on-surface/40',
                 ].join(' ')}
               >
@@ -49,7 +50,7 @@ export function StepperSidebar({ steps, currentIndex, completedSteps, onStepClic
               </span>
               <span
                 className={[
-                  'font-display font-semibold leading-tight text-[10px] lg:text-base lg:leading-normal max-w-full px-0.5 lg:px-0',
+                  'font-display font-semibold leading-tight text-[10px] lg:text-[17px] lg:leading-tight max-w-full px-0.5 lg:px-0',
                   isCurrent ? 'text-gansid-on-surface' : 'text-gansid-on-surface/50',
                 ].join(' ')}
               >
@@ -59,11 +60,12 @@ export function StepperSidebar({ steps, currentIndex, completedSteps, onStepClic
                 <span className="hidden lg:block text-sm text-gansid-on-surface/70 mt-1">{step.description}</span>
               )}
             </div>
-            {i < steps.length - 1 && (
+            {!isLast && (
               <>
-                {/* Desktop: vertical connector between circles */}
+                {/* Desktop: vertical connector — fills the gap between this step and the next,
+                    since the outer nav uses justify-between for even distribution. */}
                 <span
-                  className="hidden lg:block absolute left-[23px] top-14 w-[2px] h-16 rounded-full"
+                  className="hidden lg:block absolute left-[27px] top-16 bottom-[-1rem] w-[2px] rounded-full"
                   style={{
                     background: isComplete || isCurrent
                       ? 'linear-gradient(to bottom, #E0243C, #2260a1)'

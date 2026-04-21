@@ -242,8 +242,14 @@ export default function PublicSponsorExhibitorForm({ form, settings }: Props) {
   }, [safeStep]);
 
   return (
-    <div className="portal-root min-h-screen flex flex-col lg:flex-row bg-gansid-surface">
-      <aside className="lg:w-64 lg:px-6 lg:py-8 px-4 py-4 border-b lg:border-b-0 lg:border-r border-gansid-on-surface/10">
+    <div
+      className="portal-root min-h-screen flex flex-col lg:flex-row"
+      style={{
+        background:
+          'radial-gradient(ellipse at 15% 10%, rgba(186, 0, 40, 0.08) 0%, transparent 55%), radial-gradient(ellipse at 85% 90%, rgba(34, 96, 161, 0.08) 0%, transparent 55%), #fafafa',
+      }}
+    >
+      <aside className="lg:w-72 lg:h-screen lg:sticky lg:top-0 lg:px-6 lg:py-8 px-4 py-4 border-b lg:border-b-0 lg:border-r border-gansid-on-surface/10 bg-white/40 backdrop-blur-viscous flex lg:flex-col">
         <StepperSidebar
           steps={stepperSteps}
           currentIndex={safeStep}
@@ -251,14 +257,20 @@ export default function PublicSponsorExhibitorForm({ form, settings }: Props) {
           onStepClick={(i) => setStep(i)}
         />
       </aside>
-      <main className="flex-1 p-6 lg:p-8 max-w-3xl mx-auto w-full">
-        <h1 className="text-3xl font-display mb-2 text-gansid-primary">{form.title}</h1>
-        {form.description && (
-          <p className="text-gansid-on-surface/70 mb-8 font-body">{form.description}</p>
-        )}
-        <GlassCard className="p-6 lg:p-8">
+      <main className="flex-1 px-5 py-5 lg:px-10 lg:py-8 max-w-4xl mx-auto w-full">
+        <header className="mb-5">
+          <h1 className="font-display font-bold leading-[1.1] tracking-tight text-[clamp(1.75rem,3.6vw,2.75rem)] whitespace-nowrap overflow-hidden text-ellipsis bg-gansid-primary-gradient bg-clip-text text-transparent">
+            {form.title}
+          </h1>
+          {form.description && (
+            <p className="text-gansid-on-surface/70 mt-1.5 font-body text-sm lg:text-base leading-snug">
+              {form.description}
+            </p>
+          )}
+        </header>
+        <GlassCard className="p-5 lg:p-7">
           {stepContent()}
-          <div className="flex justify-between mt-8">
+          <div className="flex justify-between items-center mt-6 pt-5 border-t border-gansid-on-surface/10">
             <ViscousButton
               variant="secondary"
               onClick={() => setStep(Math.max(0, safeStep - 1))}
@@ -266,6 +278,9 @@ export default function PublicSponsorExhibitorForm({ form, settings }: Props) {
             >
               Previous
             </ViscousButton>
+            <span className="text-xs font-body text-gansid-on-surface/50 hidden sm:block">
+              Step {safeStep + 1} of {stepperSteps.length}
+            </span>
             {safeStep < stepperSteps.length - 1 && (
               <ViscousButton variant="primary" onClick={() => setStep(safeStep + 1)}>
                 Next

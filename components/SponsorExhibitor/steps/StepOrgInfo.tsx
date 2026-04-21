@@ -16,10 +16,20 @@ interface Props {
   onChange: (v: OrgFields) => void;
 }
 
-function FieldLabel({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
+function FieldLabel({
+  label,
+  required,
+  children,
+  className = '',
+}: {
+  label: string;
+  required?: boolean;
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
-    <label className="block space-y-1">
-      <span className="text-xs font-display font-semibold uppercase tracking-wide text-gansid-on-surface/70">
+    <label className={`block space-y-1 ${className}`}>
+      <span className="text-[11px] font-display font-semibold uppercase tracking-[0.08em] text-gansid-on-surface/70">
         {label} {required && <span className="text-gansid-primary">*</span>}
       </span>
       {children}
@@ -32,35 +42,37 @@ export default function StepOrgInfo({ value, onChange }: Props) {
     onChange({ ...value, [k]: e.target.value });
 
   return (
-    <section className="space-y-4">
-      <h2 className="text-xl font-display">Organization Information</h2>
+    <section>
+      <h2 className="text-lg font-display mb-3">Organization Information</h2>
 
-      <FieldLabel label="Organization Name" required>
-        <GlassInput value={value.orgName} onChange={set('orgName')} required />
-      </FieldLabel>
+      {/* Dense 12-column grid so inputs fill horizontal space instead of stacking
+          vertically. Reduces the scroll-down required to see all fields on this step. */}
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-x-3 gap-y-3">
+        <FieldLabel label="Organization Name" required className="md:col-span-7">
+          <GlassInput value={value.orgName} onChange={set('orgName')} required />
+        </FieldLabel>
+        <FieldLabel label="Website" className="md:col-span-5">
+          <GlassInput type="url" value={value.website} onChange={set('website')} placeholder="https://" />
+        </FieldLabel>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <FieldLabel label="Contact Name" required>
+        <FieldLabel label="Contact Name" required className="md:col-span-6">
           <GlassInput value={value.contactName} onChange={set('contactName')} required />
         </FieldLabel>
-        <FieldLabel label="Contact Title">
+        <FieldLabel label="Contact Title" className="md:col-span-6">
           <GlassInput value={value.contactTitle} onChange={set('contactTitle')} />
         </FieldLabel>
-        <FieldLabel label="Contact Email" required>
+
+        <FieldLabel label="Contact Email" required className="md:col-span-7">
           <GlassInput type="email" value={value.email} onChange={set('email')} required />
         </FieldLabel>
-        <FieldLabel label="Contact Phone">
+        <FieldLabel label="Contact Phone" className="md:col-span-5">
           <GlassInput type="tel" value={value.phone} onChange={set('phone')} />
         </FieldLabel>
+
+        <FieldLabel label="Mailing Address" className="md:col-span-12">
+          <GlassInput value={value.address} onChange={set('address')} />
+        </FieldLabel>
       </div>
-
-      <FieldLabel label="Mailing Address">
-        <GlassInput value={value.address} onChange={set('address')} />
-      </FieldLabel>
-
-      <FieldLabel label="Website">
-        <GlassInput type="url" value={value.website} onChange={set('website')} />
-      </FieldLabel>
     </section>
   );
 }
