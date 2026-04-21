@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import type { Form, AppSettings, FormStep } from '../../types';
 import { useAuth } from '../AuthContext';
 import { StepperSidebar } from '../Portal/ui/StepperSidebar';
@@ -66,8 +66,13 @@ export default function PublicSponsorExhibitorForm({ form, settings }: Props) {
 
   const stepperSteps: FormStep[] = stepIds.map(id => ({ id, label: stepLabels[id] }));
 
-  // Keep step index in range if the stepIds list shrinks (e.g. switching tier to award).
-  const safeStep = Math.min(step, stepperSteps.length - 1);
+  // Keep step index in range if the stepIds list shrinks (e.g. switching tier to award
+  // collapses the Staff step). Reset `step` on shrink so Previous/Next use the clamped
+  // value rather than a stale one.
+  const safeStep = Math.min(step, Math.max(0, stepperSteps.length - 1));
+  useEffect(() => {
+    if (step !== safeStep) setStep(safeStep);
+  }, [safeStep, step]);
   const currentStepId = stepIds[safeStep];
 
   const buildPayload = (): SponsorExhibitorPayload => ({
@@ -92,11 +97,13 @@ export default function PublicSponsorExhibitorForm({ form, settings }: Props) {
     setSubmitting(true);
     setError(null);
     try {
+      const staffFormId = (form.settings as any)?.staffFormId || form.id;
       const { data, error: fnErr } = await supabase.functions.invoke('verify-payment', {
         body: {
           mode: 'paid',
           formId: form.id,
           sponsorExhibitorSubmission: true,
+          staffFormId,
           ...payload,
         },
       });
@@ -105,36 +112,51 @@ export default function PublicSponsorExhibitorForm({ form, settings }: Props) {
       const staffIds = (data?.staffIds || []) as string[];
       const complete = (id: string) => `${window.location.origin}/#/?ref=${id}`;
       const signup = `${window.location.origin}/#/`;
-      const eventName = (CURRENT_SITE as any).eventName || form.title;
+      const eventName = (CURRENT_SITE as any).displayName || form.title;
+      const categoryLabel = (c: string) =>
+        c === 'hall_only' ? 'Hall-Only' :
+        c === 'full_access' ? 'Full-Access' :
+        'Sponsor Seat';
 
       for (let i = 0; i < staff.length; i++) {
         const entry = staff[i];
         const id = staffIds[i];
         const isPlaceholder = !entry.name?.trim() && !entry.email?.trim();
-        // Inline-detail rows get a confirmation email path (not done here);
-        // placeholders don't have a real recipient.
-        if (hasAllDetails || isPlaceholder || !id) continue;
-        if (!entry.email?.trim()) continue;
+        if (isPlaceholder || !id || !entry.email?.trim()) continue;
 
-        // The runtime sendTicketEmail default signature doesn't expose the
-        // multi-mode staff-invite shape, so call the edge function directly
-        // with the typed shape from smtpService.ts.
-        await supabase.functions.invoke('send-ticket-email', {
-          body: {
-            mode: 'staff-invite',
-            to: entry.email,
-            name: entry.name,
-            purchaser: org.contactName,
-            orgName: org.orgName,
-            category:
-              entry.category === 'hall_only' ? 'Hall-Only' :
-              entry.category === 'full_access' ? 'Full-Access' :
-              'Sponsor Seat',
-            completeUrl: complete(id),
-            signupUrl: signup,
-            eventName,
-          },
-        });
+        // Inline-detail staff get the confirmation email (fully registered);
+        // send-link staff get the invite to complete their own details.
+        // Failures are swallowed per row so one SMTP hiccup doesn't block the success UI.
+        try {
+          if (hasAllDetails) {
+            await supabase.functions.invoke('send-ticket-email', {
+              body: {
+                mode: 'staff-claim-completed',
+                to: entry.email,
+                name: entry.name,
+                orgName: org.orgName,
+                eventName,
+                attachments: [],
+              },
+            });
+          } else {
+            await supabase.functions.invoke('send-ticket-email', {
+              body: {
+                mode: 'staff-invite',
+                to: entry.email,
+                name: entry.name,
+                purchaser: org.contactName,
+                orgName: org.orgName,
+                category: categoryLabel(entry.category),
+                completeUrl: complete(id),
+                signupUrl: signup,
+                eventName,
+              },
+            });
+          }
+        } catch (emailErr) {
+          console.warn('Staff email failed for', entry.email, emailErr);
+        }
       }
 
       setSubmitted(true);

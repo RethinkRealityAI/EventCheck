@@ -76,7 +76,11 @@ export const SponsorsTable: React.FC<Props> = ({ sponsors, settings, onChanged }
                   )}
                 </td>
                 <td className="px-4 py-3 font-semibold">{s.paymentAmount || '—'}</td>
-                <td className="px-4 py-3 capitalize">{s.paymentMethod === 'cheque' ? 'Cheque' : 'PayPal'}</td>
+                <td className="px-4 py-3 capitalize">
+                  {s.paymentMethod === 'cheque' ? 'Cheque'
+                    : s.paymentMethod === 'external' ? 'External'
+                    : 'PayPal'}
+                </td>
                 <td className="px-4 py-3"><StatusBadge status={s.paymentStatus} /></td>
                 <td className="px-4 py-3 text-slate-500">{new Date(s.registeredAt).toLocaleDateString()}</td>
                 <td className="px-4 py-3" onClick={e => e.stopPropagation()}>

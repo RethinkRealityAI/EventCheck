@@ -960,11 +960,14 @@ export const getSponsorAttendees = async (): Promise<Attendee[]> => {
   const combinedFormIds = (combinedForms || []).map((f: any) => f.id);
   let combinedRows: any[] = [];
   if (combinedFormIds.length > 0) {
+    // Only include combined-form primaries that actually picked a sponsor tier.
+    // Booth-only combined primaries go to the Exhibitors tab, not this one.
     const { data, error } = await supabase
       .from('attendees')
       .select('*')
       .in('form_id', combinedFormIds)
       .eq('is_primary', true)
+      .not('sponsor_tier', 'is', null)
       .order('registered_at', { ascending: false });
     if (error) {
       console.error('Failed to load sponsor_exhibitor attendees', error);

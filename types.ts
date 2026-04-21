@@ -372,7 +372,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
 
 export type SponsorTier = 'signature' | 'gold' | 'silver' | 'award' | 'scholarship';
 export type SponsorItemCategory = 'package' | 'scholarship' | 'ad' | 'booth';
-export type PaymentMethod = 'card' | 'paypal' | 'cheque';
+export type PaymentMethod = 'card' | 'paypal' | 'cheque' | 'external';
 export type SponsorProspectStatus = 'prospect' | 'invited' | 'responded' | 'confirmed' | 'declined';
 
 export interface SponsorItem {

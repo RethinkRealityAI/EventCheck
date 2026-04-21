@@ -28,7 +28,14 @@ ALTER TABLE attendees
     'staff-pending', 'staff-claimed'
   ));
 
--- 4. New staff email template columns + seed defaults
+-- 4. Extend payment_method CHECK to accept 'external' (no-payment sponsor_exhibitor flow)
+ALTER TABLE attendees
+  DROP CONSTRAINT IF EXISTS attendees_payment_method_check;
+ALTER TABLE attendees
+  ADD CONSTRAINT attendees_payment_method_check
+  CHECK (payment_method IS NULL OR payment_method IN ('card', 'paypal', 'cheque', 'external'));
+
+-- 5. New staff email template columns + seed defaults
 ALTER TABLE app_settings
   ADD COLUMN IF NOT EXISTS email_staff_invite_subject TEXT,
   ADD COLUMN IF NOT EXISTS email_staff_invite_body TEXT,

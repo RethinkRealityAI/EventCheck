@@ -204,6 +204,7 @@ serve(async (req: Request) => {
         sponsorTier, sponsorItems, sponsoredAwards,
         boothType,
         hasAllDetails, staff, consents,
+        staffFormId: bodyStaffFormId,
       } = body;
 
       // ─── Basic validation ───
@@ -226,13 +227,16 @@ serve(async (req: Request) => {
       }
       const staffArr: any[] = Array.isArray(staff) ? staff : [];
 
-      // Validate form_type matches
+      // Validate form_type matches and resolve the staff form ID (falls back to form settings).
       const { data: formRow, error: fErr } = await supabase
-        .from('forms').select('form_type').eq('id', formId).maybeSingle();
+        .from('forms').select('form_type, settings').eq('id', formId).maybeSingle();
       if (fErr || !formRow) return jsonResponse({ error: 'Form not found' }, 404);
       if (formRow.form_type !== 'sponsor_exhibitor') {
         return jsonResponse({ error: 'Not a sponsor_exhibitor form' }, 400);
       }
+      const staffFormId: string = bodyStaffFormId
+        || (formRow.settings as any)?.staffFormId
+        || formId;
 
       // ─── Staff quota validation (server-side mirror of client validation) ───
       const BOOTH_QUOTAS: Record<string, { hall_only: number; full_access: number }> = {
@@ -296,18 +300,25 @@ serve(async (req: Request) => {
       if (primaryErr) return jsonResponse({ error: primaryErr.message }, 500);
 
       // ─── Insert staff rows ───
+      // Staff rows point at `staffFormId` (the companion registration form that collects
+      // personal details), NOT the combined-form id — otherwise the claim link
+      // (`?ref=<staffId>`) lands on the empty `sponsor_exhibitor` form and the staff member
+      // can't complete registration. This mirrors the legacy exhibitor branch.
+      // Placeholder emails use '' (not NULL) to satisfy the `attendees.email NOT NULL`
+      // constraint from the initial schema.
       const staffRows = staffArr.map((s: any, i: number) => {
         const isPlaceholder = !s.name?.trim() && !s.email?.trim();
         const id = crypto.randomUUID();
         const base: Record<string, any> = {
           id,
-          form_id: formId,
+          form_id: staffFormId,
           name: isPlaceholder ? `${org.orgName} — Staff slot #${i + 1}` : s.name,
-          email: isPlaceholder ? null : s.email,
+          email: isPlaceholder ? '' : s.email,
           ticket_type: s.category === 'full_access' ? 'Full Access' :
                        s.category === 'hall_only' ? 'Hall Only' : 'Sponsor Seat',
           payment_status: 'paid',
           payment_amount: 'PAID EXTERNALLY',
+          payment_method: 'external',
           qr_payload: JSON.stringify({ t: transactionId, i: i + 1 }),
           registered_at: new Date().toISOString(),
           transaction_id: transactionId,
