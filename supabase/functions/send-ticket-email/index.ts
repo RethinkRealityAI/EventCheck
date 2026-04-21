@@ -248,6 +248,106 @@ serve(async (req: Request) => {
             return jsonResponse({ ok: ticketOk });
         }
 
+        // ── STAFF INVITE (sponsor_exhibitor combined form): send registration-completion link
+        //    to a staff member. Caller supplies pre-composed fields (to, name, purchaser,
+        //    orgName, category, completeUrl, signupUrl, eventName). Uses admin-configurable
+        //    template from app_settings.email_staff_invite_{subject,body}.
+        //    Placeholders: {{name}} {{purchaser}} {{org_name}} {{category}} {{complete_url}}
+        //                  {{signup_url}} {{event}}
+        //    NO attachments — attachment callout is suppressed. ──
+        if (body.mode === 'staff-invite') {
+            const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+            const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+            const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+            const { data: appSettings } = await supabase
+                .from('app_settings').select('*').eq('id', 1).maybeSingle();
+            const smtpConfig = appSettings
+                ? { host: appSettings.smtp_host, port: Number(appSettings.smtp_port || 587), user: appSettings.smtp_user, pass: appSettings.smtp_pass, fromName: (appSettings as any).email_from_name || 'GANSID Congress' }
+                : undefined;
+
+            const rawSubject = (appSettings as any)?.email_staff_invite_subject
+                || 'Complete your registration for {{event}}';
+            const rawBody = (appSettings as any)?.email_staff_invite_body
+                || `<p>Hi {{name}},</p><p><strong>{{purchaser}}</strong> has registered you for <strong>{{event}}</strong> on behalf of <strong>{{org_name}}</strong> ({{category}}).</p><p>Please complete your personal details:</p><p style="text-align:center;margin:24px 0;"><a href="{{complete_url}}" style="display:inline-block;padding:12px 24px;background:#1E4A8C;color:#fff;text-decoration:none;border-radius:6px;font-weight:600;">Complete my registration</a></p><p>You can also create a portal account: <a href="{{signup_url}}">{{signup_url}}</a></p>`;
+
+            const replace = (s: string) => s
+                .replace(/\{\{name\}\}/g, body.name || 'there')
+                .replace(/\{\{purchaser\}\}/g, body.purchaser || 'A colleague')
+                .replace(/\{\{org_name\}\}/g, body.orgName || '')
+                .replace(/\{\{category\}\}/g, body.category || '')
+                .replace(/\{\{complete_url\}\}/g, body.completeUrl || '')
+                .replace(/\{\{signup_url\}\}/g, body.signupUrl || '')
+                .replace(/\{\{event\}\}/g, body.eventName || 'the event');
+
+            const subject = replace(rawSubject);
+            const body_html = replace(rawBody);
+            const html = generateEmailTemplate({
+                title: body.eventName || 'the event',
+                greeting: `Hi ${body.name || 'there'}`,
+                content: body_html,
+                // No attachments — suppress the callout.
+                fromName: smtpConfig?.fromName,
+            });
+
+            await sendSimpleEmail({ to: body.to, subject, html, smtpConfig });
+            return jsonResponse({ ok: true });
+        }
+
+        // ── STAFF CLAIM COMPLETED (sponsor_exhibitor combined form): send ticket to the
+        //    now-claimed staff member. Caller supplies pre-composed fields (to, name,
+        //    orgName, eventName, attachments). Uses app_settings.email_staff_confirmed_*.
+        //    Supports PDF attachments (base64) — attachment callout shown when present. ──
+        if (body.mode === 'staff-claim-completed') {
+            const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+            const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+            const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+            const { data: appSettings } = await supabase
+                .from('app_settings').select('*').eq('id', 1).maybeSingle();
+            const smtpConfig = appSettings
+                ? { host: appSettings.smtp_host, port: Number(appSettings.smtp_port || 587), user: appSettings.smtp_user, pass: appSettings.smtp_pass, fromName: (appSettings as any).email_from_name || 'GANSID Congress' }
+                : undefined;
+
+            const rawSubject = (appSettings as any)?.email_staff_confirmed_subject
+                || 'Your registration for {{event}} is confirmed';
+            const rawBody = (appSettings as any)?.email_staff_confirmed_body
+                || `<p>Hi {{name}},</p><p>Thank you for completing your registration for <strong>{{event}}</strong> on behalf of <strong>{{org_name}}</strong>!</p><p>Your ticket is attached. Please bring it (or the QR code) to the event for check-in.</p>`;
+
+            const replace = (s: string) => s
+                .replace(/\{\{name\}\}/g, body.name || 'there')
+                .replace(/\{\{org_name\}\}/g, body.orgName || '')
+                .replace(/\{\{event\}\}/g, body.eventName || 'the event');
+
+            const subject = replace(rawSubject);
+            const body_html = replace(rawBody);
+            const hasAttachments = Array.isArray(body.attachments) && body.attachments.length > 0;
+            const html = generateEmailTemplate({
+                title: body.eventName || 'the event',
+                greeting: `Hi ${body.name || 'there'}`,
+                content: body_html,
+                attachmentNote: hasAttachments ? 'Attachment included — please review the PDF.' : undefined,
+                fromName: smtpConfig?.fromName,
+            });
+
+            // Use the transporter directly so we can include attachments.
+            const { transporter, smtpUser, fromName } = buildTransporter(smtpConfig);
+            const attachments = (body.attachments || []).map((att: { filename: string; content: string; contentType?: string }) => ({
+                filename: att.filename,
+                content: att.content,
+                encoding: 'base64',
+                contentType: att.contentType || 'application/pdf',
+            }));
+            await transporter.sendMail({
+                from: `"${fromName}" <${smtpUser}>`,
+                to: body.to,
+                subject,
+                html,
+                attachments,
+            });
+            return jsonResponse({ ok: true });
+        }
+
         // ── EXHIBITOR STAFF INVITE: send registration-completion link to an exhibitor staff member ──
         if (body.mode === 'exhibitor-staff-invite') {
             const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
