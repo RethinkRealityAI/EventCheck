@@ -41,6 +41,7 @@ export type Database = {
                     sponsored_awards: Json | null
                     admin_notes: string | null
                     user_id: string | null
+                    exhibitor_booth_type: string | null
                 }
                 Insert: {
                     id: string
@@ -73,6 +74,7 @@ export type Database = {
                     sponsored_awards?: Json | null
                     admin_notes?: string | null
                     user_id?: string | null
+                    exhibitor_booth_type?: string | null
                 }
                 Update: {
                     id?: string
@@ -105,6 +107,7 @@ export type Database = {
                     sponsored_awards?: Json | null
                     admin_notes?: string | null
                     user_id?: string | null
+                    exhibitor_booth_type?: string | null
                 }
             }
             forms: {
@@ -180,6 +183,10 @@ export type Database = {
                     sponsor_cheque_received_body: string | null
                     sponsor_cheque_mailing_address: string | null
                     sponsor_hst_rate: number | null
+                    email_staff_invite_subject: string | null
+                    email_staff_invite_body: string | null
+                    email_staff_confirmed_subject: string | null
+                    email_staff_confirmed_body: string | null
                 }
                 Insert: {
                     id?: number
@@ -215,6 +222,10 @@ export type Database = {
                     sponsor_cheque_received_body?: string | null
                     sponsor_cheque_mailing_address?: string | null
                     sponsor_hst_rate?: number | null
+                    email_staff_invite_subject?: string | null
+                    email_staff_invite_body?: string | null
+                    email_staff_confirmed_subject?: string | null
+                    email_staff_confirmed_body?: string | null
                 }
                 Update: {
                     id?: number
@@ -250,6 +261,10 @@ export type Database = {
                     sponsor_cheque_received_body?: string | null
                     sponsor_cheque_mailing_address?: string | null
                     sponsor_hst_rate?: number | null
+                    email_staff_invite_subject?: string | null
+                    email_staff_invite_body?: string | null
+                    email_staff_confirmed_subject?: string | null
+                    email_staff_confirmed_body?: string | null
                 }
             }
             seating_tables: {

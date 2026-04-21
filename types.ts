@@ -22,7 +22,8 @@ export interface Attendee {
   primaryAttendeeId?: string; // If this is a guest, link to purchaser
   isPrimary?: boolean; // Defaults to true
   guestType?: 'adult' | 'child' | 'pending-claim' | 'claimed'
-            | 'exhibitor-staff-pending' | 'exhibitor-staff-claimed'; // Whether this guest is an adult or child (+ group-flow states)
+            | 'exhibitor-staff-pending' | 'exhibitor-staff-claimed'
+            | 'staff-pending' | 'staff-claimed'; // Whether this guest is an adult or child (+ group-flow states)
   // Seating Assignment
   assignedTableId?: string | null;
   assignedSeat?: number | null;
@@ -34,6 +35,7 @@ export interface Attendee {
   sponsoredAwards?: string[];
   adminNotes?: string;
   userId?: string | null;
+  exhibitorBoothType?: string | null;
   /** Populated ONLY by dynamic-pricing submissions (group-mode or solo). Used
    *  as the discriminator between "group-mode primary with guests" (GANSID)
    *  and "static-ticket table purchaser with guest placeholder seats" (SCAGO).
@@ -171,7 +173,7 @@ export interface FormField {
 
 export interface Form {
   id: string;
-  formType?: 'event' | 'sponsor' | 'exhibitor';  // defaults to 'event' when undefined
+  formType?: 'event' | 'sponsor' | 'exhibitor' | 'sponsor_exhibitor';  // defaults to 'event' when undefined
   title: string;
   description: string;
   thankYouMessage?: string; // HTML supported
@@ -263,6 +265,12 @@ export interface AppSettings {
   // Placeholders: {{name}}, {{event}}, {{resume_url}}, {{signup_url}}, {{step}}, {{total_steps}}.
   emailReminderSubject: string;
   emailReminderBody: string; // HTML supported
+
+  // Staff Email Templates (sponsor_exhibitor form staff invitations/confirmations)
+  emailStaffInviteSubject?: string;
+  emailStaffInviteBody?: string;
+  emailStaffConfirmedSubject?: string;
+  emailStaffConfirmedBody?: string;
 
   // Sponsor Email Templates
   sponsorInvitationSubject: string;
