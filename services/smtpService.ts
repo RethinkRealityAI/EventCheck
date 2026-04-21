@@ -12,6 +12,38 @@ export interface Attachment {
 }
 
 /**
+ * Mode-discriminated argument shapes accepted by the `send-ticket-email` edge function.
+ * The existing default-mode path (ticket email with PDF attachment) goes through
+ * `sendTicketEmail` below; these shapes are for callers that invoke the edge function
+ * directly with `supabase.functions.invoke('send-ticket-email', { body: {...} })`.
+ *
+ * Adding these as typed shapes keeps the edge-function contract discoverable from
+ * TypeScript without changing the runtime call pattern.
+ */
+export type StaffInviteArgs = {
+  mode: 'staff-invite';
+  to: string;
+  name: string;
+  purchaser: string;
+  orgName: string;
+  category: 'Hall-Only' | 'Full-Access' | 'Sponsor Seat';
+  completeUrl: string;
+  signupUrl: string;
+  eventName: string;
+};
+
+export type StaffConfirmedArgs = {
+  mode: 'staff-claim-completed';
+  to: string;
+  name: string;
+  orgName: string;
+  eventName: string;
+  attachments: Array<{ filename: string; content: string }>; // base64
+};
+
+export type SendTicketEmailArgs = StaffInviteArgs | StaffConfirmedArgs;
+
+/**
  * Convert an ArrayBuffer (e.g. from jsPDF) to a base64 string
  * that can be safely sent over HTTP to the Edge Function.
  */
