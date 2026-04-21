@@ -187,6 +187,158 @@ serve(async (req: Request) => {
     }
     // ── END EXHIBITOR BRANCH ──
 
+    // ── SPONSOR_EXHIBITOR BRANCH: payment-free flow for the combined sponsor_exhibitor form_type.
+    //    Sponsors and exhibitors have paid externally (wire / cheque / P.O.), so we skip PayPal
+    //    entirely. The primary row carries either sponsor_tier OR exhibitor_booth_type (XOR,
+    //    enforced by the client-side validation + re-checked here). N staff rows are inserted
+    //    with primary_attendee_id, guest_type='staff-pending' (for send-links) or null (inline).
+    //    Quotas enforced server-side mirroring the client's EXHIBITOR_BOOTH_TYPES + sponsor tier
+    //    data — do not import from client code (this runs under Deno).
+    if (body.sponsorExhibitorSubmission === true) {
+      const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+      const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+      const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+      const {
+        registrationType, org,
+        sponsorTier, sponsorItems, sponsoredAwards,
+        boothType,
+        hasAllDetails, staff, consents,
+      } = body;
+
+      // ─── Basic validation ───
+      if (registrationType !== 'sponsor' && registrationType !== 'exhibitor') {
+        return jsonResponse({ error: 'registrationType must be sponsor or exhibitor' }, 400);
+      }
+      const hasTier = !!sponsorTier;
+      const hasBooth = !!boothType;
+      if (hasTier === hasBooth) {
+        return jsonResponse({ error: 'Exactly one of sponsorTier or boothType required' }, 400);
+      }
+      if (!org?.orgName || !org?.contactName || !org?.email) {
+        return jsonResponse({ error: 'org.orgName, contactName, email required' }, 400);
+      }
+      if (!consents?.terms || !consents?.disclaimer || !consents?.photo) {
+        return jsonResponse({ error: 'All three consents must be accepted' }, 400);
+      }
+      if (!formId) {
+        return jsonResponse({ error: 'formId required' }, 400);
+      }
+      const staffArr: any[] = Array.isArray(staff) ? staff : [];
+
+      // Validate form_type matches
+      const { data: formRow, error: fErr } = await supabase
+        .from('forms').select('form_type').eq('id', formId).maybeSingle();
+      if (fErr || !formRow) return jsonResponse({ error: 'Form not found' }, 404);
+      if (formRow.form_type !== 'sponsor_exhibitor') {
+        return jsonResponse({ error: 'Not a sponsor_exhibitor form' }, 400);
+      }
+
+      // ─── Staff quota validation (server-side mirror of client validation) ───
+      const BOOTH_QUOTAS: Record<string, { hall_only: number; full_access: number }> = {
+        booth_3x3_corner:            { hall_only: 4, full_access: 2 },
+        booth_3x3:                   { hall_only: 4, full_access: 2 },
+        booth_3x6_corner:            { hall_only: 6, full_access: 4 },
+        booth_3x6_inline:            { hall_only: 6, full_access: 4 },
+        booth_nonprofit:             { hall_only: 2, full_access: 1 },
+        booth_commercial_publishers: { hall_only: 2, full_access: 1 },
+      };
+      const SPONSOR_QUOTAS: Record<string, number> = {
+        signature: 16, gold: 8, silver: 8, award: 0, scholarship: 0,
+      };
+
+      if (boothType) {
+        const q = BOOTH_QUOTAS[boothType];
+        if (!q) return jsonResponse({ error: `Unknown boothType: ${boothType}` }, 400);
+        const ho = staffArr.filter((s: any) => s.category === 'hall_only').length;
+        const fa = staffArr.filter((s: any) => s.category === 'full_access').length;
+        if (ho > q.hall_only || fa > q.full_access) {
+          return jsonResponse({ error: 'Staff count exceeds booth quota' }, 400);
+        }
+      }
+      if (sponsorTier) {
+        const q = SPONSOR_QUOTAS[sponsorTier];
+        if (q === undefined) return jsonResponse({ error: `Unknown sponsorTier: ${sponsorTier}` }, 400);
+        const seats = staffArr.filter((s: any) => s.category === 'sponsor_seat').length;
+        if (seats > q) return jsonResponse({ error: 'Sponsor seats exceed tier quota' }, 400);
+      }
+
+      // ─── Insert primary attendee ───
+      const transactionId = crypto.randomUUID();
+      const primaryId = crypto.randomUUID();
+      const primary: Record<string, any> = {
+        id: primaryId,
+        form_id: formId,
+        name: org.orgName,
+        email: org.email,
+        ticket_type: registrationType === 'sponsor' ? 'Sponsor' : 'Exhibitor',
+        payment_status: 'paid',
+        payment_amount: 'PAID EXTERNALLY',
+        payment_method: 'external',
+        qr_payload: JSON.stringify({ t: transactionId, i: 0 }),
+        registered_at: new Date().toISOString(),
+        transaction_id: transactionId,
+        is_primary: true,
+        user_id: authUserId,
+        company_info: org,
+        answers: { registrationType, hasAllDetails },
+      };
+      if (sponsorTier) {
+        primary.sponsor_tier = sponsorTier;
+        primary.sponsor_items = sponsorItems || [];
+        primary.sponsored_awards = sponsoredAwards || [];
+      } else {
+        primary.exhibitor_booth_type = boothType;
+      }
+
+      const { data: primaryRow, error: primaryErr } = await supabase
+        .from('attendees').insert(primary).select('id').single();
+      if (primaryErr) return jsonResponse({ error: primaryErr.message }, 500);
+
+      // ─── Insert staff rows ───
+      const staffRows = staffArr.map((s: any, i: number) => {
+        const isPlaceholder = !s.name?.trim() && !s.email?.trim();
+        const id = crypto.randomUUID();
+        const base: Record<string, any> = {
+          id,
+          form_id: formId,
+          name: isPlaceholder ? `${org.orgName} — Staff slot #${i + 1}` : s.name,
+          email: isPlaceholder ? null : s.email,
+          ticket_type: s.category === 'full_access' ? 'Full Access' :
+                       s.category === 'hall_only' ? 'Hall Only' : 'Sponsor Seat',
+          payment_status: 'paid',
+          payment_amount: 'PAID EXTERNALLY',
+          qr_payload: JSON.stringify({ t: transactionId, i: i + 1 }),
+          registered_at: new Date().toISOString(),
+          transaction_id: transactionId,
+          is_primary: false,
+          primary_attendee_id: primaryRow.id,
+          user_id: null,
+          answers: hasAllDetails && !isPlaceholder
+            ? { ...(s.fullAnswers || {}), staffCategory: s.category }
+            : { staffCategory: s.category },
+          guest_type: hasAllDetails && !isPlaceholder ? null : 'staff-pending',
+        };
+        return base;
+      });
+
+      let staffIds: string[] = [];
+      if (staffRows.length > 0) {
+        const { data: staffData, error: staffErr } = await supabase
+          .from('attendees').insert(staffRows).select('id');
+        if (staffErr) return jsonResponse({ error: staffErr.message }, 500);
+        staffIds = (staffData || []).map((r: any) => r.id);
+      }
+
+      return jsonResponse({
+        ok: true,
+        primaryId: primaryRow.id,
+        staffIds,
+        transactionId,
+      });
+    }
+    // ── END SPONSOR_EXHIBITOR BRANCH ──
+
     if (!attendees || attendees.length === 0) {
       return jsonResponse({ error: 'Missing required field: attendees' }, 400);
     }
