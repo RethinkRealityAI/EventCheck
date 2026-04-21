@@ -1330,8 +1330,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                     ?? (answers as any)?.staffCategory
                     ?? null;
                   const staffCategoryLabel = staffCategoryRaw === 'hall_only' ? 'Hall-Only'
-                    : staffCategoryRaw === 'full_access' ? 'Full-Access'
-                    : staffCategoryRaw === 'sponsor_seat' ? 'Sponsor Seat'
+                    : staffCategoryRaw === 'full_access' ? 'Full Congress'
                     : null;
                   return (
                     <>

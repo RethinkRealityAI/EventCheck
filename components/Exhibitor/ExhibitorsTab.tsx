@@ -86,9 +86,10 @@ export default function ExhibitorsTab({ attendees, forms, onRefresh }: Props) {
             const booth = org.exhibitorBoothType ? getBoothType(org.exhibitorBoothType) : undefined;
             const staff = staffByOrg.get(org.id) ?? [];
             // Support both legacy (`exhibitor_staff_category`) and combined-form
-            // (`staffCategory`) answer keys. Combined form adds `full_access` +
-            // `sponsor_seat`; treat `full_access` the same as the legacy
-            // `full_congress` bucket for the Staff Progress summary.
+            // (`staffCategory`) answer keys. Both use `hall_only` for Hall-Only;
+            // Full Congress is `full_access` (combined form) or `full_congress`
+            // (legacy) — treat them as the same bucket for the Staff Progress
+            // summary.
             const staffCat = (s: Attendee): string | undefined => {
               const a: any = s.answers ?? {};
               return a.staffCategory ?? a.exhibitor_staff_category;
@@ -98,7 +99,6 @@ export default function ExhibitorsTab({ attendees, forms, onRefresh }: Props) {
               const c = staffCat(s);
               return c === 'full_access' || c === 'full_congress';
             });
-            const sponsorSeatStaff = staff.filter(s => staffCat(s) === 'sponsor_seat');
             const isExpanded = expanded.has(org.id);
             const tierOrBoothLabel = org.exhibitorBoothType
               ? (booth?.label ?? org.exhibitorBoothType)
@@ -119,7 +119,7 @@ export default function ExhibitorsTab({ attendees, forms, onRefresh }: Props) {
                   <td className="px-3 py-2 text-slate-600">{org.email}</td>
                   <td className="px-3 py-2 text-xs">
                     {hallQuota !== undefined && fullQuota !== undefined
-                      ? `${hallStaff.length}/${hallQuota} Hall · ${fullStaff.length}/${fullQuota} Full${sponsorSeatStaff.length ? ` · ${sponsorSeatStaff.length} Sponsor Seat` : ''}`
+                      ? `${hallStaff.length}/${hallQuota} Hall · ${fullStaff.length}/${fullQuota} Full`
                       : `${staff.length} staff`}
                   </td>
                   <td className="px-3 py-2 text-xs text-slate-500">
@@ -143,15 +143,6 @@ export default function ExhibitorsTab({ attendees, forms, onRefresh }: Props) {
                         onRefresh={onRefresh}
                         showNotification={showNotification}
                       />
-                      {sponsorSeatStaff.length > 0 && (
-                        <StaffSection
-                          title="Sponsor Seat staff"
-                          staff={sponsorSeatStaff}
-                          orgFormId={org.formId}
-                          onRefresh={onRefresh}
-                          showNotification={showNotification}
-                        />
-                      )}
                     </td>
                   </tr>
                 )}
