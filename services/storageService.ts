@@ -1156,6 +1156,24 @@ export async function getAttendeesForUser(userId: string, email: string): Promis
   return unique.map(mapAttendeeFromDb);
 }
 
+/**
+ * Fetch every attendee row that belongs to a given primary (i.e. staff +
+ * guest placeholder rows for sponsor/exhibitor/group primaries). Ordered by
+ * `registered_at` because the `attendees` table has no `created_at` column.
+ */
+export async function getStaffForPrimary(primaryId: string): Promise<Attendee[]> {
+  const { data, error } = await supabase
+    .from('attendees')
+    .select('*')
+    .eq('primary_attendee_id', primaryId)
+    .order('registered_at', { ascending: true });
+  if (error) {
+    console.error('getStaffForPrimary', error);
+    return [];
+  }
+  return (data || []).map(mapAttendeeFromDb);
+}
+
 export async function getPortalForms(): Promise<Form[]> {
   // Show any portal-enabled form regardless of status (draft/active) — the portal
   // dashboard surface is already admin-curated via show_in_portal.

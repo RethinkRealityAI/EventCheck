@@ -1,6 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../AuthContext';
-import { getAttendeesForUser, getPortalForms } from '../../../services/storageService';
+import {
+  getAttendeesForUser,
+  getPortalForms,
+  getStaffForPrimary,
+  getAttendee,
+  updateAttendeeFields,
+} from '../../../services/storageService';
+import { supabase } from '../../../services/supabaseClient';
+import { CURRENT_SITE } from '../../../config/sites';
 import type { Attendee, Form } from '../../../types';
 import { useNotifications } from '../../NotificationSystem';
 import { WelcomeBlock } from './WelcomeBlock';
@@ -10,12 +18,14 @@ import { CredentialCard } from './CredentialCard';
 import { AnnouncementsFeed } from './AnnouncementsFeed';
 import { QuickLinks } from './QuickLinks';
 import { RegisterModal } from './RegisterModal';
+import TeamTable from '../../SponsorExhibitor/TeamTable';
 
 export function PortalDashboard() {
   const { profile, user } = useAuth();
   const { showNotification } = useNotifications();
   const [attendees, setAttendees] = useState<Attendee[]>([]);
   const [forms, setForms] = useState<Form[]>([]);
+  const [staffRows, setStaffRows] = useState<Attendee[]>([]);
   const [registerFormId, setRegisterFormId] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
@@ -24,6 +34,69 @@ export function PortalDashboard() {
     getAttendeesForUser(user.id, user.email).then(setAttendees);
     getPortalForms().then(setForms);
   }, [user, profile, refreshKey]);
+
+  // Identify the user's primary submission for a sponsor/exhibitor org —
+  // drives the TeamTable. We look only at rows the user themselves owns as
+  // `isPrimary` that carry a sponsor or exhibitor flag.
+  const userPrimary = useMemo(
+    () =>
+      attendees.find(
+        (a) => a.isPrimary && (a.sponsorTier || a.exhibitorBoothType)
+      ) ?? null,
+    [attendees]
+  );
+
+  useEffect(() => {
+    if (!userPrimary) {
+      setStaffRows([]);
+      return;
+    }
+    getStaffForPrimary(userPrimary.id).then(setStaffRows);
+  }, [userPrimary, refreshKey]);
+
+  const handleFillIn = async (
+    id: string,
+    patch: { name: string; email: string; category: string }
+  ) => {
+    // Merge `staffCategory` into the existing `answers` blob — the storage
+    // mapper overwrites the column as a whole, so read-modify-write.
+    const existing = await getAttendee(id);
+    const mergedAnswers = {
+      ...(existing?.answers || {}),
+      staffCategory: patch.category,
+    };
+    await updateAttendeeFields(id, {
+      name: patch.name,
+      email: patch.email,
+      answers: mergedAnswers,
+    });
+
+    // Fire a fresh staff-invite email (bypasses `sendTicketEmail` because
+    // that helper's argument shape doesn't cover the multi-mode body).
+    const categoryLabel =
+      patch.category === 'hall_only'
+        ? 'Hall-Only'
+        : patch.category === 'full_access'
+        ? 'Full-Access'
+        : 'Sponsor Seat';
+    await supabase.functions.invoke('send-ticket-email', {
+      body: {
+        mode: 'staff-invite',
+        to: patch.email,
+        name: patch.name,
+        purchaser: userPrimary?.companyInfo?.contactName || '',
+        orgName: userPrimary?.companyInfo?.orgName || '',
+        category: categoryLabel,
+        completeUrl: `${window.location.origin}/#/?ref=${id}`,
+        signupUrl: `${window.location.origin}/#/`,
+        eventName: CURRENT_SITE.displayName || 'the Congress',
+      },
+    });
+
+    if (userPrimary) {
+      setStaffRows(await getStaffForPrimary(userPrimary.id));
+    }
+  };
 
   const handleModalClose = () => {
     setRegisterFormId(null);
@@ -47,6 +120,13 @@ export function PortalDashboard() {
         <VerifyEmailBanner />
         <div className="space-y-8">
           <WelcomeBlock profile={profile} latestAttendee={latestAttendee} />
+          {userPrimary && (
+            <TeamTable
+              primary={userPrimary}
+              staff={staffRows}
+              onFillIn={handleFillIn}
+            />
+          )}
           <AvailableFormsGrid
             forms={forms}
             userAttendees={attendees}
