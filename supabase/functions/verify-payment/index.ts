@@ -201,7 +201,7 @@ serve(async (req: Request) => {
 
       const {
         registrationType, org,
-        sponsorTier, sponsorItems, sponsoredAwards,
+        sponsorTier,
         boothType,
         hasAllDetails, staff, consents,
         staffFormId: bodyStaffFormId,
@@ -239,6 +239,8 @@ serve(async (req: Request) => {
         || formId;
 
       // ─── Staff quota validation (server-side mirror of client validation) ───
+      // Both sponsor tiers and exhibitor booths expose the same Hall-Only +
+      // Full-Congress staff quota shape, so the validation is uniform.
       const BOOTH_QUOTAS: Record<string, { hall_only: number; full_access: number }> = {
         booth_3x3_corner:            { hall_only: 4, full_access: 2 },
         booth_3x3:                   { hall_only: 4, full_access: 2 },
@@ -247,24 +249,35 @@ serve(async (req: Request) => {
         booth_nonprofit:             { hall_only: 2, full_access: 1 },
         booth_commercial_publishers: { hall_only: 2, full_access: 1 },
       };
-      const SPONSOR_QUOTAS: Record<string, number> = {
-        signature: 16, gold: 8, silver: 8, award: 0, scholarship: 0,
+      const SPONSOR_TIER_QUOTAS: Record<string, { hall_only: number; full_access: number }> = {
+        platinum: { hall_only: 12, full_access: 6 },
+        gold:     { hall_only: 8,  full_access: 4 },
+        silver:   { hall_only: 6,  full_access: 3 },
+        bronze:   { hall_only: 4,  full_access: 2 },
       };
 
+      let quota: { hall_only: number; full_access: number } | null = null;
       if (boothType) {
-        const q = BOOTH_QUOTAS[boothType];
-        if (!q) return jsonResponse({ error: `Unknown boothType: ${boothType}` }, 400);
+        quota = BOOTH_QUOTAS[boothType] || null;
+        if (!quota) return jsonResponse({ error: `Unknown boothType: ${boothType}` }, 400);
+      } else if (sponsorTier) {
+        quota = SPONSOR_TIER_QUOTAS[sponsorTier] || null;
+        if (!quota) return jsonResponse({ error: `Unknown sponsorTier: ${sponsorTier}` }, 400);
+      }
+
+      if (quota) {
         const ho = staffArr.filter((s: any) => s.category === 'hall_only').length;
         const fa = staffArr.filter((s: any) => s.category === 'full_access').length;
-        if (ho > q.hall_only || fa > q.full_access) {
-          return jsonResponse({ error: 'Staff count exceeds booth quota' }, 400);
+        if (ho > quota.hall_only || fa > quota.full_access) {
+          return jsonResponse({ error: 'Staff count exceeds tier/booth quota' }, 400);
         }
       }
-      if (sponsorTier) {
-        const q = SPONSOR_QUOTAS[sponsorTier];
-        if (q === undefined) return jsonResponse({ error: `Unknown sponsorTier: ${sponsorTier}` }, 400);
-        const seats = staffArr.filter((s: any) => s.category === 'sponsor_seat').length;
-        if (seats > q) return jsonResponse({ error: 'Sponsor seats exceed tier quota' }, 400);
+
+      // Reject stale clients sending legacy 'sponsor_seat' category
+      for (const s of staffArr) {
+        if (s.category !== 'hall_only' && s.category !== 'full_access') {
+          return jsonResponse({ error: `Invalid staff category: ${s.category}` }, 400);
+        }
       }
 
       // ─── Insert primary attendee ───
@@ -289,8 +302,6 @@ serve(async (req: Request) => {
       };
       if (sponsorTier) {
         primary.sponsor_tier = sponsorTier;
-        primary.sponsor_items = sponsorItems || [];
-        primary.sponsored_awards = sponsoredAwards || [];
       } else {
         primary.exhibitor_booth_type = boothType;
       }
@@ -314,8 +325,7 @@ serve(async (req: Request) => {
           form_id: staffFormId,
           name: isPlaceholder ? `${org.orgName} — Staff slot #${i + 1}` : s.name,
           email: isPlaceholder ? '' : s.email,
-          ticket_type: s.category === 'full_access' ? 'Full Access' :
-                       s.category === 'hall_only' ? 'Hall Only' : 'Sponsor Seat',
+          ticket_type: s.category === 'full_access' ? 'Full Congress' : 'Hall Only',
           payment_status: 'paid',
           payment_amount: 'PAID EXTERNALLY',
           payment_method: 'external',

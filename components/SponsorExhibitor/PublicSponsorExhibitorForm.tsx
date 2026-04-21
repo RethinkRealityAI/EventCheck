@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import type { Form, AppSettings, FormStep } from '../../types';
+import type { Form, AppSettings, FormField, FormStep } from '../../types';
+import { getFormById } from '../../services/storageService';
 import { useAuth } from '../AuthContext';
 import { StepperSidebar } from '../Portal/ui/StepperSidebar';
 import { GlassCard } from '../Portal/ui/GlassCard';
@@ -33,8 +34,6 @@ export default function PublicSponsorExhibitorForm({ form, settings }: Props) {
     phone: '', address: '', website: '',
   });
   const [sponsorTier, setSponsorTier] = useState<string | null>(null);
-  const [sponsorItems, setSponsorItems] = useState<Array<{ id: string; category: string; qty?: number }>>([]);
-  const [sponsoredAwards, setSponsoredAwards] = useState<string[]>([]);
   const [boothType, setBoothType] = useState<string | null>(null);
   const [hasAllDetails, setHasAllDetails] = useState(false);
   const [staff, setStaff] = useState<StaffEntry[]>([]);
@@ -43,16 +42,30 @@ export default function PublicSponsorExhibitorForm({ form, settings }: Props) {
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Load the companion staff form so StepStaffRoster's inline "Full Details"
+  // accordion can render the per-staff dietary / emergency / consent fields.
+  // The combined form itself has no such fields (it's component-driven).
+  const [staffFormFields, setStaffFormFields] = useState<FormField[]>([]);
+  useEffect(() => {
+    const staffFormId = (form.settings as any)?.staffFormId;
+    if (!staffFormId) return;
+    let cancelled = false;
+    getFormById(staffFormId).then(f => {
+      if (!cancelled && f?.fields) setStaffFormFields(f.fields);
+    }).catch(() => { /* non-fatal — falls back to name+email only */ });
+    return () => { cancelled = true; };
+  }, [form.settings]);
+
   // Build the list of step ids based on the user's current selections.
+  // Every GANSID sponsor tier (Platinum/Gold/Silver/Bronze) and every booth type
+  // includes staff registrations, so the Staff step is always shown.
   const stepIds = useMemo<StepId[]>(() => {
     const base: StepId[] = ['type', 'organization'];
     if (registrationType === 'sponsor') base.push('tier');
     if (registrationType === 'exhibitor') base.push('booth');
-    const isAwardOrScholarship = sponsorTier === 'award' || sponsorTier === 'scholarship';
-    if (!isAwardOrScholarship) base.push('staff');
-    base.push('consents', 'review');
+    base.push('staff', 'consents', 'review');
     return base;
-  }, [registrationType, sponsorTier]);
+  }, [registrationType]);
 
   const stepLabels: Record<StepId, string> = {
     type: 'Type',
@@ -79,8 +92,6 @@ export default function PublicSponsorExhibitorForm({ form, settings }: Props) {
     registrationType: registrationType!,
     org,
     sponsorTier: (sponsorTier as any) || undefined,
-    sponsorItems,
-    sponsoredAwards,
     boothType: boothType || undefined,
     hasAllDetails,
     staff,
@@ -114,9 +125,7 @@ export default function PublicSponsorExhibitorForm({ form, settings }: Props) {
       const signup = `${window.location.origin}/#/`;
       const eventName = (CURRENT_SITE as any).displayName || form.title;
       const categoryLabel = (c: string) =>
-        c === 'hall_only' ? 'Hall-Only' :
-        c === 'full_access' ? 'Full-Access' :
-        'Sponsor Seat';
+        c === 'hall_only' ? 'Hall-Only' : 'Full Congress';
 
       for (let i = 0; i < staff.length; i++) {
         const entry = staff[i];
@@ -187,23 +196,13 @@ export default function PublicSponsorExhibitorForm({ form, settings }: Props) {
       case 'organization':
         return <StepOrgInfo value={org} onChange={setOrg} />;
       case 'tier':
-        return (
-          <StepSponsorTier
-            form={form}
-            tier={sponsorTier}
-            onTier={setSponsorTier}
-            items={sponsorItems}
-            onItems={setSponsorItems}
-            awards={sponsoredAwards}
-            onAwards={setSponsoredAwards}
-          />
-        );
+        return <StepSponsorTier tier={sponsorTier} onTier={setSponsorTier} />;
       case 'booth':
         return <StepExhibitorBooth value={boothType} onChange={setBoothType} />;
       case 'staff':
         return (
           <StepStaffRoster
-            form={form}
+            staffFormFields={staffFormFields}
             registrationType={registrationType!}
             sponsorTier={sponsorTier}
             boothType={boothType}
@@ -224,8 +223,6 @@ export default function PublicSponsorExhibitorForm({ form, settings }: Props) {
             boothType={boothType}
             staff={staff}
             hasAllDetails={hasAllDetails}
-            onSubmit={onSubmit}
-            submitting={submitting}
             error={error}
           />
         );
@@ -281,9 +278,13 @@ export default function PublicSponsorExhibitorForm({ form, settings }: Props) {
             <span className="text-xs font-body text-gansid-on-surface/50 hidden sm:block">
               Step {safeStep + 1} of {stepperSteps.length}
             </span>
-            {safeStep < stepperSteps.length - 1 && (
+            {safeStep < stepperSteps.length - 1 ? (
               <ViscousButton variant="primary" onClick={() => setStep(safeStep + 1)}>
                 Next
+              </ViscousButton>
+            ) : (
+              <ViscousButton variant="primary" onClick={onSubmit} disabled={submitting}>
+                {submitting ? 'Submitting…' : 'Submit Registration'}
               </ViscousButton>
             )}
           </div>

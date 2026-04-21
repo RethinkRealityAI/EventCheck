@@ -17,12 +17,8 @@ interface Props {
 
 const categoryLabel = (s: Attendee): string => {
   const c = (s.answers as any)?.staffCategory;
-  return c === 'hall_only'
-    ? 'Hall-Only'
-    : c === 'full_access'
-    ? 'Full-Access'
-    : c === 'sponsor_seat'
-    ? 'Sponsor Seat'
+  return c === 'hall_only' ? 'Hall-Only'
+    : c === 'full_access' ? 'Full Congress'
     : '—';
 };
 
@@ -229,14 +225,8 @@ export default function TeamTable({ primary, staff, onFillIn }: Props) {
                             }
                           >
                             <option value="">Category…</option>
-                            {primary.exhibitorBoothType ? (
-                              <>
-                                <option value="hall_only">Hall-Only</option>
-                                <option value="full_access">Full-Access</option>
-                              </>
-                            ) : (
-                              <option value="sponsor_seat">Sponsor Seat</option>
-                            )}
+                            <option value="hall_only">Hall-Only</option>
+                            <option value="full_access">Full Congress</option>
                           </select>
                         </div>
                         <div className="mt-2 flex gap-2 justify-end">

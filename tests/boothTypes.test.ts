@@ -29,8 +29,10 @@ describe('EXHIBITOR_BOOTH_TYPES', () => {
     expect(getBoothType('nope')).toBeUndefined();
   });
 
-  it('non-profit booth has a verification note', () => {
+  it('non-profit booth has correct USD pricing + reduced quota', () => {
     const b = getBoothType('booth_nonprofit');
-    expect(b?.note).toMatch(/[Vv]erification/);
+    expect(b?.currency).toBe('USD');
+    expect(b?.hallOnlyQuota).toBe(2);
+    expect(b?.fullAccessQuota).toBe(1);
   });
 });

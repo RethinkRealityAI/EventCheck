@@ -1,7 +1,12 @@
 import { getBoothType } from '../../config/formTemplates/boothTypes';
+import { getSponsorTier } from '../../config/formTemplates/sponsorTiers';
 
-export type SponsorTier = 'signature' | 'gold' | 'silver' | 'award' | 'scholarship';
-export type StaffCategory = 'hall_only' | 'full_access' | 'sponsor_seat';
+// GANSID combined sponsor_exhibitor tiers. Exhibitor booths and sponsor tiers have
+// the SAME shape — each offers a Hall-Only and a Full-Congress (aka Full-Access)
+// seat quota — so the staff roster uses the same two categories regardless of
+// which side of the form the primary filled out.
+export type SponsorTier = 'platinum' | 'gold' | 'silver' | 'bronze';
+export type StaffCategory = 'hall_only' | 'full_access';
 export type RegistrationType = 'sponsor' | 'exhibitor';
 
 export interface StaffEntry {
@@ -23,8 +28,6 @@ export interface SponsorExhibitorPayload {
     website?: string;
   };
   sponsorTier?: SponsorTier;
-  sponsorItems?: Array<{ id: string; category: string; qty?: number }>;
-  sponsoredAwards?: string[];
   boothType?: string;
   hasAllDetails: boolean;
   staff: StaffEntry[];
@@ -36,10 +39,21 @@ export interface ValidationResult {
   errors?: string[];
 }
 
-export function getSponsorQuota(tier: SponsorTier): number {
-  if (tier === 'signature') return 16;
-  if (tier === 'gold' || tier === 'silver') return 8;
-  return 0;
+export interface CategoryQuota {
+  hall_only: number;
+  full_access: number;
+}
+
+export function getSponsorQuota(tier: SponsorTier): CategoryQuota {
+  const t = getSponsorTier(tier);
+  if (!t) return { hall_only: 0, full_access: 0 };
+  return { hall_only: t.hallOnlyQuota, full_access: t.fullCongressQuota };
+}
+
+export function getExhibitorQuota(boothTypeId: string): CategoryQuota {
+  const b = getBoothType(boothTypeId);
+  if (!b) return { hall_only: 0, full_access: 0 };
+  return { hall_only: b.hallOnlyQuota, full_access: b.fullAccessQuota };
 }
 
 function isPlaceholder(s: StaffEntry): boolean {
@@ -70,29 +84,36 @@ export function validateSubmission(p: SponsorExhibitorPayload): ValidationResult
     errors.push('all three consents must be accepted');
   }
 
+  // Resolve quotas for whichever side was picked. Both sides use the same
+  // hall_only / full_access staff categories, so the validation is uniform.
+  let quota: CategoryQuota | null = null;
   if (p.boothType) {
     const booth = getBoothType(p.boothType);
-    if (!booth) {
-      errors.push(`Unknown boothType: ${p.boothType}`);
-    } else {
-      const hallOnly = p.staff.filter(s => s.category === 'hall_only').length;
-      const fullAccess = p.staff.filter(s => s.category === 'full_access').length;
-      if (hallOnly > booth.hallOnlyQuota) {
-        errors.push(`hall_only staff exceeds quota (${hallOnly} > ${booth.hallOnlyQuota})`);
-      }
-      if (fullAccess > booth.fullAccessQuota) {
-        errors.push(`full_access staff exceeds quota (${fullAccess} > ${booth.fullAccessQuota})`);
-      }
+    if (!booth) errors.push(`Unknown boothType: ${p.boothType}`);
+    else quota = { hall_only: booth.hallOnlyQuota, full_access: booth.fullAccessQuota };
+  } else if (p.sponsorTier) {
+    const tier = getSponsorTier(p.sponsorTier);
+    if (!tier) errors.push(`Unknown sponsorTier: ${p.sponsorTier}`);
+    else quota = { hall_only: tier.hallOnlyQuota, full_access: tier.fullCongressQuota };
+  }
+
+  if (quota) {
+    const hallOnly = p.staff.filter(s => s.category === 'hall_only').length;
+    const fullAccess = p.staff.filter(s => s.category === 'full_access').length;
+    if (hallOnly > quota.hall_only) {
+      errors.push(`hall_only staff exceeds quota (${hallOnly} > ${quota.hall_only})`);
+    }
+    if (fullAccess > quota.full_access) {
+      errors.push(`full_access staff exceeds quota (${fullAccess} > ${quota.full_access})`);
     }
   }
 
-  if (p.sponsorTier) {
-    const quota = getSponsorQuota(p.sponsorTier);
-    const seats = p.staff.filter(s => s.category === 'sponsor_seat').length;
-    if (seats > quota) {
-      errors.push(`sponsor_seat staff exceeds tier quota (${seats} > ${quota})`);
+  // Reject unknown staff categories so a stale client can't smuggle legacy values.
+  p.staff.forEach((s, i) => {
+    if (s.category !== 'hall_only' && s.category !== 'full_access') {
+      errors.push(`staff[${i}] has invalid category "${s.category}"`);
     }
-  }
+  });
 
   if (p.hasAllDetails) {
     p.staff.forEach((s, i) => {

@@ -1,7 +1,7 @@
 import React from 'react';
-import { ViscousButton } from '../../Portal/ui/ViscousButton';
 import { getBoothType } from '../../../config/formTemplates/boothTypes';
-import { getSponsorQuota, type StaffEntry, type SponsorTier } from '../validation';
+import { getSponsorTier } from '../../../config/formTemplates/sponsorTiers';
+import type { StaffEntry } from '../validation';
 
 interface Props {
   registrationType: 'sponsor' | 'exhibitor';
@@ -18,19 +18,19 @@ interface Props {
   boothType: string | null;
   staff: StaffEntry[];
   hasAllDetails: boolean;
-  onSubmit: () => void;
-  submitting: boolean;
   error: string | null;
 }
 
 export default function StepReview(p: Props) {
   const booth = p.boothType ? getBoothType(p.boothType) : null;
-  const sponsorQuota = p.sponsorTier ? getSponsorQuota(p.sponsorTier as SponsorTier) : 0;
+  const tier = p.sponsorTier ? getSponsorTier(p.sponsorTier) : null;
   const filled = p.staff.filter(s => s.name.trim() && s.email.trim()).length;
+  const hallOnly = p.staff.filter(s => s.category === 'hall_only').length;
+  const fullAccess = p.staff.filter(s => s.category === 'full_access').length;
 
   return (
     <section className="space-y-4">
-      <h2 className="text-xl font-display">Review</h2>
+      <h2 className="text-lg font-display">Review</h2>
 
       <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm font-body">
         <dt className="font-semibold">Type</dt>
@@ -44,11 +44,11 @@ export default function StepReview(p: Props) {
           {p.org.contactName} &lt;{p.org.email}&gt;
         </dd>
 
-        {p.sponsorTier && (
+        {tier && (
           <>
             <dt className="font-semibold">Tier</dt>
-            <dd className="capitalize">
-              {p.sponsorTier}{sponsorQuota > 0 ? ` (${sponsorQuota} seats)` : ''}
+            <dd>
+              {tier.name} — {tier.hallOnlyQuota} Hall-Only + {tier.fullCongressQuota} Full Congress
             </dd>
           </>
         )}
@@ -57,14 +57,14 @@ export default function StepReview(p: Props) {
           <>
             <dt className="font-semibold">Booth</dt>
             <dd>
-              {booth.label} — {booth.hallOnlyQuota} Hall-Only + {booth.fullAccessQuota} Full-Access
+              {booth.label} — {booth.hallOnlyQuota} Hall-Only + {booth.fullAccessQuota} Full Congress
             </dd>
           </>
         )}
 
         <dt className="font-semibold">Staff</dt>
         <dd>
-          {filled} of {p.staff.length} filled{' '}
+          {hallOnly} Hall-Only + {fullAccess} Full Congress · {filled} of {p.staff.length} rows filled
           ({p.hasAllDetails ? 'inline details' : 'send invitation links'})
         </dd>
       </dl>
@@ -75,9 +75,10 @@ export default function StepReview(p: Props) {
         </div>
       )}
 
-      <ViscousButton variant="primary" onClick={p.onSubmit} disabled={p.submitting}>
-        {p.submitting ? 'Submitting…' : 'Submit Registration'}
-      </ViscousButton>
+      <p className="text-xs text-gansid-on-surface/60 font-body">
+        Click <strong>Submit Registration</strong> below to finalize. Your staff will receive
+        their invitation emails immediately after submission.
+      </p>
     </section>
   );
 }
