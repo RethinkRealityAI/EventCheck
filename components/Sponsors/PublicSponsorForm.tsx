@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { PayPalScriptProvider, PayPalButtons } from '@paypal/react-paypal-js';
 import { Check, AlertCircle, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
 import { Form, AppSettings, TicketItem, SponsorItemCategory, Attendee } from '../../types';
@@ -6,7 +6,7 @@ import { supabase } from '../../services/supabaseClient';
 import { generateReceiptPDF } from '../../utils/receiptGenerator';
 import { generateTicketPDF } from '../../utils/pdfGenerator';
 import { sendTicketEmail, arrayBufferToBase64 } from '../../services/smtpService';
-import { buildSponsorEmailContext, mergeTemplate } from '../../utils/sponsorEmailTemplates';
+import { buildSponsorEmailContext, mergeTemplate, renderGuestClaimLinksHtml } from '../../utils/sponsorEmailTemplates';
 import { buildSponsorExtras } from '../../utils/paypalOrderMeta';
 import { CURRENT_SITE } from '../../config/sites';
 
@@ -203,6 +203,27 @@ const PublicSponsorForm: React.FC<Props> = ({ form, settings }) => {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [chequeSelected, setChequeSelected] = useState(false);
+  // Primary attendee id is captured once the sponsor submits successfully so
+  // the success screen can render per-seat claim links for the guest roster.
+  const [primaryAttendeeId, setPrimaryAttendeeId] = useState<string | null>(null);
+  const [guestLinks, setGuestLinks] = useState<Array<{ id: string; name: string }>>([]);
+
+  // After a successful PayPal sponsorship, load the server-created guest rows
+  // so we can surface "Share these links with your guests" on the success
+  // screen. Cheque pledges generate no guest rows yet — skip the fetch.
+  useEffect(() => {
+    if (step !== 'success' || chequeSelected || !primaryAttendeeId) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('attendees')
+        .select('id,name')
+        .eq('primary_attendee_id', primaryAttendeeId)
+        .eq('is_primary', false);
+      if (!cancelled) setGuestLinks(((data as Array<{ id: string; name: string }>) || []));
+    })();
+    return () => { cancelled = true; };
+  }, [step, chequeSelected, primaryAttendeeId]);
 
   // ── Derived totals ─────────────────────────────────────────────────────────
   const selectedPackage = packages.find((p) => p.id === selectedPackageId) ?? null;
@@ -350,12 +371,11 @@ const PublicSponsorForm: React.FC<Props> = ({ form, settings }) => {
         contentType: 'application/pdf',
       };
 
-      const ctx = buildSponsorEmailContext(savedAttendee, settings, {
-        event: 'Hope Gala & Awards 2026',
-        adminDashboardLink: window.location.origin + `/#/admin/sponsors`,
-      });
-
       if (paymentMethod === 'cheque') {
+        const ctx = buildSponsorEmailContext(savedAttendee, settings, {
+          event: 'Hope Gala & Awards 2026',
+          adminDashboardLink: window.location.origin + `/#/admin/sponsors`,
+        });
         // Email sponsor — pledge
         await sendTicketEmail(settings, {
           to: savedAttendee.email,
@@ -379,6 +399,7 @@ const PublicSponsorForm: React.FC<Props> = ({ form, settings }) => {
         // it stays in sync if tiers are edited in createSponsorForm.ts.
         const seatCount = selectedPackage?.seats ?? 0;
         const ticketAttachments: any[] = [receiptAttachment];
+        const fetchedGuests: Array<{ id: string; name: string }> = [];
         if (seatCount > 0) {
           const { data: guests } = await supabase
             .from('attendees')
@@ -386,6 +407,7 @@ const PublicSponsorForm: React.FC<Props> = ({ form, settings }) => {
             .eq('primary_attendee_id', savedAttendee.id)
             .eq('is_primary', false);
           for (const g of guests || []) {
+            fetchedGuests.push({ id: g.id, name: g.name });
             const guestAttendee = {
               ...savedAttendee,
               id: g.id,
@@ -402,6 +424,14 @@ const PublicSponsorForm: React.FC<Props> = ({ form, settings }) => {
             });
           }
         }
+        // Build the email context AFTER the guests are loaded so the
+        // {{guestClaimLinks}} placeholder renders a per-guest block the sponsor
+        // can forward directly (plus each PDF already carries the same QR/URL).
+        const ctx = buildSponsorEmailContext(savedAttendee, settings, {
+          event: 'Hope Gala & Awards 2026',
+          adminDashboardLink: window.location.origin + `/#/admin/sponsors`,
+          guestClaimLinksHtml: renderGuestClaimLinksHtml(fetchedGuests, form.id, window.location.origin),
+        });
         await sendTicketEmail(settings, {
           to: savedAttendee.email,
           subject: mergeTemplate(settings.sponsorConfirmationPaidSubject, ctx),
@@ -457,6 +487,7 @@ const PublicSponsorForm: React.FC<Props> = ({ form, settings }) => {
         throw new Error(resp?.error || fnError?.message || 'Pledge submission failed');
       }
       setChequeSelected(true);
+      setPrimaryAttendeeId(primId);
       setStep('success');
       // Fire email dispatch async — don't block UI
       dispatchSponsorEmails(primId, invId, contact.orgName, contact.email, regAt, undefined, 'cheque');
@@ -521,6 +552,7 @@ const PublicSponsorForm: React.FC<Props> = ({ form, settings }) => {
       if (fnError || resp?.error) {
         throw new Error(resp?.error || fnError?.message || 'Payment verification failed');
       }
+      setPrimaryAttendeeId(primaryAttendee.id);
       setStep('success');
       dispatchSponsorEmails(primaryAttendee.id, primaryAttendee.invoice_id, contact.orgName, contact.email, primaryAttendee.registered_at, (resp as any)?.transactionId, 'paypal');
     } catch (err: any) {
@@ -540,9 +572,13 @@ const PublicSponsorForm: React.FC<Props> = ({ form, settings }) => {
 
   // ── Success screen ─────────────────────────────────────────────────────────
   if (step === 'success') {
+    const copyGuestLink = (guestId: string) => {
+      const url = `${window.location.origin}/#/form/${form.id}?ref=${guestId}`;
+      navigator.clipboard.writeText(url);
+    };
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
-        <div className="bg-white rounded-2xl shadow-xl p-10 max-w-md w-full text-center">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4 py-10">
+        <div className="bg-white rounded-2xl shadow-xl p-10 max-w-xl w-full text-center">
           <div
             className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4"
             style={{ backgroundColor: accentColor }}
@@ -568,6 +604,31 @@ const PublicSponsorForm: React.FC<Props> = ({ form, settings }) => {
               <span className="font-semibold">Total:</span> {fmtCAD(totalWithHst)} CAD
             </p>
           </div>
+          {guestLinks.length > 0 && (
+            <div className="mt-6 text-left">
+              <h3 className="font-bold text-gray-900 mb-1">Share these links with your guests</h3>
+              <p className="text-xs text-gray-500 mb-3">
+                Each guest gets their own link. They'll use it to enter their name, dietary preferences, and pick up their ticket. Links are also in the confirmation email we just sent you.
+              </p>
+              <div className="space-y-2">
+                {guestLinks.map((g, i) => (
+                  <div key={g.id} className="flex items-center justify-between gap-3 p-3 bg-gray-50 rounded-lg text-sm">
+                    <div className="min-w-0 flex-1">
+                      <div className="font-semibold truncate">Seat {i + 1}</div>
+                      <div className="text-xs text-gray-400 truncate">{g.name}</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => copyGuestLink(g.id)}
+                      className="text-xs font-semibold text-red-700 hover:underline flex-shrink-0"
+                    >
+                      Copy link
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );

@@ -849,7 +849,10 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
             name: guestName,
             email: guestEmail,
             dietaryPreferences: g?.dietary === 'yes' ? 'Vegetarian' : '',
-            guestType: g?.guestType || 'adult',
+            // Placeholders enter the pending-claim state so they route through
+            // the group-flow claim pipeline (dashboard badge, copy-link action,
+            // claim-completion email). Inline guests keep their adult/child type.
+            guestType: isPlaceholder ? 'pending-claim' : (g?.guestType || 'adult'),
             ticketType: `Guest of ${purchaserName}`,
             registeredAt: new Date().toISOString(),
             answers: {},
@@ -864,11 +867,13 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
           allAttendees.push(guestAttendee);
 
           // Generate PDF for this guest
-          // Registration URL always points to the PRIMARY attendee so the guest flow
-          // can resolve remaining seats properly.
+          // Placeholder tickets carry a per-guest claim URL so PublicRegistration
+          // can route them through the pending-claim pipeline (update-in-place,
+          // flip to 'claimed', send claim-completion email). Named inline guests
+          // don't need a claim URL.
           if (settings) {
             const registrationUrl = isPlaceholder
-              ? `${window.location.origin}/#/form/${form.id}?ref=${newAttendee.id}`
+              ? `${window.location.origin}/#/form/${form.id}?ref=${guestId}`
               : undefined;
             guestTickets.push({ name: guestName, attendee: guestAttendee, registrationUrl });
           }
@@ -1072,9 +1077,22 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
 
         // Send all tickets to the purchaser (their own + every group guest's PDF as backup)
         const hasGroupGuests = groupGuestPdfs.length > 0;
-        const purchaserMessage = hasGroupGuests
+        // Build a per-guest claim-link block for unclaimed placeholder seats so
+        // the purchaser can forward an individual link to each guest without
+        // digging into the attached PDFs.
+        const placeholderGuestTickets = guestTickets.filter(g => !!g.registrationUrl);
+        const claimLinksBlock = placeholderGuestTickets.length > 0
+          ? `<div style="margin-top:16px;padding:12px 16px;background:#f8fafc;border-left:3px solid #4f46e5;border-radius:4px;">
+               <p style="margin:0 0 8px;font-weight:600;">Registration links for your guests</p>
+               <p style="margin:0 0 10px;font-size:13px;color:#475569;">Forward a link below to each guest so they can complete their own details. Each link claims one seat.</p>
+               <ol style="margin:0;padding-left:20px;line-height:1.8;font-size:13px;">
+                 ${placeholderGuestTickets.map(g => `<li><strong>${g.name}</strong> — <a href="${g.registrationUrl}">Claim / register</a><br><span style="color:#64748b;font-size:12px;">${g.registrationUrl}</span></li>`).join('')}
+               </ol>
+             </div>`
+          : '';
+        const purchaserMessage = (hasGroupGuests
           ? `Thank you for your ${paymentStatus === 'paid' ? 'purchase' : 'registration'}! Your ticket plus ${groupGuestPdfs.length} additional ${groupGuestPdfs.length === 1 ? 'ticket is' : 'tickets are'} attached as a backup. Each additional registrant will also receive their own ticket or registration link by email directly — you don't need to forward anything.`
-          : `Thank you for your ${paymentStatus === 'paid' ? 'purchase' : 'registration'}! Attached ${attachments.length === 1 ? 'is your ticket' : `are your ${attachments.length} tickets`}.${guestTickets.length > 0 ? ` ${(settings.emailPurchaserGuestNote || "We've also included your guest tickets as a backup. Named guests will receive their own ticket by email directly. For any unnamed guests, you can forward their ticket or share the registration link on it so they can provide their details.")}` : ''}`;
+          : `Thank you for your ${paymentStatus === 'paid' ? 'purchase' : 'registration'}! Attached ${attachments.length === 1 ? 'is your ticket' : `are your ${attachments.length} tickets`}.${guestTickets.length > 0 ? ` ${(settings.emailPurchaserGuestNote || "We've also included your guest tickets as a backup. Named guests will receive their own ticket by email directly. For any unnamed guests, you can forward their ticket or share the registration link on it so they can provide their details.")}` : ''}`) + claimLinksBlock;
         await sendTicketEmail(settings, {
           to: purchaserEmail,
           subject: `${form.title} Ticket(s)`,

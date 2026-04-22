@@ -1,14 +1,20 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Attendee, AppSettings } from '../../types';
 import { Search } from 'lucide-react';
 import SponsorDetailModal from './SponsorDetailModal';
 import ChequeReceivedModal from './ChequeReceivedModal';
 import { getBoothType } from '../../config/formTemplates/boothTypes';
+import { supabase } from '../../services/supabaseClient';
 
 interface Props {
   sponsors: Attendee[];
   settings: AppSettings;
   onChanged: () => void | Promise<void>;
+}
+
+interface GuestCounts {
+  total: number;
+  claimed: number;
 }
 
 export const SponsorsTable: React.FC<Props> = ({ sponsors, settings, onChanged }) => {
@@ -17,6 +23,40 @@ export const SponsorsTable: React.FC<Props> = ({ sponsors, settings, onChanged }
   const [methodFilter, setMethodFilter] = useState<'all' | 'paypal' | 'cheque'>('all');
   const [detailFor, setDetailFor] = useState<Attendee | null>(null);
   const [chequeFor, setChequeFor] = useState<Attendee | null>(null);
+  const [guestCounts, setGuestCounts] = useState<Record<string, GuestCounts>>({});
+
+  // Aggregate guest claim counts per sponsor in a single round-trip. Uses the
+  // same claimed/unclaimed rule as SponsorDetailModal — prefer guest_type,
+  // fall back to the "Guest Ticket #" name heuristic for legacy rows.
+  useEffect(() => {
+    if (sponsors.length === 0) { setGuestCounts({}); return; }
+    let cancelled = false;
+    (async () => {
+      const ids = sponsors.map(s => s.id);
+      const { data } = await supabase
+        .from('attendees')
+        .select('primary_attendee_id,name,guest_type')
+        .in('primary_attendee_id', ids)
+        .eq('is_primary', false);
+      if (cancelled) return;
+      const next: Record<string, GuestCounts> = {};
+      for (const row of (data || []) as Array<{ primary_attendee_id: string; name: string | null; guest_type: string | null }>) {
+        const pid = row.primary_attendee_id;
+        if (!pid) continue;
+        const bucket = next[pid] ?? { total: 0, claimed: 0 };
+        bucket.total += 1;
+        const claimed = row.guest_type === 'claimed'
+          ? true
+          : row.guest_type === 'pending-claim'
+            ? false
+            : !(row.name || '').includes('Guest Ticket #');
+        if (claimed) bucket.claimed += 1;
+        next[pid] = bucket;
+      }
+      setGuestCounts(next);
+    })();
+    return () => { cancelled = true; };
+  }, [sponsors]);
 
   const filtered = useMemo(() => sponsors.filter(s => {
     if (statusFilter !== 'all' && s.paymentStatus !== statusFilter) return false;
@@ -58,6 +98,7 @@ export const SponsorsTable: React.FC<Props> = ({ sponsors, settings, onChanged }
               <th className="text-left px-4 py-3">Total</th>
               <th className="text-left px-4 py-3">Method</th>
               <th className="text-left px-4 py-3">Status</th>
+              <th className="text-left px-4 py-3">Guests</th>
               <th className="text-left px-4 py-3">Submitted</th>
               <th className="text-left px-4 py-3">Actions</th>
             </tr>
@@ -82,6 +123,21 @@ export const SponsorsTable: React.FC<Props> = ({ sponsors, settings, onChanged }
                     : 'PayPal'}
                 </td>
                 <td className="px-4 py-3"><StatusBadge status={s.paymentStatus} /></td>
+                <td className="px-4 py-3 text-slate-600">
+                  {(() => {
+                    const c = guestCounts[s.id];
+                    if (!c || c.total === 0) return <span className="text-slate-300">—</span>;
+                    const pct = Math.round((c.claimed / c.total) * 100);
+                    const color = c.claimed === c.total ? 'bg-emerald-100 text-emerald-700'
+                      : c.claimed === 0 ? 'bg-amber-100 text-amber-700'
+                      : 'bg-blue-100 text-blue-700';
+                    return (
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${color}`} title={`${pct}% claimed`}>
+                        {c.claimed}/{c.total} claimed
+                      </span>
+                    );
+                  })()}
+                </td>
                 <td className="px-4 py-3 text-slate-500">{new Date(s.registeredAt).toLocaleDateString()}</td>
                 <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                   <button onClick={() => setDetailFor(s)} className="text-indigo-600 hover:underline text-xs mr-2">View</button>
@@ -92,7 +148,7 @@ export const SponsorsTable: React.FC<Props> = ({ sponsors, settings, onChanged }
               </tr>
             ))}
             {filtered.length === 0 && (
-              <tr><td colSpan={8} className="text-center p-12 text-slate-400">No sponsors yet.</td></tr>
+              <tr><td colSpan={9} className="text-center p-12 text-slate-400">No sponsors yet.</td></tr>
             )}
           </tbody>
         </table>
