@@ -45,6 +45,12 @@ const CATEGORY_LABELS: Record<SponsorItemCategory, string> = {
 
 const CATEGORY_ORDER: SponsorItemCategory[] = ['package', 'scholarship', 'ad', 'booth'];
 
+// Sponsorships above this threshold (in CAD) must be paid by cheque, payable to
+// "Sickle Cell Awareness Group of Ontario". At or below this threshold, only
+// PayPal is offered.
+const PAYPAL_MAX_CAD = 10000;
+const PAYABLE_TO = 'Sickle Cell Awareness Group of Ontario';
+
 // Award eligibility lists
 const GOLD_AWARDS = ['Nursing', 'Humanitarian'];
 const SILVER_AWARDS = ['Allied Health', 'Community', 'Legislative', 'Tribute', 'Media', 'Volunteer'];
@@ -530,7 +536,7 @@ const PublicSponsorForm: React.FC<Props> = ({ form, settings }) => {
           </h1>
           <p className="text-gray-500 mb-6">
             {chequeSelected
-              ? 'Your pledge has been recorded. Please make your cheque payable to SCAGO and mail to the address on the invoice.'
+              ? `Your pledge has been recorded. Please make your cheque payable to ${PAYABLE_TO} and mail to the address on the invoice.`
               : "We've received your sponsorship commitment. Our team will be in touch within 2 business days."}
           </p>
           <div className="bg-gray-50 rounded-xl p-4 text-left text-sm text-gray-700 space-y-1">
@@ -551,6 +557,7 @@ const PublicSponsorForm: React.FC<Props> = ({ form, settings }) => {
 
   // ── Payment screen ─────────────────────────────────────────────────────────
   if (step === 'payment') {
+    const chequeRequired = totalWithHst > PAYPAL_MAX_CAD;
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4 py-12">
         <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full">
@@ -567,8 +574,31 @@ const PublicSponsorForm: React.FC<Props> = ({ form, settings }) => {
           )}
 
           <div className="space-y-4">
-            {/* PayPal */}
-            {paypalClientId ? (
+            {chequeRequired ? (
+              <>
+                <div className="p-3 bg-blue-50 text-blue-800 rounded-lg text-sm">
+                  Sponsorships above {fmtCAD(PAYPAL_MAX_CAD)} CAD are paid by cheque, payable to <strong>{PAYABLE_TO}</strong>.
+                </div>
+                <button
+                  type="button"
+                  disabled={submitting}
+                  onClick={() => {
+                    setChequeSelected(true);
+                    submitCheque();
+                  }}
+                  className="w-full py-3 rounded-xl text-white font-bold transition hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
+                  style={{ backgroundColor: accentColor }}
+                >
+                  {submitting && chequeSelected ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : null}
+                  Pay by Cheque (Pledge)
+                </button>
+                <p className="text-xs text-gray-400 text-center">
+                  Submits a pledge. Cheque payable to <strong>{PAYABLE_TO}</strong>.
+                </p>
+              </>
+            ) : paypalClientId ? (
               <div key={`${paypalClientId}-${totalWithHst}`}>
                 <p className="text-xs text-gray-400 mb-2 font-semibold uppercase tracking-wide">
                   Pay online
@@ -621,35 +651,9 @@ const PublicSponsorForm: React.FC<Props> = ({ form, settings }) => {
               </div>
             ) : (
               <div className="p-3 bg-amber-50 text-amber-700 rounded-lg text-sm">
-                PayPal is not configured. Please use the cheque option below.
+                PayPal is not configured. Please contact us to complete your sponsorship.
               </div>
             )}
-
-            {/* Divider */}
-            <div className="flex items-center gap-3">
-              <hr className="flex-1 border-gray-200" />
-              <span className="text-xs text-gray-400 font-semibold uppercase tracking-wide">or</span>
-              <hr className="flex-1 border-gray-200" />
-            </div>
-
-            {/* Cheque pledge */}
-            <button
-              type="button"
-              disabled={submitting}
-              onClick={() => {
-                setChequeSelected(true);
-                submitCheque();
-              }}
-              className="w-full py-3 rounded-xl border-2 border-gray-300 text-gray-700 font-bold hover:border-gray-400 hover:bg-gray-50 transition disabled:opacity-50 flex items-center justify-center gap-2"
-            >
-              {submitting && chequeSelected ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : null}
-              Pay by Cheque (Pledge)
-            </button>
-            <p className="text-xs text-gray-400 text-center">
-              Submits a pledge. Cheque payable to <strong>SCAGO</strong>.
-            </p>
           </div>
 
           <button
@@ -845,6 +849,11 @@ const PublicSponsorForm: React.FC<Props> = ({ form, settings }) => {
                 <span>Total</span>
                 <span>{fmtCAD(totalWithHst)} CAD</span>
               </div>
+              {totalWithHst > PAYPAL_MAX_CAD && (
+                <p className="text-xs text-gray-500 pt-2">
+                  Sponsorships above {fmtCAD(PAYPAL_MAX_CAD)} CAD are paid by cheque, payable to <strong>{PAYABLE_TO}</strong>.
+                </p>
+              )}
             </div>
           )}
 
