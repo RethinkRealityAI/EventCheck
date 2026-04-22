@@ -313,7 +313,7 @@ export default function PublicSponsorExhibitorForm({ form, settings }: Props) {
           'radial-gradient(ellipse at 15% 10%, rgba(186, 0, 40, 0.08) 0%, transparent 55%), radial-gradient(ellipse at 85% 90%, rgba(34, 96, 161, 0.08) 0%, transparent 55%), #fafafa',
       }}
     >
-      <aside className="lg:w-72 lg:h-screen lg:sticky lg:top-0 lg:px-6 lg:py-8 px-4 py-4 border-b lg:border-b-0 lg:border-r border-gansid-on-surface/10 bg-white/40 backdrop-blur-viscous flex lg:flex-col">
+      <aside className="lg:w-72 lg:h-screen lg:sticky lg:top-0 lg:px-6 lg:py-8 px-4 py-4 border-b lg:border-b-0 lg:border-r border-gansid-on-surface/10 bg-white/40 backdrop-blur-viscous flex lg:flex-col lg:items-stretch [&>nav]:lg:flex-1 [&>nav]:lg:min-h-0">
         <StepperSidebar
           steps={stepperSteps}
           currentIndex={safeStep}

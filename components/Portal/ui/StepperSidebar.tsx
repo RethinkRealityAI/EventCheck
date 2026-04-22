@@ -10,7 +10,11 @@ interface StepperSidebarProps {
 export function StepperSidebar({ steps, currentIndex, completedSteps, onStepClick }: StepperSidebarProps) {
   return (
     <nav
-      className="flex flex-row lg:flex-col gap-0 py-2 lg:py-4 w-full lg:h-full"
+      // `lg:h-full` + the parent aside's `lg:h-screen` give the nav a fixed
+      // vertical size so the `flex-1` children can divide it equally. The
+      // min-height protects us on short viewports or when the parent sticky
+      // layout doesn't resolve a pixel height in time.
+      className="flex flex-row lg:flex-col gap-0 py-2 lg:py-8 w-full lg:h-full lg:min-h-[600px]"
       aria-label="Registration steps"
     >
       {steps.map((step, i) => {
@@ -19,13 +23,13 @@ export function StepperSidebar({ steps, currentIndex, completedSteps, onStepClic
         const isReachable = isComplete || i <= currentIndex;
         const isLast = i === steps.length - 1;
         return (
-          // `lg:flex-1` makes every step slot take an equal vertical share of the
-          // sidebar. Paired with the connector's `bottom: 0 / top: 3.5rem` below,
-          // the gradient line cleanly spans from the bottom of this circle to the
-          // top of the next circle without gaps or cutoffs.
+          // `flex-1` makes every step slot take an equal share of the sidebar
+          // (horizontal at mobile, vertical at desktop). Paired with the
+          // connector's `top: 3.5rem / bottom: 0` below, the gradient line
+          // bridges cleanly between adjacent circles without gaps or truncation.
           <div
             key={step.id}
-            className="relative flex flex-1 lg:flex-initial lg:flex-1 flex-col lg:flex-row items-center lg:items-start gap-1.5 lg:gap-4 min-w-0"
+            className="relative flex flex-1 flex-col lg:flex-row items-center lg:items-start gap-1.5 lg:gap-4 min-w-0"
           >
             <button
               type="button"
