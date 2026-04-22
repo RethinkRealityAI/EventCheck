@@ -553,6 +553,11 @@ serve(async (req: Request) => {
           payment_status: 'paid',
           transaction_id: capture.id,
           is_test: false,
+          // Mark as pending-claim so the row routes through the group-flow
+          // claim pipeline (PublicRegistration update-in-place, guest-claim-
+          // completed email, "Pending/Completed" dashboard badge) and so the
+          // fire-and-forget group-invite email below picks it up.
+          guest_type: 'pending-claim',
         });
       }
 

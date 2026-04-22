@@ -142,8 +142,9 @@ export const generateTicketPDF = async (
     const regQrX = qrX + (qrBoxSize - regQrBoxSize) / 2;
     const regQrY = qrY + qrBoxSize + 25;
 
+    // Extended height to fit the plain-text URL below the helper copy.
     doc.setFillColor(243, 244, 246); // Light gray highlight
-    doc.roundedRect(qrX - 5, regQrY - 10, qrBoxSize + 10, regQrBoxSize + 30, 2, 2, 'F');
+    doc.roundedRect(qrX - 5, regQrY - 10, qrBoxSize + 10, regQrBoxSize + 46, 2, 2, 'F');
 
     const regQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(registrationUrl!)}`;
     const regQrDataUrl = await toDataUrl(regQrUrl);
@@ -155,7 +156,17 @@ export const generateTicketPDF = async (
       doc.text("TO REGISTER", regQrX + regQrBoxSize / 2, regQrY - 3, { align: 'center' });
       doc.setFontSize(7);
       doc.setFont('helvetica', 'normal');
-      doc.text(["To make signing smoother,", "please register using", "this QR code."], regQrX + regQrBoxSize / 2, regQrY + regQrBoxSize + 4, { align: 'center' });
+      doc.text(["Scan the QR code, or visit the link below:"], regQrX + regQrBoxSize / 2, regQrY + regQrBoxSize + 4, { align: 'center' });
+      // Plain-text URL so recipients who can't scan can type/click the link.
+      // Strip the protocol for readability and wrap within the highlight box.
+      const displayUrl = registrationUrl!.replace(/^https?:\/\//, '');
+      doc.setFontSize(6);
+      doc.setTextColor(59, 130, 246);
+      doc.textWithLink(displayUrl, regQrX + regQrBoxSize / 2, regQrY + regQrBoxSize + 11, {
+        url: registrationUrl!,
+        align: 'center',
+        maxWidth: qrBoxSize + 8,
+      });
     } catch (e) {
       console.error("Reg QR Error", e);
     }

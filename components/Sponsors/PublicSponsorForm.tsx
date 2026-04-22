@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { PayPalScriptProvider, PayPalButtons } from '@paypal/react-paypal-js';
 import { Check, AlertCircle, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
 import { Form, AppSettings, TicketItem, SponsorItemCategory, Attendee } from '../../types';
@@ -6,7 +6,7 @@ import { supabase } from '../../services/supabaseClient';
 import { generateReceiptPDF } from '../../utils/receiptGenerator';
 import { generateTicketPDF } from '../../utils/pdfGenerator';
 import { sendTicketEmail, arrayBufferToBase64 } from '../../services/smtpService';
-import { buildSponsorEmailContext, mergeTemplate } from '../../utils/sponsorEmailTemplates';
+import { buildSponsorEmailContext, mergeTemplate, renderGuestClaimLinksHtml } from '../../utils/sponsorEmailTemplates';
 import { buildSponsorExtras } from '../../utils/paypalOrderMeta';
 import { CURRENT_SITE } from '../../config/sites';
 
@@ -44,6 +44,12 @@ const CATEGORY_LABELS: Record<SponsorItemCategory, string> = {
 };
 
 const CATEGORY_ORDER: SponsorItemCategory[] = ['package', 'scholarship', 'ad', 'booth'];
+
+// Sponsorships above this threshold (in CAD) must be paid by cheque, payable to
+// "Sickle Cell Awareness Group of Ontario". At or below this threshold, only
+// PayPal is offered.
+const PAYPAL_MAX_CAD = 10000;
+const PAYABLE_TO = 'Sickle Cell Awareness Group of Ontario';
 
 // Award eligibility lists
 const GOLD_AWARDS = ['Nursing', 'Humanitarian'];
@@ -197,6 +203,27 @@ const PublicSponsorForm: React.FC<Props> = ({ form, settings }) => {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [chequeSelected, setChequeSelected] = useState(false);
+  // Primary attendee id is captured once the sponsor submits successfully so
+  // the success screen can render per-seat claim links for the guest roster.
+  const [primaryAttendeeId, setPrimaryAttendeeId] = useState<string | null>(null);
+  const [guestLinks, setGuestLinks] = useState<Array<{ id: string; name: string }>>([]);
+
+  // After a successful PayPal sponsorship, load the server-created guest rows
+  // so we can surface "Share these links with your guests" on the success
+  // screen. Cheque pledges generate no guest rows yet — skip the fetch.
+  useEffect(() => {
+    if (step !== 'success' || chequeSelected || !primaryAttendeeId) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('attendees')
+        .select('id,name')
+        .eq('primary_attendee_id', primaryAttendeeId)
+        .eq('is_primary', false);
+      if (!cancelled) setGuestLinks(((data as Array<{ id: string; name: string }>) || []));
+    })();
+    return () => { cancelled = true; };
+  }, [step, chequeSelected, primaryAttendeeId]);
 
   // ── Derived totals ─────────────────────────────────────────────────────────
   const selectedPackage = packages.find((p) => p.id === selectedPackageId) ?? null;
@@ -344,12 +371,11 @@ const PublicSponsorForm: React.FC<Props> = ({ form, settings }) => {
         contentType: 'application/pdf',
       };
 
-      const ctx = buildSponsorEmailContext(savedAttendee, settings, {
-        event: 'Hope Gala & Awards 2026',
-        adminDashboardLink: window.location.origin + `/#/admin/sponsors`,
-      });
-
       if (paymentMethod === 'cheque') {
+        const ctx = buildSponsorEmailContext(savedAttendee, settings, {
+          event: 'Hope Gala & Awards 2026',
+          adminDashboardLink: window.location.origin + `/#/admin/sponsors`,
+        });
         // Email sponsor — pledge
         await sendTicketEmail(settings, {
           to: savedAttendee.email,
@@ -368,9 +394,12 @@ const PublicSponsorForm: React.FC<Props> = ({ form, settings }) => {
           attachments: [receiptAttachment],
         });
       } else {
-        // PAYPAL — fetch guest rows + generate their ticket PDFs
-        const seatCount = meta.tier === 'signature' ? 16 : (meta.tier === 'gold' || meta.tier === 'silver') ? 8 : 0;
+        // PAYPAL — fetch guest rows + generate their ticket PDFs.
+        // Seat allotment comes from the selected package's `seats` field so
+        // it stays in sync if tiers are edited in createSponsorForm.ts.
+        const seatCount = selectedPackage?.seats ?? 0;
         const ticketAttachments: any[] = [receiptAttachment];
+        const fetchedGuests: Array<{ id: string; name: string }> = [];
         if (seatCount > 0) {
           const { data: guests } = await supabase
             .from('attendees')
@@ -378,6 +407,7 @@ const PublicSponsorForm: React.FC<Props> = ({ form, settings }) => {
             .eq('primary_attendee_id', savedAttendee.id)
             .eq('is_primary', false);
           for (const g of guests || []) {
+            fetchedGuests.push({ id: g.id, name: g.name });
             const guestAttendee = {
               ...savedAttendee,
               id: g.id,
@@ -394,6 +424,14 @@ const PublicSponsorForm: React.FC<Props> = ({ form, settings }) => {
             });
           }
         }
+        // Build the email context AFTER the guests are loaded so the
+        // {{guestClaimLinks}} placeholder renders a per-guest block the sponsor
+        // can forward directly (plus each PDF already carries the same QR/URL).
+        const ctx = buildSponsorEmailContext(savedAttendee, settings, {
+          event: 'Hope Gala & Awards 2026',
+          adminDashboardLink: window.location.origin + `/#/admin/sponsors`,
+          guestClaimLinksHtml: renderGuestClaimLinksHtml(fetchedGuests, form.id, window.location.origin),
+        });
         await sendTicketEmail(settings, {
           to: savedAttendee.email,
           subject: mergeTemplate(settings.sponsorConfirmationPaidSubject, ctx),
@@ -449,6 +487,7 @@ const PublicSponsorForm: React.FC<Props> = ({ form, settings }) => {
         throw new Error(resp?.error || fnError?.message || 'Pledge submission failed');
       }
       setChequeSelected(true);
+      setPrimaryAttendeeId(primId);
       setStep('success');
       // Fire email dispatch async — don't block UI
       dispatchSponsorEmails(primId, invId, contact.orgName, contact.email, regAt, undefined, 'cheque');
@@ -460,7 +499,23 @@ const PublicSponsorForm: React.FC<Props> = ({ form, settings }) => {
   };
 
   // Fix 4 — Submit via verify-payment edge function (PayPal path)
-  const paypalClientId = settings?.paypalClientId || '';
+  // Resolve PayPal client ID using the same fallback chain as PublicRegistration:
+  // VITE_PAYPAL_ENV flips between sandbox/live keys, and settings.paypalClientId
+  // is the admin-configured fallback when env vars are not set.
+  const getEnvVar = (name: string): string => {
+    try {
+      return (import.meta as any).env[name] || '';
+    } catch {
+      return '';
+    }
+  };
+  const paypalEnv = (getEnvVar('VITE_PAYPAL_ENV') || 'live').toLowerCase();
+  const paypalClientId =
+    (paypalEnv === 'sandbox'
+      ? getEnvVar('VITE_PAYPAL_SANDBOX_CLIENT_ID') || getEnvVar('VITE_PAYPAL_CLIENT_ID')
+      : getEnvVar('VITE_PAYPAL_CLIENT_ID')) ||
+    settings?.paypalClientId ||
+    '';
 
   const onPayPalApprove = async (data: { orderID: string }) => {
     setSubmitting(true);
@@ -497,6 +552,7 @@ const PublicSponsorForm: React.FC<Props> = ({ form, settings }) => {
       if (fnError || resp?.error) {
         throw new Error(resp?.error || fnError?.message || 'Payment verification failed');
       }
+      setPrimaryAttendeeId(primaryAttendee.id);
       setStep('success');
       dispatchSponsorEmails(primaryAttendee.id, primaryAttendee.invoice_id, contact.orgName, contact.email, primaryAttendee.registered_at, (resp as any)?.transactionId, 'paypal');
     } catch (err: any) {
@@ -516,9 +572,13 @@ const PublicSponsorForm: React.FC<Props> = ({ form, settings }) => {
 
   // ── Success screen ─────────────────────────────────────────────────────────
   if (step === 'success') {
+    const copyGuestLink = (guestId: string) => {
+      const url = `${window.location.origin}/#/form/${form.id}?ref=${guestId}`;
+      navigator.clipboard.writeText(url);
+    };
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
-        <div className="bg-white rounded-2xl shadow-xl p-10 max-w-md w-full text-center">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4 py-10">
+        <div className="bg-white rounded-2xl shadow-xl p-10 max-w-xl w-full text-center">
           <div
             className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4"
             style={{ backgroundColor: accentColor }}
@@ -530,7 +590,7 @@ const PublicSponsorForm: React.FC<Props> = ({ form, settings }) => {
           </h1>
           <p className="text-gray-500 mb-6">
             {chequeSelected
-              ? 'Your pledge has been recorded. Please make your cheque payable to SCAGO and mail to the address on the invoice.'
+              ? `Your pledge has been recorded. Please make your cheque payable to ${PAYABLE_TO} and mail to the address on the invoice.`
               : "We've received your sponsorship commitment. Our team will be in touch within 2 business days."}
           </p>
           <div className="bg-gray-50 rounded-xl p-4 text-left text-sm text-gray-700 space-y-1">
@@ -544,6 +604,31 @@ const PublicSponsorForm: React.FC<Props> = ({ form, settings }) => {
               <span className="font-semibold">Total:</span> {fmtCAD(totalWithHst)} CAD
             </p>
           </div>
+          {guestLinks.length > 0 && (
+            <div className="mt-6 text-left">
+              <h3 className="font-bold text-gray-900 mb-1">Share these links with your guests</h3>
+              <p className="text-xs text-gray-500 mb-3">
+                Each guest gets their own link. They'll use it to enter their name, dietary preferences, and pick up their ticket. Links are also in the confirmation email we just sent you.
+              </p>
+              <div className="space-y-2">
+                {guestLinks.map((g, i) => (
+                  <div key={g.id} className="flex items-center justify-between gap-3 p-3 bg-gray-50 rounded-lg text-sm">
+                    <div className="min-w-0 flex-1">
+                      <div className="font-semibold truncate">Seat {i + 1}</div>
+                      <div className="text-xs text-gray-400 truncate">{g.name}</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => copyGuestLink(g.id)}
+                      className="text-xs font-semibold text-red-700 hover:underline flex-shrink-0"
+                    >
+                      Copy link
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -551,6 +636,7 @@ const PublicSponsorForm: React.FC<Props> = ({ form, settings }) => {
 
   // ── Payment screen ─────────────────────────────────────────────────────────
   if (step === 'payment') {
+    const chequeRequired = totalWithHst > PAYPAL_MAX_CAD;
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4 py-12">
         <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full">
@@ -567,8 +653,31 @@ const PublicSponsorForm: React.FC<Props> = ({ form, settings }) => {
           )}
 
           <div className="space-y-4">
-            {/* PayPal */}
-            {paypalClientId ? (
+            {chequeRequired ? (
+              <>
+                <div className="p-3 bg-blue-50 text-blue-800 rounded-lg text-sm">
+                  Sponsorships above {fmtCAD(PAYPAL_MAX_CAD)} CAD are paid by cheque, payable to <strong>{PAYABLE_TO}</strong>.
+                </div>
+                <button
+                  type="button"
+                  disabled={submitting}
+                  onClick={() => {
+                    setChequeSelected(true);
+                    submitCheque();
+                  }}
+                  className="w-full py-3 rounded-xl text-white font-bold transition hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
+                  style={{ backgroundColor: accentColor }}
+                >
+                  {submitting && chequeSelected ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : null}
+                  Pay by Cheque (Pledge)
+                </button>
+                <p className="text-xs text-gray-400 text-center">
+                  Submits a pledge. Cheque payable to <strong>{PAYABLE_TO}</strong>.
+                </p>
+              </>
+            ) : paypalClientId ? (
               <div key={`${paypalClientId}-${totalWithHst}`}>
                 <p className="text-xs text-gray-400 mb-2 font-semibold uppercase tracking-wide">
                   Pay online
@@ -621,35 +730,9 @@ const PublicSponsorForm: React.FC<Props> = ({ form, settings }) => {
               </div>
             ) : (
               <div className="p-3 bg-amber-50 text-amber-700 rounded-lg text-sm">
-                PayPal is not configured. Please use the cheque option below.
+                PayPal is not configured. Please contact us to complete your sponsorship.
               </div>
             )}
-
-            {/* Divider */}
-            <div className="flex items-center gap-3">
-              <hr className="flex-1 border-gray-200" />
-              <span className="text-xs text-gray-400 font-semibold uppercase tracking-wide">or</span>
-              <hr className="flex-1 border-gray-200" />
-            </div>
-
-            {/* Cheque pledge */}
-            <button
-              type="button"
-              disabled={submitting}
-              onClick={() => {
-                setChequeSelected(true);
-                submitCheque();
-              }}
-              className="w-full py-3 rounded-xl border-2 border-gray-300 text-gray-700 font-bold hover:border-gray-400 hover:bg-gray-50 transition disabled:opacity-50 flex items-center justify-center gap-2"
-            >
-              {submitting && chequeSelected ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : null}
-              Pay by Cheque (Pledge)
-            </button>
-            <p className="text-xs text-gray-400 text-center">
-              Submits a pledge. Cheque payable to <strong>SCAGO</strong>.
-            </p>
           </div>
 
           <button
@@ -845,6 +928,11 @@ const PublicSponsorForm: React.FC<Props> = ({ form, settings }) => {
                 <span>Total</span>
                 <span>{fmtCAD(totalWithHst)} CAD</span>
               </div>
+              {totalWithHst > PAYPAL_MAX_CAD && (
+                <p className="text-xs text-gray-500 pt-2">
+                  Sponsorships above {fmtCAD(PAYPAL_MAX_CAD)} CAD are paid by cheque, payable to <strong>{PAYABLE_TO}</strong>.
+                </p>
+              )}
             </div>
           )}
 

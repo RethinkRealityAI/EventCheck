@@ -79,29 +79,41 @@ const SponsorDetailModal: React.FC<Props> = ({ attendee, settings, onClose, onCh
             </section>
           )}
 
-          {guests.length > 0 && (
-            <section>
-              <h3 className="font-bold mb-2">Tickets Issued ({guests.length})</h3>
-              <div className="space-y-2">
-                {guests.map(g => (
-                  <div key={g.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg text-sm">
-                    <div>
-                      <div className="font-semibold">{g.name}</div>
-                      <div className="text-xs text-slate-500">{g.name.includes('Guest Ticket #') ? 'Unclaimed' : 'Claimed'}</div>
+          {guests.length > 0 && (() => {
+            // Prefer the authoritative `guest_type` column; fall back to the
+            // legacy name-pattern heuristic for sponsor rows created before
+            // the placeholder stamping change shipped.
+            const isClaimed = (g: any): boolean =>
+              g.guest_type === 'claimed'
+                ? true
+                : g.guest_type === 'pending-claim'
+                  ? false
+                  : !(g.name || '').includes('Guest Ticket #');
+            const claimedCount = guests.filter(isClaimed).length;
+            return (
+              <section>
+                <h3 className="font-bold mb-2">Tickets Issued ({claimedCount}/{guests.length} claimed)</h3>
+                <div className="space-y-2">
+                  {guests.map(g => (
+                    <div key={g.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg text-sm">
+                      <div>
+                        <div className="font-semibold">{g.name}</div>
+                        <div className="text-xs text-slate-500">{isClaimed(g) ? 'Claimed' : 'Unclaimed'}</div>
+                      </div>
+                      <button
+                        onClick={() => {
+                          const url = `${window.location.origin}/#/form/${attendee.formId}?ref=${g.id}`;
+                          navigator.clipboard.writeText(url);
+                          showNotification('Registration link copied', 'success');
+                        }}
+                        className="text-indigo-600 text-xs hover:underline"
+                      >Copy link</button>
                     </div>
-                    <button
-                      onClick={() => {
-                        const url = `${window.location.origin}/#/form/${attendee.formId}?ref=${g.id}`;
-                        navigator.clipboard.writeText(url);
-                        showNotification('Registration link copied', 'success');
-                      }}
-                      className="text-indigo-600 text-xs hover:underline"
-                    >Copy link</button>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
+                  ))}
+                </div>
+              </section>
+            );
+          })()}
 
           <section>
             <h3 className="font-bold mb-2">Admin Notes</h3>
