@@ -374,8 +374,10 @@ const PublicSponsorForm: React.FC<Props> = ({ form, settings }) => {
           attachments: [receiptAttachment],
         });
       } else {
-        // PAYPAL — fetch guest rows + generate their ticket PDFs
-        const seatCount = meta.tier === 'signature' ? 16 : (meta.tier === 'gold' || meta.tier === 'silver') ? 8 : 0;
+        // PAYPAL — fetch guest rows + generate their ticket PDFs.
+        // Seat allotment comes from the selected package's `seats` field so
+        // it stays in sync if tiers are edited in createSponsorForm.ts.
+        const seatCount = selectedPackage?.seats ?? 0;
         const ticketAttachments: any[] = [receiptAttachment];
         if (seatCount > 0) {
           const { data: guests } = await supabase
@@ -466,7 +468,23 @@ const PublicSponsorForm: React.FC<Props> = ({ form, settings }) => {
   };
 
   // Fix 4 — Submit via verify-payment edge function (PayPal path)
-  const paypalClientId = settings?.paypalClientId || '';
+  // Resolve PayPal client ID using the same fallback chain as PublicRegistration:
+  // VITE_PAYPAL_ENV flips between sandbox/live keys, and settings.paypalClientId
+  // is the admin-configured fallback when env vars are not set.
+  const getEnvVar = (name: string): string => {
+    try {
+      return (import.meta as any).env[name] || '';
+    } catch {
+      return '';
+    }
+  };
+  const paypalEnv = (getEnvVar('VITE_PAYPAL_ENV') || 'live').toLowerCase();
+  const paypalClientId =
+    (paypalEnv === 'sandbox'
+      ? getEnvVar('VITE_PAYPAL_SANDBOX_CLIENT_ID') || getEnvVar('VITE_PAYPAL_CLIENT_ID')
+      : getEnvVar('VITE_PAYPAL_CLIENT_ID')) ||
+    settings?.paypalClientId ||
+    '';
 
   const onPayPalApprove = async (data: { orderID: string }) => {
     setSubmitting(true);
