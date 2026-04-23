@@ -26,3 +26,10 @@ verify_jwt = true
 # the caller and enforce the super_admin gate.
 [functions.admin-invite]
 verify_jwt = true
+
+# Called anonymously by email clients loading the tracking pixel and by
+# recipients clicking rewritten CTA links. Uses service-role internally to
+# update email_sends open/click columns — never exposes any write path to
+# clients. Must be gateway-open.
+[functions.track-email]
+verify_jwt = false

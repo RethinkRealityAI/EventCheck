@@ -562,6 +562,57 @@ export type Database = {
                 };
                 Relationships: [];
             };
+            email_sends: {
+                Row: {
+                    id: string;
+                    tracking_id: string;
+                    recipient_email: string;
+                    recipient_user_id: string | null;
+                    subject: string;
+                    template_key: string | null;
+                    form_id: string | null;
+                    event_name: string | null;
+                    sent_at: string;
+                    sent_by: string | null;
+                    opened_at: string | null;
+                    click_count: number;
+                    last_clicked_at: string | null;
+                    metadata: Json;
+                };
+                Insert: {
+                    id?: string;
+                    tracking_id: string;
+                    recipient_email: string;
+                    recipient_user_id?: string | null;
+                    subject: string;
+                    template_key?: string | null;
+                    form_id?: string | null;
+                    event_name?: string | null;
+                    sent_at?: string;
+                    sent_by?: string | null;
+                    opened_at?: string | null;
+                    click_count?: number;
+                    last_clicked_at?: string | null;
+                    metadata?: Json;
+                };
+                Update: {
+                    id?: string;
+                    tracking_id?: string;
+                    recipient_email?: string;
+                    recipient_user_id?: string | null;
+                    subject?: string;
+                    template_key?: string | null;
+                    form_id?: string | null;
+                    event_name?: string | null;
+                    sent_at?: string;
+                    sent_by?: string | null;
+                    opened_at?: string | null;
+                    click_count?: number;
+                    last_clicked_at?: string | null;
+                    metadata?: Json;
+                };
+                Relationships: [];
+            };
         }
         Views: {
             [_ in never]: never

@@ -20,67 +20,78 @@ function jsonResponse(body: Record<string, any>, status = 200) {
 }
 
 /**
- * Generate a branded HTML email template.
+ * Branded HTML email shell — must match the visual language of
+ * utils/emailShell.ts in the browser so admin previews and real sends look
+ * identical. `fromName` is used as a coarse site-key signal (any name
+ * containing "GANSID" gets the tri-stop gradient; else SCAGO red).
  */
 function generateEmailTemplate(data: {
     title: string;
     greeting: string;
     content: string;
-    attachmentNote?: string; // if provided, render as the callout; if undefined, suppress the callout
+    attachmentNote?: string;
     fromName?: string;
 }) {
-    const footerName = (data.fromName && data.fromName.trim()) ? data.fromName : 'SCAGO';
-    return `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="utf-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    </head>
-    <body style="margin: 0; padding: 0; background-color: #f4f6f9; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f4f6f9; padding: 40px 20px;">
-        <tr>
-          <td align="center">
-            <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width: 600px; width: 100%; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.08);">
-              <!-- Header -->
-              <tr>
-                <td style="background: linear-gradient(135deg, #1a73e8, #0052cc); padding: 40px 40px 30px; text-align: center;">
-                  <h1 style="margin: 0; color: #ffffff; font-size: 26px; font-weight: 700; letter-spacing: 0.5px;">${data.title}</h1>
-                  <div style="width: 50px; height: 3px; background: rgba(255,255,255,0.5); margin: 16px auto 0; border-radius: 2px;"></div>
-                </td>
-              </tr>
-              <!-- Body -->
-              <tr>
-                <td style="background-color: #ffffff; padding: 40px;">
-                  <p style="margin: 0 0 20px; font-size: 18px; font-weight: 600; color: #1a1a2e;">${data.greeting},</p>
-                  <div style="font-size: 15px; line-height: 1.7; color: #444;">
-                    ${data.content}
-                  </div>
-                  ${data.attachmentNote ? `
-                  <!-- Attachment hint -->
-                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top: 28px; background-color: #f0f7ff; border-radius: 8px; border: 1px solid #d4e5f7;">
-                    <tr>
-                      <td style="padding: 16px 20px;">
-                        <p style="margin: 0; font-size: 14px; color: #1a73e8; font-weight: 600;">&#128206; ${data.attachmentNote}</p>
-                      </td>
-                    </tr>
-                  </table>
-                  ` : ''}
-                </td>
-              </tr>
-              <!-- Footer -->
-              <tr>
-                <td style="background-color: #f8f9fb; padding: 24px 40px; text-align: center; border-top: 1px solid #eaedf0;">
-                  <p style="margin: 0; font-size: 12px; color: #8c95a1;">This email was sent by ${footerName}.</p>
-                </td>
-              </tr>
-            </table>
-          </td>
-        </tr>
-      </table>
-    </body>
-    </html>
-  `;
+    const rawName = (data.fromName && data.fromName.trim()) ? data.fromName : 'SCAGO';
+    const isGansid = /gansid/i.test(rawName);
+    const palette = isGansid
+      ? {
+          headerGradient: 'linear-gradient(135deg, #ba0028 0%, #E0243C 55%, #2260a1 100%)',
+          footerGradient: 'linear-gradient(135deg, #ba0028 0%, #E0243C 60%, #2260a1 100%)',
+          buttonColor: '#ba0028',
+          brandLabel: "GANSID '26",
+          subtitle: 'Hyderabad, India · October 23–25, 2026',
+          contactEmail: 'congress@inheritedblooddisorders.world',
+        }
+      : {
+          headerGradient: 'linear-gradient(135deg, #B3282D 0%, #8B1F24 100%)',
+          footerGradient: 'linear-gradient(135deg, #B3282D 0%, #8B1F24 100%)',
+          buttonColor: '#B3282D',
+          brandLabel: 'SCAGO',
+          subtitle: 'Sickle Cell Awareness Group of Ontario',
+          contactEmail: 'info@scago.ca',
+        };
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body { margin: 0; padding: 0; background: #f3f4f6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Tahoma, sans-serif; color: #1a1c1c; }
+    .container { max-width: 560px; margin: 40px auto; background: white; border-radius: 20px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.08); }
+    .header { background: ${palette.headerGradient}; padding: 44px 32px 40px; text-align: center; color: white; }
+    .header-title { font-size: 26px; font-weight: 800; letter-spacing: 1px; color: white; text-transform: uppercase; margin: 0; }
+    .header-subtitle { font-size: 13px; color: rgba(255,255,255,0.9); margin-top: 8px; }
+    .body { padding: 40px 32px; }
+    .body h1, .body h2, .body h3 { color: #1a1c1c; margin: 0 0 16px; line-height: 1.2; }
+    .body p { font-size: 16px; line-height: 1.6; color: #1a1c1c; opacity: 0.85; margin: 0 0 20px; }
+    .body a { color: ${palette.buttonColor}; }
+    .greeting { font-size: 18px; font-weight: 600; color: #1a1a2e; margin: 0 0 20px; }
+    .attachment-callout { margin-top: 24px; background: rgba(0,0,0,0.03); border-radius: 10px; padding: 14px 18px; font-size: 14px; color: #4b5563; border-left: 3px solid ${palette.buttonColor}; }
+    .footer { padding: 28px 32px; background: ${palette.footerGradient}; text-align: center; font-size: 12px; color: rgba(255,255,255,0.92); }
+    .footer a { color: white; text-decoration: underline; }
+    .footer-brand { font-size: 13px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; color: white; margin-bottom: 6px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="header-title">${data.title}</div>
+      <div class="header-subtitle">${palette.subtitle}</div>
+    </div>
+    <div class="body">
+      <p class="greeting">${data.greeting},</p>
+      ${data.content}
+      ${data.attachmentNote ? `<div class="attachment-callout">📎 ${data.attachmentNote}</div>` : ''}
+    </div>
+    <div class="footer">
+      <div class="footer-brand">${palette.brandLabel}</div>
+      Questions? <a href="mailto:${palette.contactEmail}">${palette.contactEmail}</a>
+    </div>
+  </div>
+</body>
+</html>`;
 }
 
 /**
@@ -124,6 +135,27 @@ serve(async (req: Request) => {
 
     try {
         const body = await req.json();
+
+        // ── RAW HTML: send a fully pre-rendered email with no extra templating ──
+        // Used by admin tools (SendUserEmailModal) that generate their own branded
+        // HTML (header image, gradient footer, tracking pixel, etc.) and must NOT be
+        // wrapped by generateEmailTemplate — doing so double-wraps the doc and
+        // destroys the layout.
+        // Body shape: { mode: 'raw-html', to, subject, html, smtpConfig?, fromEmail? }
+        if (body.mode === 'raw-html') {
+            const { to, subject, html, smtpConfig } = body;
+            if (!to || !subject || !html) {
+                return jsonResponse({ error: 'Missing to/subject/html' }, 400);
+            }
+            const { transporter, smtpUser, fromName } = buildTransporter(smtpConfig);
+            await transporter.sendMail({
+                from: `"${fromName}" <${smtpUser}>`,
+                to,
+                subject,
+                html,
+            });
+            return jsonResponse({ ok: true });
+        }
 
         // ── GROUP INVITE: send registration-completion link to a pending-claim guest ──
         // Uses admin-configurable Template Y from app_settings.email_guest_claim_*.
@@ -177,6 +209,8 @@ serve(async (req: Request) => {
         }
 
         // ── GUEST CLAIM COMPLETED: send ticket to the now-claimed guest + notify primary ──
+        // Reads admin-configurable templates from app_settings.email_guest_confirmed_*
+        // with placeholders {{name}} {{event}} {{purchaser}} {{registration_id}} {{qr_image_url}}.
         if (body.mode === 'guest-claim-completed') {
             const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
             const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -196,29 +230,41 @@ serve(async (req: Request) => {
                 .maybeSingle();
             const eventName = form?.title || 'the event';
 
+            // Pull SMTP + fromName from admin-configurable app_settings so a
+            // credential rotation in Settings propagates to this mode instead of
+            // silently falling back to stale env vars.
+            const { data: appSettings } = await supabase
+                .from('app_settings').select('*').eq('id', 1).maybeSingle();
+            const smtpConfig = appSettings
+                ? { host: appSettings.smtp_host, port: Number(appSettings.smtp_port || 587), user: appSettings.smtp_user, pass: appSettings.smtp_pass, fromName: (appSettings as any).email_from_name || 'SCAGO' }
+                : undefined;
+
             // 1. Send a personal ticket confirmation to the claimed guest.
-            // QR is embedded as an image (external service) so the guest can scan directly
-            // from their email at check-in — no PDF attachment is produced on this path
-            // since the edge function doesn't have a PDF library, but the QR image is the
-            // functional equivalent for entry.
             let ticketOk = true;
             try {
                 const qrData = attendee.qr_payload || attendee.id;
                 const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(qrData)}`;
-                const subject = `Your registration for ${eventName} is confirmed`;
-                const html = `
-                    <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
-                      <h2>Hi ${attendee.name || 'there'},</h2>
-                      <p>Thank you for completing your registration for <strong>${eventName}</strong>!</p>
-                      <p>Your check-in QR code is below. Present this email at the entrance — the team will scan it.</p>
-                      <div style="text-align:center;margin:24px 0;">
-                        <img src="${qrImageUrl}" alt="Check-in QR code" width="240" height="240" style="border:1px solid #e5e7eb;border-radius:8px;padding:8px;background:#fff;" />
-                      </div>
-                      <p style="color:#666;font-size:13px;">Registration ID: ${attendee.id}</p>
-                      <p style="color:#666;font-size:13px;">If the QR image doesn't load, reply to this email and we'll resend your ticket.</p>
-                    </div>
-                `;
-                await sendSimpleEmail({ to: attendee.email, subject, html });
+
+                const rawSubject = (appSettings as any)?.email_guest_confirmed_subject
+                    || 'Your registration for {{event}} is confirmed';
+                const rawBody = (appSettings as any)?.email_guest_confirmed_body
+                    || `<p>Thank you for completing your registration for <strong>{{event}}</strong>!</p><p>Your check-in QR code is below. Present this email at the entrance — the team will scan it.</p><div style="text-align:center;margin:24px 0;"><img src="{{qr_image_url}}" alt="Check-in QR code" width="240" height="240" style="border:1px solid #e5e7eb;border-radius:8px;padding:8px;background:#fff;" /></div><p style="color:#666;font-size:13px;">Registration ID: {{registration_id}}</p>`;
+
+                const replace = (s: string) => s
+                    .replace(/\{\{name\}\}/g, attendee.name || 'there')
+                    .replace(/\{\{event\}\}/g, eventName)
+                    .replace(/\{\{registration_id\}\}/g, attendee.id)
+                    .replace(/\{\{qr_image_url\}\}/g, qrImageUrl);
+
+                const subject = replace(rawSubject);
+                const body_html = replace(rawBody);
+                const html = generateEmailTemplate({
+                    title: eventName,
+                    greeting: `Hi ${attendee.name || 'there'}`,
+                    content: body_html,
+                    fromName: smtpConfig?.fromName,
+                });
+                await sendSimpleEmail({ to: attendee.email, subject, html, smtpConfig });
             } catch (e) {
                 console.warn('Failed to send personal ticket on claim-completion', e);
                 ticketOk = false;
@@ -233,14 +279,13 @@ serve(async (req: Request) => {
                     .maybeSingle();
                 if (primary?.email) {
                     const subject = `${attendee.name} has completed their registration`;
-                    const html = `
-                        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
-                          <p>Hi ${primary.name || 'there'},</p>
-                          <p><strong>${attendee.name}</strong> has completed their registration details for <strong>${eventName}</strong>.
-                          Their individual ticket confirmation has been emailed to them directly.</p>
-                        </div>
-                    `;
-                    await sendSimpleEmail({ to: primary.email, subject, html })
+                    const html = generateEmailTemplate({
+                        title: eventName,
+                        greeting: `Hi ${primary.name || 'there'}`,
+                        content: `<p><strong>${attendee.name}</strong> has completed their registration details for <strong>${eventName}</strong>. Their individual ticket confirmation has been emailed to them directly.</p>`,
+                        fromName: smtpConfig?.fromName,
+                    });
+                    await sendSimpleEmail({ to: primary.email, subject, html, smtpConfig })
                         .catch(e => console.warn('Primary notification failed', e));
                 }
             }
@@ -349,6 +394,9 @@ serve(async (req: Request) => {
         }
 
         // ── EXHIBITOR STAFF INVITE: send registration-completion link to an exhibitor staff member ──
+        // Shares admin-configurable app_settings.email_staff_invite_* templates with the
+        // sponsor_exhibitor combined flow — the two flows are functionally identical,
+        // so operators edit a single template in Settings → Email templates.
         if (body.mode === 'exhibitor-staff-invite') {
             const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
             const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -374,30 +422,47 @@ serve(async (req: Request) => {
                 .maybeSingle();
             const eventName = form?.title || 'the GANSID Congress';
             const orgName = (org?.company_info as any)?.orgName || 'your organization';
+            const purchaser = org?.name || (org?.company_info as any)?.contactName || 'the organization';
+
+            const { data: appSettings } = await supabase
+                .from('app_settings').select('*').eq('id', 1).maybeSingle();
+            const smtpConfig = appSettings
+                ? { host: appSettings.smtp_host, port: Number(appSettings.smtp_port || 587), user: appSettings.smtp_user, pass: appSettings.smtp_pass, fromName: (appSettings as any).email_from_name || 'GANSID Congress' }
+                : undefined;
 
             const origin = body.origin || '';
             const registrationLink = `${origin}/#/form/${staff.form_id}?ref=${staff.id}`;
+            const signupUrl = `${origin}/#/`;
 
-            const subject = `Complete your registration for ${eventName}`;
-            const html = `
-                <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
-                  <h2>Hi ${staff.name || 'there'},</h2>
-                  <p><strong>${orgName}</strong> has registered you for the <strong>${eventName}</strong> as an exhibitor staff member.</p>
-                  <p>Please click below to complete your personal details (dietary restrictions, accessibility needs, consent).</p>
-                  <p style="text-align:center;margin:24px 0;">
-                    <a href="${registrationLink}" style="display:inline-block;padding:12px 24px;background:#1E4A8C;color:white;border-radius:6px;text-decoration:none;font-weight:600;">
-                      Complete my registration
-                    </a>
-                  </p>
-                  <p style="color:#666;font-size:13px;">Or copy this link into your browser:<br>${registrationLink}</p>
-                </div>
-            `;
+            const rawSubject = (appSettings as any)?.email_staff_invite_subject
+                || 'Complete your registration for {{event}}';
+            const rawBody = (appSettings as any)?.email_staff_invite_body
+                || `<p>Hi {{name}},</p><p><strong>{{purchaser}}</strong> has registered you for <strong>{{event}}</strong> on behalf of <strong>{{org_name}}</strong> ({{category}}).</p><p>Please complete your personal details:</p><p style="text-align:center;margin:24px 0;"><a href="{{complete_url}}" style="display:inline-block;padding:12px 24px;background:#1E4A8C;color:#fff;text-decoration:none;border-radius:6px;font-weight:600;">Complete my registration</a></p><p>You can also create a portal account: <a href="{{signup_url}}">{{signup_url}}</a></p>`;
 
-            await sendSimpleEmail({ to: staff.email, subject, html });
+            const replace = (s: string) => s
+                .replace(/\{\{name\}\}/g, staff.name || 'there')
+                .replace(/\{\{purchaser\}\}/g, purchaser)
+                .replace(/\{\{org_name\}\}/g, orgName)
+                .replace(/\{\{category\}\}/g, 'Exhibitor staff')
+                .replace(/\{\{complete_url\}\}/g, registrationLink)
+                .replace(/\{\{signup_url\}\}/g, signupUrl)
+                .replace(/\{\{event\}\}/g, eventName);
+
+            const subject = replace(rawSubject);
+            const body_html = replace(rawBody);
+            const html = generateEmailTemplate({
+                title: eventName,
+                greeting: `Hi ${staff.name || 'there'}`,
+                content: body_html,
+                fromName: smtpConfig?.fromName,
+            });
+
+            await sendSimpleEmail({ to: staff.email, subject, html, smtpConfig });
             return jsonResponse({ ok: true });
         }
 
         // ── EXHIBITOR STAFF CLAIM COMPLETED: send ticket to claimed staff + notify org contact ──
+        // Uses the same email_staff_confirmed_* admin templates as the sponsor_exhibitor flow.
         if (body.mode === 'exhibitor-staff-claim-completed') {
             const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
             const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -417,43 +482,57 @@ serve(async (req: Request) => {
                 .maybeSingle();
             const eventName = form?.title || 'the GANSID Congress';
 
+            const { data: org } = staff.primary_attendee_id
+                ? await supabase
+                    .from('attendees')
+                    .select('company_info, email')
+                    .eq('id', staff.primary_attendee_id)
+                    .maybeSingle()
+                : { data: null } as any;
+            const orgName = (org?.company_info as any)?.orgName || 'your organization';
+
+            const { data: appSettings } = await supabase
+                .from('app_settings').select('*').eq('id', 1).maybeSingle();
+            const smtpConfig = appSettings
+                ? { host: appSettings.smtp_host, port: Number(appSettings.smtp_port || 587), user: appSettings.smtp_user, pass: appSettings.smtp_pass, fromName: (appSettings as any).email_from_name || 'GANSID Congress' }
+                : undefined;
+
+            const rawSubject = (appSettings as any)?.email_staff_confirmed_subject
+                || 'Your registration for {{event}} is confirmed';
+            const rawBody = (appSettings as any)?.email_staff_confirmed_body
+                || `<p>Hi {{name}},</p><p>Thank you for completing your registration for <strong>{{event}}</strong> on behalf of <strong>{{org_name}}</strong>!</p><p>You are all set. Please bring this confirmation (or the QR code on your ticket) to the event for check-in.</p>`;
+
+            const replace = (s: string) => s
+                .replace(/\{\{name\}\}/g, staff.name || 'there')
+                .replace(/\{\{org_name\}\}/g, orgName)
+                .replace(/\{\{event\}\}/g, eventName);
+
             // 1. Send personal ticket confirmation to the staff member
             try {
-                const subject = `Your registration for ${eventName} is confirmed`;
-                const html = `
-                    <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
-                      <h2>Hi ${staff.name || 'there'},</h2>
-                      <p>Thank you for completing your registration for <strong>${eventName}</strong>!</p>
-                      <p>You are all set. Please bring this confirmation (or the QR code on your ticket) to the event for check-in.</p>
-                      <p style="color:#666;font-size:13px;">Registration ID: ${staff.id}</p>
-                    </div>
-                `;
-                await sendSimpleEmail({ to: staff.email, subject, html });
+                const subject = replace(rawSubject);
+                const body_html = replace(rawBody);
+                const html = generateEmailTemplate({
+                    title: eventName,
+                    greeting: `Hi ${staff.name || 'there'}`,
+                    content: body_html,
+                    fromName: smtpConfig?.fromName,
+                });
+                await sendSimpleEmail({ to: staff.email, subject, html, smtpConfig });
             } catch (e) {
                 console.warn('Failed to send exhibitor-staff ticket email', e);
             }
 
             // 2. Notify the org contact (best-effort)
-            if (staff.primary_attendee_id) {
-                const { data: org } = await supabase
-                    .from('attendees')
-                    .select('company_info, email')
-                    .eq('id', staff.primary_attendee_id)
-                    .maybeSingle();
-                const contactEmail = org?.email;
-                const orgName = (org?.company_info as any)?.orgName || 'your organization';
-                if (contactEmail) {
-                    const subject = `${staff.name} has completed their registration`;
-                    const html = `
-                        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
-                          <p>Hi ${(org?.company_info as any)?.contactName || 'there'},</p>
-                          <p><strong>${staff.name}</strong> has completed their registration details for the <strong>${eventName}</strong> on behalf of <strong>${orgName}</strong>.</p>
-                          <p>Their individual ticket confirmation has been emailed to them directly.</p>
-                        </div>
-                    `;
-                    await sendSimpleEmail({ to: contactEmail, subject, html })
-                        .catch(e => console.warn('Org contact notification failed', e));
-                }
+            if (org?.email) {
+                const subject = `${staff.name} has completed their registration`;
+                const html = generateEmailTemplate({
+                    title: eventName,
+                    greeting: `Hi ${(org?.company_info as any)?.contactName || 'there'}`,
+                    content: `<p><strong>${staff.name}</strong> has completed their registration details for the <strong>${eventName}</strong> on behalf of <strong>${orgName}</strong>.</p><p>Their individual ticket confirmation has been emailed to them directly.</p>`,
+                    fromName: smtpConfig?.fromName,
+                });
+                await sendSimpleEmail({ to: org.email, subject, html, smtpConfig })
+                    .catch(e => console.warn('Org contact notification failed', e));
             }
 
             return jsonResponse({ ok: true });
