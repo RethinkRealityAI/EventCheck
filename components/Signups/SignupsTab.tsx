@@ -1,8 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Mail, Search, RefreshCw, CheckCircle2, Clock, Circle } from 'lucide-react';
+import { Mail, Search, RefreshCw, CheckCircle2, Clock, Circle, Eye, MousePointerClick } from 'lucide-react';
 import { getPortalUsers, type PortalUser } from '../../services/storageService';
+import { getLatestEmailSendPerRecipient, type EmailSend } from '../../services/emailSendsService';
 import type { AppSettings, Form } from '../../types';
 import SendUserEmailModal from './SendUserEmailModal';
+
+const TEMPLATE_SHORT_LABELS: Record<string, string> = {
+  reminder: 'Reminder',
+  invitation: 'Invitation',
+  blank: 'Custom',
+  custom: 'Custom',
+};
 
 interface Props {
   settings: AppSettings;
@@ -29,6 +37,7 @@ function timeAgo(iso: string): string {
 
 export default function SignupsTab({ settings, forms }: Props) {
   const [users, setUsers] = useState<PortalUser[]>([]);
+  const [emailSendsByEmail, setEmailSendsByEmail] = useState<Map<string, EmailSend>>(new Map());
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<FilterKey>('all');
@@ -37,11 +46,20 @@ export default function SignupsTab({ settings, forms }: Props) {
   const load = async () => {
     setLoading(true);
     try {
-      const rows = await getPortalUsers();
+      const [rows, sendsMap] = await Promise.all([
+        getPortalUsers(),
+        getLatestEmailSendPerRecipient(),
+      ]);
       setUsers(rows);
+      setEmailSendsByEmail(sendsMap);
     } finally {
       setLoading(false);
     }
+  };
+
+  const reloadEmailSends = async () => {
+    const sendsMap = await getLatestEmailSendPerRecipient();
+    setEmailSendsByEmail(sendsMap);
   };
 
   useEffect(() => { load(); }, []);
@@ -165,36 +183,69 @@ export default function SignupsTab({ settings, forms }: Props) {
               <th className="text-left px-4 py-2 font-semibold">Status</th>
               <th className="text-left px-4 py-2 font-semibold">Signed up</th>
               <th className="text-left px-4 py-2 font-semibold">Last activity</th>
+              <th className="text-left px-4 py-2 font-semibold">Last email</th>
               <th className="text-right px-4 py-2 font-semibold">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {loading && (
-              <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400 text-sm">Loading users…</td></tr>
+              <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400 text-sm">Loading users…</td></tr>
             )}
             {!loading && rows.length === 0 && (
-              <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400 text-sm">No users match this filter.</td></tr>
+              <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400 text-sm">No users match this filter.</td></tr>
             )}
-            {!loading && rows.map(u => (
-              <tr key={u.userId} className="hover:bg-indigo-50/30">
-                <td className="px-4 py-2.5 font-medium text-gray-900">{u.fullName || <span className="text-gray-400">—</span>}</td>
-                <td className="px-4 py-2.5 text-gray-700">{u.email}</td>
-                <td className="px-4 py-2.5 text-gray-600 capitalize">{u.role}</td>
-                <td className="px-4 py-2.5">{statusBadge(u)}</td>
-                <td className="px-4 py-2.5 text-gray-500 text-xs" title={u.signupDate}>{timeAgo(u.signupDate)}</td>
-                <td className="px-4 py-2.5 text-gray-500 text-xs" title={u.lastActivityAt}>{timeAgo(u.lastActivityAt)}</td>
-                <td className="px-4 py-2.5 text-right">
-                  <button
-                    onClick={() => setSelected(u)}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-indigo-600 text-white rounded-md text-xs font-semibold hover:bg-indigo-700 transition"
-                    title="Send an email to this user"
-                  >
-                    <Mail className="w-3.5 h-3.5" />
-                    Email
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {!loading && rows.map(u => {
+              const lastEmail = emailSendsByEmail.get(u.email.toLowerCase());
+              return (
+                <tr key={u.userId} className="hover:bg-indigo-50/30">
+                  <td className="px-4 py-2.5 font-medium text-gray-900">{u.fullName || <span className="text-gray-400">—</span>}</td>
+                  <td className="px-4 py-2.5 text-gray-700">{u.email}</td>
+                  <td className="px-4 py-2.5 text-gray-600 capitalize">{u.role}</td>
+                  <td className="px-4 py-2.5">{statusBadge(u)}</td>
+                  <td className="px-4 py-2.5 text-gray-500 text-xs" title={u.signupDate}>{timeAgo(u.signupDate)}</td>
+                  <td className="px-4 py-2.5 text-gray-500 text-xs" title={u.lastActivityAt}>{timeAgo(u.lastActivityAt)}</td>
+                  <td className="px-4 py-2.5">
+                    {lastEmail ? (
+                      <div className="flex flex-col gap-0.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-gradient-to-r from-[#ba0028]/10 to-[#E0243C]/10 text-[#ba0028] border border-[#ba0028]/20"
+                            title={lastEmail.subject}
+                          >
+                            {TEMPLATE_SHORT_LABELS[lastEmail.templateKey || 'custom'] || lastEmail.templateKey}
+                          </span>
+                          {lastEmail.openedAt && (
+                            <span title={`Opened ${new Date(lastEmail.openedAt).toLocaleString()}`}>
+                              <Eye className="w-3 h-3 text-emerald-600" />
+                            </span>
+                          )}
+                          {lastEmail.clickCount > 0 && (
+                            <span className="inline-flex items-center gap-0.5 text-[10px] text-indigo-700" title={`${lastEmail.clickCount} click${lastEmail.clickCount > 1 ? 's' : ''}`}>
+                              <MousePointerClick className="w-3 h-3" />{lastEmail.clickCount}
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[10px] text-gray-500" title={lastEmail.sentAt}>
+                          {timeAgo(lastEmail.sentAt)}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-gray-400 text-xs">—</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2.5 text-right">
+                    <button
+                      onClick={() => setSelected(u)}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-indigo-600 text-white rounded-md text-xs font-semibold hover:bg-indigo-700 transition"
+                      title="Send an email to this user"
+                    >
+                      <Mail className="w-3.5 h-3.5" />
+                      Email
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -205,6 +256,7 @@ export default function SignupsTab({ settings, forms }: Props) {
           settings={settings}
           forms={forms}
           onClose={() => setSelected(null)}
+          onSent={reloadEmailSends}
         />
       )}
     </div>
