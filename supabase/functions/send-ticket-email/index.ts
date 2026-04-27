@@ -294,9 +294,21 @@ serve(async (req: Request) => {
         }
 
         // ── STAFF INVITE (sponsor_exhibitor combined form): send registration-completion link
-        //    to a staff member. Caller supplies pre-composed fields (to, name, purchaser,
-        //    orgName, category, completeUrl, signupUrl, eventName). Uses admin-configurable
-        //    template from app_settings.email_staff_invite_{subject,body}.
+        //    to a staff member. Two call patterns:
+        //      1) Pre-composed: caller supplies (to, name, purchaser, orgName, category,
+        //         completeUrl, signupUrl, eventName). Used by PublicSponsorExhibitorForm
+        //         and PortalDashboard at submit/fill-in time when they already have all
+        //         the org context loaded.
+        //      2) Hydrate-from-attendeeId: caller supplies only `attendeeId` (+ optional
+        //         `origin`). Used by the admin "Resend invitation" action in
+        //         ExhibitorsTab where the client only has the staff row's id. We fetch
+        //         the staff row, primary org, and form server-side and compose the
+        //         claim URL as `${origin}/#/form/<staff.form_id>?ref=<staff.id>`.
+        //    Either way, the completeUrl MUST point at the public registration form
+        //    (`/#/form/<formId>?ref=<id>`) so PublicRegistration's pending-claim
+        //    handler can pre-fill the staff member's name/email/category. Pointing at
+        //    `/` (root) would land them on the GANSID portal Landing/signup page.
+        //    Uses admin-configurable template from app_settings.email_staff_invite_{subject,body}.
         //    Placeholders: {{name}} {{purchaser}} {{org_name}} {{category}} {{complete_url}}
         //                  {{signup_url}} {{event}}
         //    NO attachments — attachment callout is suppressed. ──
@@ -304,6 +316,61 @@ serve(async (req: Request) => {
             const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
             const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
             const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+            // Hydrate any missing fields from the staff attendee row when the
+            // caller supplied an attendeeId (admin "Resend" path). Fields the
+            // caller passes explicitly always take precedence.
+            let to = body.to as string | undefined;
+            let name = body.name as string | undefined;
+            let purchaser = body.purchaser as string | undefined;
+            let orgName = body.orgName as string | undefined;
+            let category = body.category as string | undefined;
+            let completeUrl = body.completeUrl as string | undefined;
+            let signupUrl = body.signupUrl as string | undefined;
+            let eventName = body.eventName as string | undefined;
+
+            const needsHydration = !to || !completeUrl || !name;
+            if (needsHydration && body.attendeeId) {
+                const { data: staff } = await supabase
+                    .from('attendees')
+                    .select('*')
+                    .eq('id', body.attendeeId)
+                    .maybeSingle();
+                if (!staff) return jsonResponse({ error: 'Staff member not found' }, 404);
+
+                const { data: org } = staff.primary_attendee_id
+                    ? await supabase
+                        .from('attendees')
+                        .select('company_info, name')
+                        .eq('id', staff.primary_attendee_id)
+                        .maybeSingle()
+                    : { data: null } as any;
+                const { data: form } = await supabase
+                    .from('forms')
+                    .select('title')
+                    .eq('id', staff.form_id)
+                    .maybeSingle();
+
+                const origin = body.origin || '';
+                const staffCategory = (staff.answers as any)?.staffCategory;
+                const categoryLabel =
+                    staffCategory === 'hall_only' ? 'Hall-Only'
+                    : staffCategory === 'full_access' ? 'Full-Access'
+                    : staffCategory === 'full_congress' ? 'Full Congress'
+                    : 'Staff';
+
+                if (!to) to = staff.email;
+                if (!name) name = staff.name || 'there';
+                if (!purchaser) purchaser = org?.name || (org?.company_info as any)?.contactName || 'A colleague';
+                if (!orgName) orgName = (org?.company_info as any)?.orgName || '';
+                if (!category) category = categoryLabel;
+                if (!completeUrl) completeUrl = `${origin}/#/form/${staff.form_id}?ref=${staff.id}`;
+                if (!signupUrl) signupUrl = `${origin}/#/`;
+                if (!eventName) eventName = form?.title || 'the event';
+            }
+
+            if (!to) return jsonResponse({ error: 'staff-invite: missing recipient (to/attendeeId)' }, 400);
+            if (!completeUrl) return jsonResponse({ error: 'staff-invite: missing completeUrl (and could not derive from attendeeId)' }, 400);
 
             const { data: appSettings } = await supabase
                 .from('app_settings').select('*').eq('id', 1).maybeSingle();
@@ -317,25 +384,25 @@ serve(async (req: Request) => {
                 || `<p>Hi {{name}},</p><p><strong>{{purchaser}}</strong> has registered you for <strong>{{event}}</strong> on behalf of <strong>{{org_name}}</strong> ({{category}}).</p><p>Please complete your personal details:</p><p style="text-align:center;margin:24px 0;"><a href="{{complete_url}}" style="display:inline-block;padding:12px 24px;background:#1E4A8C;color:#fff;text-decoration:none;border-radius:6px;font-weight:600;">Complete my registration</a></p><p>You can also create a portal account: <a href="{{signup_url}}">{{signup_url}}</a></p>`;
 
             const replace = (s: string) => s
-                .replace(/\{\{name\}\}/g, body.name || 'there')
-                .replace(/\{\{purchaser\}\}/g, body.purchaser || 'A colleague')
-                .replace(/\{\{org_name\}\}/g, body.orgName || '')
-                .replace(/\{\{category\}\}/g, body.category || '')
-                .replace(/\{\{complete_url\}\}/g, body.completeUrl || '')
-                .replace(/\{\{signup_url\}\}/g, body.signupUrl || '')
-                .replace(/\{\{event\}\}/g, body.eventName || 'the event');
+                .replace(/\{\{name\}\}/g, name || 'there')
+                .replace(/\{\{purchaser\}\}/g, purchaser || 'A colleague')
+                .replace(/\{\{org_name\}\}/g, orgName || '')
+                .replace(/\{\{category\}\}/g, category || '')
+                .replace(/\{\{complete_url\}\}/g, completeUrl || '')
+                .replace(/\{\{signup_url\}\}/g, signupUrl || '')
+                .replace(/\{\{event\}\}/g, eventName || 'the event');
 
             const subject = replace(rawSubject);
             const body_html = replace(rawBody);
             const html = generateEmailTemplate({
-                title: body.eventName || 'the event',
-                greeting: `Hi ${body.name || 'there'}`,
+                title: eventName || 'the event',
+                greeting: `Hi ${name || 'there'}`,
                 content: body_html,
                 // No attachments — suppress the callout.
                 fromName: smtpConfig?.fromName,
             });
 
-            await sendSimpleEmail({ to: body.to, subject, html, smtpConfig });
+            await sendSimpleEmail({ to, subject, html, smtpConfig });
             return jsonResponse({ ok: true });
         }
 

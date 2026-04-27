@@ -69,8 +69,16 @@ export default function TeamTable({ primary, staff, onFillIn }: Props) {
     };
   }, [qrAttendee, primary.exhibitorBoothType, orgName]);
 
-  const copy = (id: string) => {
-    const url = `${window.location.origin}/#/?ref=${id}`;
+  // Build the public registration link for a staff member. MUST be
+  // `/#/form/<formId>?ref=<id>` so PublicRegistration's pending-claim
+  // handler can pre-fill the staff member's name/email/category. Pointing
+  // at `/` would land them on the GANSID portal Landing/signup page.
+  const copy = (s: Attendee) => {
+    if (!s.formId) {
+      console.warn('Cannot copy staff invitation link — staff attendee has no formId', { id: s.id });
+      return;
+    }
+    const url = `${window.location.origin}/#/form/${s.formId}?ref=${s.id}`;
     navigator.clipboard.writeText(url);
   };
 
@@ -150,7 +158,7 @@ export default function TeamTable({ primary, staff, onFillIn }: Props) {
                         <>
                           <button
                             type="button"
-                            onClick={() => copy(s.id)}
+                            onClick={() => copy(s)}
                             className="text-xs text-gansid-primary underline"
                           >
                             Copy link

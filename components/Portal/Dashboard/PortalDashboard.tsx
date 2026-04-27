@@ -120,6 +120,19 @@ export function PortalDashboard() {
         : patch.category === 'full_access'
         ? 'Full-Access'
         : 'Sponsor Seat';
+    // The completeUrl MUST point at the public registration form so the staff
+    // member lands on PublicRegistration's pending-claim flow with their info
+    // pre-filled. Pointing at `/` would land them on the GANSID portal
+    // Landing/signup page (the bug we're fixing). The signupUrl (still `/`)
+    // is intentionally a separate optional "create a portal account" link.
+    const staffFormId = existing?.formId;
+    if (!staffFormId) {
+      console.warn('handleFillIn: staff attendee has no formId; cannot construct completeUrl', { id });
+      if (userPrimary) {
+        setStaffRows(await getStaffForPrimary(userPrimary.id));
+      }
+      return;
+    }
     await supabase.functions.invoke('send-ticket-email', {
       body: {
         mode: 'staff-invite',
@@ -128,7 +141,7 @@ export function PortalDashboard() {
         purchaser: userPrimary?.companyInfo?.contactName || '',
         orgName: userPrimary?.companyInfo?.orgName || '',
         category: categoryLabel,
-        completeUrl: `${window.location.origin}/#/?ref=${id}`,
+        completeUrl: `${window.location.origin}/#/form/${staffFormId}?ref=${id}`,
         signupUrl: `${window.location.origin}/#/`,
         eventName: CURRENT_SITE.displayName || 'the Congress',
       },

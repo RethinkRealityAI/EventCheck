@@ -188,7 +188,14 @@ export default function PublicSponsorExhibitorForm({ form, settings }: Props) {
       if (fnErr) throw new Error(fnErr.message);
 
       const staffIds = (data?.staffIds || []) as string[];
-      const complete = (id: string) => `${window.location.origin}/#/?ref=${id}`;
+      // Staff invite link MUST point at the public registration form
+      // (`/#/form/<staffFormId>?ref=<staffId>`) so PublicRegistration's
+      // pending-claim handler can pre-fill the staff member's name/email/category
+      // and let them complete the remaining personal fields without being
+      // forced through the portal landing/signup at `/`. The optional
+      // `signupUrl` (still pointing at `/`) is offered as a separate "create
+      // a portal account" link inside the email body.
+      const complete = (id: string) => `${window.location.origin}/#/form/${staffFormId}?ref=${id}`;
       const signup = `${window.location.origin}/#/`;
       const eventName = (CURRENT_SITE as any).displayName || form.title;
       const categoryLabel = (c: string) =>
