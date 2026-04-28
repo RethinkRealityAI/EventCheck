@@ -214,6 +214,10 @@ function StaffRow({
   const claimedGuestType = isCombinedFormRow ? 'staff-claimed' : 'exhibitor-staff-claimed';
 
   const copyLink = () => {
+    if (!staff.formId) {
+      showNotification('Cannot copy link — staff record is missing its form ID', 'error');
+      return;
+    }
     const url = `${window.location.origin}/#/form/${staff.formId}?ref=${staff.id}`;
     navigator.clipboard.writeText(url);
     showNotification('Link copied to clipboard', 'success');

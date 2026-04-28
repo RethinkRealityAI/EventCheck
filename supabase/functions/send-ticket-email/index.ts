@@ -361,7 +361,13 @@ serve(async (req: Request) => {
 
                 if (!to) to = staff.email;
                 if (!name) name = staff.name || 'there';
-                if (!purchaser) purchaser = org?.name || (org?.company_info as any)?.contactName || 'A colleague';
+                // Prefer the contact person's name (company_info.contactName) over
+                // the primary attendee's `name` column. For sponsor_exhibitor primaries
+                // verify-payment writes `name: org.orgName` (the organization name),
+                // so falling back to `org.name` first would produce emails reading
+                // "Acme Corp has registered you for the Congress" instead of
+                // "John Smith has registered you for the Congress".
+                if (!purchaser) purchaser = (org?.company_info as any)?.contactName || org?.name || 'A colleague';
                 if (!orgName) orgName = (org?.company_info as any)?.orgName || '';
                 if (!category) category = categoryLabel;
                 if (!completeUrl) completeUrl = `${origin}/#/form/${staff.form_id}?ref=${staff.id}`;
@@ -371,6 +377,12 @@ serve(async (req: Request) => {
 
             if (!to) return jsonResponse({ error: 'staff-invite: missing recipient (to/attendeeId)' }, 400);
             if (!completeUrl) return jsonResponse({ error: 'staff-invite: missing completeUrl (and could not derive from attendeeId)' }, 400);
+            // completeUrl must be absolute — relative URLs render as dead links in
+            // email clients. This catches a missing `body.origin` in the hydrate path
+            // before we silently send a broken invitation.
+            if (!/^https?:\/\//i.test(completeUrl)) {
+                return jsonResponse({ error: `staff-invite: completeUrl must be absolute (got: ${completeUrl}). Caller must supply body.origin or a fully-qualified completeUrl.` }, 400);
+            }
 
             const { data: appSettings } = await supabase
                 .from('app_settings').select('*').eq('id', 1).maybeSingle();
@@ -489,7 +501,9 @@ serve(async (req: Request) => {
                 .maybeSingle();
             const eventName = form?.title || 'the GANSID Congress';
             const orgName = (org?.company_info as any)?.orgName || 'your organization';
-            const purchaser = org?.name || (org?.company_info as any)?.contactName || 'the organization';
+            // Prefer the contact person's name (company_info.contactName) over the
+            // primary attendee's `name` column — see staff-invite branch above for rationale.
+            const purchaser = (org?.company_info as any)?.contactName || org?.name || 'the organization';
 
             const { data: appSettings } = await supabase
                 .from('app_settings').select('*').eq('id', 1).maybeSingle();
