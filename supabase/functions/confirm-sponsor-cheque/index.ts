@@ -70,6 +70,7 @@ serve(async (req: Request) => {
           primary_attendee_id: sponsor.id,
           payment_status: 'paid',
           payment_method: sponsor.payment_method || 'cheque',
+          guest_type: 'pending-claim',
           is_test: false,
         });
       }

@@ -6,7 +6,7 @@ interface ViscousButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 export function ViscousButton({ variant = 'primary', className = '', children, ...rest }: ViscousButtonProps) {
-  const base = 'rounded-full px-6 py-3 font-display font-semibold transition-all duration-300 ease-viscous disabled:opacity-40 disabled:cursor-not-allowed';
+  const base = 'rounded-full px-7 py-3.5 text-lg font-display font-semibold transition-all duration-300 ease-viscous disabled:opacity-40 disabled:cursor-not-allowed';
   const styles = variant === 'primary'
     ? 'bg-gansid-primary-gradient text-white hover:scale-[1.02] hover:shadow-xl shadow-lg'
     : 'bg-white/80 border border-gansid-outline-variant/30 text-gansid-secondary hover:bg-white';

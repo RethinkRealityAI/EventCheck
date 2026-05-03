@@ -289,22 +289,38 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
                     </span>
                   </div>
 
-                  {/* Seating assignment */}
-                  {seatingTables.length > 0 && (
-                    <div className="bg-white/60 p-2.5 rounded-xl border border-white/60 text-sm shadow-sm space-y-1.5">
-                      <span className="text-slate-500 font-bold text-[10px] uppercase tracking-wider block">Seating Table</span>
-                      <select
-                        value={localAttendee.assignedTableId || ''}
-                        onChange={e => handleTableAssignment(e.target.value || null)}
-                        className="w-full px-3 py-2 bg-white/80 backdrop-blur-sm border border-white/60 rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
-                      >
-                        <option value="">Unassigned</option>
-                        {seatingTables.map(t => (
-                          <option key={t.id} value={t.id}>{t.name} ({t.capacity} seats)</option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
+                  {/* Seating assignment — table only. Driven by the Seating Chart admin
+                      page; assignment here syncs back to the chart in real time via
+                      assignedTableId. Always visible so admins know where to manage it. */}
+                  <div className="bg-white/60 p-2.5 rounded-xl border border-white/60 text-sm shadow-sm space-y-1.5">
+                    <span className="text-slate-500 font-bold text-[10px] uppercase tracking-wider block">Seating Table</span>
+                    {seatingTables.length > 0 ? (
+                      <>
+                        <select
+                          value={localAttendee.assignedTableId || ''}
+                          onChange={e => handleTableAssignment(e.target.value || null)}
+                          className="w-full px-3 py-2 bg-white/80 backdrop-blur-sm border border-white/60 rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
+                        >
+                          <option value="">Unassigned</option>
+                          {seatingTables.map(t => (
+                            <option key={t.id} value={t.id}>{t.name} ({t.capacity} seats)</option>
+                          ))}
+                        </select>
+                        {localAttendee.assignedTableId && (() => {
+                          const t = seatingTables.find(t => t.id === localAttendee.assignedTableId);
+                          return t ? (
+                            <div className="text-[11px] text-slate-500">
+                              Currently at <span className="font-bold text-amber-700">{t.name}</span>. Use the Seating Chart admin to rearrange the room.
+                            </div>
+                          ) : null;
+                        })()}
+                      </>
+                    ) : (
+                      <p className="text-[11px] text-slate-500 leading-snug">
+                        No tables defined yet. Add tables in the <span className="font-semibold">Seating Chart</span> admin page, then return here to assign one.
+                      </p>
+                    )}
+                  </div>
 
                   <button
                     onClick={handleResendEmail}
