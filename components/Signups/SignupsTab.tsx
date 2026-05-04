@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Mail, Search, RefreshCw, CheckCircle2, Clock, Circle, Eye, MousePointerClick } from 'lucide-react';
+import { Mail, Search, RefreshCw, CheckCircle2, Clock, Circle, Eye, MousePointerClick, ChevronLeft, ChevronRight } from 'lucide-react';
 import { getPortalUsers, type PortalUser } from '../../services/storageService';
 import { getLatestEmailSendPerRecipient, type EmailSend } from '../../services/emailSendsService';
 import type { AppSettings, Form } from '../../types';
@@ -15,6 +15,49 @@ const TEMPLATE_SHORT_LABELS: Record<string, string> = {
 interface Props {
   settings: AppSettings;
   forms: Form[];
+}
+
+interface PaginationBarProps {
+  startIndex: number;
+  pageSize: number;
+  totalRows: number;
+  page: number;
+  totalPages: number;
+  onPrev: () => void;
+  onNext: () => void;
+}
+
+function PaginationBar({ startIndex, pageSize, totalRows, page, totalPages, onPrev, onNext }: PaginationBarProps) {
+  return (
+    <div className="flex items-center justify-between gap-3 px-3 py-2 bg-white/60 backdrop-blur-sm rounded-lg border border-white/40 text-xs text-gray-600">
+      <div>
+        Showing {startIndex + 1}–{Math.min(startIndex + pageSize, totalRows)} of {totalRows}
+      </div>
+      {totalPages > 1 && (
+        <div className="flex items-center gap-1">
+          <button
+            onClick={onPrev}
+            disabled={page === 1}
+            className="p-1.5 rounded bg-white border border-gray-200 disabled:opacity-50 hover:bg-gray-50"
+            aria-label="Previous page"
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          <span className="px-2 font-medium text-gray-700">
+            Page {page} of {totalPages}
+          </span>
+          <button
+            onClick={onNext}
+            disabled={page === totalPages}
+            className="p-1.5 rounded bg-white border border-gray-200 disabled:opacity-50 hover:bg-gray-50"
+            aria-label="Next page"
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 type FilterKey = 'all' | 'not_started' | 'in_progress' | 'has_ticket';
@@ -42,6 +85,20 @@ export default function SignupsTab({ settings, forms }: Props) {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<FilterKey>('all');
   const [selected, setSelected] = useState<PortalUser | null>(null);
+  const [page, setPage] = useState(1);
+  // Page size: 10 on mobile, 15 on desktop. Tracks viewport width via the
+  // same breakpoint Tailwind uses for `md:`.
+  const [isDesktop, setIsDesktop] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia('(min-width: 768px)').matches : true,
+  );
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mq = window.matchMedia('(min-width: 768px)');
+    const onChange = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  const pageSize = isDesktop ? 15 : 10;
 
   const load = async () => {
     setLoading(true);
@@ -100,6 +157,12 @@ export default function SignupsTab({ settings, forms }: Props) {
     in_progress: users.filter(u => !u.hasPaidTicket && u.draft).length,
     not_started: users.filter(u => !u.hasPaidTicket && !u.draft).length,
   }), [users]);
+
+  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+  useEffect(() => { setPage(1); }, [search, filter, pageSize]);
+  const safePage = Math.min(page, totalPages);
+  const startIndex = (safePage - 1) * pageSize;
+  const pagedRows = rows.slice(startIndex, startIndex + pageSize);
 
   const statusBadge = (u: PortalUser) => {
     if (u.hasPaidTicket) {
@@ -172,8 +235,91 @@ export default function SignupsTab({ settings, forms }: Props) {
         </button>
       </div>
 
-      {/* Table */}
-      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+      {/* Pagination — top. Mirrors the bottom controls so users can navigate
+          without scrolling to the end of long lists, especially on mobile. */}
+      {!loading && rows.length > 0 && totalPages > 1 && (
+        <PaginationBar
+          startIndex={startIndex}
+          pageSize={pageSize}
+          totalRows={rows.length}
+          page={safePage}
+          totalPages={totalPages}
+          onPrev={() => setPage((p) => Math.max(1, p - 1))}
+          onNext={() => setPage((p) => Math.min(totalPages, p + 1))}
+        />
+      )}
+
+      {/* Mobile card layout — every row is a self-contained card so all info
+          including the Actions column is visible without horizontal scrolling. */}
+      <div className="md:hidden space-y-2">
+        {loading && (
+          <div className="bg-white rounded-lg border border-gray-200 p-6 text-center text-gray-400 text-sm">Loading users…</div>
+        )}
+        {!loading && pagedRows.length === 0 && (
+          <div className="bg-white rounded-lg border border-gray-200 p-6 text-center text-gray-400 text-sm">No users match this filter.</div>
+        )}
+        {!loading && pagedRows.map((u) => {
+          const lastEmail = emailSendsByEmail.get(u.email.toLowerCase());
+          return (
+            <div key={u.userId} className="bg-white rounded-lg border border-gray-200 p-3 shadow-sm">
+              <div className="flex items-start justify-between gap-2 mb-2">
+                <div className="min-w-0 flex-1">
+                  <div className="font-semibold text-gray-900 truncate">{u.fullName || <span className="text-gray-400">— no name —</span>}</div>
+                  <div className="text-xs text-gray-600 truncate">{u.email}</div>
+                  <div className="text-[11px] text-gray-500 capitalize mt-0.5">{u.role}</div>
+                </div>
+                <div className="shrink-0">{statusBadge(u)}</div>
+              </div>
+              <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-gray-500 mb-3">
+                <div><span className="font-semibold text-gray-700">Signed up:</span> {timeAgo(u.signupDate)}</div>
+                <div><span className="font-semibold text-gray-700">Last activity:</span> {timeAgo(u.lastActivityAt)}</div>
+              </div>
+              {lastEmail && (
+                <div className="mb-3 flex items-center gap-1.5 flex-wrap text-[11px]">
+                  <span className="font-semibold text-gray-700">Last email:</span>
+                  <span
+                    className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-gradient-to-r from-[#ba0028]/10 to-[#E0243C]/10 text-[#ba0028] border border-[#ba0028]/20"
+                    title={lastEmail.subject}
+                  >
+                    {TEMPLATE_SHORT_LABELS[lastEmail.templateKey || 'custom'] || lastEmail.templateKey}
+                  </span>
+                  {lastEmail.openedAt && (
+                    <span title={`Opened ${new Date(lastEmail.openedAt).toLocaleString()}`}>
+                      <Eye className="w-3 h-3 text-emerald-600" />
+                    </span>
+                  )}
+                  {lastEmail.clickCount > 0 && (
+                    <span className="inline-flex items-center gap-0.5 text-[10px] text-indigo-700" title={`${lastEmail.clickCount} click${lastEmail.clickCount > 1 ? 's' : ''}`}>
+                      <MousePointerClick className="w-3 h-3" />{lastEmail.clickCount}
+                    </span>
+                  )}
+                  <span className="text-gray-500">· {timeAgo(lastEmail.sentAt)}</span>
+                </div>
+              )}
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => setSelected(u)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded-md text-xs font-semibold hover:bg-indigo-700 transition"
+                  title="Send an email to this user"
+                >
+                  <Mail className="w-3.5 h-3.5" />
+                  Email
+                </button>
+                <a
+                  href={`mailto:${u.email}`}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-300 text-gray-700 rounded-md text-xs font-semibold hover:bg-gray-50 transition"
+                  title="Open in your mail client"
+                >
+                  Direct mail
+                </a>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Desktop table — unchanged. */}
+      <div className="hidden md:block bg-white rounded-lg border border-gray-200 overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-gray-600 text-xs uppercase tracking-wide">
             <tr>
@@ -191,10 +337,10 @@ export default function SignupsTab({ settings, forms }: Props) {
             {loading && (
               <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400 text-sm">Loading users…</td></tr>
             )}
-            {!loading && rows.length === 0 && (
+            {!loading && pagedRows.length === 0 && (
               <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400 text-sm">No users match this filter.</td></tr>
             )}
-            {!loading && rows.map(u => {
+            {!loading && pagedRows.map(u => {
               const lastEmail = emailSendsByEmail.get(u.email.toLowerCase());
               return (
                 <tr key={u.userId} className="hover:bg-indigo-50/30">
@@ -249,6 +395,19 @@ export default function SignupsTab({ settings, forms }: Props) {
           </tbody>
         </table>
       </div>
+
+      {/* Pagination — bottom. */}
+      {!loading && rows.length > 0 && (
+        <PaginationBar
+          startIndex={startIndex}
+          pageSize={pageSize}
+          totalRows={rows.length}
+          page={safePage}
+          totalPages={totalPages}
+          onPrev={() => setPage((p) => Math.max(1, p - 1))}
+          onNext={() => setPage((p) => Math.min(totalPages, p + 1))}
+        />
+      )}
 
       {selected && (
         <SendUserEmailModal

@@ -1,6 +1,8 @@
 import { HeroSection } from './HeroSection';
 import { AuthPanel } from './AuthPanel';
 import { InfoTabs } from './InfoTabs';
+import { FeesSection } from './FeesSection';
+import { RegistrationOverview } from './RegistrationOverview';
 
 export function Landing() {
   return (
@@ -12,12 +14,25 @@ export function Landing() {
 
       <section className="max-w-7xl mx-auto px-6 py-12 grid grid-cols-1 lg:grid-cols-[1.5fr_1fr] gap-10 relative">
         <HeroSection />
-        <div>
+        <div className="hidden lg:block" data-register-target>
           <AuthPanel />
         </div>
       </section>
-      <section className="max-w-7xl mx-auto px-6 py-16 relative">
+      <section className="max-w-7xl mx-auto px-1.5 sm:px-6 pt-8 pb-4 relative">
+        <FeesSection />
+      </section>
+      <section className="max-w-7xl mx-auto px-6 pt-8 pb-2 relative">
+        <RegistrationOverview />
+      </section>
+      <section className="max-w-7xl mx-auto px-6 py-10 relative">
         <InfoTabs />
+      </section>
+      <section
+        className="lg:hidden max-w-md mx-auto px-2 pt-4 pb-16 relative scroll-mt-8"
+        data-register-target
+        id="register"
+      >
+        <AuthPanel />
       </section>
     </div>
   );

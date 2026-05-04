@@ -101,6 +101,35 @@ export function SteppedFormShell(props: SteppedFormShellProps) {
     }
   }, [props.answers, currentIndex, props.registrationMode, props.groupSize, props.groupHasAllInfo, props.groupMembers, storageKey]);
 
+  // Debounced DB-side draft persistence. Mirrors localStorage to the
+  // `registration_drafts` table so the admin Signups tab can flip a user from
+  // "Not started" → "In progress" the moment they actually fill anything in,
+  // not just on explicit Save & Close. Only runs when the user is signed in
+  // and has produced at least one non-empty answer.
+  useEffect(() => {
+    if (!props.userId) return;
+    const hasAnyAnswer = Object.values(props.answers || {}).some((v) => {
+      if (v == null) return false;
+      if (typeof v === 'string') return v.trim().length > 0;
+      if (Array.isArray(v)) return v.length > 0;
+      if (typeof v === 'object') return Object.keys(v).length > 0;
+      return true;
+    });
+    if (!hasAnyAnswer) return;
+    const handle = window.setTimeout(() => {
+      saveDraft(props.userId!, props.form.id, {
+        answers: props.answers,
+        currentIndex,
+        registrationMode: props.registrationMode,
+        groupSize: props.groupSize,
+        groupHasAllInfo: props.groupHasAllInfo,
+        groupMembers: props.groupMembers,
+        savedAt: Date.now(),
+      }).catch(() => {/* swallow — localStorage still has the truth */});
+    }, 1500);
+    return () => window.clearTimeout(handle);
+  }, [props.answers, currentIndex, props.registrationMode, props.groupSize, props.groupHasAllInfo, props.groupMembers, props.userId, props.form.id]);
+
   const clearPersistence = () => {
     try { localStorage.removeItem(storageKey); } catch {}
     // Fire-and-forget DB cleanup so successful submits don't leave stale drafts

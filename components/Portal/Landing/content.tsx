@@ -1,5 +1,5 @@
 export const HERO = {
-  badge: 'Registration is open now!',
+  badge: 'CONGRESS REGISTRATION NOW OPEN',
   location: 'Hyderabad, India',
   dates: 'October 23–25, 2026',
   venue: 'HITEX Exhibition Centre',

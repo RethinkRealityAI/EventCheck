@@ -234,9 +234,18 @@ serve(async (req: Request) => {
       if (formRow.form_type !== 'sponsor_exhibitor') {
         return jsonResponse({ error: 'Not a sponsor_exhibitor form' }, 400);
       }
-      const staffFormId: string = bodyStaffFormId
+      // staffFormId MUST be a separate registration form. Falling back to `formId`
+      // (the combined sponsor_exhibitor form) would point staff rows at a form
+      // with no fields, breaking the `?ref=` claim flow. Hard-fail server-side
+      // rather than silently producing invitations to a dead form.
+      const staffFormId: string | undefined = bodyStaffFormId
         || (formRow.settings as any)?.staffFormId
-        || formId;
+        || undefined;
+      if (!staffFormId || staffFormId === formId) {
+        return jsonResponse({
+          error: 'sponsor_exhibitor form is misconfigured: form.settings.staffFormId must reference a separate companion registration form (cannot equal the combined form id).',
+        }, 400);
+      }
 
       // ─── Staff quota validation (server-side mirror of client validation) ───
       // Both sponsor tiers and exhibitor booths expose the same Hall-Only +

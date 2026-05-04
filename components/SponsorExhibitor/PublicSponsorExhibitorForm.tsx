@@ -175,7 +175,18 @@ export default function PublicSponsorExhibitorForm({ form, settings }: Props) {
     setSubmitting(true);
     setError(null);
     try {
-      const staffFormId = (form.settings as any)?.staffFormId || form.id;
+      // staffFormId must be a real, distinct registration form. Falling back to
+      // `form.id` would point staff rows at the combined `sponsor_exhibitor` form
+      // itself, which has no useful fields for staff to fill (the combined form
+      // is component-driven), and the `?ref=` claim flow would render an empty
+      // PublicRegistration. Hard-fail here with a user-facing error instead of
+      // silently producing broken invitations.
+      const staffFormId = (form.settings as any)?.staffFormId;
+      if (!staffFormId) {
+        setError('This form is misconfigured: no companion staff registration form is linked. Please contact the event organizers.');
+        setSubmitting(false);
+        return;
+      }
       const { data, error: fnErr } = await supabase.functions.invoke('verify-payment', {
         body: {
           mode: 'paid',

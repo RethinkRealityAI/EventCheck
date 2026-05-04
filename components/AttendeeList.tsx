@@ -21,6 +21,19 @@ interface GroupedAttendee {
   guests: Attendee[];
 }
 
+/**
+ * Sort guests in stable ascending order under their primary. Resolution:
+ *   1. Trailing "#N" parsed from placeholder names ("OrgName - Guest Ticket #N")
+ *      so unclaimed seats render in #1 → #2 → #3 order in the admin UI. This
+ *      is purely about display order — it carries no seating semantics.
+ *   2. `registeredAt` fallback for claimed guests with custom names.
+ */
+function guestSortKey(a: Attendee): number {
+  const m = (a.name || '').match(/#(\d+)\s*$/);
+  if (m) return parseInt(m[1], 10);
+  return a.registeredAt ? new Date(a.registeredAt).getTime() / 1000 : Number.MAX_SAFE_INTEGER;
+}
+
 function groupByPrimary(attendees: Attendee[]): GroupedAttendee[] {
   // Primaries: records where isPrimary is not explicitly false AND no primaryAttendeeId
   const primaries = attendees.filter(a => a.isPrimary !== false && !a.primaryAttendeeId);
@@ -33,7 +46,10 @@ function groupByPrimary(attendees: Attendee[]): GroupedAttendee[] {
       byPrimaryId.set(pid, arr);
     }
   }
-  return primaries.map(p => ({ primary: p, guests: byPrimaryId.get(p.id) ?? [] }));
+  return primaries.map(p => ({
+    primary: p,
+    guests: (byPrimaryId.get(p.id) ?? []).slice().sort((x, y) => guestSortKey(x) - guestSortKey(y)),
+  }));
 }
 
 function GuestStatusBadge({ guest }: { guest: Attendee }) {
@@ -491,6 +507,11 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
       }
     });
 
+    // Sort each table's guests in ascending ticket-number order.
+    Object.values(tables).forEach(t => {
+      t.guests.sort((x, y) => guestSortKey(x) - guestSortKey(y));
+    });
+
     // Only show table purchasers (a table = 8 seats: 1 purchaser + 7 guests)
     let result = Object.values(tables).filter(t => t.guests.length >= 7);
     if (searchTerm) {
@@ -532,6 +553,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
 
   const handleSeatingAssignment = async (attendeeId: string, tableId: string | null) => {
     await updateAttendee(attendeeId, { assignedTableId: tableId, assignedSeat: null });
+    onRefresh?.();
     showNotification(tableId ? 'Assigned to table' : 'Removed from table', 'success');
   };
 
@@ -1004,10 +1026,24 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                                 </td>
                               </tr>
                               {/* Guests */}
-                              {guests.map((g, idx) => (
+                              {guests.map((g, idx) => {
+                                const gTable = g.assignedTableId
+                                  ? seatingTables.find(t => t.id === g.assignedTableId)
+                                  : null;
+                                return (
                                 <tr key={g.id} className="bg-white/30 hover:bg-white transition-colors">
                                   <td className="px-4 py-3">
-                                    <div className="font-bold text-gray-900">{g.name || `Guest #${idx + 1}`}</div>
+                                    <div className="font-bold text-gray-900 flex items-center gap-2 flex-wrap">
+                                      <span>{g.name || `Guest #${idx + 1}`}</span>
+                                      {gTable && (
+                                        <span
+                                          className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200"
+                                          title={`Seating: ${gTable.name}`}
+                                        >
+                                          TABLE: {gTable.name}
+                                        </span>
+                                      )}
+                                    </div>
                                     <div className="text-gray-400">{g.email || 'No email provided'}</div>
                                   </td>
                                   <td className="px-4 py-3 flex gap-1">
@@ -1042,7 +1078,8 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                                     <button onClick={() => setSelectedAttendee(g)} className="text-indigo-600 hover:underline font-bold">View</button>
                                   </td>
                                 </tr>
-                              ))}
+                                );
+                              })}
                               {guests.length === 0 && (
                                 <tr>
                                   <td colSpan={seatingTables.length > 0 ? 6 : 5} className="px-4 py-8 text-center text-slate-400 italic bg-white/20">
@@ -1101,21 +1138,41 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                 </tr>
               ) : (
                 (() => {
-                  // Build a set of group-path guest IDs so they aren't rendered as standalone rows
+                  // Build a set of group-path guest IDs so they aren't rendered as standalone rows.
+                  // Mirrors the inclusion rule below for groupGuestsByPrimary — keep these two in sync
+                  // or guests will render twice.
                   const groupGuestIds = new Set(
                     paginatedItems
-                      .filter(a => a.primaryAttendeeId && (a.guestType === 'pending-claim' || a.guestType === 'claimed'))
+                      .filter(a =>
+                        a.primaryAttendeeId &&
+                        (a.guestType === 'pending-claim' ||
+                          a.guestType === 'claimed' ||
+                          a.guestType === 'adult' ||
+                          a.guestType === 'child'),
+                      )
                       .map(a => a.id)
                   );
 
-                  // For each primary, collect its group-path guests that appear in paginatedItems
+                  // For each primary, collect its group-path guests that appear in paginatedItems.
+                  // Includes pending-claim/claimed guests AND inline adult/child guests so the
+                  // primary's full party expands together as one coherent group on the live tab.
+                  // Each list is sorted ascending by seat number (resolved via getSeatNumber).
                   const groupGuestsByPrimary = new Map<string, Attendee[]>();
                   for (const a of paginatedItems) {
-                    if (a.primaryAttendeeId && (a.guestType === 'pending-claim' || a.guestType === 'claimed')) {
+                    if (
+                      a.primaryAttendeeId &&
+                      (a.guestType === 'pending-claim' ||
+                        a.guestType === 'claimed' ||
+                        a.guestType === 'adult' ||
+                        a.guestType === 'child')
+                    ) {
                       const arr = groupGuestsByPrimary.get(a.primaryAttendeeId) ?? [];
                       arr.push(a);
                       groupGuestsByPrimary.set(a.primaryAttendeeId, arr);
                     }
+                  }
+                  for (const arr of groupGuestsByPrimary.values()) {
+                    arr.sort((x, y) => guestSortKey(x) - guestSortKey(y));
                   }
 
                   const renderAttendeeRow = (attendee: Attendee, isGuestRow = false) => (
@@ -1145,6 +1202,17 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                               <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-700">GUEST</span>
                             )}
                             {isGuestRow && <GuestStatusBadge guest={attendee} />}
+                            {attendee.assignedTableId && (() => {
+                              const t = seatingTables.find(t => t.id === attendee.assignedTableId);
+                              return t ? (
+                                <span
+                                  className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200"
+                                  title={`Seating: ${t.name}`}
+                                >
+                                  TABLE: {t.name}
+                                </span>
+                              ) : null;
+                            })()}
                             {attendee.guestType === 'child' && (
                               <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-700 border border-blue-200">CHILD</span>
                             )}

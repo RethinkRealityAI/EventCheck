@@ -129,12 +129,13 @@ export function AuthPanel() {
       : 'Resend verification email';
 
   return (
-    <div className="w-full max-w-md lg:sticky lg:top-8 rounded-gansid-lg p-8 shadow-2xl gradient-border relative">
-      <div className="flex justify-center mb-6">
+    <div className="w-full max-w-lg lg:sticky lg:top-8 rounded-gansid-lg px-4 py-7 sm:px-6 sm:py-8 md:p-10 shadow-2xl gradient-border relative">
+      <div className="mb-7">
         <FloatingToggleTabs<Mode>
-          tabs={[{ id: 'signup', label: 'Create Account' }, { id: 'signin', label: 'Sign In' }]}
+          tabs={[{ id: 'signup', label: 'Register' }, { id: 'signin', label: 'Sign In' }]}
           active={mode}
           onChange={(id) => { setMode(id); setError(''); setSignupSuccess(false); resetResendState(); }}
+          fullWidth
         />
       </div>
 
@@ -171,12 +172,12 @@ export function AuthPanel() {
           <GlassInput type="email" placeholder="Email address" value={email} onChange={(e) => setEmail(e.target.value)} required />
           <GlassInput type="password" placeholder="Password (min 8 chars)" value={password} minLength={8} onChange={(e) => setPassword(e.target.value)} required />
           <div>
-            <label className="block text-sm font-display mb-2">I am a…</label>
+            <label className="block text-base font-display mb-2">I am a…</label>
             <div className="flex gap-2">
               {(['attendee', 'exhibitor', 'sponsor'] as const).map((r) => (
                 <label key={r} className="flex-1">
                   <input type="radio" name="role" value={r} checked={role === r} onChange={() => setRole(r)} className="sr-only peer" />
-                  <span className="block text-center px-3 py-2 rounded-full bg-gansid-surface-container-low cursor-pointer peer-checked:bg-gansid-primary-gradient peer-checked:text-white font-display text-sm capitalize transition-all">
+                  <span className="block text-center px-3 py-2.5 rounded-full bg-gansid-surface-container-low cursor-pointer peer-checked:bg-gansid-primary-gradient peer-checked:text-white font-display text-base capitalize transition-all">
                     {r}
                   </span>
                 </label>
@@ -184,8 +185,8 @@ export function AuthPanel() {
             </div>
           </div>
           {error && <p className="text-sm text-gansid-primary">{error}</p>}
-          <ViscousButton type="submit" variant="primary" className="w-full" disabled={loading}>
-            {loading ? 'Creating…' : 'Create Account'}
+          <ViscousButton type="submit" variant="primary" className="w-full text-xl py-4" disabled={loading}>
+            {loading ? 'Creating…' : 'Register'}
           </ViscousButton>
         </form>
       ) : (
@@ -226,7 +227,7 @@ export function AuthPanel() {
               )}
             </>
           )}
-          <ViscousButton type="submit" variant="primary" className="w-full" disabled={loading}>
+          <ViscousButton type="submit" variant="primary" className="w-full text-xl py-4" disabled={loading}>
             {loading ? 'Signing in…' : 'Sign In'}
           </ViscousButton>
         </form>

@@ -121,7 +121,152 @@ export default function TeamTable({ primary, staff, onFillIn }: Props) {
           <span className="text-xs text-gansid-on-surface/60">{orgName}</span>
         )}
       </div>
-      <div className="overflow-x-auto">
+      {/* Mobile card layout — every staff row is a self-contained card so all
+          columns including Actions are visible without horizontal scrolling. */}
+      <div className="md:hidden space-y-3">
+        {staff.map((s) => {
+          const pending = isPending(s);
+          const editing = editId === s.id;
+          return (
+            <div
+              key={s.id}
+              className="rounded-xl border border-gansid-on-surface/10 bg-white/60 backdrop-blur-sm p-3 shadow-sm"
+            >
+              <div className="flex items-start justify-between gap-2 mb-2">
+                <div className="min-w-0">
+                  <div className="font-display font-semibold text-gansid-on-surface truncate">{s.name}</div>
+                  <div className="text-xs text-gansid-on-surface/70 truncate">{s.email || '—'}</div>
+                </div>
+                <span
+                  className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                    pending
+                      ? 'bg-amber-100 text-amber-800'
+                      : 'bg-emerald-100 text-emerald-800'
+                  }`}
+                >
+                  {pending ? 'Pending' : 'Registered'}
+                </span>
+              </div>
+              <div className="text-xs text-gansid-on-surface/60 mb-3">
+                <span className="font-semibold text-gansid-on-surface/80">Category:</span> {categoryLabel(s)}
+              </div>
+              <div className="flex flex-wrap gap-x-4 gap-y-2">
+                {pending ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => copy(s)}
+                      className="text-xs font-semibold text-gansid-primary underline"
+                    >
+                      Copy link
+                    </button>
+                    {onFillIn && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditId(s.id);
+                          setEdit({
+                            name: s.name,
+                            email: s.email || '',
+                            category: (s.answers as any)?.staffCategory || '',
+                          });
+                        }}
+                        className="text-xs font-semibold text-gansid-secondary underline"
+                      >
+                        Fill in / Edit
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setViewQrId(s.id)}
+                      className="text-xs font-semibold text-gansid-primary underline"
+                    >
+                      View ticket
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => download(s)}
+                      disabled={downloadingId === s.id}
+                      className="text-xs font-semibold text-gansid-secondary underline disabled:opacity-50"
+                    >
+                      {downloadingId === s.id ? 'Preparing…' : 'Download PDF'}
+                    </button>
+                    {onFillIn && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditId(s.id);
+                          setEdit({
+                            name: s.name,
+                            email: s.email || '',
+                            category: (s.answers as any)?.staffCategory || '',
+                          });
+                        }}
+                        className="text-xs font-semibold text-gansid-secondary underline"
+                      >
+                        Edit
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+              {editing && (
+                <div className="mt-3 grid grid-cols-1 gap-2 bg-gansid-surface/50 rounded-lg p-3">
+                  <input
+                    className="border rounded px-2 py-1.5 text-sm"
+                    placeholder="Name"
+                    value={edit.name}
+                    onChange={(e) => setEdit({ ...edit, name: e.target.value })}
+                  />
+                  <input
+                    className="border rounded px-2 py-1.5 text-sm"
+                    placeholder="Email"
+                    type="email"
+                    value={edit.email}
+                    onChange={(e) => setEdit({ ...edit, email: e.target.value })}
+                  />
+                  <select
+                    className="border rounded px-2 py-1.5 text-sm"
+                    value={edit.category}
+                    onChange={(e) => setEdit({ ...edit, category: e.target.value })}
+                  >
+                    <option value="">Category…</option>
+                    <option value="hall_only">Hall-Only</option>
+                    <option value="full_access">Full Congress</option>
+                  </select>
+                  <div className="flex gap-2 justify-end">
+                    <ViscousButton variant="secondary" onClick={() => setEditId(null)}>
+                      Cancel
+                    </ViscousButton>
+                    <ViscousButton
+                      variant="primary"
+                      disabled={saving || !edit.name || !edit.email || !edit.category}
+                      onClick={async () => {
+                        if (!onFillIn) return;
+                        setSaving(true);
+                        try {
+                          await onFillIn(s.id, edit);
+                          setEditId(null);
+                        } finally {
+                          setSaving(false);
+                        }
+                      }}
+                    >
+                      {saving ? 'Saving…' : 'Save & Re-Send Invite'}
+                    </ViscousButton>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Desktop table layout — unchanged. */}
+      <div className="hidden md:block overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="text-left text-xs text-gansid-on-surface/60 uppercase">
             <tr>
@@ -200,6 +345,23 @@ export default function TeamTable({ primary, staff, onFillIn }: Props) {
                               ? 'Preparing…'
                               : 'Download PDF'}
                           </button>
+                          {onFillIn && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditId(s.id);
+                                setEdit({
+                                  name: s.name,
+                                  email: s.email || '',
+                                  category:
+                                    (s.answers as any)?.staffCategory || '',
+                                });
+                              }}
+                              className="text-xs text-gansid-secondary underline"
+                            >
+                              Edit
+                            </button>
+                          )}
                         </>
                       )}
                     </td>
