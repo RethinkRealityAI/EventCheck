@@ -130,9 +130,12 @@ export function AuthPanel() {
 
   return (
     <div className="w-full max-w-lg lg:sticky lg:top-8 rounded-gansid-lg px-4 py-7 sm:px-6 sm:py-8 md:p-10 shadow-2xl gradient-border relative">
+      <p className="font-body text-sm text-gansid-on-surface/70 text-center mb-3">
+        Create an account to access the Congress registration form, or sign in if you already have one.
+      </p>
       <div className="mb-7">
         <FloatingToggleTabs<Mode>
-          tabs={[{ id: 'signup', label: 'Register' }, { id: 'signin', label: 'Sign In' }]}
+          tabs={[{ id: 'signup', label: 'Create Account' }, { id: 'signin', label: 'Sign In' }]}
           active={mode}
           onChange={(id) => { setMode(id); setError(''); setSignupSuccess(false); resetResendState(); }}
           fullWidth
@@ -185,8 +188,8 @@ export function AuthPanel() {
             </div>
           </div>
           {error && <p className="text-sm text-gansid-primary">{error}</p>}
-          <ViscousButton type="submit" variant="primary" className="w-full text-xl py-4" disabled={loading}>
-            {loading ? 'Creating…' : 'Register'}
+          <ViscousButton type="submit" variant="primary" className="w-full text-base sm:text-lg py-4" disabled={loading}>
+            {loading ? 'Creating…' : 'Create Account & Register'}
           </ViscousButton>
         </form>
       ) : (
