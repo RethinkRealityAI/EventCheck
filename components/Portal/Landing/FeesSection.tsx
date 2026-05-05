@@ -17,7 +17,7 @@ function TierTable({ tier }: { tier: Tier }) {
   return (
     <div className="space-y-3">
       <div className="w-full rounded-full bg-gansid-gradient-reverse shadow-lg px-4 sm:px-6 md:px-8 py-3 md:py-4 text-center">
-        <div className="font-display text-[10px] sm:text-xs uppercase tracking-[0.25em] text-white/80 font-semibold">
+        <div className="font-display text-sm sm:text-base md:text-lg uppercase tracking-[0.25em] text-white font-bold">
           {tier.label}
         </div>
         <div className="font-display text-white font-bold text-sm sm:text-base md:text-lg leading-snug">
@@ -65,7 +65,7 @@ function TierTable({ tier }: { tier: Tier }) {
 export function FeesSection() {
   return (
     <div className="space-y-6 scroll-mt-8">
-      <div className="flex justify-center">
+      <div className="flex justify-center md:hidden">
         <ViscousButton
           type="button"
           variant="primary"
