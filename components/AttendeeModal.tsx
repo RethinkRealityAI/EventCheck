@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import ReactDOM from 'react-dom';
 import { Attendee, Form, SeatingTable } from '../types';
-import { User, X, Edit3, Trash2, CheckCircle, Clock, Mail, Check, QrCode, Calendar, CreditCard, Armchair } from 'lucide-react';
+import { User, X, Edit3, Trash2, CheckCircle, Clock, Mail, Check, QrCode, Calendar, CreditCard, Armchair, ExternalLink } from 'lucide-react';
 import { format } from 'date-fns';
 import QRCode from 'react-qr-code';
-import { updateAttendee, deleteAttendee, getSettings } from '../services/storageService';
+import { updateAttendee, deleteAttendee, getSettings, getAttendee } from '../services/storageService';
+import { supabase } from '../services/supabaseClient';
 import { useNotifications } from './NotificationSystem';
 import { sendEmail } from '../services/emailService';
 import { generateEmailHtml } from '../utils/emailTemplates';
@@ -15,23 +16,68 @@ interface AttendeeModalProps {
   seatingTables: SeatingTable[];
   onClose: () => void;
   onDelete: (id: string) => void;
+  onOpenAttendee?: (attendee: Attendee) => void;
 }
 
-const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingTables, onClose, onDelete }) => {
+const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingTables, onClose, onDelete, onOpenAttendee }) => {
   const [resending, setResending] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState<Partial<Attendee>>({});
   const [activeTab, setActiveTab] = useState<'details' | 'responses'>('details');
   const [localAttendee, setLocalAttendee] = useState(attendee);
+  const [purchaser, setPurchaser] = useState<Attendee | null>(null);
   const { showNotification } = useNotifications();
+
+  // Re-sync when the parent swaps in a different attendee (e.g. clicking
+  // "View purchaser" jumps from a guest row to the primary's row without
+  // unmounting the modal).
+  useEffect(() => {
+    setLocalAttendee(attendee);
+    setIsEditing(false);
+    setActiveTab('details');
+  }, [attendee.id]);
+
+  // For guest rows, look up the purchaser so we can show their name and offer
+  // a "view purchaser" affordance.
+  useEffect(() => {
+    if (localAttendee.isPrimary !== false || !localAttendee.primaryAttendeeId) {
+      setPurchaser(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const p = await getAttendee(localAttendee.primaryAttendeeId!);
+        if (!cancelled) setPurchaser(p ?? null);
+      } catch (err) {
+        console.warn('Failed to load purchaser for guest', err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [localAttendee.primaryAttendeeId, localAttendee.isPrimary]);
+
+  const isPendingClaimGuest = localAttendee.guestType === 'pending-claim'
+    || localAttendee.guestType === 'exhibitor-staff-pending'
+    || localAttendee.guestType === 'staff-pending';
 
   const handleResendEmail = async () => {
     setResending(true);
     try {
-      const settings = await getSettings();
-      const html = generateEmailHtml(settings, settings.emailBodyTemplate, localAttendee);
-      await sendEmail(localAttendee.email, settings.emailSubject, html);
-      showNotification(`Ticket resent to ${localAttendee.email}`, 'success');
+      // Pending-claim guests need the claim-invitation email (with their
+      // completion URL), not a ticket. Use the same edge function the Live
+      // tab's GuestActions chip uses so the two paths stay in sync.
+      if (isPendingClaimGuest) {
+        const { error } = await supabase.functions.invoke('send-ticket-email', {
+          body: { mode: 'group-invite', attendeeId: localAttendee.id, origin: window.location.origin },
+        });
+        if (error) throw error;
+        showNotification(`Claim invitation re-sent to ${localAttendee.email}`, 'success');
+      } else {
+        const settings = await getSettings();
+        const html = generateEmailHtml(settings, settings.emailBodyTemplate, localAttendee);
+        await sendEmail(localAttendee.email, settings.emailSubject, html);
+        showNotification(`Ticket resent to ${localAttendee.email}`, 'success');
+      }
     } catch (err: any) {
       console.error(err);
       showNotification(`Failed to resend email: ${err.message}`, 'error');
@@ -327,7 +373,10 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
                     disabled={resending}
                     className="w-full py-2.5 bg-white/60 border border-indigo-200/60 text-indigo-600 rounded-xl font-bold hover:bg-indigo-50/60 transition-all flex items-center justify-center gap-2 shadow-sm text-xs"
                   >
-                    <Mail className="w-4 h-4" /> {resending ? 'Sending...' : 'Resend Ticket Email'}
+                    <Mail className="w-4 h-4" />
+                    {resending
+                      ? 'Sending...'
+                      : isPendingClaimGuest ? 'Resend Claim Invitation' : 'Resend Ticket Email'}
                   </button>
                 </div>
               </div>
@@ -425,14 +474,38 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
                   </div>
                 )}
 
-                {/* Guest badge */}
+                {/* Guest panel — claim state + linked purchaser */}
                 {localAttendee.isPrimary === false && (
-                  <div className="bg-purple-50/60 rounded-xl p-3 border border-purple-200/40 flex items-center gap-3">
-                    <span className="inline-flex items-center px-3 py-1 rounded-xl text-xs font-bold bg-purple-100 text-purple-700 border border-purple-200/50">Guest Ticket</span>
+                  <div className="bg-purple-50/60 rounded-xl p-4 border border-purple-200/40 space-y-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="inline-flex items-center px-3 py-1 rounded-xl text-xs font-bold bg-purple-100 text-purple-700 border border-purple-200/50">Guest Ticket</span>
+                      {isPendingClaimGuest ? (
+                        <span className="inline-flex items-center px-3 py-1 rounded-xl text-xs font-bold bg-yellow-100 text-yellow-800 border border-yellow-200/50">Pending Claim</span>
+                      ) : localAttendee.guestType === 'claimed'
+                        || localAttendee.guestType === 'staff-claimed'
+                        || localAttendee.guestType === 'exhibitor-staff-claimed' ? (
+                        <span className="inline-flex items-center px-3 py-1 rounded-xl text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200/50">Self-Completed</span>
+                      ) : (
+                        <span className="inline-flex items-center px-3 py-1 rounded-xl text-xs font-bold bg-blue-100 text-blue-800 border border-blue-200/50">Pre-filled by Purchaser</span>
+                      )}
+                    </div>
                     {localAttendee.primaryAttendeeId && (
-                      <span className="text-[11px] text-indigo-600 font-bold">
-                        Linked to: {localAttendee.primaryAttendeeId.substring(0, 8)}...
-                      </span>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-[11px] text-slate-600">
+                          <span className="text-slate-400 font-bold uppercase tracking-wider mr-2">Purchaser</span>
+                          <span className="font-bold text-slate-700">{purchaser?.name || `${localAttendee.primaryAttendeeId.substring(0, 8)}…`}</span>
+                          {purchaser?.email && <span className="text-slate-500"> · {purchaser.email}</span>}
+                        </div>
+                        {purchaser && onOpenAttendee && (
+                          <button
+                            onClick={() => onOpenAttendee(purchaser)}
+                            className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 inline-flex items-center gap-1"
+                            title="Open the purchaser's record"
+                          >
+                            View purchaser <ExternalLink className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}

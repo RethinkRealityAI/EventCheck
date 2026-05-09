@@ -543,8 +543,15 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
         // attendee row's email, backlink their user_id now. The DB trigger only
         // fires on NEW auth.users inserts, so pre-existing users would otherwise
         // stay unlinked on the attendee row after claiming.
+        //
+        // Merge the guest's claim answers over the purchaser-filled snapshot so
+        // any purchaser-provided keys (dietary, age, name/email under
+        // `_guest_*`, plus the `_purchaser_filled` snapshot itself) survive the
+        // claim. The guest's edits still win for any field they touch.
+        const purchaserSnapshot = (loadedRefAttendee.answers as Record<string, any> | undefined) ?? {};
+        const mergedAnswers = { ...purchaserSnapshot, ...answers };
         const claimUpdate: Record<string, any> = {
-          answers,
+          answers: mergedAnswers,
           guest_type: newGuestType,
         };
         if (
@@ -842,6 +849,20 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
           const guestName = !isPlaceholder ? g!.name : `${purchaserName} - Guest Ticket #${i + 1}`;
           const guestEmail = !isPlaceholder ? g!.email : (purchaserEmail || 'unknown@example.com');
 
+          // Snapshot whatever the purchaser typed into the per-guest cards
+          // (name/email/dietary/age) under stable `_guest_*` keys. Persisting
+          // these in `answers` makes them visible in the admin modal's Responses
+          // tab and is preserved as `_purchaser_filled` after a guest claim
+          // overwrites their personal answers.
+          const purchaserFilled: Record<string, any> = {};
+          if (g?.name) purchaserFilled._guest_name = g.name;
+          if (g?.email) purchaserFilled._guest_email = g.email;
+          if (g?.dietary) purchaserFilled._guest_dietary = g.dietary === 'yes' ? 'Vegetarian' : 'No restrictions';
+          if (g?.guestType) purchaserFilled._guest_age_group = g.guestType;
+          const guestAnswers = Object.keys(purchaserFilled).length > 0
+            ? { ...purchaserFilled, _purchaser_filled: { ...purchaserFilled, capturedAt: new Date().toISOString() } }
+            : {};
+
           const guestAttendee: Attendee = {
             id: guestId,
             formId: form.id!,
@@ -855,7 +876,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
             guestType: isPlaceholder ? 'pending-claim' : (g?.guestType || 'adult'),
             ticketType: `Guest of ${purchaserName}`,
             registeredAt: new Date().toISOString(),
-            answers: {},
+            answers: guestAnswers,
             paymentStatus,
             paymentAmount: '0',
             invoiceId,
@@ -950,6 +971,19 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
             qrPayload,
             isInline: !!groupHasAllInfo,
           });
+          // Pre-fill snapshot for the group-mode partial path: when the purchaser
+          // didn't fill out everyone's full form, we still capture name/email/
+          // pricing inputs so the admin modal Responses tab shows what we know.
+          // The full path (groupHasAllInfo) keeps the verbatim form answers.
+          const purchaserFilledGroup: Record<string, any> = {};
+          if (m.name) purchaserFilledGroup._guest_name = m.name;
+          if (m.email) purchaserFilledGroup._guest_email = m.email;
+          if (m.countryCode) purchaserFilledGroup._guest_country = m.countryCode;
+          if (m.categoryId) purchaserFilledGroup._guest_category = m.categoryId;
+          if (m.addonIds && m.addonIds.length) purchaserFilledGroup._guest_addons = m.addonIds;
+          const fallbackAnswers = Object.keys(purchaserFilledGroup).length > 0
+            ? { ...purchaserFilledGroup, _purchaser_filled: { ...purchaserFilledGroup, capturedAt: new Date().toISOString() } }
+            : null;
           return {
             id: guestId,
             form_id: form.id,
@@ -961,7 +995,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
             qr_payload: qrPayload,
             is_primary: false,
             guest_type: groupHasAllInfo ? null : 'pending-claim',
-            answers: groupHasAllInfo && m.fullAnswers ? m.fullAnswers : null,
+            answers: groupHasAllInfo && m.fullAnswers ? m.fullAnswers : fallbackAnswers,
             is_test: false,
           };
         }),

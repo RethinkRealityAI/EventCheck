@@ -1281,18 +1281,18 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                       })}
                       {isColumnVisible('actions') && (
                         <td className="px-4 py-3 text-right sticky right-0 bg-white/95 backdrop-blur-sm z-10 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.06)]">
-                          {isGuestRow
-                            ? <GuestActions guest={attendee} formId={attendee.formId} onRefresh={onRefresh ?? (() => {})} />
-                            : (
-                              <button
-                                onClick={() => setSelectedAttendee(attendee)}
-                                className="text-indigo-600 hover:text-indigo-800 hover:bg-white/80 hover:shadow-sm p-2 rounded-lg transition"
-                                title="View Details"
-                              >
-                                <Eye className="w-4 h-4" />
-                              </button>
-                            )
-                          }
+                          <div className="flex items-center justify-end gap-1">
+                            {isGuestRow && (
+                              <GuestActions guest={attendee} formId={attendee.formId} onRefresh={onRefresh ?? (() => {})} />
+                            )}
+                            <button
+                              onClick={() => setSelectedAttendee(attendee)}
+                              className="text-indigo-600 hover:text-indigo-800 hover:bg-white/80 hover:shadow-sm p-2 rounded-lg transition"
+                              title="View Details"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                          </div>
                         </td>
                       )}
                     </tr>
@@ -1354,6 +1354,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
           seatingTables={seatingTables}
           onClose={() => setSelectedAttendee(null)}
           onDelete={handleDeleteAttendee}
+          onOpenAttendee={(a) => setSelectedAttendee(a)}
         />
       )}
 
