@@ -227,9 +227,9 @@ const AdminLayout = () => {
       <div className="absolute top-0 right-0 w-1/2 h-1/2 bg-blue-100/40 rounded-full blur-[120px] pointer-events-none transform translate-x-1/3 -translate-y-1/3"></div>
       <div className="absolute bottom-0 left-0 w-1/2 h-1/2 bg-indigo-100/40 rounded-full blur-[120px] pointer-events-none transform -translate-x-1/3 translate-y-1/3"></div>
       {/* Mobile Floating Bottom Nav */}
-      <div className="lg:hidden fixed bottom-6 left-1/2 transform -translate-x-1/2 z-50 flex flex-col items-center">
+      <div className="lg:hidden fixed bottom-6 left-1/2 transform -translate-x-1/2 z-50 flex flex-col items-center w-[calc(100vw-1.5rem)] max-w-md">
         {isMobileMenuOpen && (
-          <div className="bg-slate-900/80 backdrop-blur-2xl p-2 rounded-2xl shadow-2xl shadow-indigo-900/20 border border-slate-700/50 flex items-center gap-2 mb-4 animate-in slide-in-from-bottom-4 zoom-in-95 duration-200">
+          <div className="bg-slate-900/80 backdrop-blur-2xl p-2 rounded-2xl shadow-2xl shadow-indigo-900/20 border border-slate-700/50 flex flex-wrap items-center justify-center gap-1.5 mb-4 animate-in slide-in-from-bottom-4 zoom-in-95 duration-200 w-full">
             {canSeeDashboard && (
               <Link to="/admin" onClick={() => setIsMobileMenuOpen(false)} className="p-3 text-slate-300 hover:text-white hover:bg-slate-800/80 rounded-xl transition-all">
                 <LayoutDashboard className="w-6 h-6" />

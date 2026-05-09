@@ -150,7 +150,31 @@ export async function inviteAdmin(params: {
   });
 
   if (error) {
-    return { success: false, error: error.message || 'Invite failed' };
+    // supabase-js wraps non-2xx responses in FunctionsHttpError with a generic
+    // "Edge function returned a non-2xx status code" message and stuffs the
+    // raw Response in error.context. Read the body so the real validation
+    // error (e.g. "user already exists") reaches the UI instead of the
+    // useless wrapper message. FunctionsFetchError (network/CORS) has no
+    // context — fall back to its message.
+    const ctx = (error as any).context;
+    if (ctx && typeof ctx.json === 'function') {
+      try {
+        const body = await ctx.json();
+        if (body?.error) {
+          return {
+            success: false,
+            error: body.error,
+            alreadyExists: Boolean(body.alreadyExists),
+          };
+        }
+      } catch {
+        // Body wasn't JSON — fall through to the generic message below.
+      }
+    }
+    return {
+      success: false,
+      error: error.message || 'Invite failed — could not reach the server.',
+    };
   }
   if (data?.error) {
     return {
