@@ -127,71 +127,71 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
   const answersEntries = localAttendee.answers ? Object.entries(localAttendee.answers) : [];
 
   return ReactDOM.createPortal(
-    <div className="fixed inset-0 z-[60] flex items-center justify-center backdrop-blur-sm bg-black/20 p-4 sm:p-6" onClick={onClose}>
+    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center backdrop-blur-sm bg-black/20 p-0 sm:p-6" onClick={onClose}>
       <div
-        className="bg-white/80 backdrop-blur-3xl rounded-3xl shadow-2xl shadow-indigo-500/10 border border-white/60 w-full max-w-5xl overflow-hidden flex flex-col max-h-[98vh]"
+        className="bg-white/80 backdrop-blur-3xl rounded-t-3xl sm:rounded-3xl shadow-2xl shadow-indigo-500/10 border border-white/60 w-full max-w-5xl overflow-hidden flex flex-col max-h-[92dvh] sm:max-h-[92vh]"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="px-7 py-5 border-b border-white/40 flex justify-between items-center bg-gradient-to-r from-indigo-600 to-indigo-700 flex-shrink-0 relative overflow-hidden">
+        <div className="px-4 py-3.5 sm:px-7 sm:py-5 border-b border-white/40 flex justify-between items-center gap-2 bg-gradient-to-r from-indigo-600 to-indigo-700 flex-shrink-0 relative overflow-hidden">
           <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
           <div className="absolute -right-8 -top-8 opacity-10 pointer-events-none">
             <User strokeWidth={1} className="w-40 h-40 text-white" />
           </div>
-          <div className="flex items-center gap-3 relative z-10">
-            <div className="bg-white/20 backdrop-blur-md p-2.5 rounded-2xl shadow-lg border border-white/10">
-              <User className="w-6 h-6 text-white" />
+          <div className="flex items-center gap-2 sm:gap-3 relative z-10 min-w-0 flex-1">
+            <div className="bg-white/20 backdrop-blur-md p-2 sm:p-2.5 rounded-xl sm:rounded-2xl shadow-lg border border-white/10 flex-shrink-0">
+              <User className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
             </div>
-            <div>
-              <h3 className="text-xl font-extrabold text-white flex items-center gap-2 drop-shadow-sm">
-                {localAttendee.name}
+            <div className="min-w-0 flex-1">
+              <h3 className="text-base sm:text-xl font-extrabold text-white flex items-center gap-2 drop-shadow-sm truncate">
+                <span className="truncate">{localAttendee.name}</span>
                 {localAttendee.isTest && (
-                  <span className="px-2 py-0.5 bg-orange-400/20 text-orange-200 text-[10px] rounded-full font-bold border border-orange-300/30 uppercase tracking-wider">TEST</span>
+                  <span className="px-2 py-0.5 bg-orange-400/20 text-orange-200 text-[10px] rounded-full font-bold border border-orange-300/30 uppercase tracking-wider flex-shrink-0">TEST</span>
                 )}
               </h3>
-              <p className="text-sm text-indigo-200 font-medium">{localAttendee.email}</p>
+              <p className="text-xs sm:text-sm text-indigo-200 font-medium truncate">{localAttendee.email}</p>
             </div>
           </div>
-          <div className="flex items-center gap-1.5 relative z-10">
+          <div className="flex items-center gap-0.5 sm:gap-1.5 relative z-10 flex-shrink-0">
             <button
               onClick={() => {
                 setEditData(localAttendee);
                 setIsEditing(true);
               }}
-              className="p-2.5 text-white/80 hover:text-white hover:bg-white/10 rounded-xl transition-all"
+              className="p-2 sm:p-2.5 text-white/80 hover:text-white hover:bg-white/10 rounded-xl transition-all"
               title="Edit Attendee"
             >
-              <Edit3 className="w-5 h-5" />
+              <Edit3 className="w-4 h-4 sm:w-5 sm:h-5" />
             </button>
             <button
               onClick={() => handleDeleteAttendee(localAttendee.id)}
-              className="p-2.5 text-white/80 hover:text-red-300 hover:bg-white/10 rounded-xl transition-all"
+              className="p-2 sm:p-2.5 text-white/80 hover:text-red-300 hover:bg-white/10 rounded-xl transition-all"
               title="Delete Attendee"
             >
-              <Trash2 className="w-5 h-5" />
+              <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
             </button>
-            <div className="w-px h-6 bg-white/20 mx-1"></div>
+            <div className="hidden sm:block w-px h-6 bg-white/20 mx-1"></div>
             <button
               onClick={() => { onClose(); }}
-              className="p-2.5 text-white/70 hover:text-white hover:bg-white/10 rounded-xl transition-all"
+              className="p-2 sm:p-2.5 text-white/70 hover:text-white hover:bg-white/10 rounded-xl transition-all"
             >
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4 sm:w-5 sm:h-5" />
             </button>
           </div>
         </div>
 
         {/* Tabs - only visible when not editing */}
         {!isEditing && (
-          <div className="px-7 pt-3 flex gap-2 bg-white/60 backdrop-blur-md border-b border-white/40 flex-shrink-0">
+          <div className="px-4 sm:px-7 pt-2 sm:pt-3 flex gap-2 bg-white/60 backdrop-blur-md border-b border-white/40 flex-shrink-0">
             <button
               onClick={() => setActiveTab('details')}
-              className={`px-5 py-2.5 text-sm font-bold rounded-t-xl transition-all border-b-2 ${activeTab === 'details' ? 'border-indigo-600 text-indigo-600 bg-white/60' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
+              className={`px-4 sm:px-5 py-2 sm:py-2.5 text-xs sm:text-sm font-bold rounded-t-xl transition-all border-b-2 ${activeTab === 'details' ? 'border-indigo-600 text-indigo-600 bg-white/60' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
             >
               Details
             </button>
             <button
               onClick={() => setActiveTab('responses')}
-              className={`px-5 py-2.5 text-sm font-bold rounded-t-xl transition-all border-b-2 flex items-center gap-2 ${activeTab === 'responses' ? 'border-indigo-600 text-indigo-600 bg-white/60' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
+              className={`px-4 sm:px-5 py-2 sm:py-2.5 text-xs sm:text-sm font-bold rounded-t-xl transition-all border-b-2 flex items-center gap-2 ${activeTab === 'responses' ? 'border-indigo-600 text-indigo-600 bg-white/60' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
             >
               Responses {answersEntries.length > 0 && <span className="text-[10px] bg-indigo-100 text-indigo-600 px-2 py-0.5 rounded-full font-bold">{answersEntries.length}</span>}
             </button>
@@ -199,7 +199,7 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
         )}
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto p-6 min-h-0 custom-scrollbar">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 min-h-0 custom-scrollbar overscroll-contain">
           {isEditing ? (
             <div className="space-y-5">
               <div className="bg-white/60 backdrop-blur-md rounded-xl p-4 border border-white/60 shadow-sm">

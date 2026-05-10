@@ -21,11 +21,17 @@
 // @deno-types="npm:@supabase/supabase-js"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.46.1';
 
+// supabase-js v2.45+ silently injects `x-supabase-api-version` on every
+// functions.invoke() call. Browsers will block the preflight (and the user
+// sees "Failed to send a request to the Edge Function" / "could not be
+// reached") unless that header is in the allow-list. Keep this list in sync
+// with whatever supabase-js sends — when in doubt, add the header here.
 const corsHeaders: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers':
-    'authorization, x-client-info, apikey, content-type, x-supabase-client-platform',
+    'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-api-version',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Max-Age': '86400',
 };
 
 function json(body: unknown, status = 200): Response {

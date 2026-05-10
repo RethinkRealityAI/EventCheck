@@ -127,9 +127,25 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
   const { showNotification } = useNotifications();
   const [showExportModal, setShowExportModal] = useState(false);
 
-  // Pagination State
+  // Pagination State. Default page size is 20 (a comfortable scroll on a
+  // dashboard) and the user's choice persists per-browser in localStorage so
+  // they don't have to re-pick it after every refresh. Whitelist the value
+  // before applying so a stale/invalid entry can't break the dropdown.
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [itemsPerPage, setItemsPerPage] = useState<number>(() => {
+    if (typeof window === 'undefined') return 20;
+    const stored = Number(window.localStorage.getItem('attendeeList.itemsPerPage'));
+    return [10, 20, 25, 50, 100].includes(stored) ? stored : 20;
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem('attendeeList.itemsPerPage', String(itemsPerPage));
+    } catch {
+      // localStorage may be unavailable (private mode, quota); ignore.
+    }
+  }, [itemsPerPage]);
 
   // Collapsed state for tables
   const [expandedTables, setExpandedTables] = useState<Record<string, boolean>>({});
@@ -685,6 +701,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                 className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-indigo-500"
               >
                 <option value={10}>10 per page</option>
+                <option value={20}>20 per page</option>
                 <option value={25}>25 per page</option>
                 <option value={50}>50 per page</option>
                 <option value={100}>100 per page</option>
