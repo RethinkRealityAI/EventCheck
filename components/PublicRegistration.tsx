@@ -633,6 +633,9 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                 orgName,
                 eventName,
                 attachments,
+                // attendeeId lets the edge function stamp
+                // `last_ticket_email_at` so the dashboard reflects "Sent".
+                attendeeId: loadedRefAttendee.id,
               },
             }).catch(() => {/* ignore — email is best-effort */});
           } catch (emailErr) {

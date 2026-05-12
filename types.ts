@@ -267,6 +267,12 @@ export interface AppSettings {
   // Template X: inline-completed guests (ticket ready). Same placeholders as Y minus complete_url; adds {{signup_url}}.
   emailGuestConfirmedSubject: string;
   emailGuestConfirmedBody: string;
+  // Sent to the primary purchaser to notify them that one of their guests
+  // has finished claiming their seat. Placeholders: {{name}} (the guest
+  // who claimed), {{purchaser}} (the recipient — typically themselves),
+  // {{event}}.
+  emailGuestCompletionNotifySubject: string;
+  emailGuestCompletionNotifyBody: string;
   // Purchaser backup note (appended when guest tickets are included)
   emailPurchaserGuestNote: string;
 
@@ -285,6 +291,11 @@ export interface AppSettings {
   emailStaffInviteBody?: string;
   emailStaffConfirmedSubject?: string;
   emailStaffConfirmedBody?: string;
+  // Sent to the org contact (sponsor/exhibitor company) to notify them
+  // that one of their staff members has finished claiming a ticket.
+  // Placeholders: {{name}} (the staff member), {{org_name}}, {{event}}.
+  emailExhibitorStaffCompletionNotifySubject?: string;
+  emailExhibitorStaffCompletionNotifyBody?: string;
 
   // Sponsor Email Templates
   sponsorInvitationSubject: string;
@@ -348,6 +359,14 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // Group Template X — inline completed (ticket ready, no further action required)
   emailGuestConfirmedSubject: 'Your ticket for {{event}} is confirmed',
   emailGuestConfirmedBody: '<p>Hi {{name}},</p><p><strong>{{purchaser}}</strong> has registered you for <strong>{{event}}</strong> and has already provided your details — you are all set. Your ticket is attached; please present the QR code at the entrance.</p><p>If you would like to create a portal account with this email address to view your ticket or get updates anytime, you can do so here: <a href="{{signup_url}}">{{signup_url}}</a></p><p>See you at the Congress!</p>',
+
+  // Notification sent to the purchaser when one of their guests claims their seat.
+  emailGuestCompletionNotifySubject: '{{name}} has completed their registration for {{event}}',
+  emailGuestCompletionNotifyBody: '<p>Hi {{purchaser}},</p><p><strong>{{name}}</strong> has completed their registration details for <strong>{{event}}</strong>. Their individual ticket confirmation has been emailed to them directly — no action needed from you.</p>',
+
+  // Notification sent to the org contact when one of their exhibitor/sponsor staff completes registration.
+  emailExhibitorStaffCompletionNotifySubject: '{{name}} has completed their registration',
+  emailExhibitorStaffCompletionNotifyBody: '<p>Hi {{contact_name}},</p><p><strong>{{name}}</strong> has completed their registration details for the <strong>{{event}}</strong> on behalf of <strong>{{org_name}}</strong>.</p><p>Their individual ticket confirmation has been emailed to them directly.</p>',
 
   emailInvitationSubject: 'You are invited!',
   emailInvitationBody: '<p>Hi there,</p><p>We would love for you to join us at <strong>{{event}}</strong>.</p><p>Please click the link below to register:</p><p><a href="{{link}}" style="color: #4F46E5;">Register Now</a></p><p>Best regards,<br>The Team</p>',

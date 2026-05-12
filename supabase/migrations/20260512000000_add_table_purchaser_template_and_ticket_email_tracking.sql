@@ -14,7 +14,15 @@
 
 ALTER TABLE public.app_settings
     ADD COLUMN IF NOT EXISTS email_table_purchaser_subject text,
-    ADD COLUMN IF NOT EXISTS email_table_purchaser_body text;
+    ADD COLUMN IF NOT EXISTS email_table_purchaser_body text,
+    -- Sent to the primary purchaser when one of their guests completes
+    -- their claim. Previously hardcoded inside the edge function.
+    ADD COLUMN IF NOT EXISTS email_guest_completion_notify_subject text,
+    ADD COLUMN IF NOT EXISTS email_guest_completion_notify_body text,
+    -- Sent to the sponsor/exhibitor org contact when one of their staff
+    -- members completes their claim. Previously hardcoded.
+    ADD COLUMN IF NOT EXISTS email_exhibitor_staff_completion_notify_subject text,
+    ADD COLUMN IF NOT EXISTS email_exhibitor_staff_completion_notify_body text;
 
 ALTER TABLE public.attendees
     ADD COLUMN IF NOT EXISTS last_ticket_email_at timestamptz;

@@ -279,15 +279,39 @@ serve(async (req: Request) => {
                     .eq('id', attendee.primary_attendee_id)
                     .maybeSingle();
                 if (primary?.email) {
-                    const subject = `${attendee.name} has completed their registration`;
+                    // Admin-editable notification template. Falls back to a
+                    // sensible default when the admin hasn't customised it.
+                    const notifyRawSubject = (appSettings as any)?.email_guest_completion_notify_subject
+                        || '{{name}} has completed their registration for {{event}}';
+                    const notifyRawBody = (appSettings as any)?.email_guest_completion_notify_body
+                        || `<p>Hi {{purchaser}},</p><p><strong>{{name}}</strong> has completed their registration details for <strong>{{event}}</strong>. Their individual ticket confirmation has been emailed to them directly — no action needed from you.</p>`;
+                    const notifyReplace = (s: string) => s
+                        .replace(/\{\{name\}\}/g, attendee.name || 'Guest')
+                        .replace(/\{\{purchaser\}\}/g, primary.name || 'there')
+                        .replace(/\{\{event\}\}/g, eventName);
+                    const subject = notifyReplace(notifyRawSubject);
                     const html = generateEmailTemplate({
                         title: eventName,
                         greeting: `Hi ${primary.name || 'there'}`,
-                        content: `<p><strong>${attendee.name}</strong> has completed their registration details for <strong>${eventName}</strong>. Their individual ticket confirmation has been emailed to them directly.</p>`,
+                        content: notifyReplace(notifyRawBody),
                         fromName: smtpConfig?.fromName,
                     });
                     await sendSimpleEmail({ to: primary.email, subject, html, smtpConfig })
                         .catch(e => console.warn('Primary notification failed', e));
+                }
+            }
+
+            // Stamp `last_ticket_email_at` so the dashboard reflects "Sent"
+            // for self-claimed guests. Best-effort — the email already went
+            // out; this is just bookkeeping.
+            if (ticketOk) {
+                try {
+                    await supabase
+                        .from('attendees')
+                        .update({ last_ticket_email_at: new Date().toISOString() })
+                        .eq('id', attendee.id);
+                } catch (stampErr) {
+                    console.warn('Failed to stamp last_ticket_email_at on guest-claim-completed', stampErr);
                 }
             }
 
@@ -470,6 +494,21 @@ serve(async (req: Request) => {
                 html,
                 attachments,
             });
+            // Stamp `last_ticket_email_at` when the caller supplies an
+            // attendeeId. The current shape doesn't require it (callers
+            // pass pre-composed fields), so we treat it as optional —
+            // sponsor/exhibitor flow can be updated to pass it for full
+            // dashboard coverage.
+            if (body.attendeeId) {
+                try {
+                    await supabase
+                        .from('attendees')
+                        .update({ last_ticket_email_at: new Date().toISOString() })
+                        .eq('id', body.attendeeId);
+                } catch (stampErr) {
+                    console.warn('Failed to stamp last_ticket_email_at on staff-claim-completed', stampErr);
+                }
+            }
             return jsonResponse({ ok: true });
         }
 
@@ -604,17 +643,41 @@ serve(async (req: Request) => {
                 console.warn('Failed to send exhibitor-staff ticket email', e);
             }
 
-            // 2. Notify the org contact (best-effort)
+            // 2. Notify the org contact (best-effort). Pulls from the
+            //    admin-editable notification template so the wording can be
+            //    customised in Settings → Email Templates.
             if (org?.email) {
-                const subject = `${staff.name} has completed their registration`;
+                const contactName = (org?.company_info as any)?.contactName || 'there';
+                const notifyRawSubject = (appSettings as any)?.email_exhibitor_staff_completion_notify_subject
+                    || '{{name}} has completed their registration';
+                const notifyRawBody = (appSettings as any)?.email_exhibitor_staff_completion_notify_body
+                    || `<p>Hi {{contact_name}},</p><p><strong>{{name}}</strong> has completed their registration details for the <strong>{{event}}</strong> on behalf of <strong>{{org_name}}</strong>.</p><p>Their individual ticket confirmation has been emailed to them directly.</p>`;
+                const notifyReplace = (s: string) => s
+                    .replace(/\{\{name\}\}/g, staff.name || 'Staff member')
+                    .replace(/\{\{contact_name\}\}/g, contactName)
+                    .replace(/\{\{org_name\}\}/g, orgName || '')
+                    .replace(/\{\{event\}\}/g, eventName);
+                const subject = notifyReplace(notifyRawSubject);
                 const html = generateEmailTemplate({
                     title: eventName,
-                    greeting: `Hi ${(org?.company_info as any)?.contactName || 'there'}`,
-                    content: `<p><strong>${staff.name}</strong> has completed their registration details for the <strong>${eventName}</strong> on behalf of <strong>${orgName}</strong>.</p><p>Their individual ticket confirmation has been emailed to them directly.</p>`,
+                    greeting: `Hi ${contactName}`,
+                    content: notifyReplace(notifyRawBody),
                     fromName: smtpConfig?.fromName,
                 });
                 await sendSimpleEmail({ to: org.email, subject, html, smtpConfig })
                     .catch(e => console.warn('Org contact notification failed', e));
+            }
+
+            // Stamp `last_ticket_email_at` on the staff attendee so the
+            // dashboard reflects that we sent them their confirmation.
+            // Best-effort — the email was already sent successfully.
+            try {
+                await supabase
+                    .from('attendees')
+                    .update({ last_ticket_email_at: new Date().toISOString() })
+                    .eq('id', staff.id);
+            } catch (stampErr) {
+                console.warn('Failed to stamp last_ticket_email_at on exhibitor-staff-claim-completed', stampErr);
             }
 
             return jsonResponse({ ok: true });
