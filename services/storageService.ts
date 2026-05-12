@@ -95,6 +95,12 @@ export const updateAttendee = async (id: string, updates: Partial<Attendee>): Pr
   if (updates.companyInfo !== undefined) dbUpdates.company_info = updates.companyInfo as any;
   if (updates.sponsoredAwards !== undefined) dbUpdates.sponsored_awards = updates.sponsoredAwards as any;
   if (updates.adminNotes !== undefined) dbUpdates.admin_notes = updates.adminNotes ?? null;
+  // `last_ticket_email_at` is whitelisted here so the dashboard "Ticket
+  // Sent" stamping paths (Manual Ticket Tool, AttendeeModal resend,
+  // PublicRegistration sends) actually persist. Without this entry,
+  // the field would silently drop on every update — the most common
+  // source of "I sent it but the dashboard still says Not sent" bugs.
+  if (updates.lastTicketEmailAt !== undefined) (dbUpdates as any).last_ticket_email_at = updates.lastTicketEmailAt;
 
   const { error } = await supabase
     .from('attendees')
