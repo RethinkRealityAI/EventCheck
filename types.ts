@@ -41,6 +41,12 @@ export interface Attendee {
    *  and "static-ticket table purchaser with guest placeholder seats" (SCAGO).
    *  Null/undefined on static-ticket registrations. */
   pricingTemplateId?: string | null;
+  /** Stamped whenever the ticket email is sent or re-sent. Surfaces on the
+   *  dashboard as a "Ticket Sent" column so staff can see who's been
+   *  notified vs. who still needs an email. Independent of registration
+   *  state — `null` means we never sent (or we only sent before this field
+   *  existed). */
+  lastTicketEmailAt?: string | null;
 }
 
 export interface SeatingConfiguration {
@@ -243,6 +249,14 @@ export interface AppSettings {
   emailBodyTemplate: string; // HTML supported
   emailFooterText: string;
 
+  // Table-Purchaser Email — sent to the buyer who picked a multi-seat
+  // ticket (e.g. a full table of 8). Distinct from the standard ticket
+  // confirmation because the copy typically references the included
+  // guests, instructions for sharing claim links, table-host etiquette,
+  // etc. Same placeholders as the standard ticket email.
+  emailTablePurchaserSubject: string;
+  emailTablePurchaserBody: string;
+
   // Guest Ticket Email (sent directly to named guests)
   emailGuestSubject: string;
   emailGuestBody: string;
@@ -253,6 +267,12 @@ export interface AppSettings {
   // Template X: inline-completed guests (ticket ready). Same placeholders as Y minus complete_url; adds {{signup_url}}.
   emailGuestConfirmedSubject: string;
   emailGuestConfirmedBody: string;
+  // Sent to the primary purchaser to notify them that one of their guests
+  // has finished claiming their seat. Placeholders: {{name}} (the guest
+  // who claimed), {{purchaser}} (the recipient — typically themselves),
+  // {{event}}.
+  emailGuestCompletionNotifySubject: string;
+  emailGuestCompletionNotifyBody: string;
   // Purchaser backup note (appended when guest tickets are included)
   emailPurchaserGuestNote: string;
 
@@ -271,6 +291,11 @@ export interface AppSettings {
   emailStaffInviteBody?: string;
   emailStaffConfirmedSubject?: string;
   emailStaffConfirmedBody?: string;
+  // Sent to the org contact (sponsor/exhibitor company) to notify them
+  // that one of their staff members has finished claiming a ticket.
+  // Placeholders: {{name}} (the staff member), {{org_name}}, {{event}}.
+  emailExhibitorStaffCompletionNotifySubject?: string;
+  emailExhibitorStaffCompletionNotifyBody?: string;
 
   // Sponsor Email Templates
   sponsorInvitationSubject: string;
@@ -316,9 +341,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   emailHeaderLogo: '',
   emailHeaderColor: '#f8fafc',
   emailFooterColor: '#f8fafc',
-  emailSubject: 'Your Event Ticket & Invoice',
+  emailSubject: 'Your ticket for {{event}}',
   emailBodyTemplate: '<p>Hi <strong>{{name}}</strong>,</p><p>Thank you for registering for <strong>{{event}}</strong>!</p><p>Attached is your official PDF ticket. Please present the QR code at the entrance.</p><p>Invoice ID: {{invoiceId}}<br>Amount Paid: {{amount}}</p><p>See you there!</p>',
   emailFooterText: '© 2025 Event Organizers Inc. All rights reserved.',
+
+  emailTablePurchaserSubject: 'Your table at {{event}}',
+  emailTablePurchaserBody: '<p>Hi <strong>{{name}}</strong>,</p><p>Thank you for purchasing a table at <strong>{{event}}</strong>! Your table comes with seats for you and your guests.</p><p>Your own ticket is attached as a PDF — please present the QR code at the entrance.</p><p>Each guest seat has been pre-created. We will email guest claim links separately so each person can fill in their own details (name, dietary preferences, etc.). You can also share the links yourself from your portal account.</p><p>Invoice ID: {{invoiceId}}<br>Amount Paid: {{amount}}</p><p>See you there!</p>',
 
   emailGuestSubject: 'Your Ticket for {{event}}',
   emailGuestBody: 'Great news! {{purchaser}} has registered you for {{event}}. Your ticket is attached — please bring it with you to the event. You can scan the QR code on your ticket for entry.',
@@ -331,6 +359,14 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // Group Template X — inline completed (ticket ready, no further action required)
   emailGuestConfirmedSubject: 'Your ticket for {{event}} is confirmed',
   emailGuestConfirmedBody: '<p>Hi {{name}},</p><p><strong>{{purchaser}}</strong> has registered you for <strong>{{event}}</strong> and has already provided your details — you are all set. Your ticket is attached; please present the QR code at the entrance.</p><p>If you would like to create a portal account with this email address to view your ticket or get updates anytime, you can do so here: <a href="{{signup_url}}">{{signup_url}}</a></p><p>See you at the Congress!</p>',
+
+  // Notification sent to the purchaser when one of their guests claims their seat.
+  emailGuestCompletionNotifySubject: '{{name}} has completed their registration for {{event}}',
+  emailGuestCompletionNotifyBody: '<p>Hi {{purchaser}},</p><p><strong>{{name}}</strong> has completed their registration details for <strong>{{event}}</strong>. Their individual ticket confirmation has been emailed to them directly — no action needed from you.</p>',
+
+  // Notification sent to the org contact when one of their exhibitor/sponsor staff completes registration.
+  emailExhibitorStaffCompletionNotifySubject: '{{name}} has completed their registration',
+  emailExhibitorStaffCompletionNotifyBody: '<p>Hi {{contact_name}},</p><p><strong>{{name}}</strong> has completed their registration details for the <strong>{{event}}</strong> on behalf of <strong>{{org_name}}</strong>.</p><p>Their individual ticket confirmation has been emailed to them directly.</p>',
 
   emailInvitationSubject: 'You are invited!',
   emailInvitationBody: '<p>Hi there,</p><p>We would love for you to join us at <strong>{{event}}</strong>.</p><p>Please click the link below to register:</p><p><a href="{{link}}" style="color: #4F46E5;">Register Now</a></p><p>Best regards,<br>The Team</p>',

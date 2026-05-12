@@ -12,7 +12,7 @@ import SeatingConfigurator from './components/Seating/SeatingConfigurator';
 import SponsorsDashboard from './components/Sponsors/SponsorsDashboard';
 import { NotificationProvider } from './components/NotificationSystem';
 import { Attendee, Form } from './types';
-import { getAttendees, checkInAttendee, getForms } from './services/storageService';
+import { getAttendees, checkInAttendee, getForms, getAttendee, updateAttendee } from './services/storageService';
 import { AuthProvider, useAuth } from './components/AuthContext';
 import Login from './components/Login';
 import { CURRENT_SITE } from './config/sites';
@@ -190,14 +190,40 @@ const AdminLayout = () => {
     return () => clearInterval(interval);
   }, [refreshAttendees]);
 
-  const handleScan = async (data: string): Promise<Attendee | 'not_found' | 'already_checked_in'> => {
+  // Scan outcomes:
+  //   - `not_found`        : QR didn't match any attendee
+  //   - `already_checked_in`: attendee was previously checked in
+  //   - { pendingCapture }  : attendee row exists but it's a placeholder
+  //                           guest who hasn't filled in their own details
+  //                           yet (a "Guest Ticket #N" row from a table
+  //                           purchase). The Scanner UI surfaces inline
+  //                           inputs so door staff can capture name + email
+  //                           and check the person in atomically.
+  //   - Attendee            : normal scan, attendee now checked in
+  const handleScan = async (data: string): Promise<Attendee | 'not_found' | 'already_checked_in' | { pendingCapture: true; attendee: Attendee }> => {
     try {
       const parsed = JSON.parse(data);
       if (!parsed.id) return 'not_found';
 
-      // Check if already checked in locally first for faster UI response
+      // Local fast-path for already-checked-in scans.
       const existingInState = attendees.find(a => a.id === parsed.id);
       if (existingInState?.checkedInAt) return 'already_checked_in';
+
+      // Peek at the attendee first so we can decide whether this is a
+      // placeholder that needs name+email capture before we check them in.
+      // Skipping the auto-check-in for placeholders keeps the dashboard
+      // honest: a row only flips to "Checked In" once we have a real name
+      // attached to it, not just because someone scanned a generic ticket.
+      const peek = await getAttendee(parsed.id);
+      if (!peek) return 'not_found';
+      if (peek.checkedInAt) return 'already_checked_in';
+
+      const isPlaceholder = peek.guestType === 'pending-claim'
+        || peek.guestType === 'staff-pending'
+        || peek.guestType === 'exhibitor-staff-pending';
+      if (isPlaceholder) {
+        return { pendingCapture: true, attendee: peek };
+      }
 
       const result = await checkInAttendee(parsed.id);
 
@@ -219,6 +245,46 @@ const AdminLayout = () => {
     } catch (e) {
       return 'not_found';
     }
+  };
+
+  // Called by the Scanner after door staff fills in a placeholder guest's
+  // name + email at scan time. Saves the captured details, transitions the
+  // guest out of placeholder state (`pending-claim` → `claimed`), and
+  // stamps `checkedInAt` so the check-in completes in one round-trip. The
+  // Scanner uses the returned attendee to render the success card.
+  const handleCapturePlaceholder = async (
+    attendeeId: string,
+    name: string,
+    email: string,
+  ): Promise<Attendee | null> => {
+    const now = new Date().toISOString();
+    // Existing guestType drives the post-claim state so staff-pending
+    // becomes staff-claimed (not the generic `claimed`), matching how the
+    // public claim flow handles the same transition.
+    const current = await getAttendee(attendeeId);
+    if (!current) return null;
+    let claimedType: Attendee['guestType'] = 'claimed';
+    if (current.guestType === 'staff-pending') claimedType = 'staff-claimed';
+    else if (current.guestType === 'exhibitor-staff-pending') claimedType = 'exhibitor-staff-claimed';
+    const updates: Partial<Attendee> = {
+      name: name.trim(),
+      email: email.trim(),
+      guestType: claimedType,
+      checkedInAt: now,
+    };
+    try {
+      await updateAttendee(attendeeId, updates);
+    } catch (err) {
+      console.error('Failed to capture placeholder guest details', err);
+      return null;
+    }
+    const updated = { ...current, ...updates };
+    setAttendees(prev => {
+      const idx = prev.findIndex(a => a.id === updated.id);
+      if (idx !== -1) return prev.map(a => a.id === updated.id ? updated : a);
+      return [updated, ...prev];
+    });
+    return updated;
   };
 
   return (
@@ -460,6 +526,7 @@ const AdminLayout = () => {
       {showScanner && (
         <Scanner
           onScan={handleScan}
+          onCapturePlaceholder={handleCapturePlaceholder}
           onClose={() => setShowScanner(false)}
         />
       )}

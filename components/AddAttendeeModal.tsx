@@ -17,8 +17,6 @@ const AddAttendeeModal: React.FC<AddAttendeeModalProps> = ({ forms, selectedForm
   const [saving, setSaving] = useState(false);
 
   const [formId, setFormId] = useState(selectedFormId && selectedFormId !== '_all' ? selectedFormId : (forms[0]?.id || ''));
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
   const [ticketType, setTicketType] = useState('');
   const [paymentStatus, setPaymentStatus] = useState<'free' | 'paid' | 'pending'>('free');
   const [isTest, setIsTest] = useState(false);
@@ -30,20 +28,41 @@ const AddAttendeeModal: React.FC<AddAttendeeModalProps> = ({ forms, selectedForm
   const ticketField = selectedForm?.fields.find(f => f.type === 'ticket');
   const ticketOptions = ticketField?.ticketConfig?.items || [];
 
-  // Non-ticket fields for dynamic rendering
+  // Non-ticket fields for dynamic rendering. The form is the canonical source
+  // of name/email so we don't ask for them twice — pull whichever field looks
+  // like the name and email at submit time (same heuristic the public form
+  // uses so admin-added rows match registrant-created rows).
   const dynamicFields = useMemo(() => {
     if (!selectedForm) return [];
     return selectedForm.fields.filter(f => f.type !== 'ticket');
   }, [selectedForm]);
 
+  const nameField = useMemo(
+    () => selectedForm?.fields.find(f => f.type === 'text' || f.label.toLowerCase().includes('name')),
+    [selectedForm],
+  );
+  const emailField = useMemo(
+    () => selectedForm?.fields.find(f => f.type === 'email' || f.label.toLowerCase().includes('email')),
+    [selectedForm],
+  );
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || !email.trim()) {
-      showNotification('Name and email are required', 'warning');
-      return;
-    }
     if (!formId) {
       showNotification('Please select a form', 'warning');
+      return;
+    }
+    // Pull name/email from the form's own fields rather than asking for them
+    // twice. Same heuristic as PublicRegistration so admin-created rows look
+    // identical to registrant-created ones.
+    const resolvedName = String((nameField && answers[nameField.id]) || '').trim();
+    const resolvedEmail = String((emailField && answers[emailField.id]) || '').trim();
+    if (!resolvedName) {
+      showNotification(`Please fill in "${nameField?.label || 'name'}" — that's how the attendee will appear on the ticket.`, 'warning');
+      return;
+    }
+    if (!resolvedEmail) {
+      showNotification(`Please fill in "${emailField?.label || 'email'}" — required so we can deliver their ticket.`, 'warning');
       return;
     }
 
@@ -57,8 +76,8 @@ const AddAttendeeModal: React.FC<AddAttendeeModalProps> = ({ forms, selectedForm
         id,
         formId,
         formTitle: selectedForm?.title || 'Unknown Form',
-        name: name.trim(),
-        email: email.trim(),
+        name: resolvedName,
+        email: resolvedEmail,
         ticketType: ticketType || 'Manual Entry',
         registeredAt: new Date().toISOString(),
         checkedInAt: null,
@@ -74,7 +93,7 @@ const AddAttendeeModal: React.FC<AddAttendeeModalProps> = ({ forms, selectedForm
       };
 
       await saveAttendee(attendee);
-      showNotification(`${name} registered successfully`, 'success');
+      showNotification(`${resolvedName} registered successfully`, 'success');
       onAdded();
       onClose();
     } catch (err: any) {
@@ -131,37 +150,6 @@ const AddAttendeeModal: React.FC<AddAttendeeModalProps> = ({ forms, selectedForm
                     <option key={f.id} value={f.id}>{f.title}</option>
                   ))}
                 </select>
-              </div>
-            </div>
-
-            {/* Identity Card */}
-            <div className="bg-white/60 backdrop-blur-md rounded-2xl p-5 border border-white/60 shadow-sm">
-              <h4 className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest mb-4 flex items-center gap-2">
-                <UserPlus className="w-3 h-3" /> Attendee Info
-              </h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Full Name *</label>
-                  <input
-                    type="text"
-                    value={name}
-                    onChange={e => setName(e.target.value)}
-                    className="w-full px-4 py-3 bg-white/80 border border-white/60 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium text-slate-800 shadow-sm placeholder:text-slate-300"
-                    placeholder="John Doe"
-                    required
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Email Address *</label>
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={e => setEmail(e.target.value)}
-                    className="w-full px-4 py-3 bg-white/80 border border-white/60 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium text-slate-800 shadow-sm placeholder:text-slate-300"
-                    placeholder="john@example.com"
-                    required
-                  />
-                </div>
               </div>
             </div>
 

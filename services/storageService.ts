@@ -95,6 +95,12 @@ export const updateAttendee = async (id: string, updates: Partial<Attendee>): Pr
   if (updates.companyInfo !== undefined) dbUpdates.company_info = updates.companyInfo as any;
   if (updates.sponsoredAwards !== undefined) dbUpdates.sponsored_awards = updates.sponsoredAwards as any;
   if (updates.adminNotes !== undefined) dbUpdates.admin_notes = updates.adminNotes ?? null;
+  // `last_ticket_email_at` is whitelisted here so the dashboard "Ticket
+  // Sent" stamping paths (Manual Ticket Tool, AttendeeModal resend,
+  // PublicRegistration sends) actually persist. Without this entry,
+  // the field would silently drop on every update — the most common
+  // source of "I sent it but the dashboard still says Not sent" bugs.
+  if (updates.lastTicketEmailAt !== undefined) (dbUpdates as any).last_ticket_email_at = updates.lastTicketEmailAt;
 
   const { error } = await supabase
     .from('attendees')
@@ -267,6 +273,8 @@ export const getSettings = async (): Promise<AppSettings> => {
     emailSubject: data.email_subject || '',
     emailBodyTemplate: data.email_body_template || '',
     emailFooterText: data.email_footer_text || '',
+    emailTablePurchaserSubject: (data as any).email_table_purchaser_subject || DEFAULT_SETTINGS.emailTablePurchaserSubject,
+    emailTablePurchaserBody: (data as any).email_table_purchaser_body || DEFAULT_SETTINGS.emailTablePurchaserBody,
     emailGuestSubject: data.email_guest_subject || DEFAULT_SETTINGS.emailGuestSubject,
     emailGuestBody: data.email_guest_body || DEFAULT_SETTINGS.emailGuestBody,
     emailPurchaserGuestNote: data.email_purchaser_guest_note || DEFAULT_SETTINGS.emailPurchaserGuestNote,
@@ -274,10 +282,14 @@ export const getSettings = async (): Promise<AppSettings> => {
     emailGuestClaimBody: (data as any).email_guest_claim_body || DEFAULT_SETTINGS.emailGuestClaimBody,
     emailGuestConfirmedSubject: (data as any).email_guest_confirmed_subject || DEFAULT_SETTINGS.emailGuestConfirmedSubject,
     emailGuestConfirmedBody: (data as any).email_guest_confirmed_body || DEFAULT_SETTINGS.emailGuestConfirmedBody,
+    emailGuestCompletionNotifySubject: (data as any).email_guest_completion_notify_subject || DEFAULT_SETTINGS.emailGuestCompletionNotifySubject,
+    emailGuestCompletionNotifyBody: (data as any).email_guest_completion_notify_body || DEFAULT_SETTINGS.emailGuestCompletionNotifyBody,
     emailStaffInviteSubject: (data as any).email_staff_invite_subject || '',
     emailStaffInviteBody: (data as any).email_staff_invite_body || '',
     emailStaffConfirmedSubject: (data as any).email_staff_confirmed_subject || '',
     emailStaffConfirmedBody: (data as any).email_staff_confirmed_body || '',
+    emailExhibitorStaffCompletionNotifySubject: (data as any).email_exhibitor_staff_completion_notify_subject || DEFAULT_SETTINGS.emailExhibitorStaffCompletionNotifySubject,
+    emailExhibitorStaffCompletionNotifyBody: (data as any).email_exhibitor_staff_completion_notify_body || DEFAULT_SETTINGS.emailExhibitorStaffCompletionNotifyBody,
     emailInvitationSubject: data.email_invitation_subject || '',
     emailInvitationBody: data.email_invitation_body || '',
     emailReminderSubject: (data as any).email_reminder_subject || DEFAULT_SETTINGS.emailReminderSubject,
@@ -321,16 +333,22 @@ export const saveSettings = async (settings: AppSettings): Promise<void> => {
     email_subject: settings.emailSubject,
     email_body_template: settings.emailBodyTemplate,
     email_footer_text: settings.emailFooterText,
+    email_table_purchaser_subject: settings.emailTablePurchaserSubject,
+    email_table_purchaser_body: settings.emailTablePurchaserBody,
     email_guest_subject: settings.emailGuestSubject,
     email_guest_body: settings.emailGuestBody,
     email_guest_claim_subject: settings.emailGuestClaimSubject,
     email_guest_claim_body: settings.emailGuestClaimBody,
     email_guest_confirmed_subject: settings.emailGuestConfirmedSubject,
     email_guest_confirmed_body: settings.emailGuestConfirmedBody,
+    email_guest_completion_notify_subject: settings.emailGuestCompletionNotifySubject,
+    email_guest_completion_notify_body: settings.emailGuestCompletionNotifyBody,
     email_staff_invite_subject: settings.emailStaffInviteSubject ?? null,
     email_staff_invite_body: settings.emailStaffInviteBody ?? null,
     email_staff_confirmed_subject: settings.emailStaffConfirmedSubject ?? null,
     email_staff_confirmed_body: settings.emailStaffConfirmedBody ?? null,
+    email_exhibitor_staff_completion_notify_subject: settings.emailExhibitorStaffCompletionNotifySubject ?? null,
+    email_exhibitor_staff_completion_notify_body: settings.emailExhibitorStaffCompletionNotifyBody ?? null,
     email_purchaser_guest_note: settings.emailPurchaserGuestNote,
     email_invitation_subject: settings.emailInvitationSubject,
     email_invitation_body: settings.emailInvitationBody,
@@ -408,6 +426,7 @@ function mapAttendeeFromDb(db: AttendeeRow): Attendee {
     userId: db.user_id ?? null,
     pricingTemplateId: (db as any).pricing_template_id ?? null,
     exhibitorBoothType: (db as any).exhibitor_booth_type ?? null,
+    lastTicketEmailAt: (db as any).last_ticket_email_at ?? null,
   };
 }
 
@@ -443,6 +462,7 @@ export function mapAttendeeToDb(a: Attendee): AttendeeInsert {
     sponsored_awards: (a.sponsoredAwards as any) || [],
     admin_notes: a.adminNotes || null,
     exhibitor_booth_type: (a as any).exhibitorBoothType ?? null,
+    last_ticket_email_at: a.lastTicketEmailAt ?? null,
   } as AttendeeInsert;
 }
 

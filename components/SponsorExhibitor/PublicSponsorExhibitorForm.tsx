@@ -231,6 +231,10 @@ export default function PublicSponsorExhibitorForm({ form, settings }: Props) {
                 orgName: org.orgName,
                 eventName,
                 attachments: [],
+                // Let the edge function stamp `last_ticket_email_at` so
+                // the dashboard reflects that we sent this staff member
+                // their confirmation.
+                attendeeId: id,
               },
             });
           } else {
