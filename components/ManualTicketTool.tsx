@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Send, Loader2, User, Search, RefreshCw, QrCode, Mail, FileText } from 'lucide-react';
+import { Send, Loader2, User, Search, RefreshCw, QrCode, Mail, FileText, Users } from 'lucide-react';
 import { Attendee, AppSettings, Form } from '../types';
-import { getAttendees, saveAttendee, getSettings, getForms } from '../services/storageService';
+import { getAttendees, saveAttendee, getSettings, getForms, updateAttendee } from '../services/storageService';
 import { generateTicketPDF } from '../utils/pdfGenerator';
 import { sendTicketEmail, arrayBufferToBase64 } from '../services/smtpService';
 
@@ -79,6 +79,14 @@ const ManualTicketTool: React.FC = () => {
     guestType: 'adult',
   });
 
+  // Multi-ticket controls. Useful when an admin needs to manually issue a
+  // full table (e.g. 8 seats) to one buyer: each seat becomes its own
+  // scannable attendee row, and all PDFs go out in a single email to the
+  // buyer. Defaults to off; auto-enables and sets the quantity when the
+  // selected ticket type has `seats > 1` (i.e. it's a table-style ticket).
+  const [multiTicketEnabled, setMultiTicketEnabled] = useState(false);
+  const [ticketQuantity, setTicketQuantity] = useState(1);
+
   // Customizable email fields — driven by the selected attendee / form
   const [customSubject, setCustomSubject] = useState('');
   const [customMessage, setCustomMessage] = useState('');
@@ -117,6 +125,25 @@ const ManualTicketTool: React.FC = () => {
   const selectedForm = forms.find(f => f.id === formData.formId);
   const ticketField = selectedForm?.fields.find(f => f.type === 'ticket');
   const availableTicketTypes = ticketField?.ticketConfig?.items || [];
+  const selectedTicketItem = availableTicketTypes.find(t => t.name === formData.ticketType);
+  const seatsForSelectedTicket = (selectedTicketItem?.seats && selectedTicketItem.seats > 1)
+    ? selectedTicketItem.seats
+    : 0;
+
+  // Whenever the selected ticket type changes, auto-enable the multi-ticket
+  // flow with the right default quantity for table-style tickets. The admin
+  // can still uncheck it or override the quantity. We don't override after
+  // they've started editing — gate on whether the selected ticket actually
+  // has multi-seat semantics.
+  useEffect(() => {
+    if (seatsForSelectedTicket > 1) {
+      setMultiTicketEnabled(true);
+      setTicketQuantity(seatsForSelectedTicket);
+    } else {
+      setMultiTicketEnabled(false);
+      setTicketQuantity(1);
+    }
+  }, [seatsForSelectedTicket]);
 
   const ticketTypeNames = availableTicketTypes.map(t => t.name).join(',');
   useEffect(() => {
@@ -233,24 +260,62 @@ const ManualTicketTool: React.FC = () => {
     setLoading(true);
     setSuccessMsg('');
 
-    const id = crypto.randomUUID();
-    const newAttendee: Attendee = {
-      id,
+    // Resolve the effective quantity. Multi-ticket mode is for the
+    // "send a full table to one buyer" case: we create N attendee rows so
+    // each seat has its own QR (one for the buyer + N-1 placeholder guests
+    // linked back to them). All PDFs are then bundled into a single email
+    // to the buyer's address.
+    const requestedQty = multiTicketEnabled ? Math.max(1, Math.min(20, Math.floor(ticketQuantity || 1))) : 1;
+    const buyerName = `${formData.firstName} ${formData.lastName}`.trim();
+    const primaryId = crypto.randomUUID();
+    const primary: Attendee = {
+      id: primaryId,
       formId: formData.formId,
       formTitle: selectedForm?.title || 'Manual Entry',
-      name: `${formData.firstName} ${formData.lastName}`.trim(),
+      name: buyerName,
       email: formData.email,
       ticketType: formData.ticketType,
       registeredAt: new Date().toISOString(),
-      qrPayload: JSON.stringify({ id, formId: formData.formId, action: 'checkin' }),
+      qrPayload: JSON.stringify({ id: primaryId, formId: formData.formId, action: 'checkin' }),
       paymentStatus: formData.paymentStatus as any,
       isPrimary: true,
       guestType: formData.guestType as any,
     };
 
-    // Save first; if this fails the attendee was never created so we stop.
+    // Each additional ticket is a placeholder guest row tied back to the
+    // primary so the dashboard can see "John Smith — table host (8 seats)"
+    // and each seat is independently scannable and claimable. Names follow
+    // the "OrgName - Guest Ticket #N" convention used by the public table
+    // purchase path so the existing claim UX picks them up without
+    // changes.
+    const placeholderGuests: Attendee[] = [];
+    for (let i = 1; i < requestedQty; i++) {
+      const guestId = crypto.randomUUID();
+      placeholderGuests.push({
+        id: guestId,
+        formId: formData.formId,
+        formTitle: selectedForm?.title || 'Manual Entry',
+        name: `${buyerName || 'Table'} - Guest Ticket #${i}`,
+        email: `guest-${guestId}@placeholder.invalid`,
+        ticketType: `Guest of ${buyerName || 'table host'}`,
+        registeredAt: new Date().toISOString(),
+        qrPayload: JSON.stringify({ id: guestId, formId: formData.formId, action: 'checkin' }),
+        paymentStatus: 'free',
+        isPrimary: false,
+        primaryAttendeeId: primaryId,
+        guestType: 'pending-claim',
+      });
+    }
+
+    // Save attendees first; if any save fails we surface it and stop so the
+    // admin can decide whether to retry. We persist sequentially rather
+    // than in parallel so a mid-batch failure leaves a coherent partial
+    // state (primary + however many guests succeeded).
     try {
-      await saveAttendee(newAttendee);
+      await saveAttendee(primary);
+      for (const g of placeholderGuests) {
+        await saveAttendee(g);
+      }
     } catch (err: any) {
       console.error(err);
       setSuccessMsg(`failed: could not save attendee: ${err?.message || 'unknown error'}`);
@@ -263,25 +328,58 @@ const ManualTicketTool: React.FC = () => {
     // email step fails below.
     const updatedAttendees = await getAttendees();
     setAttendees(updatedAttendees);
-    setSelectedAttendee(newAttendee);
+    setSelectedAttendee(primary);
     setMode('existing');
     setFormData(prev => ({ ...prev, firstName: '', lastName: '', email: '' }));
 
     if (settings && settings.smtpUser && settings.smtpPass) {
       try {
-        const doc = await generateTicketPDF(newAttendee, settings, selectedForm!);
+        // Generate PDF for the primary plus each placeholder. Placeholders
+        // get a registration URL so the recipient can self-claim their
+        // seat — the PDF generator now suppresses the registration QR for
+        // anyone who's already claimed, so this is safe.
+        const origin = window.location.origin;
+        const attachments: Array<{ filename: string; content: string; contentType: string }> = [];
+        const primaryDoc = await generateTicketPDF(primary, settings, selectedForm!);
+        attachments.push({
+          filename: `${primary.name.replace(/[^a-zA-Z0-9 ]/g, '_') || 'Ticket'}_Ticket.pdf`,
+          content: arrayBufferToBase64(primaryDoc.output('arraybuffer')),
+          contentType: 'application/pdf',
+        });
+        for (let i = 0; i < placeholderGuests.length; i++) {
+          const g = placeholderGuests[i];
+          const claimUrl = `${origin}/#/form/${formData.formId}?ref=${g.id}`;
+          const guestDoc = await generateTicketPDF(g, settings, selectedForm!, claimUrl);
+          attachments.push({
+            filename: `Guest_${i + 2}_Ticket.pdf`,
+            content: arrayBufferToBase64(guestDoc.output('arraybuffer')),
+            contentType: 'application/pdf',
+          });
+        }
         await sendTicketEmail(settings, {
           to: formData.email,
           subject: customSubject,
-          name: newAttendee.name,
+          name: primary.name,
+          title: selectedForm?.title || undefined,
           message: customMessage,
-          attachments: [{
-            filename: `${newAttendee.name.replace(/[^a-zA-Z0-9 ]/g, '_')}_Ticket.pdf`,
-            content: arrayBufferToBase64(doc.output('arraybuffer')),
-            contentType: 'application/pdf',
-          }],
+          attachments,
         });
-        setSuccessMsg('Ticket generated and email dispatched successfully');
+        // Stamp lastTicketEmailAt across the whole batch. Best-effort —
+        // errors here don't undo the send.
+        const stampedAt = new Date().toISOString();
+        try {
+          await Promise.all([
+            updateAttendee(primary.id, { lastTicketEmailAt: stampedAt }),
+            ...placeholderGuests.map(g => updateAttendee(g.id, { lastTicketEmailAt: stampedAt })),
+          ]);
+        } catch (err) {
+          console.warn('Failed to stamp lastTicketEmailAt on some rows', err);
+        }
+        if (requestedQty > 1) {
+          setSuccessMsg(`${requestedQty} tickets generated and emailed to ${formData.email}`);
+        } else {
+          setSuccessMsg('Ticket generated and email dispatched successfully');
+        }
       } catch (err: any) {
         console.error(err);
         setSuccessMsg(`failed: ticket saved but email failed — ${err?.message || 'unknown error'}. Use "Send Ticket Email" to retry.`);
@@ -315,6 +413,7 @@ const ManualTicketTool: React.FC = () => {
         to: selectedAttendee.email,
         subject: customSubject,
         name: selectedAttendee.name,
+        title: form.title || undefined,
         message: customMessage,
         attachments: [{
           filename: `${selectedAttendee.name.replace(/[^a-zA-Z0-9 ]/g, '_')}_Ticket.pdf`,
@@ -322,6 +421,13 @@ const ManualTicketTool: React.FC = () => {
           contentType: 'application/pdf',
         }],
       });
+      // Stamp send-time so the dashboard reflects "Sent". Errors here are
+      // metadata-only; the user already got the email.
+      try {
+        await updateAttendee(selectedAttendee.id, { lastTicketEmailAt: new Date().toISOString() });
+      } catch (err) {
+        console.warn('Failed to stamp lastTicketEmailAt for resend', err);
+      }
       setSuccessMsg(`Email dispatched successfully to ${selectedAttendee.email}`);
     } catch (err: any) {
       console.error(err);
@@ -462,6 +568,57 @@ const ManualTicketTool: React.FC = () => {
                       <option value="pending">Pending</option>
                     </select>
                   </div>
+                </div>
+              )}
+
+              {/* Multi-ticket controls — for table buyers. When the selected
+                  ticket type carries multiple seats (e.g. a "Table of 8") we
+                  auto-enable this and prefill the quantity, so the admin can
+                  issue a full table to one buyer in one shot. Otherwise it's
+                  an explicit opt-in. */}
+              {formData.formId && (
+                <div className="rounded-lg border border-indigo-200 bg-indigo-50/40 p-3">
+                  <label className="flex items-start gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={multiTicketEnabled}
+                      onChange={e => {
+                        const enabled = e.target.checked;
+                        setMultiTicketEnabled(enabled);
+                        if (!enabled) {
+                          setTicketQuantity(1);
+                        } else if (ticketQuantity < 2) {
+                          setTicketQuantity(seatsForSelectedTicket > 1 ? seatsForSelectedTicket : 2);
+                        }
+                      }}
+                      className="mt-0.5 w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <div className="flex-1">
+                      <div className="text-sm font-semibold text-indigo-900 flex items-center gap-1.5">
+                        <Users className="w-3.5 h-3.5" />
+                        Send multiple tickets to this guest
+                      </div>
+                      <div className="text-xs text-indigo-700/80 mt-0.5">
+                        {seatsForSelectedTicket > 1
+                          ? `This ticket type covers ${seatsForSelectedTicket} seats — issuing ${seatsForSelectedTicket} scannable tickets, all emailed to the buyer.`
+                          : 'Issues N scannable ticket rows to the same buyer. Useful when one person is paying for a group.'}
+                      </div>
+                    </div>
+                  </label>
+                  {multiTicketEnabled && (
+                    <div className="mt-3 flex items-center gap-3 pl-7">
+                      <label className="text-xs font-semibold text-indigo-800 uppercase tracking-wider">Quantity</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={20}
+                        value={ticketQuantity}
+                        onChange={e => setTicketQuantity(Math.max(1, Math.min(20, Number(e.target.value) || 1)))}
+                        className="w-20 px-2 py-1.5 border border-indigo-200 rounded-md text-sm text-center outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                      />
+                      <span className="text-xs text-indigo-600">{ticketQuantity > 1 ? 'tickets' : 'ticket'} (max 20)</span>
+                    </div>
+                  )}
                 </div>
               )}
 

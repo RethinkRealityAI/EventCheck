@@ -267,6 +267,8 @@ export const getSettings = async (): Promise<AppSettings> => {
     emailSubject: data.email_subject || '',
     emailBodyTemplate: data.email_body_template || '',
     emailFooterText: data.email_footer_text || '',
+    emailTablePurchaserSubject: (data as any).email_table_purchaser_subject || DEFAULT_SETTINGS.emailTablePurchaserSubject,
+    emailTablePurchaserBody: (data as any).email_table_purchaser_body || DEFAULT_SETTINGS.emailTablePurchaserBody,
     emailGuestSubject: data.email_guest_subject || DEFAULT_SETTINGS.emailGuestSubject,
     emailGuestBody: data.email_guest_body || DEFAULT_SETTINGS.emailGuestBody,
     emailPurchaserGuestNote: data.email_purchaser_guest_note || DEFAULT_SETTINGS.emailPurchaserGuestNote,
@@ -321,6 +323,8 @@ export const saveSettings = async (settings: AppSettings): Promise<void> => {
     email_subject: settings.emailSubject,
     email_body_template: settings.emailBodyTemplate,
     email_footer_text: settings.emailFooterText,
+    email_table_purchaser_subject: settings.emailTablePurchaserSubject,
+    email_table_purchaser_body: settings.emailTablePurchaserBody,
     email_guest_subject: settings.emailGuestSubject,
     email_guest_body: settings.emailGuestBody,
     email_guest_claim_subject: settings.emailGuestClaimSubject,
@@ -408,6 +412,7 @@ function mapAttendeeFromDb(db: AttendeeRow): Attendee {
     userId: db.user_id ?? null,
     pricingTemplateId: (db as any).pricing_template_id ?? null,
     exhibitorBoothType: (db as any).exhibitor_booth_type ?? null,
+    lastTicketEmailAt: (db as any).last_ticket_email_at ?? null,
   };
 }
 
@@ -443,6 +448,7 @@ export function mapAttendeeToDb(a: Attendee): AttendeeInsert {
     sponsored_awards: (a.sponsoredAwards as any) || [],
     admin_notes: a.adminNotes || null,
     exhibitor_booth_type: (a as any).exhibitorBoothType ?? null,
+    last_ticket_email_at: a.lastTicketEmailAt ?? null,
   } as AttendeeInsert;
 }
 

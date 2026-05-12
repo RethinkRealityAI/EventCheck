@@ -41,6 +41,12 @@ export interface Attendee {
    *  and "static-ticket table purchaser with guest placeholder seats" (SCAGO).
    *  Null/undefined on static-ticket registrations. */
   pricingTemplateId?: string | null;
+  /** Stamped whenever the ticket email is sent or re-sent. Surfaces on the
+   *  dashboard as a "Ticket Sent" column so staff can see who's been
+   *  notified vs. who still needs an email. Independent of registration
+   *  state — `null` means we never sent (or we only sent before this field
+   *  existed). */
+  lastTicketEmailAt?: string | null;
 }
 
 export interface SeatingConfiguration {
@@ -243,6 +249,14 @@ export interface AppSettings {
   emailBodyTemplate: string; // HTML supported
   emailFooterText: string;
 
+  // Table-Purchaser Email — sent to the buyer who picked a multi-seat
+  // ticket (e.g. a full table of 8). Distinct from the standard ticket
+  // confirmation because the copy typically references the included
+  // guests, instructions for sharing claim links, table-host etiquette,
+  // etc. Same placeholders as the standard ticket email.
+  emailTablePurchaserSubject: string;
+  emailTablePurchaserBody: string;
+
   // Guest Ticket Email (sent directly to named guests)
   emailGuestSubject: string;
   emailGuestBody: string;
@@ -316,9 +330,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   emailHeaderLogo: '',
   emailHeaderColor: '#f8fafc',
   emailFooterColor: '#f8fafc',
-  emailSubject: 'Your Event Ticket & Invoice',
+  emailSubject: 'Your ticket for {{event}}',
   emailBodyTemplate: '<p>Hi <strong>{{name}}</strong>,</p><p>Thank you for registering for <strong>{{event}}</strong>!</p><p>Attached is your official PDF ticket. Please present the QR code at the entrance.</p><p>Invoice ID: {{invoiceId}}<br>Amount Paid: {{amount}}</p><p>See you there!</p>',
   emailFooterText: '© 2025 Event Organizers Inc. All rights reserved.',
+
+  emailTablePurchaserSubject: 'Your table at {{event}}',
+  emailTablePurchaserBody: '<p>Hi <strong>{{name}}</strong>,</p><p>Thank you for purchasing a table at <strong>{{event}}</strong>! Your table comes with seats for you and your guests.</p><p>Your own ticket is attached as a PDF — please present the QR code at the entrance.</p><p>Each guest seat has been pre-created. We will email guest claim links separately so each person can fill in their own details (name, dietary preferences, etc.). You can also share the links yourself from your portal account.</p><p>Invoice ID: {{invoiceId}}<br>Amount Paid: {{amount}}</p><p>See you there!</p>',
 
   emailGuestSubject: 'Your Ticket for {{event}}',
   emailGuestBody: 'Great news! {{purchaser}} has registered you for {{event}}. Your ticket is attached — please bring it with you to the event. You can scan the QR code on your ticket for entry.',

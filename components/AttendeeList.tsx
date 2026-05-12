@@ -116,6 +116,7 @@ const STANDARD_COLUMNS: ColumnDef[] = [
   { key: 'ticketType', label: 'Ticket Type', group: 'standard' },
   { key: 'status', label: 'Status', group: 'standard' },
   { key: 'registered', label: 'Registered', group: 'standard' },
+  { key: 'ticketSent', label: 'Ticket Sent', group: 'standard' },
   { key: 'actions', label: 'Actions', group: 'standard' },
 ];
 
@@ -1126,6 +1127,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                 {isColumnVisible('ticketType') && <th className="px-4 py-2.5 min-w-[110px] text-xs font-semibold uppercase tracking-wide text-gray-500">Ticket Type</th>}
                 {isColumnVisible('status') && <th className="px-4 py-2.5 min-w-[100px] text-xs font-semibold uppercase tracking-wide text-gray-500">Status</th>}
                 {isColumnVisible('registered') && <th className="px-4 py-2.5 min-w-[100px] text-xs font-semibold uppercase tracking-wide text-gray-500">Registered</th>}
+                {isColumnVisible('ticketSent') && <th className="px-4 py-2.5 min-w-[100px] text-xs font-semibold uppercase tracking-wide text-gray-500">Ticket Sent</th>}
                 {dynamicColumns.map(col =>
                   isColumnVisible(col.key) ? (
                     <th key={col.key} className="px-4 py-2.5 min-w-[180px] max-w-[240px]" title={col.label}>
@@ -1281,6 +1283,18 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                       {isColumnVisible('registered') && (
                         <td className="px-4 py-3 text-gray-500 font-mono text-xs">
                           {format(new Date(attendee.registeredAt), 'MMM d, yyyy')}
+                        </td>
+                      )}
+                      {isColumnVisible('ticketSent') && (
+                        <td className="px-4 py-3 text-xs">
+                          {attendee.lastTicketEmailAt ? (
+                            <div className="flex flex-col">
+                              <span className="text-emerald-700 font-semibold">Sent</span>
+                              <span className="text-gray-400 font-mono text-[11px]">{format(new Date(attendee.lastTicketEmailAt), 'MMM d, p')}</span>
+                            </div>
+                          ) : (
+                            <span className="text-gray-400">Not sent</span>
+                          )}
                         </td>
                       )}
                       {dynamicColumns.map(col => {

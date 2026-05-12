@@ -103,7 +103,17 @@ export const generateTicketPDF = async (
   // --- Main Ticket Body Box ---
   const bodyStartY = 70;
   const hasDonation = attendee.donatedSeats && attendee.donatedSeats > 0;
-  const isPlaceholder = registrationUrl && registrationUrl.length > 0;
+  // Only stamp the "TO REGISTER" QR on tickets whose recipient still has to
+  // fill out their own details (placeholder guests / pending-claim staff).
+  // Once a guest has claimed (guestType becomes `claimed`, `staff-claimed`,
+  // or `exhibitor-staff-claimed`) we drop the registration QR so they don't
+  // see a redundant "scan to register" block on the ticket they already own.
+  // Callers that pass a `registrationUrl` for a claimed guest will silently
+  // skip the block here — the entry QR is always shown regardless.
+  const isPendingClaim = attendee.guestType === 'pending-claim'
+    || attendee.guestType === 'staff-pending'
+    || attendee.guestType === 'exhibitor-staff-pending';
+  const isPlaceholder = !!registrationUrl && registrationUrl.length > 0 && isPendingClaim;
   const hasPayment = !!attendee.transactionId;
   const bodyHeight = isPlaceholder ? 160 : (hasDonation ? 150 : (hasPayment ? 125 : 110));
 

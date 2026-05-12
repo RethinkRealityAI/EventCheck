@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { getFormById, getSettings, saveAttendee, getAttendee, getGuestsByPrimaryId, mapAttendeeToDb } from '../services/storageService';
+import { getFormById, getSettings, saveAttendee, getAttendee, getGuestsByPrimaryId, mapAttendeeToDb, updateAttendee } from '../services/storageService';
 import { FormField, AppSettings, Attendee, Form, DynamicPricingSelection } from '../types';
 import type { PricingTemplate } from '../types';
 import { resolveBracket, resolveTier, computeTotal, formatPrice } from '../utils/pricing';
@@ -1124,16 +1124,46 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                </ol>
              </div>`
           : '';
-        const purchaserMessage = (hasGroupGuests
-          ? `Thank you for your ${paymentStatus === 'paid' ? 'purchase' : 'registration'}! Your ticket plus ${groupGuestPdfs.length} additional ${groupGuestPdfs.length === 1 ? 'ticket is' : 'tickets are'} attached as a backup. Each additional registrant will also receive their own ticket or registration link by email directly — you don't need to forward anything.`
-          : `Thank you for your ${paymentStatus === 'paid' ? 'purchase' : 'registration'}! Attached ${attachments.length === 1 ? 'is your ticket' : `are your ${attachments.length} tickets`}.${guestTickets.length > 0 ? ` ${(settings.emailPurchaserGuestNote || "We've also included your guest tickets as a backup. Named guests will receive their own ticket by email directly. For any unnamed guests, you can forward their ticket or share the registration link on it so they can provide their details.")}` : ''}`) + claimLinksBlock;
+        // Table-or-group purchasers get the dedicated `emailTablePurchaser*`
+        // template (with its own subject + body — admins can edit it
+        // independently from the solo ticket template in Settings).
+        // Solo purchasers get the standard `emailSubject`/`emailBodyTemplate`.
+        // Both templates support {{name}}, {{event}}, {{id}}, {{invoiceId}},
+        // {{amount}} — substituted here so admins can move event-name
+        // references around freely. The dynamic claim-links block is
+        // appended after the rendered body so admin edits never lose the
+        // per-guest URLs.
+        const isTableOrGroup = guestTickets.length > 0 || hasGroupGuests;
+        const subjectTpl = isTableOrGroup
+          ? (settings.emailTablePurchaserSubject || settings.emailSubject || 'Your ticket for {{event}}')
+          : (settings.emailSubject || 'Your ticket for {{event}}');
+        const bodyTpl = isTableOrGroup
+          ? (settings.emailTablePurchaserBody || settings.emailBodyTemplate || '<p>Thank you for registering for <strong>{{event}}</strong>.</p>')
+          : (settings.emailBodyTemplate || '<p>Thank you for registering for <strong>{{event}}</strong>.</p>');
+        const renderPlaceholders = (s: string) => s
+          .replace(/\{\{event\}\}/g, form.title || '')
+          .replace(/\{\{name\}\}/g, purchaserName || '')
+          .replace(/\{\{id\}\}/g, submissionId || '')
+          .replace(/\{\{invoiceId\}\}/g, invoiceId || '')
+          .replace(/\{\{amount\}\}/g, paymentAmount || (paymentTotal > 0 ? String(paymentTotal) : ''));
+        const purchaserSubject = renderPlaceholders(subjectTpl);
+        const purchaserMessage = renderPlaceholders(bodyTpl) + claimLinksBlock;
         await sendTicketEmail(settings, {
           to: purchaserEmail,
-          subject: `${form.title} Ticket(s)`,
+          subject: purchaserSubject,
           name: purchaserName,
+          title: form.title || undefined,
           message: purchaserMessage,
           attachments
         });
+        // Stamp ticket-send timestamp so the dashboard reflects "Sent" for
+        // this primary. Best-effort — log + continue on error so a
+        // post-purchase confirmation never blocks on a metadata update.
+        try {
+          await updateAttendee(submissionId, { lastTicketEmailAt: new Date().toISOString() });
+        } catch (err) {
+          console.warn('Failed to stamp lastTicketEmailAt for purchaser', err);
+        }
 
         // Group-mode: send each inline registrant their own ticket directly.
         // Pending-claim registrants get a claim-link email from the server instead —
@@ -1155,6 +1185,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
             to: g.email,
             subject: replace(subjectTpl),
             name: g.name,
+            title: form.title || undefined,
             message: replace(bodyTpl),
             attachments: [{
               filename: `${safeName}_Ticket.pdf`,
@@ -1162,6 +1193,12 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
               contentType: 'application/pdf',
             }],
           });
+          // Track email-send for the inline-completed guest. Best-effort.
+          try {
+            await updateAttendee(g.guestId, { lastTicketEmailAt: new Date().toISOString() });
+          } catch (err) {
+            console.warn('Failed to stamp lastTicketEmailAt for inline guest', err);
+          }
         }
 
         // Also email individual named guests directly
@@ -1185,6 +1222,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
               to: gt.attendee.email,
               subject: guestSubject,
               name: gt.attendee.name,
+              title: form.title || undefined,
               message: guestBody,
               attachments: [{
                 filename: `${safeName}_Ticket.pdf`,
@@ -1192,6 +1230,16 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                 contentType: 'application/pdf'
               }]
             });
+            // Stamp ticket-send timestamp for this guest. Skipped silently
+            // when the underlying attendee id isn't available (legacy guests
+            // without rows).
+            try {
+              if (gt.attendee.id) {
+                await updateAttendee(gt.attendee.id, { lastTicketEmailAt: new Date().toISOString() });
+              }
+            } catch (err) {
+              console.warn('Failed to stamp lastTicketEmailAt for named guest', err);
+            }
           }
         }
       } catch (emailError) {

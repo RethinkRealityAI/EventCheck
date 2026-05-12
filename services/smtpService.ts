@@ -71,6 +71,11 @@ export async function sendTicketEmail(settings: AppSettings, data: {
   name: string;
   message: string;
   attachments?: Attachment[];
+  /** Banner title rendered at the top of the email shell. Defaults to the
+   *  event name when omitted by the caller — the edge function will fall
+   *  back to "Event Registration" if absent. Pass the actual event title
+   *  (e.g. "Hope Gala") so recipients see the right header. */
+  title?: string;
 }): Promise<void> {
   if (!settings.smtpUser || !settings.smtpPass) {
     console.warn('SMTP credentials not configured — skipping email send.');
@@ -91,6 +96,7 @@ export async function sendTicketEmail(settings: AppSettings, data: {
         subject: data.subject,
         name: data.name,
         message: data.message,
+        title: data.title,
         attachments: data.attachments || [],
       }
     },

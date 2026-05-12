@@ -78,6 +78,16 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
         await sendEmail(localAttendee.email, settings.emailSubject, html);
         showNotification(`Ticket resent to ${localAttendee.email}`, 'success');
       }
+      // Stamp send-time on the attendee record so the dashboard reflects
+      // "Sent" without forcing a page refresh. Best-effort — the email is
+      // already out the door, this is just metadata.
+      const stampedAt = new Date().toISOString();
+      try {
+        await updateAttendee(localAttendee.id, { lastTicketEmailAt: stampedAt });
+        setLocalAttendee({ ...localAttendee, lastTicketEmailAt: stampedAt });
+      } catch (err) {
+        console.warn('Failed to stamp lastTicketEmailAt on resend', err);
+      }
     } catch (err: any) {
       console.error(err);
       showNotification(`Failed to resend email: ${err.message}`, 'error');

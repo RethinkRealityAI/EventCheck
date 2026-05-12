@@ -649,10 +649,23 @@ serve(async (req: Request) => {
         });
 
         const hasAttachments = Array.isArray(email.attachments) && email.attachments.length > 0;
+        // Use the caller-supplied banner title (typically the event name like
+        // "Hope Gala") so the email header shows the actual event instead of
+        // the generic "Event Registration" copy. Fall back when omitted so
+        // older callers keep working.
+        const bannerTitle = (typeof email.title === 'string' && email.title.trim())
+            ? email.title.trim()
+            : 'Event Registration';
+        // Strip any HTML the caller already wrapped around the message so we
+        // don't double-wrap with our own <p>. Detect by leading "<" — admin-
+        // edited templates usually contain block-level tags already.
+        const messageHtml = /^\s*<(p|div|h\d|table|ul|ol|blockquote|figure)/i.test(email.message)
+            ? email.message
+            : `<p>${email.message}</p>`;
         const html = generateEmailTemplate({
-            title: 'Event Registration',
+            title: bannerTitle,
             greeting: `Hello ${email.name}`,
-            content: `<p>${email.message}</p>`,
+            content: messageHtml,
             attachmentNote: hasAttachments ? 'Attachment included — please review the PDF.' : undefined,
             fromName,
         });

@@ -1,18 +1,29 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import jsQR from 'jsqr';
-import { Camera, X, CheckCircle, AlertTriangle, Volume2, VolumeX, Armchair, Utensils, LogOut } from 'lucide-react';
+import { Camera, X, CheckCircle, AlertTriangle, Volume2, VolumeX, Armchair, Utensils, LogOut, UserPlus, Loader2 } from 'lucide-react';
 import { Attendee } from '../types';
 import { getSeatingTables } from '../services/storageService';
 
+type ScanOutcome =
+  | Attendee
+  | 'not_found'
+  | 'already_checked_in'
+  | { pendingCapture: true; attendee: Attendee };
+
 interface ScannerProps {
-  onScan: (data: string) => Promise<Attendee | 'not_found' | 'already_checked_in'>;
+  onScan: (data: string) => Promise<ScanOutcome>;
+  /** Called when door staff captures name+email for a placeholder guest at
+   *  scan time. Returns the updated attendee (now checked in) so the
+   *  success card can render their captured details. */
+  onCapturePlaceholder?: (attendeeId: string, name: string, email: string) => Promise<Attendee | null>;
   onClose: () => void;
 }
 
 type ScanResult =
   | { status: 'success'; message: string; attendee: Attendee; tableName?: string | null }
   | { status: 'warning'; message: string; attendee?: Attendee; tableName?: string | null }
-  | { status: 'error'; message: string };
+  | { status: 'error'; message: string }
+  | { status: 'pending-capture'; attendee: Attendee };
 
 // How long the success card stays up before auto-resuming the camera. Tuned for
 // a busy door — long enough to read the name, short enough to not hold up a
@@ -59,7 +70,7 @@ const vibrate = (pattern: number | number[]) => {
   }
 };
 
-const Scanner: React.FC<ScannerProps> = ({ onScan, onClose }) => {
+const Scanner: React.FC<ScannerProps> = ({ onScan, onCapturePlaceholder, onClose }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
@@ -144,10 +155,16 @@ const Scanner: React.FC<ScannerProps> = ({ onScan, onClose }) => {
               } else if (result === 'already_checked_in') {
                 playFeedback('warning');
                 setScanResult({ status: 'warning', message: 'Already Checked In' });
+              } else if (typeof result === 'object' && (result as any).pendingCapture) {
+                // Placeholder guest scan — no check-in yet, door staff
+                // captures name+email in the success card.
+                playFeedback('warning');
+                setScanResult({ status: 'pending-capture', attendee: (result as { attendee: Attendee }).attendee });
               } else {
-                const tableName = await resolveTableName(result);
+                const attendee = result as Attendee;
+                const tableName = await resolveTableName(attendee);
                 playFeedback('success');
-                setScanResult({ status: 'success', message: 'Checked In', attendee: result, tableName });
+                setScanResult({ status: 'success', message: 'Checked In', attendee, tableName });
               }
             })();
           }
@@ -212,8 +229,12 @@ const Scanner: React.FC<ScannerProps> = ({ onScan, onClose }) => {
 
   // Auto-resume after a short delay so a queue of attendees can flow through
   // without a tap between each. Cleared on manual close or unmount.
+  // Suppressed for pending-capture results — those require the door staff
+  // to type a name + email, so the modal stays up indefinitely until they
+  // confirm or exit.
   useEffect(() => {
     if (!scanResult) return;
+    if (scanResult.status === 'pending-capture') return;
     if (resumeTimerRef.current != null) {
       window.clearTimeout(resumeTimerRef.current);
     }
@@ -228,8 +249,45 @@ const Scanner: React.FC<ScannerProps> = ({ onScan, onClose }) => {
     };
   }, [scanResult, handleResume]);
 
+  // Inline capture form state for placeholder scans. Reset whenever a new
+  // pending-capture result lands so the inputs don't keep stale text from
+  // a previous scan.
+  const [captureName, setCaptureName] = useState('');
+  const [captureEmail, setCaptureEmail] = useState('');
+  const [capturing, setCapturing] = useState(false);
+  useEffect(() => {
+    if (scanResult?.status === 'pending-capture') {
+      setCaptureName('');
+      setCaptureEmail('');
+      setCapturing(false);
+    }
+  }, [scanResult]);
+
+  const handleCaptureSubmit = useCallback(async () => {
+    if (!scanResult || scanResult.status !== 'pending-capture') return;
+    const name = captureName.trim();
+    const email = captureEmail.trim();
+    if (!name || !email) return;
+    if (!onCapturePlaceholder) return;
+    setCapturing(true);
+    try {
+      const updated = await onCapturePlaceholder(scanResult.attendee.id, name, email);
+      if (updated) {
+        const tableName = await resolveTableName(updated);
+        playFeedback('success');
+        setScanResult({ status: 'success', message: 'Checked In', attendee: updated, tableName });
+      } else {
+        playFeedback('error');
+        setScanResult({ status: 'error', message: 'Could not save details — try again.' });
+      }
+    } finally {
+      setCapturing(false);
+    }
+  }, [scanResult, captureName, captureEmail, onCapturePlaceholder, resolveTableName, playFeedback]);
+
   const successAttendee = scanResult?.status === 'success' ? scanResult.attendee : null;
   const successTable = scanResult?.status === 'success' ? scanResult.tableName : null;
+  const pendingAttendee = scanResult?.status === 'pending-capture' ? scanResult.attendee : null;
 
   return (
     <div className="fixed inset-0 z-50 bg-black flex flex-col">
@@ -302,9 +360,72 @@ const Scanner: React.FC<ScannerProps> = ({ onScan, onClose }) => {
                 <AlertTriangle className="w-14 h-14 text-yellow-600" strokeWidth={2.5} />
               </div>
             )}
+            {scanResult.status === 'pending-capture' && (
+              <div className="bg-indigo-100 rounded-full p-3 ring-8 ring-indigo-50">
+                <UserPlus className="w-14 h-14 text-indigo-600" strokeWidth={2.5} />
+              </div>
+            )}
           </div>
 
-          {successAttendee ? (
+          {pendingAttendee ? (
+            <form
+              className="text-center mb-4"
+              onSubmit={e => { e.preventDefault(); handleCaptureSubmit(); }}
+            >
+              <p className="text-xl font-extrabold text-slate-900 leading-tight">Guest Ticket — Needs Details</p>
+              <p className="text-sm text-slate-500 mt-1.5 font-medium">
+                This seat hasn't been claimed yet. Enter the guest's name and email to check them in.
+              </p>
+              {pendingAttendee.ticketType && (
+                <div className="mt-2 inline-flex items-center px-3 py-1 rounded-full bg-slate-100 text-slate-600 text-[11px] font-bold uppercase tracking-wider">
+                  {pendingAttendee.ticketType}
+                </div>
+              )}
+              <div className="mt-4 space-y-2.5 text-left">
+                <div>
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Full Name</label>
+                  <input
+                    type="text"
+                    value={captureName}
+                    onChange={e => setCaptureName(e.target.value)}
+                    className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                    placeholder="Jane Doe"
+                    autoFocus
+                    autoComplete="off"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Email</label>
+                  <input
+                    type="email"
+                    value={captureEmail}
+                    onChange={e => setCaptureEmail(e.target.value)}
+                    className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                    placeholder="jane@example.com"
+                    autoComplete="off"
+                  />
+                </div>
+              </div>
+              <div className="flex gap-3 mt-5">
+                <button
+                  type="submit"
+                  disabled={!captureName.trim() || !captureEmail.trim() || capturing}
+                  className="flex-1 py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-500/20 disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
+                >
+                  {capturing ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                  {capturing ? 'Saving…' : 'Check In'}
+                </button>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="px-4 py-3 bg-white border border-slate-200 text-slate-600 rounded-xl font-bold hover:bg-slate-50 inline-flex items-center gap-2"
+                  title="Exit scanner"
+                >
+                  <LogOut className="w-4 h-4" /> Exit
+                </button>
+              </div>
+            </form>
+          ) : successAttendee ? (
             <div className="text-center mb-5">
               <p className="text-3xl font-extrabold text-slate-900 leading-tight">{successAttendee.name}</p>
               <div className="mt-2 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 font-bold text-xs uppercase tracking-wider">
@@ -342,32 +463,36 @@ const Scanner: React.FC<ScannerProps> = ({ onScan, onClose }) => {
                 )}
               </div>
             </div>
-          ) : (
+          ) : (scanResult.status === 'error' || scanResult.status === 'warning') ? (
             <h3 className={`text-2xl font-extrabold mb-5 text-center ${
               scanResult.status === 'error' ? 'text-red-600' : 'text-yellow-600'
             }`}>
               {scanResult.message}
             </h3>
-          )}
+          ) : null}
 
-          <div className="flex gap-3">
-            <button
-              onClick={handleResume}
-              className="flex-1 py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-500/20"
-            >
-              Close
-            </button>
-            <button
-              onClick={onClose}
-              className="px-4 py-3 bg-white border border-slate-200 text-slate-600 rounded-xl font-bold hover:bg-slate-50 inline-flex items-center gap-2"
-              title="Exit scanner"
-            >
-              <LogOut className="w-4 h-4" /> Exit
-            </button>
-          </div>
-          <p className="text-[10px] text-slate-400 text-center mt-3 uppercase tracking-widest font-bold">
-            Auto-resuming in a moment…
-          </p>
+          {scanResult.status !== 'pending-capture' && (
+            <>
+              <div className="flex gap-3">
+                <button
+                  onClick={handleResume}
+                  className="flex-1 py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-500/20"
+                >
+                  Close
+                </button>
+                <button
+                  onClick={onClose}
+                  className="px-4 py-3 bg-white border border-slate-200 text-slate-600 rounded-xl font-bold hover:bg-slate-50 inline-flex items-center gap-2"
+                  title="Exit scanner"
+                >
+                  <LogOut className="w-4 h-4" /> Exit
+                </button>
+              </div>
+              <p className="text-[10px] text-slate-400 text-center mt-3 uppercase tracking-widest font-bold">
+                Auto-resuming in a moment…
+              </p>
+            </>
+          )}
         </div>
       )}
 
