@@ -189,58 +189,78 @@ const Scanner: React.FC<ScannerProps> = ({ onScan, onCapturePlaceholder, onClose
     }
 
     if (isScanningRef.current) {
-      requestAnimationFrame(scan);
+      // Recursive schedule reads the latest scan via ref so we don't
+      // pin the rAF chain to a stale closure when scan's deps (e.g.
+      // muted) change.
+      requestAnimationFrame(() => scanRef.current());
     }
   }, [onScan, playFeedback, resolveTableName]);
 
-  useEffect(() => {
-    let stream: MediaStream | null = null;
+  // Mirror of the latest scan callback. Lets the camera-startup useEffect
+  // run with empty deps (mount-only) without ever closing over a stale
+  // scan. Without this, every realtime parent re-render that handed Scanner
+  // a new `onScan` prop tore down and re-acquired the camera mid-session,
+  // and the new `play()` call hit the browser's autoplay policy without a
+  // fresh user gesture → "Tap the screen to start the camera" appearing
+  // immediately after a successful check-in.
+  const scanRef = useRef(scan);
+  useEffect(() => { scanRef.current = scan; }, [scan]);
 
-    const startCamera = async () => {
-      try {
-        // Soft preference: `ideal` lets desktop laptops fall back to the
-        // built-in front camera when no rear camera exists, instead of
-        // OverconstrainedError-ing.
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: 'environment' } },
-        });
-        const tracks = stream.getVideoTracks();
-        const settings = tracks[0]?.getSettings?.();
-        console.info('[Scanner] camera stream acquired', {
-          tracks: tracks.length,
-          settings,
-        });
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          // Awaiting play() surfaces NotAllowedError / autoplay-policy
-          // rejections that were previously silent. The video JSX now sets
-          // `autoPlay`, `playsInline`, and `muted` so this should succeed
-          // without a user gesture, but log if it doesn't.
-          try {
-            await videoRef.current.play();
-            console.info('[Scanner] video.play() resolved', {
-              readyState: videoRef.current.readyState,
-              videoWidth: videoRef.current.videoWidth,
-              videoHeight: videoRef.current.videoHeight,
-            });
-          } catch (playErr) {
-            console.warn('[Scanner] video.play() rejected — frames will not flow until user gesture', playErr);
-            setCameraError('Tap the screen to start the camera.');
-            return;
-          }
-          requestAnimationFrame(scan);
-        }
-      } catch (err) {
-        console.error('[Scanner] getUserMedia rejected', err);
-        setCameraError('Unable to access camera. Please ensure you have granted permissions.');
+  // Holds the live MediaStream so the tap-to-retry handler can stop the
+  // existing tracks before re-acquiring (avoids leaking concurrent streams
+  // if the user taps multiple times).
+  const streamRef = useRef<MediaStream | null>(null);
+
+  const startCamera = useCallback(async () => {
+    try {
+      // Stop any existing stream before re-acquiring (handles the
+      // tap-to-retry path).
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(t => t.stop());
+        streamRef.current = null;
       }
-    };
+      // Soft preference: `ideal` lets desktop laptops fall back to the
+      // built-in front camera when no rear camera exists, instead of
+      // OverconstrainedError-ing.
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' } },
+      });
+      streamRef.current = stream;
+      const tracks = stream.getVideoTracks();
+      const settings = tracks[0]?.getSettings?.();
+      console.info('[Scanner] camera stream acquired', {
+        tracks: tracks.length,
+        settings,
+      });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        try {
+          await videoRef.current.play();
+          console.info('[Scanner] video.play() resolved', {
+            readyState: videoRef.current.readyState,
+            videoWidth: videoRef.current.videoWidth,
+            videoHeight: videoRef.current.videoHeight,
+          });
+          setCameraError(null);
+        } catch (playErr) {
+          console.warn('[Scanner] video.play() rejected — frames will not flow until user gesture', playErr);
+          setCameraError('Tap the screen to start the camera.');
+          return;
+        }
+        requestAnimationFrame(() => scanRef.current());
+      }
+    } catch (err) {
+      console.error('[Scanner] getUserMedia rejected', err);
+      setCameraError('Unable to access camera. Please ensure you have granted permissions.');
+    }
+  }, []);
 
+  useEffect(() => {
     startCamera();
-
     return () => {
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
       }
       isScanningRef.current = false;
       if (resumeTimerRef.current != null) {
@@ -253,7 +273,10 @@ const Scanner: React.FC<ScannerProps> = ({ onScan, onCapturePlaceholder, onClose
         audioCtxRef.current = null;
       }
     };
-  }, [scan]);
+    // Mount-only: camera lifecycle is now fully decoupled from `scan` /
+    // `startCamera` reference changes. See `scanRef` comment above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleResume = useCallback(() => {
     if (resumeTimerRef.current != null) {
@@ -403,10 +426,15 @@ const Scanner: React.FC<ScannerProps> = ({ onScan, onCapturePlaceholder, onClose
             )}
           </>
         ) : (
-          <div className="text-white p-6 text-center">
-            <AlertTriangle className="w-12 h-12 mx-auto mb-4 text-yellow-400" />
-            <p>{cameraError}</p>
-          </div>
+          <button
+            type="button"
+            onClick={() => startCamera()}
+            className="absolute inset-0 w-full h-full text-white p-6 text-center flex flex-col items-center justify-center bg-black/40 hover:bg-black/30 transition-colors cursor-pointer"
+          >
+            <AlertTriangle className="w-12 h-12 mb-4 text-yellow-400" />
+            <p className="text-lg font-semibold mb-2">{cameraError}</p>
+            <p className="text-sm text-white/70">Tap anywhere to retry</p>
+          </button>
         )}
       </div>
 

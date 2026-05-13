@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { HashRouter, Routes, Route, Link, useLocation, Navigate, useNavigate } from 'react-router-dom';
 import { LayoutDashboard, QrCode, ClipboardList, LogOut, Settings as SettingsIcon, ExternalLink, Menu, X, ChevronLeft, ChevronRight, Loader2, Rows3, Users, Handshake, UserCircle, Shield, KeyRound, ScanLine } from 'lucide-react';
 import ManualTicketTool from './components/ManualTicketTool';
@@ -242,13 +242,23 @@ const AdminLayout = () => {
   //                           inputs so door staff can capture name + email
   //                           and check the person in atomically.
   //   - Attendee            : normal scan, attendee now checked in
-  const handleScan = async (data: string): Promise<Attendee | 'not_found' | 'already_checked_in' | { pendingCapture: true; attendee: Attendee }> => {
+  // Ref mirror of `attendees` so `handleScan` can read the latest list
+  // without listing `attendees` as a useCallback dep. If we did, the
+  // callback's identity would change every time the realtime subscription
+  // updated the array, the Scanner's `onScan` prop would change, the
+  // Scanner's camera-startup effect would re-fire, and `video.play()`
+  // would reject (no fresh user gesture) → "Tap the screen to start the
+  // camera" appearing mid-scan-session.
+  const attendeesRef = useRef<Attendee[]>(attendees);
+  useEffect(() => { attendeesRef.current = attendees; }, [attendees]);
+
+  const handleScan = useCallback(async (data: string): Promise<Attendee | 'not_found' | 'already_checked_in' | { pendingCapture: true; attendee: Attendee }> => {
     try {
       const parsed = JSON.parse(data);
       if (!parsed.id) return 'not_found';
 
       // Local fast-path for already-checked-in scans.
-      const existingInState = attendees.find(a => a.id === parsed.id);
+      const existingInState = attendeesRef.current.find(a => a.id === parsed.id);
       if (existingInState?.checkedInAt) return 'already_checked_in';
 
       // Peek at the attendee first so we can decide whether this is a
@@ -291,14 +301,16 @@ const AdminLayout = () => {
       console.warn('Scanner: failed to resolve QR payload', { data, error: e });
       return 'not_found';
     }
-  };
+  }, []);
 
   // Called by the Scanner after door staff fills in a placeholder guest's
   // name + email at scan time. Saves the captured details, transitions the
   // guest out of placeholder state (`pending-claim` → `claimed`), and
   // stamps `checkedInAt` so the check-in completes in one round-trip. The
-  // Scanner uses the returned attendee to render the success card.
-  const handleCapturePlaceholder = async (
+  // Scanner uses the returned attendee to render the success card. Memoized
+  // for the same reason as `handleScan` above — keeps Scanner's prop
+  // identity stable so the camera doesn't restart on parent re-renders.
+  const handleCapturePlaceholder = useCallback(async (
     attendeeId: string,
     name: string,
     email: string,
@@ -331,7 +343,7 @@ const AdminLayout = () => {
       return [updated, ...prev];
     });
     return updated;
-  };
+  }, []);
 
   return (
     <div className="flex h-screen bg-gradient-to-br from-indigo-50 via-white to-blue-50/80 overflow-hidden relative">
