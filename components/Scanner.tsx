@@ -260,11 +260,21 @@ const Scanner: React.FC<ScannerProps> = ({ onScan, onCapturePlaceholder, onClose
       window.clearTimeout(resumeTimerRef.current);
       resumeTimerRef.current = null;
     }
+    // Clear the dedup cache so re-scanning the same ticket immediately
+    // surfaces "Already Checked In" feedback instead of being silently
+    // suppressed as a duplicate. The DUPLICATE_SUPPRESS_MS window is only
+    // meant to debounce a QR that lingered in-frame across one decode.
+    lastScanRef.current = null;
     setScanResult(null);
     isScanningRef.current = true;
     setIsScanning(true);
     requestAnimationFrame(scan);
   }, [scan]);
+
+  // Visible countdown driving the "Resuming in Ns" pill. State (not a ref)
+  // because we're rendering it. Restarts every time a new scanResult lands.
+  const [resumeCountdown, setResumeCountdown] = useState<number | null>(null);
+  const countdownIntervalRef = useRef<number | null>(null);
 
   // Auto-resume after a short delay so a queue of attendees can flow through
   // without a tap between each. Cleared on manual close or unmount.
@@ -272,11 +282,24 @@ const Scanner: React.FC<ScannerProps> = ({ onScan, onCapturePlaceholder, onClose
   // to type a name + email, so the modal stays up indefinitely until they
   // confirm or exit.
   useEffect(() => {
-    if (!scanResult) return;
-    if (scanResult.status === 'pending-capture') return;
+    if (!scanResult) {
+      setResumeCountdown(null);
+      return;
+    }
+    if (scanResult.status === 'pending-capture') {
+      setResumeCountdown(null);
+      return;
+    }
     if (resumeTimerRef.current != null) {
       window.clearTimeout(resumeTimerRef.current);
     }
+    if (countdownIntervalRef.current != null) {
+      window.clearInterval(countdownIntervalRef.current);
+    }
+    setResumeCountdown(Math.ceil(AUTO_RESUME_MS / 1000));
+    countdownIntervalRef.current = window.setInterval(() => {
+      setResumeCountdown(prev => (prev != null && prev > 1 ? prev - 1 : 0));
+    }, 1000);
     resumeTimerRef.current = window.setTimeout(() => {
       handleResume();
     }, AUTO_RESUME_MS);
@@ -284,6 +307,10 @@ const Scanner: React.FC<ScannerProps> = ({ onScan, onCapturePlaceholder, onClose
       if (resumeTimerRef.current != null) {
         window.clearTimeout(resumeTimerRef.current);
         resumeTimerRef.current = null;
+      }
+      if (countdownIntervalRef.current != null) {
+        window.clearInterval(countdownIntervalRef.current);
+        countdownIntervalRef.current = null;
       }
     };
   }, [scanResult, handleResume]);
@@ -515,23 +542,19 @@ const Scanner: React.FC<ScannerProps> = ({ onScan, onCapturePlaceholder, onClose
 
           {scanResult.status !== 'pending-capture' && (
             <>
-              <div className="flex gap-3">
-                <button
-                  onClick={handleResume}
-                  className="flex-1 py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-500/20"
-                >
-                  Close
-                </button>
-                <button
-                  onClick={onClose}
-                  className="px-4 py-3 bg-white border border-slate-200 text-slate-600 rounded-xl font-bold hover:bg-slate-50 inline-flex items-center gap-2"
-                  title="Exit scanner"
-                >
-                  <LogOut className="w-4 h-4" /> Exit
-                </button>
-              </div>
+              <button
+                onClick={handleResume}
+                className="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-500/20 inline-flex items-center justify-center gap-2"
+              >
+                Scan Next
+                {resumeCountdown != null && resumeCountdown > 0 && (
+                  <span className="inline-flex items-center justify-center min-w-[1.5rem] h-6 px-1.5 rounded-full bg-white/20 text-white text-xs font-bold tabular-nums">
+                    {resumeCountdown}s
+                  </span>
+                )}
+              </button>
               <p className="text-[10px] text-slate-400 text-center mt-3 uppercase tracking-widest font-bold">
-                Auto-resuming in a moment…
+                Use the X at the top to exit
               </p>
             </>
           )}

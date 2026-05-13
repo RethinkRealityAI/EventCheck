@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { HashRouter, Routes, Route, Link, useLocation, Navigate, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, QrCode, ClipboardList, LogOut, Settings as SettingsIcon, ExternalLink, Menu, X, ChevronLeft, ChevronRight, Loader2, Rows3, Users, Handshake, UserCircle, Shield, KeyRound } from 'lucide-react';
+import { LayoutDashboard, QrCode, ClipboardList, LogOut, Settings as SettingsIcon, ExternalLink, Menu, X, ChevronLeft, ChevronRight, Loader2, Rows3, Users, Handshake, UserCircle, Shield, KeyRound, ScanLine } from 'lucide-react';
 import ManualTicketTool from './components/ManualTicketTool';
 import AttendeeList from './components/AttendeeList';
 import Scanner from './components/Scanner';
@@ -13,6 +13,7 @@ import SponsorsDashboard from './components/Sponsors/SponsorsDashboard';
 import { NotificationProvider } from './components/NotificationSystem';
 import { Attendee, Form } from './types';
 import { getAttendees, checkInAttendee, getForms, getAttendee, updateAttendee } from './services/storageService';
+import { supabase } from './services/supabaseClient';
 import { AuthProvider, useAuth } from './components/AuthContext';
 import Login from './components/Login';
 import { CURRENT_SITE } from './config/sites';
@@ -186,9 +187,50 @@ const AdminLayout = () => {
 
   useEffect(() => {
     refreshAttendees();
-    const interval = setInterval(refreshAttendees, 5000);
+    // Polling kept as a safety net at a slower cadence (15s) so transient
+    // realtime disconnects don't leave the dashboard frozen. The realtime
+    // channel below is what drives sub-second updates at the door.
+    const interval = setInterval(refreshAttendees, 15000);
     return () => clearInterval(interval);
   }, [refreshAttendees]);
+
+  // Live attendee updates via Supabase Postgres-changes subscription.
+  // Triggered by every INSERT (new registration) and UPDATE (check-in stamp,
+  // table assignment, etc.) on `public.attendees`. The migration
+  // `20260513170000_enable_realtime_attendees.sql` adds the table to the
+  // `supabase_realtime` publication on both projects. We re-fetch the full
+  // row by id rather than rely on the WAL payload because the row is small
+  // and a fresh fetch keeps us aligned with the same shape `getAttendee`
+  // returns elsewhere (joined fields, derived columns).
+  useEffect(() => {
+    const channel = supabase
+      .channel('attendees-live')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'attendees' },
+        async (payload) => {
+          const rowId = (payload.new as any)?.id ?? (payload.old as any)?.id;
+          if (!rowId) return;
+          if (payload.eventType === 'DELETE') {
+            setAttendees(prev => prev.filter(a => a.id !== rowId));
+            return;
+          }
+          const fresh = await getAttendee(rowId);
+          if (!fresh) return;
+          setAttendees(prev => {
+            const idx = prev.findIndex(a => a.id === fresh.id);
+            if (idx === -1) return [fresh, ...prev];
+            const next = prev.slice();
+            next[idx] = fresh;
+            return next;
+          });
+        },
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   // Scan outcomes:
   //   - `not_found`        : QR didn't match any attendee
@@ -320,8 +362,15 @@ const AdminLayout = () => {
                 <Handshake className="w-6 h-6" />
               </Link>
             )}
-            <button onClick={() => { setShowScanner(true); setIsMobileMenuOpen(false); }} className="p-3 bg-indigo-600 text-white rounded-xl shadow-lg shadow-indigo-500/20 hover:bg-indigo-500 transition-all">
-              <QrCode className="w-6 h-6" />
+            <button
+              onClick={() => { setShowScanner(true); setIsMobileMenuOpen(false); }}
+              title="Scan tickets"
+              className={`p-3 rounded-xl transition-all ${showScanner
+                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20 hover:bg-indigo-500'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+              }`}
+            >
+              <ScanLine className="w-6 h-6" />
             </button>
             {canSeeSettings && (
               <Link to="/admin/settings" onClick={() => setIsMobileMenuOpen(false)} className="p-3 text-slate-300 hover:text-white hover:bg-slate-800/80 rounded-xl transition-all">
@@ -450,7 +499,7 @@ const AdminLayout = () => {
                 }`}
               title="Scan Tickets"
             >
-              <QrCode className={`w-5 h-5 transition-transform group-hover:scale-110 ${(isSidebarCollapsed && !isSidebarPinned) ? '' : 'text-white'}`} />
+              <ScanLine className={`w-5 h-5 transition-transform group-hover:scale-110 ${(isSidebarCollapsed && !isSidebarPinned) ? '' : 'text-white'}`} />
               <span className={`font-medium whitespace-nowrap transition-all duration-300 ${(isSidebarCollapsed && !isSidebarPinned) ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}>Scan Tickets</span>
             </button>
           </div>
