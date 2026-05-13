@@ -82,6 +82,7 @@ const Scanner: React.FC<ScannerProps> = ({ onScan, onCapturePlaceholder, onClose
   const lastScanRef = useRef<{ data: string; at: number } | null>(null);
   const resumeTimerRef = useRef<number | null>(null);
   const isScanningRef = useRef(true);
+  const firstFrameLoggedRef = useRef(false);
 
   // Keep ref in sync so the rAF callback (closed over a stale value otherwise)
   // sees the latest value without being recreated.
@@ -125,6 +126,17 @@ const Scanner: React.FC<ScannerProps> = ({ onScan, onCapturePlaceholder, onClose
     const canvas = canvasRef.current;
 
     if (video && canvas && video.readyState === video.HAVE_ENOUGH_DATA) {
+      // Fires once per Scanner mount as proof that frames are flowing into
+      // jsQR. If you don't see this in DevTools, the camera stream never
+      // reached HAVE_ENOUGH_DATA — usually an autoplay-policy or invisible
+      // video-element issue, not a QR-content problem.
+      if (!firstFrameLoggedRef.current) {
+        firstFrameLoggedRef.current = true;
+        console.info('[Scanner] first frame ready, jsQR loop active', {
+          videoWidth: video.videoWidth,
+          videoHeight: video.videoHeight,
+        });
+      }
       const ctx = canvas.getContext('2d');
       if (ctx) {
         canvas.height = video.videoHeight;
@@ -132,11 +144,15 @@ const Scanner: React.FC<ScannerProps> = ({ onScan, onCapturePlaceholder, onClose
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        // `attemptBoth` lets jsQR also read inverted (light-on-dark) QRs —
+        // matters for printed tickets photographed on dark backgrounds and
+        // for some screen-displayed dark-mode QR renderings.
         const code = jsQR(imageData.data, imageData.width, imageData.height, {
-          inversionAttempts: 'dontInvert',
+          inversionAttempts: 'attemptBoth',
         });
 
         if (code) {
+          console.info('[Scanner] jsQR decoded payload', { length: code.data.length, preview: code.data.slice(0, 80) });
           // Suppress repeat decodes of the same payload while the QR is still
           // in frame.
           const last = lastScanRef.current;
@@ -182,17 +198,40 @@ const Scanner: React.FC<ScannerProps> = ({ onScan, onCapturePlaceholder, onClose
 
     const startCamera = async () => {
       try {
+        // Soft preference: `ideal` lets desktop laptops fall back to the
+        // built-in front camera when no rear camera exists, instead of
+        // OverconstrainedError-ing.
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment' },
+          video: { facingMode: { ideal: 'environment' } },
+        });
+        const tracks = stream.getVideoTracks();
+        const settings = tracks[0]?.getSettings?.();
+        console.info('[Scanner] camera stream acquired', {
+          tracks: tracks.length,
+          settings,
         });
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
-          videoRef.current.setAttribute('playsinline', 'true');
-          videoRef.current.play();
+          // Awaiting play() surfaces NotAllowedError / autoplay-policy
+          // rejections that were previously silent. The video JSX now sets
+          // `autoPlay`, `playsInline`, and `muted` so this should succeed
+          // without a user gesture, but log if it doesn't.
+          try {
+            await videoRef.current.play();
+            console.info('[Scanner] video.play() resolved', {
+              readyState: videoRef.current.readyState,
+              videoWidth: videoRef.current.videoWidth,
+              videoHeight: videoRef.current.videoHeight,
+            });
+          } catch (playErr) {
+            console.warn('[Scanner] video.play() rejected — frames will not flow until user gesture', playErr);
+            setCameraError('Tap the screen to start the camera.');
+            return;
+          }
           requestAnimationFrame(scan);
         }
       } catch (err) {
-        console.error('Camera error', err);
+        console.error('[Scanner] getUserMedia rejected', err);
         setCameraError('Unable to access camera. Please ensure you have granted permissions.');
       }
     };
@@ -323,6 +362,9 @@ const Scanner: React.FC<ScannerProps> = ({ onScan, onCapturePlaceholder, onClose
             <video
               ref={videoRef}
               className="absolute inset-0 w-full h-full object-cover opacity-80"
+              autoPlay
+              playsInline
+              muted
             />
             <canvas ref={canvasRef} className="hidden" />
 

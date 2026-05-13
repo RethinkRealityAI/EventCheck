@@ -243,6 +243,10 @@ const AdminLayout = () => {
       return attendee;
 
     } catch (e) {
+      // Surface the actual failure in DevTools — without this, every cause
+      // (malformed QR, RPC error, network blip) collapses to "Invalid Ticket"
+      // at the door and there's no way to tell them apart.
+      console.warn('Scanner: failed to resolve QR payload', { data, error: e });
       return 'not_found';
     }
   };

@@ -302,7 +302,10 @@ serve(async (req: Request) => {
         payment_status: 'paid',
         payment_amount: 'PAID EXTERNALLY',
         payment_method: 'external',
-        qr_payload: JSON.stringify({ t: transactionId, i: 0 }),
+        // QR payload must be `{ id }` so the door scanner's handleScan can
+        // resolve it via getAttendee. Earlier shapes like `{ t, i }` rendered
+        // a valid QR but every scan returned "Invalid Ticket".
+        qr_payload: JSON.stringify({ id: primaryId }),
         registered_at: new Date().toISOString(),
         transaction_id: transactionId,
         is_primary: true,
@@ -339,7 +342,7 @@ serve(async (req: Request) => {
           payment_status: 'paid',
           payment_amount: 'PAID EXTERNALLY',
           payment_method: 'external',
-          qr_payload: JSON.stringify({ t: transactionId, i: i + 1 }),
+          qr_payload: JSON.stringify({ id }),
           registered_at: new Date().toISOString(),
           transaction_id: transactionId,
           is_primary: false,
