@@ -224,9 +224,13 @@ function StaffRow({
   };
 
   const resend = async () => {
-    await supabase.functions.invoke('send-ticket-email', {
+    const { error } = await supabase.functions.invoke('send-ticket-email', {
       body: { mode: inviteMode, attendeeId: staff.id, origin: window.location.origin },
     });
+    if (error) {
+      showNotification(`Failed to resend invitation: ${error.message || 'unknown error'}`, 'error');
+      return;
+    }
     showNotification('Invitation resent', 'success');
   };
 

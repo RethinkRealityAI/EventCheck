@@ -48,8 +48,22 @@ serve(async (req: Request) => {
       payment_status: 'paid',
       payment_amount: (sponsor.payment_amount || '').replace(/\s*\(PENDING CHEQUE\)/, '').trim(),
     };
-    const { error: updErr } = await supabase.from('attendees').update(updates).eq('id', attendeeId);
+    // `.select('id')` confirms the flip actually wrote a row. Without
+    // the rowcount check the function would happily insert 16 paid
+    // guest seats for a sponsor whose payment_status is still pending —
+    // exactly the silent-failure class we're closing across the codebase.
+    const { data: updRows, error: updErr } = await supabase
+      .from('attendees')
+      .update(updates)
+      .eq('id', attendeeId)
+      .select('id');
     if (updErr) return jsonResponse({ error: updErr.message }, 500);
+    if (!updRows || updRows.length === 0) {
+      console.error('confirm-sponsor-cheque: payment flip touched 0 rows', { attendeeId });
+      return jsonResponse({
+        error: `Sponsor row ${attendeeId} could not be marked paid (0 rows affected). Refresh and retry; if the issue persists, contact engineering.`,
+      }, 409);
+    }
 
     const tier = sponsor.sponsor_tier;
     const seatCount = tier === 'signature' ? 16 : (tier === 'gold' || tier === 'silver') ? 8 : 0;

@@ -527,6 +527,16 @@ serve(async (req: Request) => {
                 .eq('id', body.attendeeId)
                 .maybeSingle();
             if (sErr || !staff) return jsonResponse({ error: 'Staff member not found' }, 404);
+            // Placeholder staff rows are inserted with `email: ''` when the
+            // exhibitor doesn't yet know their staff's contacts. Sending to
+            // an empty `to` either errors silently or delivers to nobody;
+            // either way the slot stays unclaimed forever. Refuse fast so
+            // the caller can prompt the org to fill in details first.
+            if (!staff.email || !String(staff.email).trim()) {
+                return jsonResponse({
+                    error: `Staff row ${staff.id} has no email — cannot send invite. Add an email and retry.`,
+                }, 400);
+            }
 
             const { data: org } = await supabase
                 .from('attendees')
@@ -629,18 +639,28 @@ serve(async (req: Request) => {
                 .replace(/\{\{event\}\}/g, eventName);
 
             // 1. Send personal ticket confirmation to the staff member
-            try {
-                const subject = replace(rawSubject);
-                const body_html = replace(rawBody);
-                const html = generateEmailTemplate({
-                    title: eventName,
-                    greeting: `Hi ${staff.name || 'there'}`,
-                    content: body_html,
-                    fromName: smtpConfig?.fromName,
-                });
-                await sendSimpleEmail({ to: staff.email, subject, html, smtpConfig });
-            } catch (e) {
-                console.warn('Failed to send exhibitor-staff ticket email', e);
+            // We track success so we can gate the `last_ticket_email_at`
+            // stamp below — stamping unconditionally on a failed send is
+            // exactly the silent-failure that hid the Sherrie James bug
+            // (dashboard said "Sent" while no email actually went out).
+            let staffTicketEmailSent = false;
+            if (!staff.email || !String(staff.email).trim()) {
+                console.error('exhibitor-staff-claim-completed: staff has no email', { staffId: staff.id });
+            } else {
+                try {
+                    const subject = replace(rawSubject);
+                    const body_html = replace(rawBody);
+                    const html = generateEmailTemplate({
+                        title: eventName,
+                        greeting: `Hi ${staff.name || 'there'}`,
+                        content: body_html,
+                        fromName: smtpConfig?.fromName,
+                    });
+                    await sendSimpleEmail({ to: staff.email, subject, html, smtpConfig });
+                    staffTicketEmailSent = true;
+                } catch (e) {
+                    console.warn('Failed to send exhibitor-staff ticket email', e);
+                }
             }
 
             // 2. Notify the org contact (best-effort). Pulls from the
@@ -668,19 +688,22 @@ serve(async (req: Request) => {
                     .catch(e => console.warn('Org contact notification failed', e));
             }
 
-            // Stamp `last_ticket_email_at` on the staff attendee so the
-            // dashboard reflects that we sent them their confirmation.
-            // Best-effort — the email was already sent successfully.
-            try {
-                await supabase
-                    .from('attendees')
-                    .update({ last_ticket_email_at: new Date().toISOString() })
-                    .eq('id', staff.id);
-            } catch (stampErr) {
-                console.warn('Failed to stamp last_ticket_email_at on exhibitor-staff-claim-completed', stampErr);
+            // Only stamp `last_ticket_email_at` if the staff ticket email
+            // actually went out. Otherwise the dashboard would lie that
+            // the ticket was delivered, making operators believe the
+            // attendee is informed when they aren't.
+            if (staffTicketEmailSent) {
+                try {
+                    await supabase
+                        .from('attendees')
+                        .update({ last_ticket_email_at: new Date().toISOString() })
+                        .eq('id', staff.id);
+                } catch (stampErr) {
+                    console.warn('Failed to stamp last_ticket_email_at on exhibitor-staff-claim-completed', stampErr);
+                }
             }
 
-            return jsonResponse({ ok: true });
+            return jsonResponse({ ok: staffTicketEmailSent, staffTicketEmailSent });
         }
 
         // ── DEFAULT FLOW: generic SMTP relay (original behaviour) ──

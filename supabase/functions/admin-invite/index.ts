@@ -154,11 +154,22 @@ Deno.serve(async (req: Request) => {
       updated_at: new Date().toISOString(),
     }, { onConflict: 'id' });
   if (upsertErr) {
+    // Roll back the auth user. Otherwise we leave behind a confirmed
+    // account with role='attendee' (set by handle_new_user trigger) and
+    // the super admin's retry will 422 on the duplicate email — leaving
+    // an under-privileged orphan account in auth.users with a leaked
+    // temp password. Best to undo the create and surface a clean error.
+    try {
+      await admin.auth.admin.deleteUser(created.user.id);
+    } catch (cleanupErr) {
+      console.error('admin-invite: failed to roll back auth user after profile upsert failure', {
+        userId: created.user.id,
+        upsertErr: upsertErr.message,
+        cleanupErr,
+      });
+    }
     return json({
-      error: `User created but profile setup failed: ${upsertErr.message}. ` +
-             `Please promote them manually from the admin dashboard.`,
-      userId: created.user.id,
-      tempPassword,
+      error: `User creation rolled back: profile setup failed (${upsertErr.message}). Please retry the invitation.`,
     }, 500);
   }
 

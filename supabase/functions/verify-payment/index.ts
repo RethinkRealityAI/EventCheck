@@ -163,8 +163,25 @@ serve(async (req: Request) => {
 
       const { error: staffErr } = await supabase.from('attendees').insert(staffRows);
       if (staffErr) {
-        console.error('CRITICAL: org inserted but staff insert failed', JSON.stringify({ orgId, error: staffErr.message }));
-        return jsonResponse({ error: 'Saved org but failed to save staff: ' + staffErr.message }, 500);
+        // Roll back the org row so retries don't create duplicate orgs
+        // and we don't leave behind an orphaned 'paid' row with no staff.
+        // The org row was inserted in step 1 and is the only thing
+        // pointing at this orgId, so a delete is safe here.
+        const { error: rollbackErr } = await supabase.from('attendees').delete().eq('id', orgId);
+        if (rollbackErr) {
+          console.error('CRITICAL: org rollback failed after staff insert failed', JSON.stringify({
+            orgId,
+            staffErr: staffErr.message,
+            rollbackErr: rollbackErr.message,
+          }));
+          return jsonResponse({
+            error: `Staff insert failed AND org rollback failed. Orphaned org row id=${orgId} requires manual cleanup. Engineering reference: ${orgId}.`,
+            partial: true,
+            orphanedOrgId: orgId,
+          }, 500);
+        }
+        console.error('Org rolled back after staff insert failure', JSON.stringify({ orgId, error: staffErr.message }));
+        return jsonResponse({ error: 'Failed to save staff: ' + staffErr.message + '. Org rolled back; please retry.' }, 500);
       }
 
       // 3. Fire per-staff invitation emails (fire-and-forget)
@@ -466,11 +483,54 @@ serve(async (req: Request) => {
 
       // ─── CHEQUE: skip PayPal, save pending, no guest tickets yet ───
       if (paymentMethod === 'cheque') {
+        // Validate the client-supplied primary.id is a UUID and does not
+        // collide with an existing row owned by a different user. The
+        // upsert below trusts the id wholesale — without this guard a
+        // buggy or malicious client could overwrite a paid attendee
+        // record by sending the victim's id with their own payload.
+        const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (!primary.id || typeof primary.id !== 'string' || !UUID_RE.test(primary.id)) {
+          return jsonResponse({ error: 'primary attendee id must be a UUID' }, 400);
+        }
+        const { data: existing, error: existingErr } = await supabase
+          .from('attendees')
+          .select('id, user_id, form_id, payment_status')
+          .eq('id', primary.id)
+          .maybeSingle();
+        if (existingErr) {
+          console.error('verify-payment cheque: collision check failed', existingErr);
+          return jsonResponse({ error: 'Collision check failed: ' + existingErr.message }, 500);
+        }
+        if (existing) {
+          // Allow the same user to re-submit (idempotent retry) but
+          // reject any cross-user / cross-form / paid-overwrite attempt.
+          const sameUser = existing.user_id && authUserId && existing.user_id === authUserId;
+          const sameForm = existing.form_id === primary.form_id;
+          const isPaid = existing.payment_status === 'paid';
+          if (!sameUser || !sameForm || isPaid) {
+            console.error('verify-payment cheque: id collision rejected', {
+              attemptedId: primary.id,
+              existingUserId: existing.user_id,
+              callerUserId: authUserId,
+              existingFormId: existing.form_id,
+              callerFormId: primary.form_id,
+              existingPaymentStatus: existing.payment_status,
+            });
+            return jsonResponse({ error: 'Attendee id collision; refresh and retry' }, 409);
+          }
+        }
         primary.payment_status = 'pending';
         primary.payment_amount = `${computedTotal.toFixed(2)} ${currency} (PENDING CHEQUE)`;
         primary.user_id = authUserId;
-        const { error } = await supabase.from('attendees').upsert([primary]);
+        const { data: upserted, error } = await supabase
+          .from('attendees')
+          .upsert([primary])
+          .select('id');
         if (error) return jsonResponse({ error: error.message }, 500);
+        if (!upserted || upserted.length === 0) {
+          console.error('verify-payment cheque: upsert touched 0 rows', { id: primary.id });
+          return jsonResponse({ error: 'Sponsor row could not be saved (0 rows affected).' }, 500);
+        }
         return jsonResponse({
           success: true,
           cheque: true,

@@ -102,12 +102,29 @@ export const updateAttendee = async (id: string, updates: Partial<Attendee>): Pr
   // source of "I sent it but the dashboard still says Not sent" bugs.
   if (updates.lastTicketEmailAt !== undefined) (dbUpdates as any).last_ticket_email_at = updates.lastTicketEmailAt;
 
-  const { error } = await supabase
+  // `.select('id')` is mandatory: PostgREST returns no error and 0 rows
+  // when an UPDATE matches nothing under the caller's RLS policies. That
+  // exact pattern silently lost a guest's claim data on 2026-05-14
+  // because the anon role had UPDATE but no SELECT on attendees. We now
+  // confirm at least one row was touched and throw on silent failure so
+  // the caller sees a loud error instead of a false success.
+  const { data, error } = await supabase
     .from('attendees')
     .update(dbUpdates)
-    .eq('id', id);
+    .eq('id', id)
+    .select('id');
 
-  if (error) console.error("Failed to update attendee", error);
+  if (error) {
+    console.error('Failed to update attendee', { id, error });
+    throw new Error(`updateAttendee failed for ${id}: ${error.message}`);
+  }
+  if (!data || data.length === 0) {
+    console.error('updateAttendee silently affected 0 rows', { id, dbUpdates });
+    throw new Error(
+      `updateAttendee affected 0 rows for ${id}. ` +
+        `Check that the row exists and that the current role has SELECT + UPDATE policies on attendees.`,
+    );
+  }
 };
 
 // Alias for callers (sponsor_exhibitor staff claim flow) that use a more explicit name.
@@ -1061,7 +1078,10 @@ export const logProspectEmail = async (
   const history = (data.email_history as any[]) || [];
   history.push(entry);
   const newStatus = data.status === 'prospect' ? 'invited' : data.status;
-  await supabase
+  // `.select('id')` confirms the row was actually mutated. Without this
+  // check, a missing RLS policy or a deleted row would silently drop the
+  // email history entry and the prospect → invited status transition.
+  const { data: updated, error } = await supabase
     .from('sponsor_prospects')
     .update({
       email_history: history as any,
@@ -1069,7 +1089,19 @@ export const logProspectEmail = async (
       invited_at: data.status === 'prospect' ? entry.sentAt : undefined,
       status: newStatus,
     })
-    .eq('id', id);
+    .eq('id', id)
+    .select('id');
+  if (error) {
+    console.error('logProspectEmail update failed', { id, error });
+    throw new Error(`logProspectEmail failed for ${id}: ${error.message}`);
+  }
+  if (!updated || updated.length === 0) {
+    console.error('logProspectEmail silently affected 0 rows', { id });
+    throw new Error(
+      `logProspectEmail affected 0 rows for prospect ${id}. ` +
+        `Email history entry was lost — verify the row exists and SELECT/UPDATE policies are in place.`,
+    );
+  }
 };
 
 function mapProspectFromDb(db: any): SponsorProspect {

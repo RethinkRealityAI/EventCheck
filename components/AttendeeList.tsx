@@ -73,9 +73,13 @@ function GuestActions({ guest, formId, onRefresh }: { guest: Attendee; formId: s
   };
 
   const resend = async () => {
-    await supabase.functions.invoke('send-ticket-email', {
+    const { error } = await supabase.functions.invoke('send-ticket-email', {
       body: { mode: 'group-invite', attendeeId: guest.id, origin: window.location.origin },
     });
+    if (error) {
+      showNotification(`Failed to resend invitation: ${error.message || 'unknown error'}`, 'error');
+      return;
+    }
     showNotification('Invitation re-sent', 'success');
   };
 

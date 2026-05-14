@@ -44,7 +44,16 @@ export function ProfilePage() {
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
-    await updateProfile(user.id, { fullName, organization, countryCode, phone });
+    // updateProfile returns null on error OR when the .update().select() returns
+    // no rows (RLS-blocked or row missing). Treat both as failure so we never
+    // toast "Profile saved." for a write that didn't persist.
+    const result = await updateProfile(user.id, { fullName, organization, countryCode, phone });
+    if (!result) {
+      setSaving(false);
+      setToast('Failed to save profile. Please try again.');
+      setTimeout(() => setToast(''), 4000);
+      return;
+    }
     await refreshProfile();
     setSaving(false);
     setToast('Profile saved.');
