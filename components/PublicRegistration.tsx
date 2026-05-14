@@ -771,7 +771,10 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
 
     // Construct Ticket Summary String
     let ticketTypeSummary = paymentStatus === 'paid' ? 'Paid Admission' : 'General Admission';
-    if (ticketField && ticketField.ticketConfig) {
+    if (pricingTemplate && selectedCategoryId) {
+      const cat = pricingTemplate.categories.find(c => c.id === selectedCategoryId);
+      if (cat?.name) ticketTypeSummary = cat.name;
+    } else if (ticketField && ticketField.ticketConfig) {
       const parts: string[] = [];
       ticketField.ticketConfig.items.forEach(item => {
         const qty = ticketQuantities[item.id] || 0;

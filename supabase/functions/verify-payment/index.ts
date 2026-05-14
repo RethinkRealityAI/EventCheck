@@ -943,6 +943,16 @@ serve(async (req: Request) => {
       }
       // ── END DYNAMIC PRICING BRANCH — fall through to static-pricing event branch ──
 
+      // Guard: if the form is configured for dynamic pricing but the request
+      // supplied no pricingSelection (and no groupPricingSelections), reject
+      // hard rather than silently computing $0 via the static branch and
+      // allowing a free registration on a paid-only event.
+      if (pricingTemplateId) {
+        return jsonResponse({
+          error: 'This form requires a pricing selection to determine the registration fee.',
+        }, 400);
+      }
+
       const fields: FormField[] = typeof formData.fields === 'string'
         ? JSON.parse(formData.fields)
         : formData.fields;

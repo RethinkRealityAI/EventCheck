@@ -1293,7 +1293,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                               <span className="text-gray-400 font-mono text-[11px]">{format(new Date(attendee.lastTicketEmailAt), 'MMM d, p')}</span>
                             </div>
                           ) : (
-                            <span className="text-gray-400">Not sent</span>
+                            <span className="text-gray-300">—</span>
                           )}
                         </td>
                       )}
