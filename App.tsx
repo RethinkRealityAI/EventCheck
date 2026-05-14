@@ -74,8 +74,11 @@ const DashboardStats = ({ attendees }: { attendees: Attendee[] }) => {
             <Users className="w-16 h-16 transform right-[-10px] top-[-10px]" />
           </div>
           <h3 className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-2">Total Registrations</h3>
-          <p className="text-4xl font-extrabold text-slate-800 drop-shadow-sm">{primaryAttendees.length}</p>
-          {guestCount > 0 && <p className="text-xs text-indigo-600 font-semibold mt-2 bg-indigo-50 inline-block px-2 py-1 rounded-md">+ {guestCount} guest ticket{guestCount !== 1 ? 's' : ''}</p>}
+          <p className="text-4xl font-extrabold text-slate-800 drop-shadow-sm">{primaryAttendees.length + guestCount}</p>
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            <span className="text-xs text-indigo-600 font-semibold bg-indigo-50 px-2 py-1 rounded-md">{primaryAttendees.length} registrant{primaryAttendees.length !== 1 ? 's' : ''}</span>
+            {guestCount > 0 && <span className="text-xs text-indigo-400 font-semibold bg-indigo-50 px-2 py-1 rounded-md">{guestCount} guest{guestCount !== 1 ? 's' : ''}</span>}
+          </div>
         </div>
         <div className="bg-white/80 backdrop-blur-2xl p-6 rounded-3xl shadow-xl shadow-indigo-500/10 border border-white/60 hover:shadow-2xl hover:shadow-indigo-500/20 transition-all duration-300 transform hover:-translate-y-1 relative overflow-hidden group">
           <div className="absolute top-0 right-0 p-6 opacity-5 group-hover:opacity-10 transition-opacity duration-300">

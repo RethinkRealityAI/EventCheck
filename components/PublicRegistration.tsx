@@ -550,10 +550,16 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
         // claim. The guest's edits still win for any field they touch.
         const purchaserSnapshot = (loadedRefAttendee.answers as Record<string, any> | undefined) ?? {};
         const mergedAnswers = { ...purchaserSnapshot, ...answers };
+        const claimNameField = form?.fields.find(f => f.type === 'text' || f.label.toLowerCase().includes('name'));
+        const claimEmailField = form?.fields.find(f => f.type === 'email' || f.label.toLowerCase().includes('email'));
+        const claimedName = claimNameField ? String(mergedAnswers[claimNameField.id] || '').trim() : '';
+        const claimedEmail = claimEmailField ? String(mergedAnswers[claimEmailField.id] || '').trim() : '';
         const claimUpdate: Record<string, any> = {
           answers: mergedAnswers,
           guest_type: newGuestType,
         };
+        if (claimedName) claimUpdate.name = claimedName;
+        if (claimedEmail) claimUpdate.email = claimedEmail;
         if (
           !isExhibitorStaffPending
           && user?.id
