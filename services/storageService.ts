@@ -444,6 +444,7 @@ function mapAttendeeFromDb(db: AttendeeRow): Attendee {
     pricingTemplateId: (db as any).pricing_template_id ?? null,
     exhibitorBoothType: (db as any).exhibitor_booth_type ?? null,
     lastTicketEmailAt: (db as any).last_ticket_email_at ?? null,
+    isPaidExtra: (db as any).is_paid_extra ?? false,
   };
 }
 
@@ -480,6 +481,7 @@ export function mapAttendeeToDb(a: Attendee): AttendeeInsert {
     admin_notes: a.adminNotes || null,
     exhibitor_booth_type: (a as any).exhibitorBoothType ?? null,
     last_ticket_email_at: a.lastTicketEmailAt ?? null,
+    is_paid_extra: a.isPaidExtra ?? false,
   } as AttendeeInsert;
 }
 

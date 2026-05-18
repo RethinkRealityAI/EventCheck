@@ -15,6 +15,7 @@ interface Props {
 interface GuestCounts {
   total: number;
   claimed: number;
+  paidExtras: number;
 }
 
 export const SponsorsTable: React.FC<Props> = ({ sponsors, settings, onChanged }) => {
@@ -35,15 +36,15 @@ export const SponsorsTable: React.FC<Props> = ({ sponsors, settings, onChanged }
       const ids = sponsors.map(s => s.id);
       const { data } = await supabase
         .from('attendees')
-        .select('primary_attendee_id,name,guest_type')
+        .select('primary_attendee_id,name,guest_type,is_paid_extra')
         .in('primary_attendee_id', ids)
         .eq('is_primary', false);
       if (cancelled) return;
       const next: Record<string, GuestCounts> = {};
-      for (const row of (data || []) as Array<{ primary_attendee_id: string; name: string | null; guest_type: string | null }>) {
+      for (const row of (data || []) as Array<{ primary_attendee_id: string; name: string | null; guest_type: string | null; is_paid_extra: boolean | null }>) {
         const pid = row.primary_attendee_id;
         if (!pid) continue;
-        const bucket = next[pid] ?? { total: 0, claimed: 0 };
+        const bucket = next[pid] ?? { total: 0, claimed: 0, paidExtras: 0 };
         bucket.total += 1;
         const claimed = row.guest_type === 'claimed'
           ? true
@@ -51,6 +52,7 @@ export const SponsorsTable: React.FC<Props> = ({ sponsors, settings, onChanged }
             ? false
             : !(row.name || '').includes('Guest Ticket #');
         if (claimed) bucket.claimed += 1;
+        if (row.is_paid_extra) bucket.paidExtras += 1;
         next[pid] = bucket;
       }
       setGuestCounts(next);
@@ -99,6 +101,7 @@ export const SponsorsTable: React.FC<Props> = ({ sponsors, settings, onChanged }
               <th className="text-left px-4 py-3">Method</th>
               <th className="text-left px-4 py-3">Status</th>
               <th className="text-left px-4 py-3">Guests</th>
+              <th className="text-left px-4 py-3">Extras</th>
               <th className="text-left px-4 py-3">Submitted</th>
               <th className="text-left px-4 py-3">Actions</th>
             </tr>
@@ -138,6 +141,20 @@ export const SponsorsTable: React.FC<Props> = ({ sponsors, settings, onChanged }
                     );
                   })()}
                 </td>
+                <td className="px-4 py-3">
+                  {(() => {
+                    const extras = guestCounts[s.id]?.paidExtras ?? 0;
+                    if (extras === 0) return <span className="text-slate-300">—</span>;
+                    return (
+                      <span
+                        className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold"
+                        title={`${extras} additional booth staff paid by card ($${extras * 50} USD)`}
+                      >
+                        +{extras} paid
+                      </span>
+                    );
+                  })()}
+                </td>
                 <td className="px-4 py-3 text-slate-500">{new Date(s.registeredAt).toLocaleDateString()}</td>
                 <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                   <button onClick={() => setDetailFor(s)} className="text-indigo-600 hover:underline text-xs mr-2">View</button>
@@ -148,7 +165,7 @@ export const SponsorsTable: React.FC<Props> = ({ sponsors, settings, onChanged }
               </tr>
             ))}
             {filtered.length === 0 && (
-              <tr><td colSpan={9} className="text-center p-12 text-slate-400">No sponsors yet.</td></tr>
+              <tr><td colSpan={10} className="text-center p-12 text-slate-400">No sponsors yet.</td></tr>
             )}
           </tbody>
         </table>

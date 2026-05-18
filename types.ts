@@ -47,6 +47,11 @@ export interface Attendee {
    *  state — `null` means we never sent (or we only sent before this field
    *  existed). */
   lastTicketEmailAt?: string | null;
+  /** True when this attendee row was purchased as an additional booth staff
+   *  spot (sponsor_exhibitor flow), distinct from tier/booth-allotted staff.
+   *  Extras are paid online by card via PayPal at $50 USD each. The PayPal
+   *  capture id is shared with the primary row through `transactionId`. */
+  isPaidExtra?: boolean;
 }
 
 export interface SeatingConfiguration {

@@ -223,7 +223,9 @@ serve(async (req: Request) => {
         boothType,
         hasAllDetails, staff, consents,
         staffFormId: bodyStaffFormId,
+        extras: bodyExtras,
       } = body;
+      const extrasArr: any[] = Array.isArray(bodyExtras) ? bodyExtras : [];
 
       // ─── Basic validation ───
       if (registrationType !== 'sponsor' && registrationType !== 'exhibitor') {
@@ -307,8 +309,112 @@ serve(async (req: Request) => {
         }
       }
 
+      // ─── Paid extras validation + PayPal capture ───
+      // Tier/booth pricing is invoiced externally as before. The only
+      // amount we capture through PayPal in this branch is the optional
+      // additional booth staff at $50 USD each (cap 10).
+      const EXTRA_UNIT_PRICE = 50; // USD
+      const EXTRA_MAX = 10;
+      if (extrasArr.length > EXTRA_MAX) {
+        return jsonResponse({ error: `extras count ${extrasArr.length} exceeds cap of ${EXTRA_MAX}` }, 400);
+      }
+      const isEmailStr = (s: unknown) => typeof s === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
+      for (let i = 0; i < extrasArr.length; i++) {
+        const e = extrasArr[i];
+        if (!e?.name?.trim()) return jsonResponse({ error: `extras[${i}].name required` }, 400);
+        if (!isEmailStr(e?.email)) return jsonResponse({ error: `extras[${i}].email invalid` }, 400);
+        if (e.category !== 'hall_only' && e.category !== 'full_access') {
+          return jsonResponse({ error: `extras[${i}].category invalid` }, 400);
+        }
+      }
+
+      // Capture PayPal order when there are paid extras. Mirrors the
+      // sponsor PayPal branch below: env-aware sandbox/live resolution,
+      // OAuth, capture, amount check.
+      let extrasTransactionId: string | null = null;
+      let extrasPaymentAmount: string | null = null;
+      if (extrasArr.length > 0) {
+        if (!paypalOrderId) {
+          return jsonResponse({ error: 'paypalOrderId required for paid extras' }, 400);
+        }
+        const expectedExtrasTotal = extrasArr.length * EXTRA_UNIT_PRICE;
+
+        const paypalMode = (Deno.env.get('PAYPAL_MODE') || '').toLowerCase();
+        const origin = (req.headers.get('origin') || '').toLowerCase();
+        const isLocalhost = origin !== '' && (origin.includes('localhost') || origin.includes('127.0.0.1'));
+        let useSandbox: boolean;
+        if (isLocalhost) useSandbox = true;
+        else if (paypalMode === 'production') useSandbox = false;
+        else if (paypalMode === 'sandbox') useSandbox = true;
+        else useSandbox = false;
+
+        const PP_CLIENT_ID = (useSandbox
+          ? (Deno.env.get('PAYPAL_SANDBOX_CLIENT_ID') || Deno.env.get('PAYPAL_CLIENT_ID'))
+          : Deno.env.get('PAYPAL_CLIENT_ID'))?.trim() || '';
+        const PP_CLIENT_SECRET = (useSandbox
+          ? (Deno.env.get('PAYPAL_SANDBOX_CLIENT_SECRET') || Deno.env.get('PAYPAL_CLIENT_SECRET'))
+          : Deno.env.get('PAYPAL_CLIENT_SECRET'))?.trim() || '';
+        const PP_API_BASE = Deno.env.get('PAYPAL_API_BASE')
+          || (useSandbox ? 'https://api-m.sandbox.paypal.com' : 'https://api-m.paypal.com');
+        if (!PP_CLIENT_ID || !PP_CLIENT_SECRET) {
+          return jsonResponse({ error: 'PayPal credentials not configured' }, 500);
+        }
+
+        const authResp = await fetch(`${PP_API_BASE}/v1/oauth2/token`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Basic ${btoa(`${PP_CLIENT_ID}:${PP_CLIENT_SECRET}`)}`,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: 'grant_type=client_credentials',
+        });
+        if (!authResp.ok) return jsonResponse({ error: 'PayPal auth failed' }, 502);
+        const { access_token } = await authResp.json();
+
+        const capResp = await fetch(`${PP_API_BASE}/v2/checkout/orders/${paypalOrderId}/capture`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${access_token}`, 'Content-Type': 'application/json' },
+        });
+        const capData = await capResp.json();
+        if (!capResp.ok || capData.status !== 'COMPLETED') {
+          const issue = capData?.details?.[0]?.issue || capData?.name || capData?.message || 'unknown';
+          const debugId = capData?.debug_id || '';
+          console.error('[verify-payment se-extras] PayPal capture failed', JSON.stringify({ issue, debugId, useSandbox, apiBase: PP_API_BASE, orderId: paypalOrderId }));
+          return jsonResponse({ error: `PayPal capture failed: ${issue}${debugId ? ` (debug_id: ${debugId})` : ''}` }, 502);
+        }
+        const capture = capData.purchase_units?.[0]?.payments?.captures?.[0];
+        if (!capture) return jsonResponse({ error: 'No capture data' }, 502);
+
+        // Duplicate transaction guard — refuse to insert two registrations
+        // for the same PayPal capture id.
+        const { data: existingTx } = await supabase
+          .from('attendees').select('id').eq('transaction_id', capture.id).limit(1);
+        if (existingTx && existingTx.length > 0) {
+          return jsonResponse({ error: 'This payment has already been processed' }, 409);
+        }
+
+        const capturedAmount = parseFloat(capture.amount.value);
+        const capturedCurrency = capture.amount.currency_code;
+        if (Math.abs(capturedAmount - expectedExtrasTotal) > 0.01) {
+          return jsonResponse({
+            error: `Extras amount mismatch. Expected: $${expectedExtrasTotal} USD, Captured: ${capturedAmount} ${capturedCurrency}`,
+          }, 422);
+        }
+        if (capturedCurrency !== 'USD') {
+          return jsonResponse({ error: `Extras currency must be USD, got ${capturedCurrency}` }, 422);
+        }
+        extrasTransactionId = capture.id;
+        extrasPaymentAmount = `${capturedAmount} ${capturedCurrency}`;
+      }
+
       // ─── Insert primary attendee ───
-      const transactionId = crypto.randomUUID();
+      // When the user paid for extras, the primary row shares the PayPal
+      // transaction_id (so the dashboard can group the whole submission).
+      // Otherwise we generate a random UUID (the existing "external pay"
+      // pattern). Either way, the primary row's payment_method stays
+      // 'external' because tier/booth pricing is invoiced separately;
+      // the captured PayPal amount is just the extras subtotal.
+      const transactionId = extrasTransactionId ?? crypto.randomUUID();
       const primaryId = crypto.randomUUID();
       const primary: Record<string, any> = {
         id: primaryId,
@@ -317,7 +423,9 @@ serve(async (req: Request) => {
         email: org.email,
         ticket_type: registrationType === 'sponsor' ? 'Sponsor' : 'Exhibitor',
         payment_status: 'paid',
-        payment_amount: 'PAID EXTERNALLY',
+        payment_amount: extrasPaymentAmount
+          ? `Extras: ${extrasPaymentAmount}; Tier: PAID EXTERNALLY`
+          : 'PAID EXTERNALLY',
         payment_method: 'external',
         // QR payload must be `{ id }` so the door scanner's handleScan can
         // resolve it via getAttendee. Earlier shapes like `{ t, i }` rendered
@@ -381,11 +489,63 @@ serve(async (req: Request) => {
         staffIds = (staffData || []).map((r: any) => r.id);
       }
 
+      // ─── Insert paid extras (only when extras.length > 0) ───
+      // These mirror the tier-staff row shape but carry payment_method='paypal'
+      // and the captured PayPal amount, and are flagged with is_paid_extra=true
+      // so the admin dashboard can distinguish them. Names/emails are always
+      // present (no placeholder/claim-link flow for paid extras), so guest_type
+      // is always 'staff-pending' — they still need to claim their personal
+      // details on the staff form via `?ref=` link.
+      let extrasIds: string[] = [];
+      if (extrasArr.length > 0 && extrasTransactionId) {
+        const extraRows = extrasArr.map((e: any) => {
+          const id = crypto.randomUUID();
+          return {
+            id,
+            form_id: staffFormId,
+            name: e.name,
+            email: e.email,
+            ticket_type: e.category === 'full_access' ? 'Full Congress (Extra)' : 'Hall Only (Extra)',
+            payment_status: 'paid',
+            payment_amount: `$${EXTRA_UNIT_PRICE}.00 USD`,
+            payment_method: 'paypal',
+            qr_payload: JSON.stringify({ id }),
+            registered_at: new Date().toISOString(),
+            transaction_id: extrasTransactionId,
+            is_primary: false,
+            primary_attendee_id: primaryRow.id,
+            user_id: null,
+            answers: { staffCategory: e.category },
+            guest_type: 'staff-pending',
+            is_paid_extra: true,
+          };
+        });
+        const { data: extraData, error: extrasErr } = await supabase
+          .from('attendees').insert(extraRows).select('id');
+        if (extrasErr) {
+          // CRITICAL: PayPal already captured, primary + tier staff already inserted,
+          // but extras failed. Log for manual reconciliation; refund/retry decisions
+          // are handled out-of-band.
+          console.error('CRITICAL: sponsor_exhibitor extras insert failed after PayPal capture', JSON.stringify({
+            transactionId: extrasTransactionId,
+            primaryId,
+            extrasCount: extrasArr.length,
+            dbError: extrasErr.message,
+          }));
+          return jsonResponse({
+            error: `Your payment was processed but we encountered a database error saving the additional staff. Please contact the event organizers with this reference: ${extrasTransactionId}`,
+          }, 500);
+        }
+        extrasIds = (extraData || []).map((r: any) => r.id);
+      }
+
       return jsonResponse({
         ok: true,
         primaryId: primaryRow.id,
         staffIds,
+        extrasIds,
         transactionId,
+        extrasTransactionId,
       });
     }
     // ── END SPONSOR_EXHIBITOR BRANCH ──

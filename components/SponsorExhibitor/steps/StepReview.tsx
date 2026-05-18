@@ -1,7 +1,8 @@
 import React from 'react';
 import { getBoothType } from '../../../config/formTemplates/boothTypes';
 import { getSponsorTier } from '../../../config/formTemplates/sponsorTiers';
-import type { StaffEntry } from '../validation';
+import type { ExtraStaffEntry, StaffEntry } from '../validation';
+import { EXTRA_STAFF_UNIT_PRICE_USD } from '../validation';
 
 interface Props {
   registrationType: 'sponsor' | 'exhibitor';
@@ -17,6 +18,7 @@ interface Props {
   sponsorTier: string | null;
   boothType: string | null;
   staff: StaffEntry[];
+  extras: ExtraStaffEntry[];
   hasAllDetails: boolean;
   error: string | null;
 }
@@ -67,6 +69,15 @@ export default function StepReview(p: Props) {
           {hallOnly} Hall-Only + {fullAccess} Full Congress · {filled} of {p.staff.length} rows filled
           ({p.hasAllDetails ? 'inline details' : 'send invitation links'})
         </dd>
+
+        {p.extras.length > 0 && (
+          <>
+            <dt className="font-semibold">Extras</dt>
+            <dd>
+              {p.extras.length} × ${EXTRA_STAFF_UNIT_PRICE_USD} USD = <strong>${p.extras.length * EXTRA_STAFF_UNIT_PRICE_USD} USD</strong> (payable online by card)
+            </dd>
+          </>
+        )}
       </dl>
 
       {p.error && (
@@ -76,8 +87,9 @@ export default function StepReview(p: Props) {
       )}
 
       <p className="text-xs text-gansid-on-surface/60 font-body">
-        Click <strong>Submit Registration</strong> below to finalize. Your staff will receive
-        their invitation emails immediately after submission.
+        {p.extras.length > 0
+          ? <>Click <strong>Pay &amp; Submit</strong> below to be redirected to a secure payment page. Your registration completes automatically after payment.</>
+          : <>Click <strong>Submit Registration</strong> below to finalize. Your staff will receive their invitation emails immediately after submission.</>}
       </p>
     </section>
   );

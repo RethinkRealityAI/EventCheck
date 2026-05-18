@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X } from 'lucide-react';
+import { X, Loader2 } from 'lucide-react';
 
 interface ConsentCheckboxProps {
   id: string;
@@ -87,10 +87,10 @@ export default function ConsentCheckbox({
           onClick={closeModal}
         >
           <div
-            className="bg-white rounded-gansid-xl max-w-3xl w-full shadow-2xl max-h-[85vh] flex flex-col overflow-hidden"
+            className="bg-white rounded-gansid-xl max-w-3xl w-full shadow-2xl h-[85vh] flex flex-col overflow-hidden"
             onClick={e => e.stopPropagation()}
           >
-            <div className="bg-gansid-primary-gradient px-6 py-5 flex items-center justify-between">
+            <div className="bg-gansid-primary-gradient px-6 py-5 flex items-center justify-between shrink-0">
               <h2 className="text-xl font-display font-bold text-white">{modalTitle}</h2>
               <button
                 onClick={closeModal}
@@ -100,21 +100,37 @@ export default function ConsentCheckbox({
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="overflow-y-auto flex-1 p-6 bg-gansid-surface-container-lowest">
-              {loading && <div className="text-slate-400 font-body">Loading…</div>}
-              {loadError && <div className="text-gansid-primary text-sm font-body">Failed to load: {loadError}</div>}
+            {/* Body always fills the available height (modal is fixed at
+                85vh) so the header and footer don't appear to jump when
+                the fetched content arrives. Loading and error states are
+                centered in the same container the content will occupy. */}
+            <div className="overflow-y-auto flex-1 min-h-0 p-6 bg-gansid-surface-container-lowest">
+              {loading && (
+                <div className="flex flex-col items-center justify-center h-full gap-3 text-gansid-on-surface/50 font-body">
+                  <Loader2 className="w-6 h-6 animate-spin" />
+                  <span className="text-sm">Loading document…</span>
+                </div>
+              )}
+              {loadError && (
+                <div className="flex items-center justify-center h-full">
+                  <div className="text-gansid-primary text-sm font-body text-center max-w-sm">
+                    Couldn't load this document: {loadError}. Please close and try again, or contact the event organizers.
+                  </div>
+                </div>
+              )}
               {!loading && !loadError && (
                 <pre className="whitespace-pre-wrap font-body text-sm text-gansid-on-surface leading-relaxed">
                   {content}
                 </pre>
               )}
             </div>
-            <div className="bg-gansid-primary-gradient px-6 py-4 flex justify-end">
+            <div className="bg-gansid-primary-gradient px-6 py-4 flex justify-end shrink-0">
               <button
                 onClick={closeModal}
-                className="px-6 py-2.5 rounded-full bg-white text-gansid-primary font-display font-bold shadow-md hover:scale-[1.02] transition-all"
+                disabled={loading}
+                className="px-6 py-2.5 rounded-full bg-white text-gansid-primary font-display font-bold shadow-md hover:scale-[1.02] transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
               >
-                I've Read This
+                {loading ? 'Loading…' : "I've Read This"}
               </button>
             </div>
           </div>

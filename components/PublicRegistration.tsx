@@ -1353,7 +1353,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   }
 
   if (form.formType === 'sponsor_exhibitor' && !guestRef) {
-    return <PublicSponsorExhibitorForm form={form} settings={settings} />;
+    return <PublicSponsorExhibitorForm form={form} settings={settings} isEmbedded={isEmbedded} />;
   }
 
   const isSteppedMode = form.settings?.renderMode === 'stepped';

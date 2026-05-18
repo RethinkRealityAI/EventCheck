@@ -3,7 +3,11 @@ import {
   validateSubmission,
   getSponsorQuota,
   getExhibitorQuota,
+  computeExtrasSubtotalUsd,
+  EXTRA_STAFF_MAX_PER_ORDER,
+  EXTRA_STAFF_UNIT_PRICE_USD,
   type SponsorExhibitorPayload,
+  type ExtraStaffEntry,
 } from '../components/SponsorExhibitor/validation';
 
 const baseOrg = {
@@ -155,5 +159,96 @@ describe('validateSubmission', () => {
     } as SponsorExhibitorPayload);
     expect(r.ok).toBe(false);
     expect(r.errors?.join(' ')).toMatch(/invalid category/);
+  });
+
+  describe('paid extras', () => {
+    const validExtra = (i: number): ExtraStaffEntry => ({
+      name: `Extra ${i}`,
+      email: `extra${i}@a.test`,
+      category: 'hall_only',
+    });
+
+    it('accepts a valid extras list', () => {
+      const r = validateSubmission({
+        registrationType: 'sponsor',
+        org: baseOrg, sponsorTier: 'gold',
+        hasAllDetails: false,
+        staff: [],
+        extras: [validExtra(1), validExtra(2)],
+        consents: { terms: true, disclaimer: true, photo: true },
+      } as SponsorExhibitorPayload);
+      expect(r.ok).toBe(true);
+    });
+
+    it('rejects extras over the cap', () => {
+      const extras = Array.from({ length: EXTRA_STAFF_MAX_PER_ORDER + 1 }, (_, i) => validExtra(i));
+      const r = validateSubmission({
+        registrationType: 'sponsor',
+        org: baseOrg, sponsorTier: 'platinum',
+        hasAllDetails: false,
+        staff: [],
+        extras,
+        consents: { terms: true, disclaimer: true, photo: true },
+      } as SponsorExhibitorPayload);
+      expect(r.ok).toBe(false);
+      expect(r.errors?.join(' ')).toMatch(/exceeds cap/);
+    });
+
+    it('rejects extras missing name', () => {
+      const r = validateSubmission({
+        registrationType: 'sponsor',
+        org: baseOrg, sponsorTier: 'gold',
+        hasAllDetails: false,
+        staff: [],
+        extras: [{ name: '', email: 'x@a.test', category: 'hall_only' }],
+        consents: { terms: true, disclaimer: true, photo: true },
+      } as SponsorExhibitorPayload);
+      expect(r.ok).toBe(false);
+      expect(r.errors?.join(' ')).toMatch(/name required/);
+    });
+
+    it('rejects extras with invalid category', () => {
+      const r = validateSubmission({
+        registrationType: 'sponsor',
+        org: baseOrg, sponsorTier: 'gold',
+        hasAllDetails: false,
+        staff: [],
+        extras: [{ name: 'A', email: 'a@a.test', category: 'sponsor_seat' as any }],
+        consents: { terms: true, disclaimer: true, photo: true },
+      } as SponsorExhibitorPayload);
+      expect(r.ok).toBe(false);
+      expect(r.errors?.join(' ')).toMatch(/invalid category/);
+    });
+
+    it('treats missing extras array as empty', () => {
+      const payload = {
+        registrationType: 'sponsor',
+        org: baseOrg, sponsorTier: 'gold',
+        hasAllDetails: false,
+        staff: [],
+        consents: { terms: true, disclaimer: true, photo: true },
+      } as SponsorExhibitorPayload;
+      const r = validateSubmission(payload);
+      expect(r.ok).toBe(true);
+    });
+  });
+});
+
+describe('computeExtrasSubtotalUsd', () => {
+  it('returns 0 for empty extras', () => {
+    expect(computeExtrasSubtotalUsd([])).toBe(0);
+  });
+
+  it('returns 0 when extras is undefined', () => {
+    expect(computeExtrasSubtotalUsd(undefined)).toBe(0);
+  });
+
+  it('multiplies count by unit price', () => {
+    const extras: ExtraStaffEntry[] = [
+      { name: 'A', email: 'a@a.test', category: 'hall_only' },
+      { name: 'B', email: 'b@a.test', category: 'full_access' },
+      { name: 'C', email: 'c@a.test', category: 'hall_only' },
+    ];
+    expect(computeExtrasSubtotalUsd(extras)).toBe(EXTRA_STAFF_UNIT_PRICE_USD * 3);
   });
 });

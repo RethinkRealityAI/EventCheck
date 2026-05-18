@@ -76,6 +76,7 @@ export default function ExhibitorsTab({ attendees, forms, onRefresh }: Props) {
             <th className="px-3 py-2">Tier / Booth</th>
             <th className="px-3 py-2">Contact</th>
             <th className="px-3 py-2">Staff Progress</th>
+            <th className="px-3 py-2">Extras</th>
             <th className="px-3 py-2">Registered</th>
           </tr>
         </thead>
@@ -99,6 +100,7 @@ export default function ExhibitorsTab({ attendees, forms, onRefresh }: Props) {
               const c = staffCat(s);
               return c === 'full_access' || c === 'full_congress';
             });
+            const paidExtras = staff.filter(s => s.isPaidExtra === true);
             const isExpanded = expanded.has(org.id);
             const tierOrBoothLabel = org.exhibitorBoothType
               ? (booth?.label ?? org.exhibitorBoothType)
@@ -122,13 +124,25 @@ export default function ExhibitorsTab({ attendees, forms, onRefresh }: Props) {
                       ? `${hallStaff.length}/${hallQuota} Hall · ${fullStaff.length}/${fullQuota} Full`
                       : `${staff.length} staff`}
                   </td>
+                  <td className="px-3 py-2 text-xs">
+                    {paidExtras.length > 0 ? (
+                      <span
+                        className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-semibold"
+                        title={`${paidExtras.length} additional booth staff paid by card ($${paidExtras.length * 50})`}
+                      >
+                        +{paidExtras.length} paid
+                      </span>
+                    ) : (
+                      <span className="text-slate-300">—</span>
+                    )}
+                  </td>
                   <td className="px-3 py-2 text-xs text-slate-500">
                     {org.registeredAt ? new Date(org.registeredAt).toLocaleDateString() : '—'}
                   </td>
                 </tr>
                 {isExpanded && (
                   <tr>
-                    <td colSpan={6} className="p-3 bg-slate-50">
+                    <td colSpan={7} className="p-3 bg-slate-50">
                       <StaffSection
                         title="Hall Only staff"
                         staff={hallStaff}
@@ -252,6 +266,14 @@ function StaffRow({
       <span className="text-sm">{staff.name}</span>
       <span className="text-xs text-slate-500">{staff.email}</span>
       {badge}
+      {staff.isPaidExtra && (
+        <span
+          className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-semibold border border-emerald-200"
+          title="Paid additional booth staff ($50 USD)"
+        >
+          Paid extra
+        </span>
+      )}
       {isPending && (
         <div className="ml-auto flex gap-1">
           <button onClick={copyLink} title="Copy link" className="p-1 hover:bg-slate-200 rounded">

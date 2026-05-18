@@ -1,26 +1,37 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Eye, EyeOff } from 'lucide-react';
-import { supabase } from '../../../services/supabaseClient';
-import { FloatingToggleTabs } from '../ui/FloatingToggleTabs';
-import { GlassInput } from '../ui/GlassInput';
-import { ViscousButton } from '../ui/ViscousButton';
+import { supabase } from '../../services/supabaseClient';
+import { FloatingToggleTabs } from '../Portal/ui/FloatingToggleTabs';
+import { GlassInput } from '../Portal/ui/GlassInput';
+import { ViscousButton } from '../Portal/ui/ViscousButton';
 
 type Mode = 'signup' | 'signin';
+type Role = 'sponsor' | 'exhibitor';
 
-export function AuthPanel() {
+interface Props {
+  /**
+   * Form ID of the sponsor_exhibitor form for this tenant. Resolved by the parent
+   * page from `forms.form_type = 'sponsor_exhibitor'`. After successful sign-up or
+   * sign-in, we navigate to `/form/<formId>` so the user lands directly in the
+   * combined registration form.
+   */
+  sponsorExhibitorFormId: string | null;
+}
+
+export function SponsorExhibitorAuthPanel({ sponsorExhibitorFormId }: Props) {
   const navigate = useNavigate();
   const [mode, setMode] = useState<Mode>('signup');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
+  const [orgName, setOrgName] = useState('');
+  const [role, setRole] = useState<Role>('sponsor');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [signupSuccess, setSignupSuccess] = useState(false);
 
-  // Resend verification state — shared between the signup-success screen and
-  // the "Email not confirmed" signin recovery path.
   const [resending, setResending] = useState(false);
   const [resendMsg, setResendMsg] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
   const [cooldownSec, setCooldownSec] = useState(0);
@@ -39,13 +50,32 @@ export function AuthPanel() {
     setShowResendOnSignin(false);
   };
 
+  // Where to land after sign-in (the user is already signed in, so we can
+  // route them directly to the form).
+  const postAuthPath = sponsorExhibitorFormId
+    ? `/form/${sponsorExhibitorFormId}`
+    : '/portal';
+
+  // Where Supabase's email-confirmation link should land the user. We use the
+  // dedicated sponsor/exhibitor landing page (not /#/portal and not
+  // /#/form/<id>) so:
+  //   1. Users who haven't finished the form-id lookup at signup time still
+  //      end up on the right page after confirming their email.
+  //   2. SponsorExhibitorLandingPage detects an authenticated user and
+  //      auto-redirects them to /#/form/<id> on mount — a single source of
+  //      truth for "post-auth, route to the form".
+  // Pointing the redirect at /#/portal (the old root AuthPanel default) is
+  // what caused the bug where users landed on the attendee Congress
+  // registration page after confirming.
+  const postAuthRedirect = `${window.location.origin}/#/sponsor-exhibitor`;
+
   const handleResend = async () => {
     if (!email || cooldownSec > 0 || resending) return;
     setResending(true); setResendMsg(null);
     const { error: err } = await supabase.auth.resend({
       type: 'signup',
       email,
-      options: { emailRedirectTo: `${window.location.origin}/#/portal` },
+      options: { emailRedirectTo: postAuthRedirect },
     });
     setResending(false);
     if (err) {
@@ -71,11 +101,12 @@ export function AuthPanel() {
     const { error: err } = await supabase.auth.signUp({
       email, password,
       options: {
-        data: { full_name: `${firstName} ${lastName}`.trim(), role: 'attendee' },
-        // Supabase's verification link redirects here after token confirmation.
-        // Without this, Supabase uses the project's default Site URL which may
-        // not be set or may not match the current deployment (landing vs portal).
-        emailRedirectTo: `${window.location.origin}/#/portal`,
+        data: {
+          full_name: `${firstName} ${lastName}`.trim(),
+          role,
+          organization: orgName.trim() || null,
+        },
+        emailRedirectTo: postAuthRedirect,
       },
     });
     setLoading(false);
@@ -90,41 +121,26 @@ export function AuthPanel() {
     const { data, error: err } = await supabase.auth.signInWithPassword({ email, password });
     if (err) {
       setLoading(false);
-      // Supabase's canonical code is the truth; regex is a backstop for older
-      // server versions. Tightened to avoid matching unrelated "verification"
-      // phrases that could surface in other auth errors.
       const code = (err as { code?: string }).code;
       const unverified = code === 'email_not_confirmed'
         || /email not confirmed/i.test(err.message);
       if (unverified) {
         setShowResendOnSignin(true);
-        setError('Your email isn\u2019t verified yet. Check your inbox for the link, or resend it below.');
+        setError('Your email isn’t verified yet. Check your inbox for the link, or resend it below.');
       } else {
         setError(err.message);
       }
       return;
     }
 
-    const user = data.user;
-    if (!user) { setLoading(false); navigate('/portal'); return; }
-
-    // Check if the user has any existing attendee rows
-    const { count } = await supabase
-      .from('attendees')
-      .select('*', { count: 'exact', head: true })
-      .or(`user_id.eq.${user.id},email.eq.${user.email}`);
-
     setLoading(false);
-    if (!count || count === 0) {
-      // First-time user — take them straight to the Congress registration form
-      navigate('/form/gansid-congress-2026');
-    } else {
-      navigate('/portal');
-    }
+    if (!data.user) { navigate('/portal'); return; }
+    // Send the signed-in user straight to the combined sponsor/exhibitor form.
+    navigate(postAuthPath);
   };
 
   const resendLabel = resending
-    ? 'Sending\u2026'
+    ? 'Sending…'
     : cooldownSec > 0
       ? `Resend in ${cooldownSec}s`
       : 'Resend verification email';
@@ -132,7 +148,7 @@ export function AuthPanel() {
   return (
     <div className="w-full max-w-lg lg:sticky lg:top-8 rounded-gansid-lg px-4 py-7 sm:px-6 sm:py-8 md:p-10 shadow-2xl gradient-border relative">
       <p className="font-body text-sm text-gansid-on-surface/70 text-center mb-3">
-        Create an account to access the Congress registration form, or sign in if you already have one.
+        Create your account to complete your sponsor or exhibitor registration, or sign in if you already have one.
       </p>
       <div className="mb-7">
         <FloatingToggleTabs<Mode>
@@ -147,7 +163,7 @@ export function AuthPanel() {
         <div className="space-y-4 text-center">
           <h3 className="font-display text-2xl">Check your email</h3>
           <p className="font-body text-gansid-on-surface/70">
-            We've sent a verification link to <strong>{email}</strong>. Click it to complete your registration.
+            We've sent a verification link to <strong>{email}</strong>. Click it to access the sponsor &amp; exhibitor registration form.
           </p>
           <p className="font-body text-sm text-gansid-on-surface/50">
             Didn't get it? Check your spam folder or resend below.
@@ -173,7 +189,8 @@ export function AuthPanel() {
             <GlassInput placeholder="First name" value={firstName} onChange={(e) => setFirstName(e.target.value)} required />
             <GlassInput placeholder="Last name" value={lastName} onChange={(e) => setLastName(e.target.value)} required />
           </div>
-          <GlassInput type="email" placeholder="Email address" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          <GlassInput placeholder="Organization / Company name" value={orgName} onChange={(e) => setOrgName(e.target.value)} required />
+          <GlassInput type="email" placeholder="Work email address" value={email} onChange={(e) => setEmail(e.target.value)} required />
           <div className="relative">
             <GlassInput
               type={showPassword ? 'text' : 'password'}
@@ -194,13 +211,26 @@ export function AuthPanel() {
               {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
             </button>
           </div>
-          <p className="text-xs text-gansid-on-surface/60 font-body text-center">
-            Sponsor or exhibitor? <a href="#/sponsor-exhibitor" className="text-gansid-secondary font-semibold hover:underline">Register here</a> instead.
-          </p>
+          <div>
+            <label className="block text-base font-display mb-2">I am a…</label>
+            <div className="flex gap-2">
+              {(['sponsor', 'exhibitor'] as const).map((r) => (
+                <label key={r} className="flex-1">
+                  <input type="radio" name="se-role" value={r} checked={role === r} onChange={() => setRole(r)} className="sr-only peer" />
+                  <span className="block text-center px-3 py-2.5 rounded-full bg-gansid-surface-container-low cursor-pointer peer-checked:bg-gansid-primary-gradient peer-checked:text-white font-display text-base capitalize transition-all">
+                    {r}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </div>
           {error && <p className="text-sm text-gansid-primary">{error}</p>}
           <ViscousButton type="submit" variant="primary" className="w-full text-base sm:text-lg py-4" disabled={loading}>
-            {loading ? 'Creating…' : 'Create Account & Register'}
+            {loading ? 'Creating…' : 'Create Account & Continue'}
           </ViscousButton>
+          <p className="text-xs text-gansid-on-surface/60 font-body text-center">
+            Attending as an individual? <a href="#/" className="text-gansid-secondary font-semibold hover:underline">Register here</a> instead.
+          </p>
         </form>
       ) : (
         <form onSubmit={handleSignin} className="space-y-4">

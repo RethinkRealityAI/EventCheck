@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { PayPalScriptProvider, PayPalButtons } from '@paypal/react-paypal-js';
 import type { Form, AppSettings, FormField, FormStep } from '../../types';
 import { getFormById } from '../../services/storageService';
 import { useAuth } from '../AuthContext';
@@ -10,37 +11,122 @@ import StepOrgInfo from './steps/StepOrgInfo';
 import StepSponsorTier from './steps/StepSponsorTier';
 import StepExhibitorBooth from './steps/StepExhibitorBooth';
 import StepStaffRoster from './steps/StepStaffRoster';
+import StepExtras from './steps/StepExtras';
 import StepConsents from './steps/StepConsents';
 import StepReview from './steps/StepReview';
-import { validateSubmission, type SponsorExhibitorPayload, type StaffEntry } from './validation';
+import {
+  validateSubmission,
+  EXTRA_STAFF_UNIT_PRICE_USD,
+  EXTRA_STAFF_MAX_PER_ORDER,
+  type SponsorExhibitorPayload,
+  type StaffEntry,
+  type ExtraStaffEntry,
+} from './validation';
 import { supabase } from '../../services/supabaseClient';
 import { CURRENT_SITE } from '../../config/sites';
 
-interface Props { form: Form; settings: AppSettings; }
+interface Props {
+  form: Form;
+  settings: AppSettings;
+  /**
+   * True when the form is rendered inside the portal RegisterModal (constrained
+   * card with overflow-hidden). In that case we drop `min-h-screen` and rely on
+   * the modal's height + inner column scroll instead, which fixes content
+   * getting clipped past the bottom of the modal with no scroll affordance.
+   */
+  isEmbedded?: boolean;
+}
 
-type StepId = 'type' | 'organization' | 'tier' | 'booth' | 'staff' | 'consents' | 'review';
+type StepId = 'type' | 'organization' | 'tier' | 'booth' | 'staff' | 'extras' | 'consents' | 'review';
 
-export default function PublicSponsorExhibitorForm({ form, settings }: Props) {
-  const { profile } = useAuth();
-  const initialType =
+export default function PublicSponsorExhibitorForm({ form, settings, isEmbedded }: Props) {
+  const { profile, user } = useAuth();
+  // The auth profile resolves asynchronously — on first paint it's null even
+  // for users who came in via the dedicated sponsor/exhibitor page. We
+  // initialise from whatever's already loaded and then reactively sync once
+  // the profile arrives. Without the effect below, role-locked users would
+  // briefly see the 'type' step and then end up on 'organization' with
+  // registrationType still null, which would silently fail validation at
+  // submit time.
+  const profileRole: 'sponsor' | 'exhibitor' | null =
     profile?.role === 'sponsor' ? 'sponsor' :
     profile?.role === 'exhibitor' ? 'exhibitor' :
     null;
 
   const [step, setStep] = useState(0);
-  const [registrationType, setRegistrationType] = useState<'sponsor' | 'exhibitor' | null>(initialType);
+  const [registrationType, setRegistrationType] = useState<'sponsor' | 'exhibitor' | null>(profileRole);
+
+  // Reactive sync: when the auth profile resolves and carries a sponsor/
+  // exhibitor role, adopt it as the registration type (only if the user
+  // hasn't already picked something else manually — direct-link visitors
+  // who already chose 'sponsor' on the type step shouldn't get clobbered
+  // if their session later flips to 'exhibitor', though that combination
+  // is unusual).
+  useEffect(() => {
+    if (!profileRole) return;
+    setRegistrationType((curr) => curr ?? profileRole);
+  }, [profileRole]);
+  // Pre-fill org info from the signed-in user's account metadata so the user
+  // doesn't have to re-type their name / email / company they already gave
+  // during signup. The sponsor/exhibitor signup writes `full_name` and
+  // `organization` into auth user_metadata; both end up on the profiles row
+  // via the handle_new_user trigger. We read from both — whichever resolves
+  // first wins, with reactive sync below when profile loads.
+  const initialMetaName = (user?.user_metadata?.full_name as string | undefined)?.trim() ?? '';
+  const initialMetaOrg = (user?.user_metadata?.organization as string | undefined)?.trim() ?? '';
+  const initialMetaEmail = user?.email ?? '';
+
   const [org, setOrg] = useState({
-    orgName: '', contactName: '', contactTitle: '', email: '',
-    phone: '', address: '', website: '',
+    orgName: profile?.organization ?? initialMetaOrg ?? '',
+    contactName: profile?.fullName ?? initialMetaName ?? '',
+    contactTitle: '',
+    email: profile?.email ?? initialMetaEmail ?? '',
+    phone: profile?.phone ?? '',
+    address: '',
+    website: '',
   });
+
+  // Reactive sync: when profile/user resolves after first paint, fill any
+  // org fields that are still empty. We never overwrite values the user has
+  // already typed — pre-fill is a convenience, not a constraint.
+  useEffect(() => {
+    setOrg((curr) => ({
+      ...curr,
+      orgName: curr.orgName || profile?.organization || (user?.user_metadata?.organization as string | undefined) || '',
+      contactName: curr.contactName || profile?.fullName || (user?.user_metadata?.full_name as string | undefined) || '',
+      email: curr.email || profile?.email || user?.email || '',
+      phone: curr.phone || profile?.phone || '',
+    }));
+  }, [profile, user]);
   const [sponsorTier, setSponsorTier] = useState<string | null>(null);
   const [boothType, setBoothType] = useState<string | null>(null);
   const [hasAllDetails, setHasAllDetails] = useState(false);
   const [staff, setStaff] = useState<StaffEntry[]>([]);
+  const [extras, setExtras] = useState<ExtraStaffEntry[]>([]);
   const [consents, setConsents] = useState({ terms: false, disclaimer: false, photo: false });
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Role is locked from session when the user arrived from the sponsor/
+  // exhibitor registration page and signed in there — `profile.role` is set
+  // to either 'sponsor' or 'exhibitor'. In that case we skip the explicit
+  // "type" step entirely. Direct-link visitors with no role see the type
+  // step as before.
+  const roleLockedFromSession = profileRole !== null;
+
+  // PayPal client ID — same fallback chain as PublicSponsorForm. Used only
+  // when extras.length > 0 to render the PayPal button on the review step.
+  const getEnvVar = (name: string): string => {
+    try { return (import.meta as any).env[name] || ''; } catch { return ''; }
+  };
+  const paypalEnv = (getEnvVar('VITE_PAYPAL_ENV') || 'live').toLowerCase();
+  const paypalClientId =
+    (paypalEnv === 'sandbox'
+      ? getEnvVar('VITE_PAYPAL_SANDBOX_CLIENT_ID') || getEnvVar('VITE_PAYPAL_CLIENT_ID')
+      : getEnvVar('VITE_PAYPAL_CLIENT_ID')) ||
+    settings?.paypalClientId ||
+    '';
 
   // Load the companion staff form so StepStaffRoster's inline "Full Details"
   // accordion can render the per-staff dietary / emergency / consent fields.
@@ -59,13 +145,19 @@ export default function PublicSponsorExhibitorForm({ form, settings }: Props) {
   // Build the list of step ids based on the user's current selections.
   // Every GANSID sponsor tier (Platinum/Gold/Silver/Bronze) and every booth type
   // includes staff registrations, so the Staff step is always shown.
+  //
+  // When the role is locked from session metadata, the 'type' step is skipped
+  // — the user already declared sponsor/exhibitor at signup on the dedicated
+  // registration page.
   const stepIds = useMemo<StepId[]>(() => {
-    const base: StepId[] = ['type', 'organization'];
+    const base: StepId[] = [];
+    if (!roleLockedFromSession) base.push('type');
+    base.push('organization');
     if (registrationType === 'sponsor') base.push('tier');
     if (registrationType === 'exhibitor') base.push('booth');
-    base.push('staff', 'consents', 'review');
+    base.push('staff', 'extras', 'consents', 'review');
     return base;
-  }, [registrationType]);
+  }, [registrationType, roleLockedFromSession]);
 
   const stepLabels: Record<StepId, string> = {
     type: 'Type',
@@ -73,6 +165,7 @@ export default function PublicSponsorExhibitorForm({ form, settings }: Props) {
     tier: 'Tier',
     booth: 'Booth',
     staff: 'Staff',
+    extras: 'Extras',
     consents: 'Consents',
     review: 'Review',
   };
@@ -95,6 +188,7 @@ export default function PublicSponsorExhibitorForm({ form, settings }: Props) {
     boothType: boothType || undefined,
     hasAllDetails,
     staff,
+    extras,
     consents,
   });
 
@@ -136,6 +230,20 @@ export default function PublicSponsorExhibitorForm({ form, settings }: Props) {
           }
         });
         break;
+      case 'extras':
+        if (extras.length > EXTRA_STAFF_MAX_PER_ORDER) {
+          errs.push(`You can add at most ${EXTRA_STAFF_MAX_PER_ORDER} additional staff per registration.`);
+        }
+        extras.forEach((e, i) => {
+          const n = i + 1;
+          if (!e.name.trim()) errs.push(`Additional staff #${n}: name is required.`);
+          if (!e.email.trim()) errs.push(`Additional staff #${n}: email is required.`);
+          else if (!isEmail(e.email)) errs.push(`Additional staff #${n}: email is not a valid address.`);
+          if (e.category !== 'hall_only' && e.category !== 'full_access') {
+            errs.push(`Additional staff #${n}: pick an access type.`);
+          }
+        });
+        break;
       case 'consents':
         if (!consents.terms) errs.push('You must accept the Terms & Conditions.');
         if (!consents.disclaimer) errs.push('You must accept the Disclaimer & Liability Waiver.');
@@ -158,7 +266,7 @@ export default function PublicSponsorExhibitorForm({ form, settings }: Props) {
   // Clear the inline error whenever the user navigates away from the step.
   useEffect(() => { setStepError(null); }, [currentStepId]);
 
-  const onSubmit = async () => {
+  const onSubmit = async (paypalOrderId?: string) => {
     // Block submit if the Review step itself is reachable but an earlier step
     // has gaps (e.g. user clicked the stepper sidebar to jump here).
     const stepErrs = validateCurrentStep();
@@ -170,6 +278,14 @@ export default function PublicSponsorExhibitorForm({ form, settings }: Props) {
     const v = validateSubmission(payload);
     if (!v.ok) {
       setError(v.errors?.join('; ') || 'Validation failed');
+      return;
+    }
+    // Paid-extras require a PayPal capture before we even call verify-payment.
+    // When this function is invoked from the PayPal `onApprove` callback the
+    // capture has already happened and `paypalOrderId` is set. Otherwise we
+    // bail and let the PayPal button drive the flow.
+    if (payload.extras.length > 0 && !paypalOrderId) {
+      setError('Please complete payment via the PayPal button below before submitting.');
       return;
     }
     setSubmitting(true);
@@ -187,12 +303,14 @@ export default function PublicSponsorExhibitorForm({ form, settings }: Props) {
         setSubmitting(false);
         return;
       }
+
       const { data, error: fnErr } = await supabase.functions.invoke('verify-payment', {
         body: {
           mode: 'paid',
           formId: form.id,
           sponsorExhibitorSubmission: true,
           staffFormId,
+          paypalOrderId,
           ...payload,
         },
       });
@@ -283,7 +401,7 @@ export default function PublicSponsorExhibitorForm({ form, settings }: Props) {
       case 'type':
         return <StepRegistrationType value={registrationType} onChange={setRegistrationType} />;
       case 'organization':
-        return <StepOrgInfo value={org} onChange={setOrg} />;
+        return <StepOrgInfo value={org} onChange={setOrg} prefilledFromAccount={prefilledFromAccount} />;
       case 'tier':
         return <StepSponsorTier tier={sponsorTier} onTier={setSponsorTier} />;
       case 'booth':
@@ -301,6 +419,8 @@ export default function PublicSponsorExhibitorForm({ form, settings }: Props) {
             onStaff={setStaff}
           />
         );
+      case 'extras':
+        return <StepExtras extras={extras} onExtras={setExtras} />;
       case 'consents':
         return <StepConsents value={consents} onChange={setConsents} />;
       case 'review':
@@ -311,6 +431,7 @@ export default function PublicSponsorExhibitorForm({ form, settings }: Props) {
             sponsorTier={sponsorTier}
             boothType={boothType}
             staff={staff}
+            extras={extras}
             hasAllDetails={hasAllDetails}
             error={error}
           />
@@ -327,15 +448,36 @@ export default function PublicSponsorExhibitorForm({ form, settings }: Props) {
     return s;
   }, [safeStep]);
 
+  // We treat the org info as pre-filled when (a) the user arrived from the
+  // sponsor/exhibitor signup (role locked from session) AND (b) we actually
+  // resolved their organization name from session metadata. Direct-link
+  // visitors without an account see the regular blank-input layout.
+  const prefilledFromAccount = roleLockedFromSession && !!org.orgName && !!org.contactName;
+
+  // Layout: full-screen (min-h-screen) when the form is mounted as a top-level
+  // route at /#/form/<id>, vs. constrained-height (h-full + inner scroll) when
+  // mounted inside the portal RegisterModal. Without the embed-aware swap,
+  // the modal's overflow-hidden + our min-h-screen produced content clipped
+  // past the modal's bottom with no scroll affordance.
+  const containerClass = isEmbedded
+    ? 'portal-root h-full min-h-0 flex flex-col lg:flex-row overflow-hidden'
+    : 'portal-root min-h-screen flex flex-col lg:flex-row';
+  const asideClass = isEmbedded
+    ? 'lg:w-72 lg:h-full lg:overflow-y-auto lg:px-6 lg:py-8 px-4 py-4 border-b lg:border-b-0 lg:border-r border-gansid-on-surface/10 bg-white/40 backdrop-blur-viscous flex lg:flex-col lg:items-stretch [&>nav]:lg:flex-1 [&>nav]:lg:min-h-0'
+    : 'lg:w-72 lg:h-screen lg:sticky lg:top-0 lg:px-6 lg:py-8 px-4 py-4 border-b lg:border-b-0 lg:border-r border-gansid-on-surface/10 bg-white/40 backdrop-blur-viscous flex lg:flex-col lg:items-stretch [&>nav]:lg:flex-1 [&>nav]:lg:min-h-0';
+  const mainClass = isEmbedded
+    ? 'flex-1 lg:h-full lg:overflow-y-auto px-5 py-5 lg:px-10 lg:py-8 max-w-4xl mx-auto w-full'
+    : 'flex-1 px-5 py-5 lg:px-10 lg:py-8 max-w-4xl mx-auto w-full';
+
   return (
     <div
-      className="portal-root min-h-screen flex flex-col lg:flex-row"
+      className={containerClass}
       style={{
         background:
           'radial-gradient(ellipse at 15% 10%, rgba(186, 0, 40, 0.08) 0%, transparent 55%), radial-gradient(ellipse at 85% 90%, rgba(34, 96, 161, 0.08) 0%, transparent 55%), #fafafa',
       }}
     >
-      <aside className="lg:w-72 lg:h-screen lg:sticky lg:top-0 lg:px-6 lg:py-8 px-4 py-4 border-b lg:border-b-0 lg:border-r border-gansid-on-surface/10 bg-white/40 backdrop-blur-viscous flex lg:flex-col lg:items-stretch [&>nav]:lg:flex-1 [&>nav]:lg:min-h-0">
+      <aside className={asideClass}>
         <StepperSidebar
           steps={stepperSteps}
           currentIndex={safeStep}
@@ -358,16 +500,22 @@ export default function PublicSponsorExhibitorForm({ form, settings }: Props) {
           }}
         />
       </aside>
-      <main className="flex-1 px-5 py-5 lg:px-10 lg:py-8 max-w-4xl mx-auto w-full">
-        <header className="mb-5">
+      <main className={mainClass}>
+        {/*
+         * When embedded in RegisterModal, reserve space at the top-right of
+         * the header for the modal's absolute close-X (~56px wide) so the
+         * title isn't clipped. Skip the right-padding in full-page mode
+         * where there's no overlay to avoid.
+         */}
+        <header className={`mb-5 ${isEmbedded ? 'pr-14 lg:pr-16' : ''}`}>
           <h1 className="font-display font-bold leading-[1.15] tracking-tight text-xl sm:text-2xl lg:text-[1.75rem] bg-gansid-primary-gradient bg-clip-text text-transparent">
-            {form.title}
+            Thank you for partnering with us
           </h1>
-          {form.description && (
-            <p className="text-gansid-on-surface/70 mt-2 font-body text-sm lg:text-base leading-snug">
-              {form.description}
-            </p>
-          )}
+          <p className="text-gansid-on-surface/70 mt-2 font-body text-sm lg:text-base leading-snug">
+            Your support is making the inaugural GANSID Congress possible. Please confirm a few details and
+            register your booth staff below. Need more seats? You can purchase additional booth staff beyond
+            your package allotment at the Extras step.
+          </p>
         </header>
         <GlassCard className="p-5 lg:p-7">
           {stepContent()}
@@ -391,10 +539,55 @@ export default function PublicSponsorExhibitorForm({ form, settings }: Props) {
               <ViscousButton variant="primary" onClick={tryAdvance}>
                 Next
               </ViscousButton>
-            ) : (
-              <ViscousButton variant="primary" onClick={onSubmit} disabled={submitting}>
+            ) : extras.length === 0 ? (
+              <ViscousButton variant="primary" onClick={() => onSubmit()} disabled={submitting}>
                 {submitting ? 'Submitting…' : 'Submit Registration'}
               </ViscousButton>
+            ) : (
+              // Paid extras path: render the PayPal button. The button itself
+              // is the submit affordance — pressing the regular submit before
+              // PayPal capture is rejected by onSubmit. We pass the captured
+              // PayPal order id straight into onSubmit on approve.
+              <div className="flex flex-col items-end gap-2 min-w-[260px]">
+                <span className="text-xs font-body text-gansid-on-surface/70">
+                  ${extras.length * EXTRA_STAFF_UNIT_PRICE_USD} USD · pay below to finalize
+                </span>
+                {paypalClientId ? (
+                  <div className="w-full" key={`${paypalClientId}-${extras.length}`}>
+                    <PayPalScriptProvider
+                      options={{ clientId: paypalClientId, currency: 'USD', components: 'buttons' }}
+                    >
+                      <PayPalButtons
+                        style={{ layout: 'horizontal', shape: 'rect', tagline: false, height: 40 }}
+                        disabled={submitting}
+                        createOrder={(_data, actions) =>
+                          actions.order.create({
+                            intent: 'CAPTURE',
+                            purchase_units: [{
+                              amount: {
+                                currency_code: 'USD',
+                                value: (extras.length * EXTRA_STAFF_UNIT_PRICE_USD).toFixed(2),
+                              },
+                              description: `GANSID Congress — ${extras.length} additional booth staff`,
+                            }],
+                            application_context: { shipping_preference: 'NO_SHIPPING' },
+                          })
+                        }
+                        onApprove={async (data) => { await onSubmit(data.orderID); }}
+                        onCancel={() => setError('Payment was cancelled. You can try again when ready.')}
+                        onError={(err) => {
+                          console.error('PayPal error', err);
+                          setError('Something went wrong with PayPal. Please try again or contact the event organizers.');
+                        }}
+                      />
+                    </PayPalScriptProvider>
+                  </div>
+                ) : (
+                  <div className="px-3 py-2 bg-amber-50 text-amber-700 rounded-lg text-xs font-body">
+                    PayPal isn't configured for this site. Please contact the event organizers to complete your additional staff purchase.
+                  </div>
+                )}
+              </div>
             )}
           </div>
         </GlassCard>

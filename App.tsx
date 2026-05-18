@@ -18,6 +18,7 @@ import { AuthProvider, useAuth } from './components/AuthContext';
 import Login from './components/Login';
 import { CURRENT_SITE } from './config/sites';
 import { Landing } from './components/Portal/Landing/Landing';
+import { SponsorExhibitorLandingPage } from './components/SponsorExhibitor/SponsorExhibitorLandingPage';
 import { PortalLayout } from './components/Portal/PortalLayout';
 import { PortalDashboard } from './components/Portal/Dashboard/PortalDashboard';
 import { ProfilePage } from './components/Portal/Profile/ProfilePage';
@@ -683,6 +684,7 @@ export default function App() {
             {CURRENT_SITE.portalEnabled ? (
               <>
                 <Route path="/" element={<Landing />} />
+                <Route path="/sponsor-exhibitor" element={<SponsorExhibitorLandingPage />} />
                 <Route path="/reset-password" element={<ResetPasswordPage />} />
                 <Route
                   path="/portal"

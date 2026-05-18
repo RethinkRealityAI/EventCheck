@@ -16,6 +16,22 @@ export interface StaffEntry {
   fullAnswers?: Record<string, unknown>;
 }
 
+/**
+ * Booth staff member purchased on top of the tier/booth allotment. These
+ * cost $50 each (USD), paid online by card, and are capped at 10 per
+ * registration. Unlike tier-allotted `StaffEntry`, name + email are always
+ * required (no placeholder/claim-link flow for paid extras — the buyer
+ * must declare exactly who is being added).
+ */
+export interface ExtraStaffEntry {
+  name: string;
+  email: string;
+  category: StaffCategory;
+}
+
+export const EXTRA_STAFF_UNIT_PRICE_USD = 50;
+export const EXTRA_STAFF_MAX_PER_ORDER = 10;
+
 export interface SponsorExhibitorPayload {
   registrationType: RegistrationType;
   org: {
@@ -31,6 +47,7 @@ export interface SponsorExhibitorPayload {
   boothType?: string;
   hasAllDetails: boolean;
   staff: StaffEntry[];
+  extras: ExtraStaffEntry[];
   consents: { terms: boolean; disclaimer: boolean; photo: boolean };
 }
 
@@ -129,5 +146,29 @@ export function validateSubmission(p: SponsorExhibitorPayload): ValidationResult
     });
   }
 
+  // Extras: paid additional booth staff. Every entry must have name + email +
+  // a valid category, and total count cannot exceed the per-order cap.
+  const extras = Array.isArray(p.extras) ? p.extras : [];
+  if (extras.length > EXTRA_STAFF_MAX_PER_ORDER) {
+    errors.push(`extras count ${extras.length} exceeds cap of ${EXTRA_STAFF_MAX_PER_ORDER}`);
+  }
+  extras.forEach((s, i) => {
+    if (!s.name?.trim()) errors.push(`extras[${i}] name required`);
+    if (!s.email?.trim()) errors.push(`extras[${i}] email required`);
+    if (s.category !== 'hall_only' && s.category !== 'full_access') {
+      errors.push(`extras[${i}] invalid category "${s.category}"`);
+    }
+  });
+
   return errors.length ? { ok: false, errors } : { ok: true };
+}
+
+/**
+ * Compute the additional-staff subtotal in USD. The unit price is currently
+ * a global constant (no per-category or per-tier variation). Returned in
+ * dollars; callers convert to cents when talking to Stripe.
+ */
+export function computeExtrasSubtotalUsd(extras: ExtraStaffEntry[] | undefined): number {
+  if (!Array.isArray(extras)) return 0;
+  return extras.length * EXTRA_STAFF_UNIT_PRICE_USD;
 }
