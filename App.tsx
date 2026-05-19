@@ -32,6 +32,7 @@ import {
   isSuperAdmin,
   type AdminPageKey,
 } from './utils/adminPermissions';
+import { computeDonationPool } from './utils/donationPool';
 
 const NavLink = ({ to, icon: Icon, children, collapsed }: { to: string, icon: any, children?: React.ReactNode, collapsed?: boolean }) => {
   const location = useLocation();
@@ -53,10 +54,16 @@ const NavLink = ({ to, icon: Icon, children, collapsed }: { to: string, icon: an
 };
 
 const DashboardStats = ({ attendees }: { attendees: Attendee[] }) => {
-  const total = attendees.length;
-  const primaryAttendees = attendees.filter(a => a.isPrimary !== false);
-  const guestCount = attendees.filter(a => a.isPrimary === false).length;
-  const checkedIn = attendees.filter(a => a.checkedInAt).length;
+  // Stats cards represent REAL registrations only. Test attendees (created via
+  // the admin "test submission" flow) live exclusively in the Test tab of the
+  // attendee list and must not contaminate Total Registrations, Live
+  // Attendance, Check-in Rate, or Donated Seats — otherwise an admin running
+  // a quick test inflates the live counts the team relies on during an event.
+  const realAttendees = attendees.filter(a => a.isTest !== true);
+  const total = realAttendees.length;
+  const primaryAttendees = realAttendees.filter(a => a.isPrimary !== false);
+  const guestCount = realAttendees.filter(a => a.isPrimary === false).length;
+  const checkedIn = realAttendees.filter(a => a.checkedInAt).length;
   const percentage = total === 0 ? 0 : Math.round((checkedIn / total) * 100);
 
   const totalDonatedSeats = primaryAttendees.reduce((acc, curr) => acc + (Number(curr.donatedSeats) || 0), 0);
@@ -65,6 +72,13 @@ const DashboardStats = ({ attendees }: { attendees: Attendee[] }) => {
     .filter(a => (a.donatedSeats || 0) > 0 || (a.donatedTables || 0) > 0)
     .sort((a, b) => new Date(b.registeredAt).getTime() - new Date(a.registeredAt).getTime())
     .slice(0, 5);
+  // Live donation-pool snapshot (donated vs claimed vs still available) so
+  // the Donated Seats card surfaces how much room remains for admins to
+  // issue donor-funded tickets from the Manual QR / Add Attendee tools.
+  // Pass realAttendees (already test-filtered) so this stays consistent
+  // with the other derivations above — computeDonationPool also filters
+  // internally, but using the same source keeps the math obvious.
+  const donationPool = computeDonationPool(realAttendees);
 
   return (
     <div className="space-y-8 mb-8">
@@ -106,9 +120,18 @@ const DashboardStats = ({ attendees }: { attendees: Attendee[] }) => {
              <Rows3 className="w-16 h-16 transform right-[-10px] top-[-10px]" />
           </div>
           <h3 className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-2">Donated Seats</h3>
-          <p className="text-4xl font-extrabold text-emerald-600 drop-shadow-sm">{totalDonatedSeats}</p>
+          {/* Lead number is now AVAILABLE (donated - claimed) so the card
+              tells admins the actionable thing: how many free seats they
+              can still issue. The supporting line shows donated/claimed
+              breakdown + any donated full tables. */}
+          <p className="text-4xl font-extrabold text-emerald-600 drop-shadow-sm">
+            {donationPool.available}
+            <span className="text-lg font-bold text-emerald-600/60 ml-1">/ {donationPool.donated}</span>
+          </p>
           <p className="text-xs text-emerald-700 font-semibold mt-2 bg-emerald-50 inline-block px-2 py-1 rounded-md">
-            {totalDonatedTables > 0 ? `${totalDonatedTables} table${totalDonatedTables !== 1 ? 's' : ''} · ${totalDonatedSeats} seat${totalDonatedSeats !== 1 ? 's' : ''} donated` : `seats donated for others`}
+            {donationPool.donated === 0
+              ? 'no donations yet'
+              : `${donationPool.available} available · ${donationPool.claimed} claimed${totalDonatedTables > 0 ? ` · ${totalDonatedTables} table${totalDonatedTables !== 1 ? 's' : ''}` : ''}`}
           </p>
         </div>
       </div>

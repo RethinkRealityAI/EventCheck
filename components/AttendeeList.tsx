@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Attendee, Form, AppSettings, SeatingTable } from '../types';
-import { LayoutDashboard, Users, ChevronDown, ChevronRight, UserPlus, CheckCircle, Clock, Search, Calendar, Eye, X, Mail, User, Download, FileSpreadsheet, Check, ChevronLeft, Filter, Loader2, Copy, ChevronsDown, ChevronsRight, Star, Pin, Plus, SlidersHorizontal } from 'lucide-react';
+import { LayoutDashboard, Users, ChevronDown, ChevronRight, UserPlus, CheckCircle, Clock, Search, Calendar, Eye, X, Mail, User, Download, FileSpreadsheet, Check, ChevronLeft, Filter, Loader2, Copy, ChevronsDown, ChevronsRight, Star, Pin, Plus, SlidersHorizontal, Heart } from 'lucide-react';
 import { format } from 'date-fns';
 import { updateAttendee, getSettings, saveSettings, getSeatingTables } from '../services/storageService';
 import { supabase } from '../services/supabaseClient';
@@ -118,7 +118,7 @@ const STANDARD_COLUMNS: ColumnDef[] = [
   { key: 'name', label: 'Name', group: 'standard' },
   { key: 'formTitle', label: 'Event/Form', group: 'standard' },
   { key: 'ticketType', label: 'Ticket Type', group: 'standard' },
-  { key: 'status', label: 'Status', group: 'standard' },
+  { key: 'status', label: 'Check-in Status', group: 'standard' },
   { key: 'registered', label: 'Registered', group: 'standard' },
   { key: 'ticketSent', label: 'Ticket Sent', group: 'standard' },
   { key: 'actions', label: 'Actions', group: 'standard' },
@@ -973,7 +973,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                       </div>
                       <div className="flex items-center gap-6">
                         <div className="hidden sm:flex flex-col items-end">
-                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-tight">Status</span>
+                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-tight">Check-in Status</span>
                           <div className="flex items-center gap-1.5">
                             <div className={`w-2 h-2 rounded-full ${primary.checkedInAt ? 'bg-green-500' : 'bg-amber-400'}`}></div>
                             <span className="text-xs font-bold text-gray-700">
@@ -1003,7 +1003,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                                 <th className="px-4 py-3">Attendee</th>
                                 <th className="px-4 py-3">Role</th>
                                 <th className="px-4 py-3">Ticket Type</th>
-                                <th className="px-4 py-3 text-center">Status</th>
+                                <th className="px-4 py-3 text-center">Check-in Status</th>
                                 {seatingTables.length > 0 && <th className="px-4 py-3">Seating Table</th>}
                                 <th className="px-4 py-3 text-right pr-6">Details</th>
                               </tr>
@@ -1129,7 +1129,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                 {isColumnVisible('name') && <th className="px-4 py-2.5 min-w-[180px] text-xs font-semibold uppercase tracking-wide text-gray-500">Name</th>}
                 {isColumnVisible('formTitle') && <th className="px-4 py-2.5 min-w-[140px] text-xs font-semibold uppercase tracking-wide text-gray-500">Event/Form</th>}
                 {isColumnVisible('ticketType') && <th className="px-4 py-2.5 min-w-[110px] text-xs font-semibold uppercase tracking-wide text-gray-500">Ticket Type</th>}
-                {isColumnVisible('status') && <th className="px-4 py-2.5 min-w-[100px] text-xs font-semibold uppercase tracking-wide text-gray-500">Status</th>}
+                {isColumnVisible('status') && <th className="px-4 py-2.5 min-w-[120px] text-xs font-semibold uppercase tracking-wide text-gray-500">Check-in Status</th>}
                 {isColumnVisible('registered') && <th className="px-4 py-2.5 min-w-[100px] text-xs font-semibold uppercase tracking-wide text-gray-500">Registered</th>}
                 {isColumnVisible('ticketSent') && <th className="px-4 py-2.5 min-w-[100px] text-xs font-semibold uppercase tracking-wide text-gray-500">Ticket Sent</th>}
                 {dynamicColumns.map(col =>
@@ -1241,6 +1241,15 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                             )}
                             {attendee.guestType === 'adult' && (
                               <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">ADULT</span>
+                            )}
+                            {attendee.isDonatedSeatClaim && (
+                              <span
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200"
+                                title="This ticket was issued against a donor's donated-seat pool"
+                              >
+                                <Heart className="w-2.5 h-2.5 fill-emerald-700 text-emerald-700" />
+                                DONATED SEAT CLAIM
+                              </span>
                             )}
                             {((attendee.donatedSeats || 0) > 0 || (attendee.donatedTables || 0) > 0) && (
                               <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-700">
@@ -1398,6 +1407,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
         <AddAttendeeModal
           forms={forms}
           selectedFormId={selectedFormId}
+          attendees={attendees}
           onClose={() => setShowAddModal(false)}
           onAdded={() => {
             // The parent component's polling will pick up the new attendee

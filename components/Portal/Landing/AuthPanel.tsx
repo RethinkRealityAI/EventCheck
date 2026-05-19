@@ -68,7 +68,7 @@ export function AuthPanel() {
     e.preventDefault();
     setError(''); setLoading(true);
     resetResendState();
-    const { error: err } = await supabase.auth.signUp({
+    const { data, error: err } = await supabase.auth.signUp({
       email, password,
       options: {
         data: { full_name: `${firstName} ${lastName}`.trim(), role: 'attendee' },
@@ -79,7 +79,26 @@ export function AuthPanel() {
       },
     });
     setLoading(false);
-    if (err) { setError(err.message); return; }
+    if (err) {
+      // Some Supabase server versions return the "user already exists" condition
+      // as a real error. Normalize it to the friendly message we use below.
+      if (/already|exists|registered/i.test(err.message) || (err as { code?: string }).code === 'user_already_exists') {
+        setError('A user with that email already exists. Please sign in instead.');
+      } else {
+        setError(err.message);
+      }
+      return;
+    }
+    // When "Confirm email" is enabled in Supabase Auth (the default), an
+    // already-registered email returns success WITH an empty `identities`
+    // array to prevent email enumeration. We detect that and surface a
+    // friendly "already exists" message instead of silently showing
+    // "Check your email" — otherwise the user waits forever for an email
+    // that was never sent.
+    if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+      setError('A user with that email already exists. Please sign in instead.');
+      return;
+    }
     setSignupSuccess(true);
   };
 

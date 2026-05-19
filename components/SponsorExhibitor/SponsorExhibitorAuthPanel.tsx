@@ -98,7 +98,7 @@ export function SponsorExhibitorAuthPanel({ sponsorExhibitorFormId }: Props) {
     e.preventDefault();
     setError(''); setLoading(true);
     resetResendState();
-    const { error: err } = await supabase.auth.signUp({
+    const { data, error: err } = await supabase.auth.signUp({
       email, password,
       options: {
         data: {
@@ -110,7 +110,22 @@ export function SponsorExhibitorAuthPanel({ sponsorExhibitorFormId }: Props) {
       },
     });
     setLoading(false);
-    if (err) { setError(err.message); return; }
+    if (err) {
+      if (/already|exists|registered/i.test(err.message) || (err as { code?: string }).code === 'user_already_exists') {
+        setError('A user with that email already exists. Please sign in instead.');
+      } else {
+        setError(err.message);
+      }
+      return;
+    }
+    // When email-confirm is enabled, an already-registered email returns
+    // success with an empty `identities` array (Supabase's anti-enumeration
+    // measure). Detect and surface a friendly message rather than telling
+    // the user to check an email that will never arrive.
+    if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+      setError('A user with that email already exists. Please sign in instead.');
+      return;
+    }
     setSignupSuccess(true);
   };
 

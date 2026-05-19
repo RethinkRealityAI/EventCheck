@@ -1,18 +1,24 @@
 import React, { useState, useMemo } from 'react';
 import ReactDOM from 'react-dom';
 import { Attendee, Form } from '../types';
-import { X, UserPlus, Loader2, Calendar, CreditCard } from 'lucide-react';
+import { X, UserPlus, Loader2, Calendar, CreditCard, Heart } from 'lucide-react';
 import { saveAttendee } from '../services/storageService';
 import { useNotifications } from './NotificationSystem';
+import { computeDonationPool } from '../utils/donationPool';
 
 interface AddAttendeeModalProps {
   forms: Form[];
   selectedFormId?: string;
+  /** All current attendees — used to compute the live donated-seat pool so
+   *  the admin can see how many free claim slots are left. Defaults to []
+   *  if the caller doesn't have a list handy (the checkbox still appears,
+   *  just without the "X available" hint). */
+  attendees?: Attendee[];
   onClose: () => void;
   onAdded: () => void;
 }
 
-const AddAttendeeModal: React.FC<AddAttendeeModalProps> = ({ forms, selectedFormId, onClose, onAdded }) => {
+const AddAttendeeModal: React.FC<AddAttendeeModalProps> = ({ forms, selectedFormId, attendees = [], onClose, onAdded }) => {
   const { showNotification } = useNotifications();
   const [saving, setSaving] = useState(false);
 
@@ -20,7 +26,28 @@ const AddAttendeeModal: React.FC<AddAttendeeModalProps> = ({ forms, selectedForm
   const [ticketType, setTicketType] = useState('');
   const [paymentStatus, setPaymentStatus] = useState<'free' | 'paid' | 'pending'>('free');
   const [isTest, setIsTest] = useState(false);
+  const [isDonatedSeatClaim, setIsDonatedSeatClaim] = useState(false);
   const [answers, setAnswers] = useState<Record<string, any>>({});
+
+  // Live donated-seat pool from the attendee list. Drives the hint copy on
+  // the donated-seat checkbox so the admin knows whether they have any
+  // unclaimed donor seats left to issue. Recomputes on every render — cheap
+  // since the list is bounded by event size.
+  const donationPool = useMemo(() => computeDonationPool(attendees), [attendees]);
+  // When the admin checks the box, default the payment status to "free" —
+  // donated seats are never paid by the recipient. Keep behaviour additive:
+  // if they had a different value selected, restore it on uncheck via the
+  // saved snapshot.
+  const previousPaymentStatusRef = React.useRef(paymentStatus);
+  const handleToggleDonated = (checked: boolean) => {
+    setIsDonatedSeatClaim(checked);
+    if (checked) {
+      previousPaymentStatusRef.current = paymentStatus;
+      setPaymentStatus('free');
+    } else {
+      setPaymentStatus(previousPaymentStatusRef.current);
+    }
+  };
 
   const selectedForm = useMemo(() => forms.find(f => f.id === formId), [forms, formId]);
 
@@ -65,6 +92,15 @@ const AddAttendeeModal: React.FC<AddAttendeeModalProps> = ({ forms, selectedForm
       showNotification(`Please fill in "${emailField?.label || 'email'}" — required so we can deliver their ticket.`, 'warning');
       return;
     }
+    // Block over-claiming when the pool is empty. Skip the check for test
+    // rows since they're excluded from the pool anyway.
+    if (isDonatedSeatClaim && !isTest && donationPool.available <= 0) {
+      showNotification(
+        `No donated seats are currently available — ${donationPool.claimed} of ${donationPool.donated} already claimed. Uncheck "Donated seat claim" or wait for a new donation.`,
+        'warning',
+      );
+      return;
+    }
 
     setSaving(true);
     try {
@@ -90,6 +126,7 @@ const AddAttendeeModal: React.FC<AddAttendeeModalProps> = ({ forms, selectedForm
         donationType: 'none',
         donatedTables: 0,
         donatedSeats: 0,
+        isDonatedSeatClaim,
       };
 
       await saveAttendee(attendee);
@@ -133,6 +170,42 @@ const AddAttendeeModal: React.FC<AddAttendeeModalProps> = ({ forms, selectedForm
         {/* Form */}
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 min-h-0 custom-scrollbar">
           <div className="space-y-4">
+
+            {/* Donated-seat claim toggle — at the top so admins issuing a
+                gifted ticket can flag it before filling anything else. The
+                hint copy reflects the live pool so they know whether they
+                have any unclaimed seats to give. */}
+            <div
+              className={`rounded-2xl px-5 py-3.5 border flex items-start gap-3 transition-all ${
+                isDonatedSeatClaim
+                  ? 'bg-emerald-50/80 border-emerald-200/60'
+                  : 'bg-emerald-50/40 border-emerald-200/40'
+              }`}
+            >
+              <input
+                type="checkbox"
+                id="markAsDonatedClaim"
+                checked={isDonatedSeatClaim}
+                onChange={e => handleToggleDonated(e.target.checked)}
+                disabled={donationPool.available <= 0 && !isDonatedSeatClaim}
+                className="mt-0.5 w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed"
+              />
+              <div className="flex-1 min-w-0">
+                <label htmlFor="markAsDonatedClaim" className="text-sm text-emerald-800 font-bold cursor-pointer select-none flex items-center gap-1.5">
+                  <Heart className="w-3.5 h-3.5 fill-emerald-600 text-emerald-600" />
+                  Mark as donated seat claim
+                </label>
+                <p className="text-xs text-emerald-700/80 mt-0.5">
+                  {donationPool.donated === 0 ? (
+                    <>No donated seats have been pledged yet — once a donor registers and donates seats, you can issue those seats here.</>
+                  ) : donationPool.available <= 0 ? (
+                    <>All <strong>{donationPool.donated}</strong> donated seats have been claimed ({donationPool.claimed}/{donationPool.donated}). Waiting on a new donation.</>
+                  ) : (
+                    <><strong>{donationPool.available}</strong> donated seat{donationPool.available !== 1 ? 's' : ''} available ({donationPool.claimed}/{donationPool.donated} already claimed). Checking this issues the ticket as free against the donor pool.</>
+                  )}
+                </p>
+              </div>
+            </div>
 
             {/* Event Selector Card */}
             <div className="bg-white/60 backdrop-blur-md rounded-2xl p-5 border border-white/60 shadow-sm">

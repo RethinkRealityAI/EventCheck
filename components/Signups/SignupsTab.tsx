@@ -1,7 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Mail, Search, RefreshCw, CheckCircle2, Clock, Circle, Eye, MousePointerClick, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Mail, Search, RefreshCw, CheckCircle2, Clock, Circle, Eye, MousePointerClick, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
 import { getPortalUsers, type PortalUser } from '../../services/storageService';
 import { getLatestEmailSendPerRecipient, type EmailSend } from '../../services/emailSendsService';
+import { supabase } from '../../services/supabaseClient';
+import { useAuth } from '../AuthContext';
+import { useNotifications } from '../NotificationSystem';
 import type { AppSettings, Form } from '../../types';
 import SendUserEmailModal from './SendUserEmailModal';
 
@@ -79,12 +82,18 @@ function timeAgo(iso: string): string {
 }
 
 export default function SignupsTab({ settings, forms }: Props) {
+  const { profile } = useAuth();
+  const { showNotification } = useNotifications();
+  const isSuperAdmin = profile?.role === 'super_admin';
   const [users, setUsers] = useState<PortalUser[]>([]);
   const [emailSendsByEmail, setEmailSendsByEmail] = useState<Map<string, EmailSend>>(new Map());
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<FilterKey>('all');
   const [selected, setSelected] = useState<PortalUser | null>(null);
+  // Tracks which user row is currently being deleted (so we can disable the
+  // delete button + show a spinner while the edge function runs).
+  const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   // Page size: 10 on mobile, 15 on desktop. Tracks viewport width via the
   // same breakpoint Tailwind uses for `md:`.
@@ -117,6 +126,40 @@ export default function SignupsTab({ settings, forms }: Props) {
   const reloadEmailSends = async () => {
     const sendsMap = await getLatestEmailSendPerRecipient();
     setEmailSendsByEmail(sendsMap);
+  };
+
+  // Delete a signed-up portal user end-to-end (auth.users + profiles cascade).
+  // Behind the super-admin gate enforced both client-side here AND server-side
+  // in the admin-delete-user edge function. Confirmation prompt uses the
+  // user's email so the admin can't misclick on the wrong row. Attendee rows
+  // that reference user_id are intentionally preserved — paid registrations
+  // are not deleted along with the account.
+  const deleteUser = async (u: PortalUser) => {
+    if (!isSuperAdmin) return;
+    const confirmText = `Delete account for "${u.email}"?\n\nThis removes the auth user and their profile. Paid attendee rows (if any) are kept.\n\nThis cannot be undone.`;
+    if (!window.confirm(confirmText)) return;
+
+    setDeletingUserId(u.userId);
+    try {
+      const { data, error } = await supabase.functions.invoke('admin-delete-user', {
+        body: { userId: u.userId },
+      });
+      if (error || (data as any)?.error) {
+        const message = (data as any)?.error || error?.message || 'Unknown error';
+        showNotification(`Delete failed: ${message}`, 'error');
+        return;
+      }
+      // Optimistic local removal so the row disappears immediately even before
+      // the full list reload completes.
+      setUsers((prev) => prev.filter((x) => x.userId !== u.userId));
+      showNotification(`Deleted ${u.email}`, 'success');
+      // Background reload to pick up any cascade-side changes (e.g. drafts).
+      load();
+    } catch (e: any) {
+      showNotification(`Delete failed: ${e?.message || 'Unknown error'}`, 'error');
+    } finally {
+      setDeletingUserId(null);
+    }
   };
 
   useEffect(() => { load(); }, []);
@@ -312,6 +355,17 @@ export default function SignupsTab({ settings, forms }: Props) {
                 >
                   Direct mail
                 </a>
+                {isSuperAdmin && (
+                  <button
+                    onClick={() => deleteUser(u)}
+                    disabled={deletingUserId === u.userId}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-red-200 text-red-700 rounded-md text-xs font-semibold hover:bg-red-50 transition disabled:opacity-50"
+                    title="Delete this signup (auth user + profile)"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    {deletingUserId === u.userId ? 'Deleting…' : 'Delete'}
+                  </button>
+                )}
               </div>
             </div>
           );
@@ -380,14 +434,27 @@ export default function SignupsTab({ settings, forms }: Props) {
                     )}
                   </td>
                   <td className="px-4 py-2.5 text-right">
-                    <button
-                      onClick={() => setSelected(u)}
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-indigo-600 text-white rounded-md text-xs font-semibold hover:bg-indigo-700 transition"
-                      title="Send an email to this user"
-                    >
-                      <Mail className="w-3.5 h-3.5" />
-                      Email
-                    </button>
+                    <div className="inline-flex items-center gap-2 justify-end">
+                      <button
+                        onClick={() => setSelected(u)}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-indigo-600 text-white rounded-md text-xs font-semibold hover:bg-indigo-700 transition"
+                        title="Send an email to this user"
+                      >
+                        <Mail className="w-3.5 h-3.5" />
+                        Email
+                      </button>
+                      {isSuperAdmin && (
+                        <button
+                          onClick={() => deleteUser(u)}
+                          disabled={deletingUserId === u.userId}
+                          className="inline-flex items-center gap-1 px-2 py-1 bg-white border border-red-200 text-red-700 rounded-md text-xs font-semibold hover:bg-red-50 transition disabled:opacity-50"
+                          title="Delete this signup (auth user + profile)"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          {deletingUserId === u.userId ? '…' : 'Delete'}
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               );

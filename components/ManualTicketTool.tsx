@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Send, Loader2, User, Search, RefreshCw, QrCode, Mail, FileText, Users } from 'lucide-react';
+import { Send, Loader2, User, Search, RefreshCw, QrCode, Mail, FileText, Users, Heart } from 'lucide-react';
 import { Attendee, AppSettings, Form } from '../types';
 import { getAttendees, saveAttendee, getSettings, getForms, updateAttendee } from '../services/storageService';
 import { generateTicketPDF } from '../utils/pdfGenerator';
 import { sendTicketEmail, arrayBufferToBase64 } from '../services/smtpService';
+import { computeDonationPool } from '../utils/donationPool';
 
 type Mode = 'existing' | 'new';
 type PreviewTab = 'email' | 'ticket';
@@ -78,6 +79,12 @@ const ManualTicketTool: React.FC = () => {
     paymentStatus: 'free',
     guestType: 'adult',
   });
+  // Donated-seat claim flag for the new-ticket path. When true, every issued
+  // ticket (primary + placeholders for a multi-ticket batch) is marked as
+  // a donated-seat claim and the dashboard pool decrements by the batch size.
+  // Forces paymentStatus to 'free' since the recipient doesn't pay for a
+  // donated seat.
+  const [markAsDonatedClaim, setMarkAsDonatedClaim] = useState(false);
 
   // Multi-ticket controls. Useful when an admin needs to manually issue a
   // full table (e.g. 8 seats) to one buyer: each seat becomes its own
@@ -123,6 +130,10 @@ const ManualTicketTool: React.FC = () => {
   );
 
   const selectedForm = forms.find(f => f.id === formData.formId);
+
+  // Live donated-seat pool computed from the in-memory attendee list. Drives
+  // the pool badge + the new-mode "donated claim" checkbox copy.
+  const donationPool = useMemo(() => computeDonationPool(attendees), [attendees]);
   const ticketField = selectedForm?.fields.find(f => f.type === 'ticket');
   const availableTicketTypes = ticketField?.ticketConfig?.items || [];
   const selectedTicketItem = availableTicketTypes.find(t => t.name === formData.ticketType);
@@ -267,7 +278,19 @@ const ManualTicketTool: React.FC = () => {
     // to the buyer's address.
     const requestedQty = multiTicketEnabled ? Math.max(1, Math.min(20, Math.floor(ticketQuantity || 1))) : 1;
     const buyerName = `${formData.firstName} ${formData.lastName}`.trim();
+
+    // Block over-claiming the donated pool. Each issued ticket in the batch
+    // counts as one claim, so a 5-ticket multi-batch needs 5 available seats.
+    if (markAsDonatedClaim && donationPool.available < requestedQty) {
+      setSuccessMsg(
+        `failed: only ${donationPool.available} donated seat${donationPool.available !== 1 ? 's' : ''} available, but ${requestedQty} requested. Uncheck the donated-seat option or reduce quantity.`,
+      );
+      return;
+    }
     const primaryId = crypto.randomUUID();
+    // Donated-seat claims are always free to the recipient. Honor the form's
+    // selected payment status only when this is NOT a donated claim.
+    const effectivePaymentStatus = markAsDonatedClaim ? 'free' : (formData.paymentStatus as any);
     const primary: Attendee = {
       id: primaryId,
       formId: formData.formId,
@@ -277,9 +300,10 @@ const ManualTicketTool: React.FC = () => {
       ticketType: formData.ticketType,
       registeredAt: new Date().toISOString(),
       qrPayload: JSON.stringify({ id: primaryId, formId: formData.formId, action: 'checkin' }),
-      paymentStatus: formData.paymentStatus as any,
+      paymentStatus: effectivePaymentStatus,
       isPrimary: true,
       guestType: formData.guestType as any,
+      isDonatedSeatClaim: markAsDonatedClaim,
     };
 
     // Each additional ticket is a placeholder guest row tied back to the
@@ -304,6 +328,10 @@ const ManualTicketTool: React.FC = () => {
         isPrimary: false,
         primaryAttendeeId: primaryId,
         guestType: 'pending-claim',
+        // Each placeholder counts as its own donated-seat claim — issuing a
+        // 5-ticket batch as donated consumes 5 from the pool, matching the
+        // pre-save validation above.
+        isDonatedSeatClaim: markAsDonatedClaim,
       });
     }
 
@@ -453,6 +481,31 @@ const ManualTicketTool: React.FC = () => {
   return (
     <div className="grid lg:grid-cols-2 gap-8">
       <div className="space-y-6">
+        {/* Donated-seat pool badge — always visible at the top so admins
+            issuing tickets know how many free claim slots are available,
+            even before opening the new-ticket form. */}
+        {donationPool.donated > 0 && (
+          <div className="rounded-xl border border-emerald-200 bg-gradient-to-r from-emerald-50 to-emerald-50/40 px-4 py-3 flex items-center justify-between gap-3 shadow-sm">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="shrink-0 h-9 w-9 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                <Heart className="w-4 h-4 fill-emerald-600" />
+              </div>
+              <div className="min-w-0">
+                <div className="text-[11px] font-bold uppercase tracking-wider text-emerald-700/80">Donated Seats Pool</div>
+                <div className="text-sm font-bold text-emerald-900">
+                  {donationPool.available} available
+                  <span className="font-medium text-emerald-700/70"> · {donationPool.claimed}/{donationPool.donated} claimed</span>
+                </div>
+              </div>
+            </div>
+            {donationPool.available > 0 && (
+              <span className="hidden sm:inline-flex shrink-0 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-600 text-white">
+                Ready to issue
+              </span>
+            )}
+          </div>
+        )}
+
         {/* Mode Toggle */}
         <div className="bg-white p-1 rounded-lg border border-gray-200 inline-flex shadow-sm">
           <button
@@ -619,6 +672,49 @@ const ManualTicketTool: React.FC = () => {
                       <span className="text-xs text-indigo-600">{ticketQuantity > 1 ? 'tickets' : 'ticket'} (max 20)</span>
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* Donated-seat claim toggle — sits above the buyer fields so
+                  the admin can opt in before typing the recipient's name. The
+                  hint copy reflects the live pool so they know whether the
+                  pool has room for the requested batch. */}
+              {formData.formId && (
+                <div
+                  className={`rounded-lg border p-3 transition-all ${
+                    markAsDonatedClaim ? 'border-emerald-300 bg-emerald-50/70' : 'border-emerald-200 bg-emerald-50/30'
+                  }`}
+                >
+                  <label className="flex items-start gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={markAsDonatedClaim}
+                      onChange={e => setMarkAsDonatedClaim(e.target.checked)}
+                      disabled={donationPool.available <= 0 && !markAsDonatedClaim}
+                      className="mt-0.5 w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-semibold text-emerald-900 flex items-center gap-1.5">
+                        <Heart className="w-3.5 h-3.5 fill-emerald-600 text-emerald-600" />
+                        Mark as donated seat claim
+                      </div>
+                      <div className="text-xs text-emerald-800/80 mt-0.5">
+                        {donationPool.donated === 0 ? (
+                          <>No donated seats pledged yet. Once a donor registers and donates seats, you'll be able to issue them here.</>
+                        ) : donationPool.available <= 0 ? (
+                          <>All <strong>{donationPool.donated}</strong> donated seats are already claimed ({donationPool.claimed}/{donationPool.donated}).</>
+                        ) : (
+                          <>
+                            <strong>{donationPool.available}</strong> donated seat{donationPool.available !== 1 ? 's' : ''} available ({donationPool.claimed}/{donationPool.donated} claimed).
+                            {markAsDonatedClaim && (multiTicketEnabled ? ticketQuantity > 1 : false) && (
+                              <> This batch will consume <strong>{ticketQuantity}</strong>.</>
+                            )}
+                            {markAsDonatedClaim && ' Ticket will be issued as free.'}
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </label>
                 </div>
               )}
 

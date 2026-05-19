@@ -134,7 +134,29 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
     return field ? field.label : fieldId.replace('field_', '').replace(/_/g, ' ');
   };
 
-  const answersEntries = localAttendee.answers ? Object.entries(localAttendee.answers) : [];
+  // Internal metadata keys that should never render as cards in the Responses
+  // tab. `_purchaser_filled` is a redundant nested snapshot — the same data
+  // already appears as `_guest_name`, `_guest_email`, etc., and the dashboard
+  // already surfaces the "Purchaser Filled" pill on these rows, so showing
+  // the raw object was both confusing and visually broken (rendered as
+  // `[object Object]`).
+  const HIDDEN_ANSWER_KEYS = new Set(['_purchaser_filled']);
+  const answersEntries = localAttendee.answers
+    ? Object.entries(localAttendee.answers).filter(([key]) => !HIDDEN_ANSWER_KEYS.has(key))
+    : [];
+
+  // Defensive value-to-string for the Responses cards. `String(val)` on an
+  // object produces "[object Object]"; we never want that to leak into the
+  // UI again if a new metadata field is introduced without a corresponding
+  // HIDDEN_ANSWER_KEYS entry.
+  const renderAnswerValue = (val: unknown): string => {
+    if (val === null || val === undefined || val === '') return '—';
+    if (Array.isArray(val)) return val.length === 0 ? '—' : val.join(', ');
+    if (typeof val === 'object') {
+      try { return JSON.stringify(val); } catch { return '—'; }
+    }
+    return String(val);
+  };
 
   return ReactDOM.createPortal(
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center backdrop-blur-sm bg-black/20 p-0 sm:p-6" onClick={onClose}>
@@ -261,17 +283,19 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
                 </div>
               </div>
 
-              {/* Form field answers editing */}
-              {editData.answers && Object.entries(editData.answers).length > 0 && (
+              {/* Form field answers editing — same HIDDEN_ANSWER_KEYS filter
+                  as the read view so internal metadata (_purchaser_filled) is
+                  never editable in the UI. */}
+              {editData.answers && Object.entries(editData.answers).filter(([k]) => !HIDDEN_ANSWER_KEYS.has(k)).length > 0 && (
                 <div className="bg-white/60 backdrop-blur-md rounded-xl p-4 border border-white/60 shadow-sm">
                   <h4 className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest mb-3">Form Fields</h4>
                   <div className="space-y-3">
-                    {Object.entries(editData.answers).map(([key, val]) => (
+                    {Object.entries(editData.answers).filter(([k]) => !HIDDEN_ANSWER_KEYS.has(k)).map(([key, val]) => (
                       <div key={key} className="space-y-1">
                         <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{resolveFieldLabel(key)} *</label>
                         <input
                           className="w-full px-3 py-2 bg-white/80 border border-white/60 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium text-slate-800 shadow-sm"
-                          value={Array.isArray(val) ? val.join(', ') : String(val || '')}
+                          value={renderAnswerValue(val) === '—' ? '' : renderAnswerValue(val)}
                           onChange={e => setEditData({
                             ...editData,
                             answers: {
@@ -529,8 +553,8 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
                   {answersEntries.map(([key, val]) => (
                     <div key={key} className="bg-white/60 p-3.5 rounded-xl border border-white/60 shadow-sm hover:shadow-md transition-all">
                       <span className="text-[10px] font-bold text-indigo-500 block mb-2 uppercase tracking-widest">{resolveFieldLabel(key)}</span>
-                      <span className="text-sm text-slate-800 font-bold block">
-                        {Array.isArray(val) ? val.join(', ') : String(val)}
+                      <span className="text-sm text-slate-800 font-bold block break-words">
+                        {renderAnswerValue(val)}
                       </span>
                     </div>
                   ))}

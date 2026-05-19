@@ -52,6 +52,10 @@ export interface Attendee {
    *  Extras are paid online by card via PayPal at $50 USD each. The PayPal
    *  capture id is shared with the primary row through `transactionId`. */
   isPaidExtra?: boolean;
+  /** True when this attendee was issued against a donor's `donatedSeats`
+   *  pool. The available pool is computed as
+   *  `SUM(donatedSeats) − COUNT(isDonatedSeatClaim)` across all attendees. */
+  isDonatedSeatClaim?: boolean;
 }
 
 export interface SeatingConfiguration {
