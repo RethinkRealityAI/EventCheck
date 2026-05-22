@@ -1396,6 +1396,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
           attendee={selectedAttendee}
           forms={forms}
           seatingTables={seatingTables}
+          attendees={attendees}
           onClose={() => setSelectedAttendee(null)}
           onDelete={handleDeleteAttendee}
           onOpenAttendee={(a) => setSelectedAttendee(a)}

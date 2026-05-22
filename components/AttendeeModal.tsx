@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import ReactDOM from 'react-dom';
 import { Attendee, Form, SeatingTable } from '../types';
-import { User, X, Edit3, Trash2, CheckCircle, Clock, Mail, Check, QrCode, Calendar, CreditCard, Armchair, ExternalLink } from 'lucide-react';
+import { User, Users, UserPlus, Search, X, Edit3, Trash2, CheckCircle, Clock, Mail, Check, QrCode, Calendar, CreditCard, Armchair, ExternalLink } from 'lucide-react';
 import { format } from 'date-fns';
 import QRCode from 'react-qr-code';
 import { updateAttendee, deleteAttendee, getSettings, getAttendee } from '../services/storageService';
@@ -14,18 +14,27 @@ interface AttendeeModalProps {
   attendee: Attendee;
   forms: Form[];
   seatingTables: SeatingTable[];
+  attendees?: Attendee[];
   onClose: () => void;
   onDelete: (id: string) => void;
   onOpenAttendee?: (attendee: Attendee) => void;
 }
 
-const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingTables, onClose, onDelete, onOpenAttendee }) => {
+const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingTables, attendees, onClose, onDelete, onOpenAttendee }) => {
   const [resending, setResending] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState<Partial<Attendee>>({});
   const [activeTab, setActiveTab] = useState<'details' | 'responses'>('details');
   const [localAttendee, setLocalAttendee] = useState(attendee);
   const [purchaser, setPurchaser] = useState<Attendee | null>(null);
+  const [showLinkPanel, setShowLinkPanel] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [pendingLinkIds, setPendingLinkIds] = useState<Set<string>>(new Set());
+  const [localGuestIds, setLocalGuestIds] = useState<string[]>(() =>
+    (attendees || []).filter(a => a.primaryAttendeeId === attendee.id).map(a => a.id)
+  );
+  const [isSavingLinks, setIsSavingLinks] = useState(false);
+  const [unlinkingIds, setUnlinkingIds] = useState<Set<string>>(new Set());
   const { showNotification } = useNotifications();
 
   // Re-sync when the parent swaps in a different attendee (e.g. clicking
@@ -35,6 +44,11 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
     setLocalAttendee(attendee);
     setIsEditing(false);
     setActiveTab('details');
+    setShowLinkPanel(false);
+    setPendingLinkIds(new Set());
+    setSearchQuery('');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setLocalGuestIds((attendees || []).filter(a => a.primaryAttendeeId === attendee.id).map(a => a.id));
   }, [attendee.id]);
 
   // For guest rows, look up the purchaser so we can show their name and offer
@@ -125,6 +139,38 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
     showNotification(newCheckedIn ? 'Checked in successfully!' : 'Check-in undone', newCheckedIn ? 'success' : 'info');
   };
 
+  const handleSaveLinks = async () => {
+    if (pendingLinkIds.size === 0) return;
+    setIsSavingLinks(true);
+    try {
+      await Promise.all([...pendingLinkIds].map(id =>
+        updateAttendee(id, { primaryAttendeeId: localAttendee.id, isPrimary: false, guestType: 'adult' })
+      ));
+      setLocalGuestIds(prev => [...prev, ...[...pendingLinkIds]]);
+      setShowLinkPanel(false);
+      setPendingLinkIds(new Set());
+      setSearchQuery('');
+      showNotification(`${pendingLinkIds.size} guest${pendingLinkIds.size !== 1 ? 's' : ''} linked`, 'success');
+    } catch (err: any) {
+      showNotification(`Failed to link guests: ${err.message}`, 'error');
+    } finally {
+      setIsSavingLinks(false);
+    }
+  };
+
+  const handleUnlinkGuest = async (guestId: string) => {
+    setUnlinkingIds(prev => new Set(prev).add(guestId));
+    try {
+      await updateAttendee(guestId, { primaryAttendeeId: undefined, isPrimary: true, guestType: undefined });
+      setLocalGuestIds(prev => prev.filter(id => id !== guestId));
+      showNotification('Guest unlinked', 'success');
+    } catch (err: any) {
+      showNotification(`Failed to unlink guest: ${err.message}`, 'error');
+    } finally {
+      setUnlinkingIds(prev => { const next = new Set(prev); next.delete(guestId); return next; });
+    }
+  };
+
   // Find the form for this attendee to resolve field labels
   const form = forms.find(f => f.id === localAttendee.formId);
 
@@ -157,6 +203,27 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
     }
     return String(val);
   };
+
+  const existingGuests = (attendees || []).filter(a => localGuestIds.includes(a.id));
+  // Build the set of IDs that are already someone's primary — linking these
+  // would orphan their own sub-guests, so exclude them.
+  const idsWithSubGuests = new Set(
+    (attendees || []).filter(a => a.primaryAttendeeId).map(a => a.primaryAttendeeId!)
+  );
+  const eligibleCandidates = (attendees || []).filter(a =>
+    a.id !== localAttendee.id &&
+    a.isPrimary !== false &&
+    !localGuestIds.includes(a.id) &&
+    a.formId === localAttendee.formId &&
+    !a.isTest &&
+    !idsWithSubGuests.has(a.id)
+  );
+  const filteredCandidates = searchQuery.trim()
+    ? eligibleCandidates.filter(a =>
+        a.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        a.email.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : eligibleCandidates;
 
   return ReactDOM.createPortal(
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center backdrop-blur-sm bg-black/20 p-0 sm:p-6" onClick={onClose}>
@@ -508,6 +575,180 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
                   </div>
                 )}
 
+                {/* Linked Guests — manage guest pairings for primary attendees */}
+                {localAttendee.isPrimary !== false && attendees && (
+                  <div className="bg-white/60 rounded-xl p-4 border border-white/60 shadow-sm">
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="text-[10px] font-bold text-indigo-500 uppercase tracking-[0.15em] flex items-center gap-2">
+                        <Users className="w-3 h-3" />
+                        Linked Guests
+                        {localGuestIds.length > 0 && (
+                          <span className="bg-indigo-100 text-indigo-600 text-[10px] px-2 py-0.5 rounded-full font-bold">{localGuestIds.length}</span>
+                        )}
+                      </h4>
+                      {!showLinkPanel && (
+                        <button
+                          onClick={() => setShowLinkPanel(true)}
+                          className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1.5 px-2.5 py-1 rounded-lg hover:bg-indigo-50/60 transition-all"
+                        >
+                          <UserPlus className="w-3.5 h-3.5" />
+                          Link Guest
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Existing linked guests */}
+                    {existingGuests.length > 0 && (
+                      <div className="space-y-1.5 mb-3">
+                        {existingGuests.map(g => (
+                          <div key={g.id} className="flex items-center justify-between bg-indigo-50/60 px-3 py-2 rounded-xl border border-indigo-100/60 group">
+                            <div className="flex items-center gap-2 min-w-0 flex-1">
+                              <User className="w-3.5 h-3.5 text-indigo-400 flex-shrink-0" />
+                              <div className="min-w-0 flex-1">
+                                <span className="text-sm font-bold text-slate-800 truncate block">{g.name}</span>
+                                <span className="text-[11px] text-slate-500 truncate block">{g.email}</span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1 ml-2 flex-shrink-0">
+                              {onOpenAttendee && (
+                                <button
+                                  onClick={() => onOpenAttendee(g)}
+                                  className="text-[11px] font-bold text-indigo-500 hover:text-indigo-700 flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-indigo-100/60 transition-all opacity-0 group-hover:opacity-100"
+                                  title="Open this guest's record"
+                                >
+                                  <ExternalLink className="w-3 h-3" />
+                                </button>
+                              )}
+                              <button
+                                onClick={() => handleUnlinkGuest(g.id)}
+                                disabled={unlinkingIds.has(g.id)}
+                                className="text-[11px] font-bold text-slate-400 hover:text-red-500 flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-red-50 transition-all disabled:opacity-50"
+                                title="Remove guest link"
+                              >
+                                {unlinkingIds.has(g.id) ? <span className="text-slate-400">…</span> : <X className="w-3 h-3" />}
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Empty state */}
+                    {existingGuests.length === 0 && !showLinkPanel && (
+                      <div className="text-center py-3">
+                        <Users className="w-6 h-6 text-slate-200 mx-auto mb-1.5" />
+                        <p className="text-xs text-slate-400 font-medium">No guests linked yet.</p>
+                        <p className="text-[11px] text-slate-300 mt-0.5">Use "Link Guest" to group attendees together for viewing.</p>
+                      </div>
+                    )}
+
+                    {/* Search + select panel */}
+                    {showLinkPanel && (
+                      <div className="space-y-3 mt-1">
+                        <div className="relative">
+                          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                          <input
+                            autoFocus
+                            className="w-full pl-9 pr-3 py-2 bg-white/80 border border-white/60 rounded-xl text-sm font-medium text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
+                            placeholder="Search by name or email…"
+                            value={searchQuery}
+                            onChange={e => setSearchQuery(e.target.value)}
+                          />
+                        </div>
+
+                        <div className="max-h-48 overflow-y-auto space-y-0.5 rounded-xl border border-white/60 bg-white/40 p-1">
+                          {filteredCandidates.length === 0 ? (
+                            <div className="py-5 text-center">
+                              <p className="text-xs text-slate-400 font-medium">
+                                {eligibleCandidates.length === 0
+                                  ? 'No available attendees on this form'
+                                  : 'No results — try a different name or email'}
+                              </p>
+                              {eligibleCandidates.length === 0 && (
+                                <p className="text-[11px] text-slate-300 mt-1">
+                                  Attendees already linked as guests elsewhere are not shown.
+                                </p>
+                              )}
+                            </div>
+                          ) : (
+                            filteredCandidates.map(candidate => {
+                              const checked = pendingLinkIds.has(candidate.id);
+                              return (
+                                <label
+                                  key={candidate.id}
+                                  className={`flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer transition-all ${checked ? 'bg-indigo-50/80 border border-indigo-200/60' : 'hover:bg-white/70 border border-transparent'}`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={() => {
+                                      setPendingLinkIds(prev => {
+                                        const next = new Set(prev);
+                                        if (next.has(candidate.id)) next.delete(candidate.id);
+                                        else next.add(candidate.id);
+                                        return next;
+                                      });
+                                    }}
+                                    className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 flex-shrink-0 w-4 h-4"
+                                  />
+                                  <div className="min-w-0 flex-1">
+                                    <span className="text-sm font-bold text-slate-800 block truncate">{candidate.name}</span>
+                                    <span className="text-[11px] text-slate-500 block truncate">{candidate.email}</span>
+                                  </div>
+                                  {checked && <Check className="w-4 h-4 text-indigo-500 flex-shrink-0" />}
+                                </label>
+                              );
+                            })
+                          )}
+                        </div>
+
+                        {/* Selected confirmation chips */}
+                        {pendingLinkIds.size > 0 && (
+                          <div className="bg-indigo-50/60 rounded-xl p-2.5 border border-indigo-100/60">
+                            <p className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider mb-1.5">Selected to link</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {[...pendingLinkIds].map(id => {
+                                const a = eligibleCandidates.find(c => c.id === id);
+                                return a ? (
+                                  <span key={id} className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white text-indigo-700 text-xs font-bold rounded-lg border border-indigo-200/60 shadow-sm">
+                                    {a.name}
+                                    <button
+                                      onClick={() => setPendingLinkIds(prev => { const next = new Set(prev); next.delete(id); return next; })}
+                                      className="text-indigo-400 hover:text-indigo-700 transition-colors"
+                                    >
+                                      <X className="w-3 h-3" />
+                                    </button>
+                                  </span>
+                                ) : null;
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="flex gap-2 pt-1">
+                          <button
+                            onClick={() => { setShowLinkPanel(false); setPendingLinkIds(new Set()); setSearchQuery(''); }}
+                            className="flex-1 py-2.5 bg-white/60 border border-white/60 rounded-xl font-bold text-slate-600 hover:bg-white/80 transition-all text-xs"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            onClick={handleSaveLinks}
+                            disabled={pendingLinkIds.size === 0 || isSavingLinks}
+                            className="flex-1 py-2.5 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-xl font-bold hover:from-indigo-500 hover:to-indigo-600 transition-all shadow-lg shadow-indigo-500/20 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {isSavingLinks
+                              ? 'Saving…'
+                              : pendingLinkIds.size === 0
+                                ? 'Select guests above'
+                                : `Link ${pendingLinkIds.size} Guest${pendingLinkIds.size !== 1 ? 's' : ''}`}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Guest panel — claim state + linked purchaser */}
                 {localAttendee.isPrimary === false && (
                   <div className="bg-purple-50/60 rounded-xl p-4 border border-purple-200/40 space-y-2">
@@ -519,9 +760,9 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
                         || localAttendee.guestType === 'staff-claimed'
                         || localAttendee.guestType === 'exhibitor-staff-claimed' ? (
                         <span className="inline-flex items-center px-3 py-1 rounded-xl text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200/50">Self-Completed</span>
-                      ) : (
+                      ) : localAttendee.answers?._purchaser_filled ? (
                         <span className="inline-flex items-center px-3 py-1 rounded-xl text-xs font-bold bg-blue-100 text-blue-800 border border-blue-200/50">Pre-filled by Purchaser</span>
-                      )}
+                      ) : null}
                     </div>
                     {localAttendee.primaryAttendeeId && (
                       <div className="flex items-center justify-between gap-2">
