@@ -1,6 +1,13 @@
 import React, { useState, useMemo } from 'react';
-import { Search, UserPlus, Users, X, ChevronDown, ChevronUp, Shuffle, UserMinus, Table as TableIcon, PanelRightClose } from 'lucide-react';
+import { Search, UserPlus, Users, X, ChevronDown, ChevronUp, Shuffle, UserMinus, Table as TableIcon, PanelRightClose, CheckCheck } from 'lucide-react';
 import { Attendee, SeatingTable } from '../../types';
+
+interface PartyGroup {
+    primaryId: string;
+    primaryName: string;
+    primaryIsUnassigned: boolean;
+    members: Attendee[]; // unassigned members only
+}
 
 interface GuestSidebarProps {
     attendees: Attendee[];
@@ -24,15 +31,70 @@ export default function GuestSidebar({
     const [search, setSearch] = useState('');
     const [selectedGuests, setSelectedGuests] = useState<Set<string>>(new Set());
     const [showAssigned, setShowAssigned] = useState(true);
+    const [showUnattached, setShowUnattached] = useState(true);
 
-    const unassigned = useMemo(() =>
-        attendees.filter(a => !a.assignedTableId && a.name.toLowerCase().includes(search.toLowerCase())),
-        [attendees, search]
+    // All unassigned attendees, unsearched — used for counts and selectAll
+    const allUnassigned = useMemo(() =>
+        attendees.filter(a => !a.assignedTableId),
+        [attendees]
     );
 
     const assigned = useMemo(() =>
         attendees.filter(a => a.assignedTableId),
         [attendees]
+    );
+
+    // Build party groups from unassigned attendees
+    const { partyGroups, solos } = useMemo(() => {
+        // IDs of primaries that at least one unassigned guest points to
+        const primaryIds = new Set(
+            allUnassigned.filter(a => a.primaryAttendeeId).map(a => a.primaryAttendeeId!)
+        );
+
+        const groups: PartyGroup[] = [];
+        const groupedIds = new Set<string>();
+
+        for (const primaryId of primaryIds) {
+            const unassignedGuests = allUnassigned.filter(a => a.primaryAttendeeId === primaryId);
+            if (unassignedGuests.length === 0) continue;
+
+            const primaryAttendee = allUnassigned.find(a => a.id === primaryId);
+            const primaryName = attendees.find(a => a.id === primaryId)?.name ?? 'Unknown Party';
+
+            const members: Attendee[] = [];
+            if (primaryAttendee) {
+                members.push(primaryAttendee);
+                groupedIds.add(primaryAttendee.id);
+            }
+            members.push(...unassignedGuests);
+            unassignedGuests.forEach(g => groupedIds.add(g.id));
+
+            groups.push({
+                primaryId,
+                primaryName,
+                primaryIsUnassigned: !!primaryAttendee,
+                members,
+            });
+        }
+
+        groups.sort((a, b) => b.members.length - a.members.length);
+
+        const soloList = allUnassigned.filter(a => !groupedIds.has(a.id));
+        return { partyGroups: groups, solos: soloList };
+    }, [allUnassigned, attendees]);
+
+    // Search-filtered views
+    const q = search.toLowerCase();
+    const filteredPartyGroups = useMemo(() => {
+        if (!q) return partyGroups;
+        return partyGroups
+            .map(g => ({ ...g, members: g.members.filter(m => m.name.toLowerCase().includes(q) || m.email.toLowerCase().includes(q)) }))
+            .filter(g => g.members.length > 0 || g.primaryName.toLowerCase().includes(q));
+    }, [partyGroups, q]);
+
+    const filteredSolos = useMemo(() =>
+        solos.filter(a => !q || a.name.toLowerCase().includes(q) || a.email.toLowerCase().includes(q)),
+        [solos, q]
     );
 
     // Group assigned guests by table
@@ -64,11 +126,24 @@ export default function GuestSidebar({
     };
 
     const selectAll = () => {
-        if (selectedGuests.size === unassigned.length) {
+        if (selectedGuests.size === allUnassigned.length) {
             setSelectedGuests(new Set());
         } else {
-            setSelectedGuests(new Set(unassigned.map(a => a.id)));
+            setSelectedGuests(new Set(allUnassigned.map(a => a.id)));
         }
+    };
+
+    const toggleParty = (group: PartyGroup) => {
+        const allSelected = group.members.every(m => selectedGuests.has(m.id));
+        setSelectedGuests(prev => {
+            const next = new Set(prev);
+            if (allSelected) {
+                group.members.forEach(m => next.delete(m.id));
+            } else {
+                group.members.forEach(m => next.add(m.id));
+            }
+            return next;
+        });
     };
 
     const handleBulkAssign = () => {
@@ -88,7 +163,7 @@ export default function GuestSidebar({
                         Guests
                     </h3>
                     <p className="text-[10px] text-slate-500 mt-0.5">
-                        {unassigned.length} unassigned · {assigned.length} assigned
+                        {allUnassigned.length} unassigned · {assigned.length} assigned
                     </p>
                 </div>
                 {onCollapse && (
@@ -129,7 +204,7 @@ export default function GuestSidebar({
                     onClick={selectAll}
                     className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white text-xs font-semibold rounded-lg transition-colors"
                 >
-                    {selectedGuests.size === unassigned.length ? 'Deselect' : 'Select All'}
+                    {selectedGuests.size === allUnassigned.length && allUnassigned.length > 0 ? 'Deselect' : 'Select All'}
                 </button>
             </div>
 
@@ -153,61 +228,170 @@ export default function GuestSidebar({
 
             {/* Main Tabs/Sections */}
             <div className="flex-1 overflow-y-auto custom-scrollbar">
-                {/* Unassigned section */}
-                <div className="p-4">
-                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">
-                        Unassigned ({unassigned.length})
-                    </p>
-                    <div className="space-y-1">
-                        {unassigned.length === 0 ? (
-                            <p className="text-xs text-slate-600 italic">No unassigned guests found</p>
-                        ) : (
-                            unassigned.map(guest => (
-                                <div
-                                    key={guest.id}
-                                    className={`flex items-center gap-2 p-2.5 rounded-lg cursor-pointer transition-all ${selectedGuests.has(guest.id)
-                                        ? 'bg-indigo-600/20 border border-indigo-500/40'
-                                        : 'bg-slate-800/50 hover:bg-slate-800 border border-transparent'
-                                        }`}
-                                    onClick={() => toggleGuest(guest.id)}
-                                >
-                                    <input
-                                        type="checkbox"
-                                        checked={selectedGuests.has(guest.id)}
-                                        readOnly
-                                        className="w-4 h-4 rounded accent-indigo-600"
-                                    />
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-1.5">
-                                            <p className="text-sm font-medium text-white truncate">{guest.name}</p>
-                                            {guest.guestType === 'child' && (
-                                                <span className="text-[9px] bg-sky-500/20 text-sky-300 px-1.5 py-0.5 rounded-full font-bold uppercase">Child</span>
-                                            )}
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                            <p className="text-xs text-slate-400 truncate">{guest.email}</p>
-                                            {guest.dietaryPreferences && (
-                                                <span className="text-[9px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded-full" title={guest.dietaryPreferences}>
-                                                    🍽
-                                                </span>
-                                            )}
-                                        </div>
-                                        {guest.ticketType && (
-                                            <p className="text-[10px] text-slate-500 truncate mt-0.5">{guest.ticketType}</p>
-                                        )}
+                {/* Unassigned section — grouped by party */}
+                <div className="p-4 space-y-4">
+                    {allUnassigned.length === 0 && (
+                        <p className="text-xs text-slate-600 italic">No unassigned guests</p>
+                    )}
+
+                    {/* Party groups */}
+                    {filteredPartyGroups.map(group => {
+                        const allSelected = group.members.length > 0 && group.members.every(m => selectedGuests.has(m.id));
+                        const someSelected = group.members.some(m => selectedGuests.has(m.id));
+                        return (
+                            <div key={group.primaryId} className="rounded-xl overflow-hidden border border-indigo-700/30">
+                                {/* Group header */}
+                                <div className="flex items-center justify-between px-3 py-2 bg-indigo-900/40">
+                                    <div className="flex items-center gap-2 min-w-0">
+                                        <Users className="w-3.5 h-3.5 text-indigo-400 flex-shrink-0" />
+                                        <span className="text-xs font-bold text-indigo-200 truncate">
+                                            {group.primaryIsUnassigned
+                                                ? `${group.primaryName} Party`
+                                                : `${group.primaryName}'s guests`}
+                                        </span>
+                                        <span className="text-[10px] text-indigo-400 flex-shrink-0">
+                                            · {group.members.length} remaining
+                                        </span>
                                     </div>
-                                    {selectedTableId && spotsLeft > 0 && (
-                                        <button
-                                            onClick={(e) => { e.stopPropagation(); onAssignGuests([guest.id], selectedTableId); }}
-                                            className="p-1 hover:bg-indigo-600/30 rounded transition-colors"
+                                    <button
+                                        onClick={() => toggleParty(group)}
+                                        className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold transition-colors flex-shrink-0 ml-2 ${
+                                            allSelected
+                                                ? 'bg-indigo-600/40 text-indigo-200 hover:bg-indigo-600/60'
+                                                : 'bg-indigo-800/60 text-indigo-300 hover:bg-indigo-700/60'
+                                        }`}
+                                        title={allSelected ? 'Deselect whole party' : 'Select whole party'}
+                                    >
+                                        <CheckCheck className="w-3 h-3" />
+                                        {allSelected ? 'Deselect' : someSelected ? 'Select rest' : 'Select Party'}
+                                    </button>
+                                </div>
+
+                                {/* Member rows */}
+                                <div className="bg-slate-800/30 divide-y divide-slate-700/20">
+                                    {group.members.map(guest => (
+                                        <div
+                                            key={guest.id}
+                                            className={`flex items-center gap-2 pl-6 pr-2.5 py-2 cursor-pointer transition-all ${
+                                                selectedGuests.has(guest.id)
+                                                    ? 'bg-indigo-600/20'
+                                                    : 'hover:bg-slate-800/60'
+                                            }`}
+                                            onClick={() => toggleGuest(guest.id)}
                                         >
-                                            <UserPlus className="w-4 h-4 text-indigo-400" />
-                                        </button>
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedGuests.has(guest.id)}
+                                                readOnly
+                                                className="w-4 h-4 rounded accent-indigo-600 flex-shrink-0"
+                                            />
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex items-center gap-1.5">
+                                                    <p className="text-sm font-medium text-white truncate">{guest.name}</p>
+                                                    {guest.guestType === 'child' && (
+                                                        <span className="text-[9px] bg-sky-500/20 text-sky-300 px-1.5 py-0.5 rounded-full font-bold uppercase">Child</span>
+                                                    )}
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <p className="text-xs text-slate-400 truncate">{guest.email}</p>
+                                                    {guest.dietaryPreferences && (
+                                                        <span className="text-[9px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded-full" title={guest.dietaryPreferences}>🍽</span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-1 flex-shrink-0">
+                                                <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase ${
+                                                    !guest.primaryAttendeeId
+                                                        ? 'bg-indigo-500/20 text-indigo-300'
+                                                        : 'bg-slate-600/50 text-slate-400'
+                                                }`}>
+                                                    {!guest.primaryAttendeeId ? 'Primary' : 'Guest'}
+                                                </span>
+                                                {selectedTableId && spotsLeft > 0 && (
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); onAssignGuests([guest.id], selectedTableId!); }}
+                                                        className="p-1 hover:bg-indigo-600/30 rounded transition-colors"
+                                                        title="Assign to selected table"
+                                                    >
+                                                        <UserPlus className="w-3.5 h-3.5 text-indigo-400" />
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        );
+                    })}
+
+                    {/* Unattached (solos) */}
+                    {(filteredSolos.length > 0 || (partyGroups.length === 0 && solos.length > 0)) && (
+                        <div>
+                            <button
+                                onClick={() => setShowUnattached(v => !v)}
+                                className="w-full flex items-center justify-between mb-2 group"
+                            >
+                                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                                    Unattached ({filteredSolos.length})
+                                </p>
+                                {showUnattached
+                                    ? <ChevronUp className="w-3.5 h-3.5 text-slate-600 group-hover:text-slate-400 transition-colors" />
+                                    : <ChevronDown className="w-3.5 h-3.5 text-slate-600 group-hover:text-slate-400 transition-colors" />
+                                }
+                            </button>
+                            {showUnattached && (
+                                <div className="space-y-1">
+                                    {filteredSolos.length === 0 ? (
+                                        <p className="text-xs text-slate-600 italic">No unattached guests found</p>
+                                    ) : (
+                                        filteredSolos.map(guest => (
+                                            <div
+                                                key={guest.id}
+                                                className={`flex items-center gap-2 p-2.5 rounded-lg cursor-pointer transition-all ${
+                                                    selectedGuests.has(guest.id)
+                                                        ? 'bg-indigo-600/20 border border-indigo-500/40'
+                                                        : 'bg-slate-800/50 hover:bg-slate-800 border border-transparent'
+                                                }`}
+                                                onClick={() => toggleGuest(guest.id)}
+                                            >
+                                                <input
+                                                    type="checkbox"
+                                                    checked={selectedGuests.has(guest.id)}
+                                                    readOnly
+                                                    className="w-4 h-4 rounded accent-indigo-600"
+                                                />
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-center gap-1.5">
+                                                        <p className="text-sm font-medium text-white truncate">{guest.name}</p>
+                                                        {guest.guestType === 'child' && (
+                                                            <span className="text-[9px] bg-sky-500/20 text-sky-300 px-1.5 py-0.5 rounded-full font-bold uppercase">Child</span>
+                                                        )}
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <p className="text-xs text-slate-400 truncate">{guest.email}</p>
+                                                        {guest.dietaryPreferences && (
+                                                            <span className="text-[9px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded-full" title={guest.dietaryPreferences}>🍽</span>
+                                                        )}
+                                                    </div>
+                                                    {guest.ticketType && (
+                                                        <p className="text-[10px] text-slate-500 truncate mt-0.5">{guest.ticketType}</p>
+                                                    )}
+                                                </div>
+                                                {selectedTableId && spotsLeft > 0 && (
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); onAssignGuests([guest.id], selectedTableId!); }}
+                                                        className="p-1 hover:bg-indigo-600/30 rounded transition-colors"
+                                                    >
+                                                        <UserPlus className="w-4 h-4 text-indigo-400" />
+                                                    </button>
+                                                )}
+                                            </div>
+                                        ))
                                     )}
                                 </div>
-                            ))
-                        )}
-                    </div>
+                            )}
+                        </div>
+                    )}
                 </div>
 
                 {/* Assigned section grouped by table */}

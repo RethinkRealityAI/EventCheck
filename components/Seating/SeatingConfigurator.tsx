@@ -186,7 +186,9 @@ export default function SeatingConfigurator() {
             setForms(f);
             setCustomModels(models);
             if (f.length > 0) {
-                setSelectedFormId(f[0].id);
+                const saved = localStorage.getItem('seatingDefaultFormId');
+                const preferred = saved && f.find(form => form.id === saved);
+                setSelectedFormId(preferred ? preferred.id : f[0].id);
             }
         };
         loadInit();
@@ -687,7 +689,10 @@ export default function SeatingConfigurator() {
 
                         <select
                             value={selectedFormId}
-                            onChange={(e) => setSelectedFormId(e.target.value)}
+                            onChange={(e) => {
+                                setSelectedFormId(e.target.value);
+                                localStorage.setItem('seatingDefaultFormId', e.target.value);
+                            }}
                             className="bg-slate-800 border border-slate-700 text-white text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 min-w-0 max-w-[140px] truncate"
                         >
                             {forms.map(f => (
