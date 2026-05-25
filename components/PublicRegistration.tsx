@@ -47,6 +47,25 @@ interface PublicRegistrationProps {
   onSaveAndClose?: () => void;
 }
 
+// Resolves a registrant's full display name from form fields + answers.
+// Handles forms with split "First Name" / "Last Name" fields (e.g. GANSID
+// Congress) by concatenating both, instead of returning only the first text
+// field (which is always just the first name on those forms).
+function resolveDisplayName(fields: FormField[], answers: Record<string, any>): string {
+  const firstF = fields.find(f => f.type === 'text' && /first\s*name|given\s*name/i.test(f.label));
+  const lastF  = fields.find(f => f.type === 'text' && /last\s*name|surname|family\s*name/i.test(f.label));
+  if (firstF || lastF) {
+    const parts = [
+      firstF ? (answers[firstF.id] || '') : '',
+      lastF  ? (answers[lastF.id]  || '') : '',
+    ].filter(Boolean);
+    return parts.join(' ') || 'Guest';
+  }
+  // Fall back to the first field whose type is 'text' or whose label mentions 'name'
+  const nameF = fields.find(f => f.type === 'text' || /\bname\b/i.test(f.label));
+  return nameF ? (answers[nameF.id] || 'Guest') : 'Guest';
+}
+
 const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: PublicRegistrationProps = {}) => {
   // Embedded = rendered inside the portal RegisterModal (which sets onComplete).
   // Non-embedded = standalone public URL (`/#/form/<id>`) — gets full-page card styling.
@@ -695,9 +714,8 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
 
     if (mode === 'guest' && fetchedPrimaryAttendee) {
       // In guest mode, name and email come from the form's standard fields
-      const nameField = form.fields.find(f => f.type === 'text' || f.label.toLowerCase().includes('name'));
       const emailField = form.fields.find(f => f.type === 'email' || f.label.toLowerCase().includes('email'));
-      const guestName = nameField ? answers[nameField.id] : 'Guest';
+      const guestName = resolveDisplayName(form.fields, answers);
       const guestEmail = emailField ? answers[emailField.id] : 'unknown@example.com';
 
       // Determine the record to update
@@ -773,7 +791,6 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
     }
 
     const emailField = form.fields.find(f => f.type === 'email' || f.label.toLowerCase().includes('email'));
-    const nameField = form.fields.find(f => f.type === 'text' || f.label.toLowerCase().includes('name'));
 
     // Construct Ticket Summary String
     let ticketTypeSummary = paymentStatus === 'paid' ? 'Paid Admission' : 'General Admission';
@@ -789,8 +806,9 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
       if (parts.length > 0) ticketTypeSummary = parts.join(', ');
     }
 
-    // Purchaser name/email from form fields (always preserved as primary)
-    let purchaserName = nameField ? answers[nameField.id] : 'Guest';
+    // Purchaser name/email from form fields (always preserved as primary).
+    // resolveDisplayName handles split first/last name fields correctly.
+    let purchaserName = resolveDisplayName(form.fields, answers);
     let purchaserEmail = emailField ? answers[emailField.id] : 'unknown@example.com';
 
     // If the user explicitly edited the first guest (Purchaser), use those details instead
@@ -1715,6 +1733,19 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                     tagline: false
                   }}
                   createOrder={(data, actions) => {
+                    // Build payer object so PayPal merchant dashboard shows the
+                    // registrant's name and email instead of a blank guest entry.
+                    const _emailF = form.fields.find(f => f.type === 'email' || f.label.toLowerCase().includes('email'));
+                    const _firstF = form.fields.find(f => f.type === 'text' && /first\s*name|given\s*name/i.test(f.label));
+                    const _lastF  = form.fields.find(f => f.type === 'text' && /last\s*name|surname|family\s*name/i.test(f.label));
+                    const _payerEmail = _emailF ? (answers[_emailF.id] || '') : '';
+                    const _givenName  = _firstF ? (answers[_firstF.id] || '') : resolveDisplayName(form.fields, answers);
+                    const _surname    = _lastF  ? (answers[_lastF.id]  || '') : '';
+                    const _payer: Record<string, any> = {};
+                    if (_givenName) _payer.name = { given_name: _givenName, ...(_surname ? { surname: _surname } : {}) };
+                    if (_payerEmail) _payer.email_address = _payerEmail;
+                    const _hasPayer = Object.keys(_payer).length > 0;
+
                     if (pricingTemplate && registrationMode === 'group' && groupTotal != null) {
                       const groupExtras = buildDynamicGroupExtras({
                         form,
@@ -1748,6 +1779,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                           ...(groupExtras.items ? { items: groupExtras.items } : {}),
                         }],
                         intent: 'CAPTURE',
+                        ...(_hasPayer ? { payer: _payer } : {}),
                       });
                     }
                     if (pricingTemplate && dynamicTotal != null) {
@@ -1772,6 +1804,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                           ...(dynExtras.items ? { items: dynExtras.items } : {}),
                         }],
                         intent: 'CAPTURE',
+                        ...(_hasPayer ? { payer: _payer } : {}),
                       });
                     }
                     const staticCurrency = ticketField?.ticketConfig?.currency || "USD";
@@ -1814,7 +1847,8 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                       ],
                       application_context: {
                         shipping_preference: "NO_SHIPPING"
-                      }
+                      },
+                      ...(_hasPayer ? { payer: _payer } : {}),
                     });
                   }}
                   onApprove={onPayPalApprove}
