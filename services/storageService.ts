@@ -442,10 +442,16 @@ function mapAttendeeFromDb(db: AttendeeRow): Attendee {
     adminNotes: (db as any).admin_notes || undefined,
     userId: db.user_id ?? null,
     pricingTemplateId: (db as any).pricing_template_id ?? null,
+    pricingTier: (db as any).pricing_tier ?? null,
+    pricingBracket: (db as any).pricing_bracket ?? null,
+    pricingCategoryId: (db as any).pricing_category_id ?? null,
     exhibitorBoothType: (db as any).exhibitor_booth_type ?? null,
     lastTicketEmailAt: (db as any).last_ticket_email_at ?? null,
     isPaidExtra: (db as any).is_paid_extra ?? false,
     isDonatedSeatClaim: (db as any).is_donated_seat_claim ?? false,
+    isBogoClaim: (db as any).is_bogo_claim ?? false,
+    bogoSourceAttendeeId: (db as any).bogo_source_attendee_id ?? null,
+    bogoDismissedByPayerAt: (db as any).bogo_dismissed_by_payer_at ?? null,
   };
 }
 
@@ -484,6 +490,13 @@ export function mapAttendeeToDb(a: Attendee): AttendeeInsert {
     last_ticket_email_at: a.lastTicketEmailAt ?? null,
     is_paid_extra: a.isPaidExtra ?? false,
     is_donated_seat_claim: a.isDonatedSeatClaim ?? false,
+    pricing_template_id: a.pricingTemplateId ?? null,
+    pricing_tier: a.pricingTier ?? null,
+    pricing_bracket: a.pricingBracket ?? null,
+    pricing_category_id: a.pricingCategoryId ?? null,
+    is_bogo_claim: a.isBogoClaim ?? false,
+    bogo_source_attendee_id: a.bogoSourceAttendeeId ?? null,
+    bogo_dismissed_by_payer_at: a.bogoDismissedByPayerAt ?? null,
   } as AttendeeInsert;
 }
 

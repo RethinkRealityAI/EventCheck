@@ -706,6 +706,246 @@ serve(async (req: Request) => {
             return jsonResponse({ ok: staffTicketEmailSent, staffTicketEmailSent });
         }
 
+        // ── BOGO: shared helper to load app_settings + smtp config + form + payer ──
+        // All four BOGO modes share the same lookup pattern.
+        async function loadBogoContext(supabase: any, attendeeId: string) {
+            const { data: free } = await supabase
+                .from('attendees').select('*').eq('id', attendeeId).maybeSingle();
+            if (!free) return null;
+            const { data: source } = free.bogo_source_attendee_id
+                ? await supabase
+                    .from('attendees').select('id, name, email')
+                    .eq('id', free.bogo_source_attendee_id).maybeSingle()
+                : { data: null };
+            const { data: form } = await supabase
+                .from('forms').select('title').eq('id', free.form_id).maybeSingle();
+            const { data: appSettings } = await supabase
+                .from('app_settings').select('*').eq('id', 1).maybeSingle();
+            const smtpConfig = appSettings
+                ? { host: appSettings.smtp_host, port: Number(appSettings.smtp_port || 587), user: appSettings.smtp_user, pass: appSettings.smtp_pass, fromName: (appSettings as any).email_from_name || 'GANSID Congress' }
+                : undefined;
+            return { free, source, form, appSettings, smtpConfig };
+        }
+
+        const BOGO_ADMIN_CONTACT = 'admin@inheritedblooddisorders.world';
+
+        // ── BOGO TICKET: send QR ticket to a free guest (inline mode at checkout,
+        //    or post-claim of a claim-link). Template defaults are baked in but
+        //    admin can override via app_settings.email_bogo_ticket_subject/body.
+        if (body.mode === 'bogo-ticket') {
+            const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+            const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+            const supabase = createClient(supabaseUrl, supabaseServiceKey);
+            const ctx = await loadBogoContext(supabase, body.attendeeId);
+            if (!ctx) return jsonResponse({ error: 'Free attendee not found' }, 404);
+            const { free, source, form, appSettings, smtpConfig } = ctx;
+            if (!free.email) return jsonResponse({ error: 'Free attendee has no email' }, 400);
+
+            const eventName = form?.title || 'the event';
+            const origin = body.origin || '';
+            const signupUrl = `${origin}/#/`;
+            const qrData = free.qr_payload || free.id;
+            const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(qrData)}`;
+
+            const rawSubject = (appSettings as any)?.email_bogo_ticket_subject
+                || '{{purchaser}} has sent you a free ticket to {{event}}';
+            const rawBody = (appSettings as any)?.email_bogo_ticket_body
+                || `<p>Hi {{name}},</p>
+<p><strong>{{purchaser}}</strong> has gifted you a free ticket to <strong>{{event}}</strong>.</p>
+<p>Your check-in QR code is below. Show it at the door.</p>
+<div style="text-align:center;margin:24px 0;"><img src="{{qr_image_url}}" alt="Check-in QR code" width="240" height="240" style="border:1px solid #e5e7eb;border-radius:8px;padding:8px;background:#fff;" /></div>
+<p style="color:#666;font-size:13px;">Registration ID: {{registration_id}}</p>
+<p style="margin-top:20px;padding:12px;background:#f9fafb;border-left:3px solid #e5e7eb;font-size:14px;">This ticket is issued to your email address and cannot be transferred to another person. If you have questions or issues, contact <a href="mailto:{{admin_contact}}">{{admin_contact}}</a>.</p>
+<p style="margin-top:16px;font-size:14px;">Optional: <a href="{{signup_url}}">create a profile</a> to manage your ticket and access event resources.</p>`;
+
+            const replace = (s: string) => s
+                .replace(/\{\{name\}\}/g, free.name || 'there')
+                .replace(/\{\{purchaser\}\}/g, source?.name || 'A colleague')
+                .replace(/\{\{event\}\}/g, eventName)
+                .replace(/\{\{qr_image_url\}\}/g, qrImageUrl)
+                .replace(/\{\{registration_id\}\}/g, free.id)
+                .replace(/\{\{signup_url\}\}/g, signupUrl)
+                .replace(/\{\{admin_contact\}\}/g, BOGO_ADMIN_CONTACT);
+
+            const subject = replace(rawSubject);
+            const body_html = replace(rawBody);
+            const html = generateEmailTemplate({
+                title: eventName,
+                greeting: `Hi ${free.name || 'there'}`,
+                content: body_html,
+                fromName: smtpConfig?.fromName,
+            });
+
+            try {
+                await sendSimpleEmail({ to: free.email, subject, html, smtpConfig });
+                // Stamp last_ticket_email_at so dashboards show "Sent".
+                await supabase.from('attendees')
+                    .update({ last_ticket_email_at: new Date().toISOString() })
+                    .eq('id', free.id);
+            } catch (e) {
+                console.error('bogo-ticket email failed', e);
+                return jsonResponse({ error: 'Email send failed' }, 500);
+            }
+            return jsonResponse({ ok: true });
+        }
+
+        // ── BOGO CLAIM LINK: send the claim link to the PAYER (not the guest),
+        //    who will forward it to whoever they'd like to bring. ──
+        if (body.mode === 'bogo-claim-link') {
+            const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+            const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+            const supabase = createClient(supabaseUrl, supabaseServiceKey);
+            const ctx = await loadBogoContext(supabase, body.attendeeId);
+            if (!ctx) return jsonResponse({ error: 'Free attendee not found' }, 404);
+            const { free, source, form, appSettings, smtpConfig } = ctx;
+            const payerEmail = source?.email;
+            if (!payerEmail) return jsonResponse({ error: 'Source attendee has no email' }, 400);
+
+            const eventName = form?.title || 'the event';
+            const origin = body.origin || '';
+            const claimUrl = `${origin}/#/form/${free.form_id}?ref=${free.id}`;
+            const portalTicketsUrl = `${origin}/#/portal/tickets`;
+
+            const rawSubject = (appSettings as any)?.email_bogo_claim_link_subject
+                || 'Your free guest claim link for {{event}}';
+            const rawBody = (appSettings as any)?.email_bogo_claim_link_body
+                || `<p>Hi {{payer_name}},</p>
+<p>Your free guest claim link for <strong>{{event}}</strong> is ready.</p>
+<p style="text-align:center;margin:24px 0;"><a href="{{claim_url}}" style="display:inline-block;padding:12px 24px;background:#ba0028;color:#fff;text-decoration:none;border-radius:6px;font-weight:600;">Forward this claim link</a></p>
+<p>Forward the link to the person you'd like to bring — they'll complete the short claim form and receive their ticket.</p>
+<p>You can also manage this and your other tickets from your portal: <a href="{{portal_tickets_url}}">{{portal_tickets_url}}</a></p>
+<p style="margin-top:20px;padding:12px;background:#f9fafb;border-left:3px solid #e5e7eb;font-size:14px;">Once your guest claims this ticket, the email they enter is locked to them. Make sure to forward this to the actual person attending. For issues, contact <a href="mailto:{{admin_contact}}">{{admin_contact}}</a>.</p>`;
+
+            const replace = (s: string) => s
+                .replace(/\{\{payer_name\}\}/g, source?.name || 'there')
+                .replace(/\{\{event\}\}/g, eventName)
+                .replace(/\{\{claim_url\}\}/g, claimUrl)
+                .replace(/\{\{portal_tickets_url\}\}/g, portalTicketsUrl)
+                .replace(/\{\{admin_contact\}\}/g, BOGO_ADMIN_CONTACT);
+
+            const subject = replace(rawSubject);
+            const body_html = replace(rawBody);
+            const html = generateEmailTemplate({
+                title: eventName,
+                greeting: `Hi ${source?.name || 'there'}`,
+                content: body_html,
+                fromName: smtpConfig?.fromName,
+            });
+
+            try {
+                await sendSimpleEmail({ to: payerEmail, subject, html, smtpConfig });
+            } catch (e) {
+                console.error('bogo-claim-link email failed', e);
+                return jsonResponse({ error: 'Email send failed' }, 500);
+            }
+            return jsonResponse({ ok: true });
+        }
+
+        // ── BOGO TICKET UPDATED: re-issue ticket to the free guest after the
+        //    payer edited recipient details (uncommitted-only). ──
+        if (body.mode === 'bogo-ticket-updated') {
+            const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+            const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+            const supabase = createClient(supabaseUrl, supabaseServiceKey);
+            const ctx = await loadBogoContext(supabase, body.attendeeId);
+            if (!ctx) return jsonResponse({ error: 'Free attendee not found' }, 404);
+            const { free, source, form, appSettings, smtpConfig } = ctx;
+            if (!free.email) return jsonResponse({ error: 'Free attendee has no email' }, 400);
+
+            const eventName = form?.title || 'the event';
+            const qrData = free.qr_payload || free.id;
+            const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(qrData)}`;
+
+            const rawSubject = (appSettings as any)?.email_bogo_ticket_updated_subject
+                || 'Your {{event}} ticket has been updated';
+            const rawBody = (appSettings as any)?.email_bogo_ticket_updated_body
+                || `<p>Hi {{name}},</p>
+<p>Your ticket for <strong>{{event}}</strong> has been updated by <strong>{{purchaser}}</strong>. The latest version is below — please discard any earlier copies.</p>
+<div style="text-align:center;margin:24px 0;"><img src="{{qr_image_url}}" alt="Check-in QR code" width="240" height="240" style="border:1px solid #e5e7eb;border-radius:8px;padding:8px;background:#fff;" /></div>
+<p style="margin-top:20px;padding:12px;background:#f9fafb;border-left:3px solid #e5e7eb;font-size:14px;">This ticket is issued to your email address and cannot be transferred. Questions? <a href="mailto:{{admin_contact}}">{{admin_contact}}</a>.</p>`;
+
+            const replace = (s: string) => s
+                .replace(/\{\{name\}\}/g, free.name || 'there')
+                .replace(/\{\{purchaser\}\}/g, source?.name || 'the buyer')
+                .replace(/\{\{event\}\}/g, eventName)
+                .replace(/\{\{qr_image_url\}\}/g, qrImageUrl)
+                .replace(/\{\{admin_contact\}\}/g, BOGO_ADMIN_CONTACT);
+
+            const subject = replace(rawSubject);
+            const body_html = replace(rawBody);
+            const html = generateEmailTemplate({
+                title: eventName,
+                greeting: `Hi ${free.name || 'there'}`,
+                content: body_html,
+                fromName: smtpConfig?.fromName,
+            });
+
+            try {
+                await sendSimpleEmail({ to: free.email, subject, html, smtpConfig });
+                await supabase.from('attendees')
+                    .update({ last_ticket_email_at: new Date().toISOString() })
+                    .eq('id', free.id);
+            } catch (e) {
+                console.error('bogo-ticket-updated email failed', e);
+                return jsonResponse({ error: 'Email send failed' }, 500);
+            }
+            return jsonResponse({ ok: true });
+        }
+
+        // ── BOGO TICKET WITHDRAWN: notify the free guest that their gifted
+        //    ticket has been withdrawn (because admin cancelled the paid
+        //    source attendee). ──
+        if (body.mode === 'bogo-ticket-withdrawn') {
+            const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+            const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+            const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+            // For withdrawn, the row may be about to be deleted — accept
+            // a name+email+eventName payload directly so the caller can
+            // capture before delete.
+            const guestEmail = body.guestEmail || '';
+            const guestName = body.guestName || 'there';
+            const payerName = body.payerName || 'A colleague';
+            const eventName = body.eventName || 'the event';
+            if (!guestEmail) return jsonResponse({ error: 'guestEmail required' }, 400);
+
+            const { data: appSettings } = await supabase
+                .from('app_settings').select('*').eq('id', 1).maybeSingle();
+            const smtpConfig = appSettings
+                ? { host: appSettings.smtp_host, port: Number(appSettings.smtp_port || 587), user: appSettings.smtp_user, pass: appSettings.smtp_pass, fromName: (appSettings as any).email_from_name || 'GANSID Congress' }
+                : undefined;
+
+            const rawSubject = (appSettings as any)?.email_bogo_ticket_withdrawn_subject
+                || 'Your free ticket to {{event}} has been withdrawn';
+            const rawBody = (appSettings as any)?.email_bogo_ticket_withdrawn_body
+                || `<p>Hi {{name}},</p>
+<p>The free ticket <strong>{{purchaser}}</strong> sent you for <strong>{{event}}</strong> has been withdrawn. We're sorry for the inconvenience.</p>
+<p style="margin-top:20px;padding:12px;background:#f9fafb;border-left:3px solid #e5e7eb;font-size:14px;">For questions or alternatives, please contact <a href="mailto:{{admin_contact}}">{{admin_contact}}</a>.</p>`;
+
+            const replace = (s: string) => s
+                .replace(/\{\{name\}\}/g, guestName)
+                .replace(/\{\{purchaser\}\}/g, payerName)
+                .replace(/\{\{event\}\}/g, eventName)
+                .replace(/\{\{admin_contact\}\}/g, BOGO_ADMIN_CONTACT);
+
+            const subject = replace(rawSubject);
+            const body_html = replace(rawBody);
+            const html = generateEmailTemplate({
+                title: eventName,
+                greeting: `Hi ${guestName}`,
+                content: body_html,
+                fromName: smtpConfig?.fromName,
+            });
+
+            try {
+                await sendSimpleEmail({ to: guestEmail, subject, html, smtpConfig });
+            } catch (e) {
+                console.error('bogo-ticket-withdrawn email failed', e);
+                return jsonResponse({ error: 'Email send failed' }, 500);
+            }
+            return jsonResponse({ ok: true });
+        }
+
         // ── DEFAULT FLOW: generic SMTP relay (original behaviour) ──
         const { smtpConfig, email } = body;
 

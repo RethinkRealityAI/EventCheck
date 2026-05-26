@@ -41,6 +41,12 @@ export interface Attendee {
    *  and "static-ticket table purchaser with guest placeholder seats" (SCAGO).
    *  Null/undefined on static-ticket registrations. */
   pricingTemplateId?: string | null;
+  /** Dynamic-pricing inputs stamped at purchase time. Required for BOGO
+   *  price-ceiling lookups (free guest's category price at the payer's
+   *  tier+bracket must be <= payer's category price at the same lookup). */
+  pricingTier?: string | null;
+  pricingBracket?: string | null;
+  pricingCategoryId?: string | null;
   /** Stamped whenever the ticket email is sent or re-sent. Surfaces on the
    *  dashboard as a "Ticket Sent" column so staff can see who's been
    *  notified vs. who still needs an email. Independent of registration
@@ -56,6 +62,20 @@ export interface Attendee {
    *  pool. The available pool is computed as
    *  `SUM(donatedSeats) − COUNT(isDonatedSeatClaim)` across all attendees. */
   isDonatedSeatClaim?: boolean;
+  /** True when this attendee row is a Buy-One-Get-One-Free claim — i.e.
+   *  a free ticket gifted by another paying attendee. The paying source
+   *  is identified by `bogoSourceAttendeeId`. Free rows have
+   *  `paymentStatus='free'`, `paymentAmount=0`, `paymentMethod='bogo'`. */
+  isBogoClaim?: boolean;
+  /** Set on BOGO claim rows only. References the paid attendee row whose
+   *  BOGO slot this free ticket consumes. Enforces 1:1 via partial unique
+   *  index in the DB. */
+  bogoSourceAttendeeId?: string | null;
+  /** Set when the payer of the BOGO source ticket has cosmetically hidden
+   *  this claim row from their portal "My Tickets" view. Does NOT free the
+   *  BOGO slot — the claim remains "used". Free guest's ticket and profile
+   *  are unaffected. */
+  bogoDismissedByPayerAt?: string | null;
 }
 
 export interface SeatingConfiguration {
@@ -224,6 +244,14 @@ export interface Form {
     sendGuestConfirmationEmails?: boolean;
     renderMode?: 'single' | 'stepped';
     steps?: FormStep[];
+    /** When true, each paid attendee on this form unlocks one BOGO free
+     *  guest ticket of equal or lesser value (compared at the payer's
+     *  tier+bracket). Only meaningful on `formType='event'` forms with a
+     *  `pricingTemplateId`. UI surfaces gated by `CURRENT_SITE.portalEnabled`. */
+    bogoEnabled?: boolean;
+    /** Optional admin-customizable copy shown to the buyer in the BOGO
+     *  section at checkout. Falls back to a sensible default if empty. */
+    bogoNoteToBuyer?: string;
   };
   pdfSettings?: Partial<PdfSettings>; // Per-form PDF overrides
   pricingTemplate?: PricingTemplate; // Runtime-attached in getFormById; not persisted in DB
@@ -520,6 +548,18 @@ export interface GroupMemberPricingSelection {
   countryCode: string;
   categoryId: string;
   addonIds: string[];
+}
+
+/** BOGO claim payload — sent inside the `verify-payment` request body
+ *  for at-checkout BOGO claims, and also accepted by the `bogo-send`
+ *  edge function for post-purchase sends. `paidIndex` references the
+ *  position of the paying attendee in the attendees[] array. */
+export interface BogoClaim {
+  paidIndex: number;
+  mode: 'inline' | 'claim_link';
+  guestName?: string;
+  guestEmail?: string;
+  categoryId?: string | null;
 }
 
 // ============================================================

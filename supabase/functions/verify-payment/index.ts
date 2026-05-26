@@ -1,6 +1,10 @@
 // @ts-nocheck
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import {
+  buildBogoRow,
+  isCategoryAtOrBelowCeiling,
+} from '../_shared/bogoRowBuilder.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -14,6 +18,131 @@ function jsonResponse(body: Record<string, any>, status = 200) {
     status,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
+}
+
+// ── BOGO claim validation + insert helper ─────────────────────────────────
+// Used by both the group and solo dynamic-pricing branches. Validates the
+// bogoClaims array against the resolved payer rows, builds free attendee
+// rows via the shared helper, inserts them, and fires emails for each.
+//
+// Returns { partialBogoFailure: boolean }. NEVER throws — partial failure
+// means the paid rows already succeeded and we don't want to surface 500
+// for a $0 row that the user can retry from the portal.
+async function processBogoClaims(args: {
+  supabase: any;
+  paidRows: Array<any>; // ordered to match bogoClaims[].paidIndex
+  bogoClaims: Array<any>;
+  invoiceId: string;
+  formId: string;
+  formSettings: any;
+  formTitle: string | null;
+  serviceRoleKey: string;
+  supabaseUrl: string;
+  origin: string;
+}): Promise<{ partialBogoFailure: boolean }> {
+  const { supabase, paidRows, bogoClaims, invoiceId, formId, formTitle, serviceRoleKey, supabaseUrl, origin } = args;
+  if (!bogoClaims || bogoClaims.length === 0) return { partialBogoFailure: false };
+
+  // Build free rows. Per spec, free row inherits payer's tier+bracket — the
+  // ceiling is enforced at PAYER's tier+bracket, not the guest's.
+  const bogoRows = bogoClaims.map((claim: any) => {
+    const paid = paidRows[claim.paidIndex];
+    return buildBogoRow({
+      paid: {
+        id: paid.id,
+        form_id: paid.form_id,
+        form_title: paid.form_title ?? formTitle,
+        email: paid.email,
+        pricing_template_id: paid.pricing_template_id,
+        pricing_tier: paid.pricing_tier,
+        pricing_bracket: paid.pricing_bracket,
+      },
+      formId,
+      invoiceId,
+      mode: claim.mode,
+      guestName: claim.guestName,
+      guestEmail: claim.guestEmail,
+      guestCategoryId: claim.categoryId,
+    });
+  });
+
+  const { data: inserted, error: bogoErr } = await supabase
+    .from('attendees').insert(bogoRows).select('id');
+
+  if (bogoErr || !inserted || inserted.length !== bogoRows.length) {
+    console.error('[verify-payment] BOGO insert partial failure', JSON.stringify({
+      error: bogoErr?.message,
+      expected: bogoRows.length,
+      got: inserted?.length ?? 0,
+    }));
+    return { partialBogoFailure: true };
+  }
+
+  // Fire emails (fire-and-forget). Mode 'inline' → ticket to guest;
+  // mode 'claim_link' → claim link to payer.
+  const emailFnUrl = `${supabaseUrl}/functions/v1/send-ticket-email`;
+  for (let i = 0; i < bogoClaims.length; i++) {
+    const claim = bogoClaims[i];
+    const row = bogoRows[i];
+    const mode = claim.mode === 'inline' ? 'bogo-ticket' : 'bogo-claim-link';
+    fetch(emailFnUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${serviceRoleKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ mode, attendeeId: row.id, origin }),
+    }).catch((e: any) => console.warn('BOGO email failed', e));
+  }
+
+  return { partialBogoFailure: false };
+}
+
+// Validates bogoClaims request shape against per-member pricing resolutions.
+// Runs BEFORE PayPal capture so we 422 cleanly without taking money.
+// Returns null when valid, or a Response (already a 422) when not.
+function validateBogoClaimsPreCapture(args: {
+  bogoClaims: Array<any>;
+  memberCount: number;
+  formSettings: any;
+  tpl: any;
+  payerResolutionByIndex: Array<{ tierId: string; bracketId: string; categoryId: string }>;
+}): Response | null {
+  const { bogoClaims, memberCount, formSettings, tpl, payerResolutionByIndex } = args;
+  if (!bogoClaims || bogoClaims.length === 0) return null;
+  if (!formSettings?.bogoEnabled) {
+    return jsonResponse({ error: 'BOGO_NOT_ENABLED' }, 422);
+  }
+  const seenIdxs = new Set<number>();
+  for (const claim of bogoClaims) {
+    if (typeof claim.paidIndex !== 'number' || claim.paidIndex < 0 || claim.paidIndex >= memberCount) {
+      return jsonResponse({ error: 'BOGO_BAD_INDEX' }, 422);
+    }
+    if (seenIdxs.has(claim.paidIndex)) {
+      return jsonResponse({ error: 'BOGO_DUPLICATE_SOURCE' }, 422);
+    }
+    seenIdxs.add(claim.paidIndex);
+    if (claim.mode !== 'inline' && claim.mode !== 'claim_link') {
+      return jsonResponse({ error: 'BOGO_BAD_MODE' }, 422);
+    }
+    if (claim.mode === 'inline') {
+      if (!claim.guestName || typeof claim.guestName !== 'string' || claim.guestName.trim().length === 0) {
+        return jsonResponse({ error: 'BOGO_MISSING_FIELDS' }, 422);
+      }
+      if (!claim.guestEmail || !/^.+@.+\..+$/.test(String(claim.guestEmail))) {
+        return jsonResponse({ error: 'BOGO_MISSING_FIELDS' }, 422);
+      }
+      if (!claim.categoryId || typeof claim.categoryId !== 'string') {
+        return jsonResponse({ error: 'BOGO_MISSING_FIELDS' }, 422);
+      }
+      const payer = payerResolutionByIndex[claim.paidIndex];
+      if (!payer) return jsonResponse({ error: 'BOGO_BAD_INDEX' }, 422);
+      if (!isCategoryAtOrBelowCeiling(tpl, payer.categoryId, payer.tierId, payer.bracketId, claim.categoryId)) {
+        return jsonResponse({ error: 'BOGO_PRICE_EXCEEDED' }, 422);
+      }
+    }
+  }
+  return null;
 }
 
 interface TicketItem {
@@ -899,6 +1028,20 @@ serve(async (req: Request) => {
 
         const expectedCents = memberResolutions.reduce((sum, m) => sum + m.cents, 0);
 
+        // 3b. BOGO pre-capture validation — runs BEFORE PayPal so we 422
+        // cleanly without taking money on a malformed claim.
+        const groupBogoClaims = Array.isArray(body.bogoClaims) ? body.bogoClaims : [];
+        const groupBogoValidationFail = validateBogoClaimsPreCapture({
+          bogoClaims: groupBogoClaims,
+          memberCount: memberResolutions.length,
+          formSettings: formData.settings,
+          tpl,
+          payerResolutionByIndex: memberResolutions.map(m => ({
+            tierId: m.tierId, bracketId: m.bracketId, categoryId: m.categoryId,
+          })),
+        });
+        if (groupBogoValidationFail) return groupBogoValidationFail;
+
         // 4. Capture PayPal order — replicate the inlined OAuth + capture logic
         if (!paypalOrderId) return jsonResponse({ error: 'paypalOrderId required for group payment' }, 400);
         const ppMode = (Deno.env.get('PAYPAL_MODE') || '').toLowerCase();
@@ -1001,7 +1144,31 @@ serve(async (req: Request) => {
           }
         }
 
-        return jsonResponse({ ok: true, total: expectedCents, currency: tpl.currency ?? 'USD', primaryId, guestIds: rows.slice(1).map(r => r.id) });
+        // BOGO post-insert: build free rows + fire emails. Partial failure
+        // is tolerated (paid rows are already in); response surfaces
+        // partialBogoFailure so client can prompt the user to retry from
+        // their portal.
+        const groupBogoResult = await processBogoClaims({
+          supabase,
+          paidRows: rows,
+          bogoClaims: groupBogoClaims,
+          invoiceId: ppCapture.id,
+          formId,
+          formSettings: formData.settings,
+          formTitle: formData.title ?? null,
+          serviceRoleKey: Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+          supabaseUrl: Deno.env.get('SUPABASE_URL')!,
+          origin: req.headers.get('origin') ?? '',
+        });
+
+        return jsonResponse({
+          ok: true,
+          total: expectedCents,
+          currency: tpl.currency ?? 'USD',
+          primaryId,
+          guestIds: rows.slice(1).map(r => r.id),
+          partialBogoFailure: groupBogoResult.partialBogoFailure,
+        });
       }
       // ── END GROUP DYNAMIC BRANCH — fall through to single-person dynamic branch below ──
 
@@ -1053,6 +1220,20 @@ serve(async (req: Request) => {
 
         // 7. expectedCents = base fee (already in cents) + addons
         const expectedCents = fee + addonTotal;
+
+        // 7b. BOGO pre-capture validation — solo branch has exactly 1 paid
+        // attendee, so any bogoClaim must have paidIndex=0.
+        const soloBogoClaims = Array.isArray(body.bogoClaims) ? body.bogoClaims : [];
+        const soloBogoValidationFail = validateBogoClaimsPreCapture({
+          bogoClaims: soloBogoClaims,
+          memberCount: 1,
+          formSettings: formData.settings,
+          tpl,
+          payerResolutionByIndex: [{
+            tierId: activeTier.id, bracketId: activeBracket.id, categoryId: cat.id,
+          }],
+        });
+        if (soloBogoValidationFail) return soloBogoValidationFail;
 
         // 8. Capture PayPal order and extract amount in cents
         if (!paypalOrderId) return jsonResponse({ error: 'paypalOrderId required for dynamic pricing payment' }, 400);
@@ -1158,8 +1339,36 @@ serve(async (req: Request) => {
           }, 500);
         }
 
-        // 11. Return success
-        return jsonResponse({ ok: true, total: expectedCents, currency: tpl.currency ?? 'CAD' });
+        // 11. BOGO post-insert: build + insert free rows, fire emails.
+        const soloPaidRowForBogo = {
+          id: primary.id,
+          form_id: formId,
+          form_title: formData.title ?? null,
+          email: primary.email,
+          pricing_template_id: tpl.id,
+          pricing_tier: activeTier.id,
+          pricing_bracket: activeBracket.id,
+        };
+        const soloBogoResult = await processBogoClaims({
+          supabase,
+          paidRows: [soloPaidRowForBogo],
+          bogoClaims: soloBogoClaims,
+          invoiceId: ppCapture.id,
+          formId,
+          formSettings: formData.settings,
+          formTitle: formData.title ?? null,
+          serviceRoleKey: Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+          supabaseUrl: Deno.env.get('SUPABASE_URL')!,
+          origin: req.headers.get('origin') ?? '',
+        });
+
+        // 12. Return success
+        return jsonResponse({
+          ok: true,
+          total: expectedCents,
+          currency: tpl.currency ?? 'CAD',
+          partialBogoFailure: soloBogoResult.partialBogoFailure,
+        });
       }
       // ── END DYNAMIC PRICING BRANCH — fall through to static-pricing event branch ──
 
