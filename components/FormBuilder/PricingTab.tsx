@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import type { Form, PricingTemplate, AppSettings, PromoCode } from '../../types';
+import { DEFAULT_SPEAKER_PROMO_APPLIED_MESSAGE } from '../../utils/promoCodes';
 import { getPricingTemplates, getSettings } from '../../services/storageService';
 import { resolveBracket } from '../../utils/pricing';
 import { CURRENT_SITE } from '../../config/sites';
@@ -172,6 +173,14 @@ export default function PricingTab({ form, onFormChange }: Props) {
                         Remove
                       </button>
                     </div>
+                    <select
+                      value={p.appliesTo || 'all'}
+                      onChange={e => updatePromoCode(i, { appliesTo: e.target.value as 'all' | 'registration_only' })}
+                      className="w-full px-2 py-1.5 text-sm border border-slate-300 rounded"
+                    >
+                      <option value="all">Applies to: Overall pricing (tickets + add-ons)</option>
+                      <option value="registration_only">Applies to: Registration fee only (excludes add-ons)</option>
+                    </select>
                     <div className="flex flex-wrap gap-3 text-xs">
                       <label className="flex items-center gap-1.5">
                         <input
@@ -185,11 +194,26 @@ export default function PricingTab({ form, onFormChange }: Props) {
                         <input
                           type="checkbox"
                           checked={p.appliesGuestType === 'speaker'}
-                          onChange={e => updatePromoCode(i, { appliesGuestType: e.target.checked ? 'speaker' : undefined })}
+                          onChange={e => {
+                            const speaker = e.target.checked;
+                            updatePromoCode(i, {
+                              appliesGuestType: speaker ? 'speaker' : undefined,
+                              appliedMessage: speaker && !p.appliedMessage
+                                ? DEFAULT_SPEAKER_PROMO_APPLIED_MESSAGE
+                                : p.appliedMessage,
+                            });
+                          }}
                         />
                         <span>Tag registrant as Speaker (solo registrations only)</span>
                       </label>
                     </div>
+                    <input
+                      type="text"
+                      placeholder="Message after Apply (e.g. Speaker Registration Discount Applied)"
+                      value={p.appliedMessage ?? ''}
+                      onChange={e => updatePromoCode(i, { appliedMessage: e.target.value })}
+                      className="w-full px-2 py-1.5 text-sm border border-slate-300 rounded"
+                    />
                     <input
                       type="text"
                       placeholder="Internal description (admin-only, optional)"

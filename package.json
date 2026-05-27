@@ -15,9 +15,10 @@
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "lint:migrations": "node scripts/lint-migrations.mjs",
+    "check:migrations": "node scripts/check-migrations-parity.mjs",
     "smoke:db": "node scripts/smoke-db.mjs",
     "predeploy": "npm run lint:migrations && tsc --noEmit && npm run test && npm run build",
-    "postdeploy": "npm run smoke:db"
+    "postdeploy": "npm run smoke:db && npm run check:migrations"
   },
   "dependencies": {
     "@paypal/react-paypal-js": "^8.9.2",
