@@ -1277,6 +1277,75 @@ export async function getAttendeesForUser(userId: string, email: string): Promis
 }
 
 /**
+ * Portal "My Tickets" data: the user's own attendee rows PLUS any BOGO claim
+ * rows that reference one of their paid rows as the source.
+ *
+ * Why two queries: a pre-forward claim-link BOGO row has `user_id IS NULL`
+ * (no recipient yet), so a single user_id/email filter would miss it. The
+ * RLS policy `users_can_see_their_bogo_claims` allows the SELECT — we
+ * still need an explicit `bogo_source_attendee_id IN (...)` filter so
+ * PostgREST returns only the relevant rows.
+ */
+export async function getAttendeesForUserWithBogoClaims(
+  userId: string,
+  email: string,
+): Promise<Attendee[]> {
+  const own = await getAttendeesForUser(userId, email);
+  // "Mine" includes my own primary rows AND any group members I purchased
+  // (their primary_attendee_id points at a primary of mine). Group members'
+  // user_id is NULL pre-claim, so the basic user_id/email query above
+  // misses them — but the primary owns their BOGO slot until they claim.
+  const myPrimaryIds = own
+    .filter(a => a.isBogoClaim !== true && a.isPrimary !== false)
+    .map(a => a.id);
+
+  let groupRows: any[] = [];
+  if (myPrimaryIds.length > 0) {
+    // Pull paid group members linked to my primary rows so the portal can
+    // surface their BOGO slots. Exclude staff/exhibitor-staff rows — those
+    // belong on the sponsor/exhibitor dashboard, not the personal portal.
+    const { data, error } = await supabase
+      .from('attendees')
+      .select('*')
+      .in('primary_attendee_id', myPrimaryIds)
+      .not('guest_type', 'in', '(staff-pending,staff-claimed,exhibitor-staff-pending,exhibitor-staff-claimed)');
+    if (error) console.error('getAttendeesForUserWithBogoClaims group pass', error);
+    else groupRows = data ?? [];
+  }
+
+  // BOGO claim rows — referenced by any of my paid attendees (primary or
+  // group member). Pre-claim claim_link rows have user_id IS NULL and would
+  // be missed otherwise; the dedicated RLS policy permits this read.
+  const seen = new Set<string>(own.map(a => a.id));
+  const merged: Attendee[] = [...own];
+  for (const row of groupRows) {
+    if (seen.has(row.id)) continue;
+    seen.add(row.id);
+    merged.push(mapAttendeeFromDb(row));
+  }
+  const allPaidIds = merged
+    .filter(a => a.isBogoClaim !== true)
+    .map(a => a.id);
+  if (allPaidIds.length === 0) return merged;
+
+  const { data: claimRows, error: claimErr } = await supabase
+    .from('attendees')
+    .select('*')
+    .eq('is_bogo_claim', true)
+    .in('bogo_source_attendee_id', allPaidIds);
+  if (claimErr) {
+    console.error('getAttendeesForUserWithBogoClaims claim pass', claimErr);
+    return merged;
+  }
+  for (const row of claimRows ?? []) {
+    if (seen.has((row as any).id)) continue;
+    seen.add((row as any).id);
+    merged.push(mapAttendeeFromDb(row as any));
+  }
+  return merged;
+}
+
+/**
  * Fetch every attendee row that belongs to a given primary (i.e. staff +
  * guest placeholder rows for sponsor/exhibitor/group primaries). Ordered by
  * `registered_at` because the `attendees` table has no `created_at` column.

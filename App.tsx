@@ -20,6 +20,7 @@ import { CURRENT_SITE } from './config/sites';
 import { Landing } from './components/Portal/Landing/Landing';
 import { SponsorExhibitorLandingPage } from './components/SponsorExhibitor/SponsorExhibitorLandingPage';
 import { PortalLayout } from './components/Portal/PortalLayout';
+import MyTicketsPage from './components/Portal/MyTickets/MyTicketsPage';
 import { PortalDashboard } from './components/Portal/Dashboard/PortalDashboard';
 import { ProfilePage } from './components/Portal/Profile/ProfilePage';
 import { ResetPasswordPage } from './components/Portal/ResetPassword/ResetPasswordPage';
@@ -718,6 +719,7 @@ export default function App() {
                   }
                 >
                   <Route index element={<PortalDashboard />} />
+                  <Route path="tickets" element={<MyTicketsPage />} />
                   <Route path="profile" element={<ProfilePage />} />
                 </Route>
               </>

@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { getFormById, getSettings, saveAttendee, getAttendee, getGuestsByPrimaryId, mapAttendeeToDb, updateAttendee } from '../services/storageService';
-import { FormField, AppSettings, Attendee, Form, DynamicPricingSelection } from '../types';
+import { FormField, AppSettings, Attendee, Form, DynamicPricingSelection, BogoClaim } from '../types';
 import type { PricingTemplate } from '../types';
 import { resolveBracket, resolveTier, computeTotal, formatPrice } from '../utils/pricing';
+import { getEligibleBogoCategories, BOGO_ADMIN_CONTACT } from '../utils/bogo';
 import { computeGroupTotal, type GroupMemberPricingInput } from '../utils/groupPricing';
 import { clearAllProgress } from '../utils/registrationProgress';
 import CountryField from './FormBuilder/fields/CountryField';
@@ -168,6 +169,19 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
     { name: '', email: '', countryCode: '', categoryId: null, addonIds: [] },
   ]);
 
+  // ── BOGO slots — one per paid attendee. Index 0 is the buyer themselves;
+  //    indices 1..N are group members. `mode='skip'` means no BOGO for this
+  //    paid ticket. Synced to the paid attendee count via useEffect below.
+  type BogoSlot = {
+    mode: 'inline' | 'claim_link' | 'skip';
+    guestName: string;
+    guestEmail: string;
+    categoryId: string;
+  };
+  const [bogoSlots, setBogoSlots] = useState<BogoSlot[]>([
+    { mode: 'inline', guestName: '', guestEmail: '', categoryId: '' },
+  ]);
+
   // Derived pricing values — recomputed each render
   const activeBracket = pricingTemplate ? resolveBracket(pricingTemplate, new Date()) : null;
   const activeTier = pricingTemplate ? resolveTier(pricingTemplate, selectedCountryCode) : null;
@@ -218,6 +232,82 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
       return prev.slice(0, groupSize);
     });
   }, [groupSize]);
+
+  // BOGO is gated on form opt-in + a pricing template (no template ⇒ no
+  // category ceiling to enforce).
+  const bogoFeatureOn = !!(form?.settings?.bogoEnabled && pricingTemplate);
+
+  // Sync bogoSlots length to match paid-attendee count (buyer + group members).
+  const bogoSlotCount = bogoFeatureOn
+    ? (registrationMode === 'group' ? 1 + groupMembers.length : 1)
+    : 0;
+  useEffect(() => {
+    setBogoSlots(prev => {
+      if (prev.length === bogoSlotCount) return prev;
+      if (prev.length < bogoSlotCount) {
+        return [
+          ...prev,
+          ...Array(bogoSlotCount - prev.length).fill(null).map(() => ({
+            mode: 'inline' as const, guestName: '', guestEmail: '', categoryId: '',
+          })),
+        ];
+      }
+      return prev.slice(0, bogoSlotCount);
+    });
+  }, [bogoSlotCount]);
+
+  // Per-payer pricing info for BOGO — used to drive each slot's category
+  // dropdown and to flag a slot as un-fillable (payer hasn't picked a
+  // category yet). Index 0 = buyer; 1..N = group members.
+  type BogoPayerInfo = {
+    label: string;
+    categoryId: string;
+    tierId: string;
+    bracketId: string;
+    categoryName: string;
+  };
+  const bogoPayerInfos: BogoPayerInfo[] = (() => {
+    if (!bogoFeatureOn || !pricingTemplate || !activeBracket) return [];
+    const infos: BogoPayerInfo[] = [];
+    if (selectedCategoryId && activeTier) {
+      const cat = pricingTemplate.categories.find(c => c.id === selectedCategoryId);
+      infos.push({
+        label: 'You',
+        categoryId: selectedCategoryId,
+        tierId: activeTier.id,
+        bracketId: activeBracket.id,
+        categoryName: cat?.name ?? selectedCategoryId,
+      });
+    } else {
+      infos.push({ label: 'You', categoryId: '', tierId: '', bracketId: '', categoryName: '' });
+    }
+    if (registrationMode === 'group') {
+      for (let i = 0; i < groupMembers.length; i++) {
+        const m = groupMembers[i];
+        const tier = m.countryCode ? resolveTier(pricingTemplate, m.countryCode) : null;
+        const cat = m.categoryId ? pricingTemplate.categories.find(c => c.id === m.categoryId) : null;
+        infos.push({
+          label: m.name?.trim() || `Member ${i + 1}`,
+          categoryId: m.categoryId ?? '',
+          tierId: tier?.id ?? '',
+          bracketId: activeBracket.id,
+          categoryName: cat?.name ?? '',
+        });
+      }
+    }
+    return infos;
+  })();
+
+  // BOGO inline-slot validity for submit-button gating
+  const bogoSlotsValid = !bogoFeatureOn || bogoSlots.every((s, i) => {
+    if (s.mode === 'skip' || s.mode === 'claim_link') return true;
+    const payer = bogoPayerInfos[i];
+    if (!payer || !payer.categoryId || !payer.tierId) return false; // payer not ready
+    if (!s.guestName.trim()) return false;
+    if (!/^.+@.+\..+$/.test(s.guestEmail)) return false;
+    if (!s.categoryId) return false;
+    return true;
+  });
 
   // "Same country" shortcut — propagate first member's country to all
   useEffect(() => {
@@ -963,6 +1053,29 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
       verifyBody.pricingSelection = pricingSelection;
     }
 
+    // BOGO claims — build from non-skip slots. paidIndex matches the order
+    // attendees are inserted server-side: 0 = primary buyer, 1..N = group
+    // members in their list order.
+    if (bogoFeatureOn && bogoSlots.length > 0) {
+      const claims: BogoClaim[] = [];
+      for (let i = 0; i < bogoSlots.length; i++) {
+        const s = bogoSlots[i];
+        if (s.mode === 'skip') continue;
+        if (s.mode === 'inline') {
+          claims.push({
+            paidIndex: i,
+            mode: 'inline',
+            guestName: s.guestName.trim(),
+            guestEmail: s.guestEmail.trim(),
+            categoryId: s.categoryId,
+          });
+        } else {
+          claims.push({ paidIndex: i, mode: 'claim_link', categoryId: null });
+        }
+      }
+      if (claims.length > 0) verifyBody.bogoClaims = claims;
+    }
+
     // Track IDs we generate for each group member so we can reuse them
     // post-success for PDF generation (purchaser-backup attachments + per-guest emails).
     const groupGuestRows: Array<{ id: string; name: string; email: string; qrPayload: string; isInline: boolean }> = [];
@@ -1646,11 +1759,128 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
               </div>
             )}
 
+            {bogoFeatureOn && !isAnyPendingClaim && bogoSlotCount > 0 && pricingTemplate && (
+              <div className="rounded-2xl border-2 border-emerald-200 bg-emerald-50/60 p-5">
+                <div className="flex items-start gap-3 mb-3">
+                  <span className="text-2xl">🎁</span>
+                  <div>
+                    <h3 className="font-bold text-emerald-900 text-lg leading-tight">
+                      {bogoSlotCount === 1 ? 'Bring a guest free' : `Bring up to ${bogoSlotCount} guests free`}
+                    </h3>
+                    <p className="text-sm text-emerald-800 mt-1">
+                      {form.settings?.bogoNoteToBuyer
+                        || 'Each paid ticket includes one free guest of equal or lesser ticket value.'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  {bogoSlots.map((slot, i) => {
+                    const payer = bogoPayerInfos[i];
+                    const payerReady = payer && payer.categoryId && payer.tierId;
+                    const eligibleCats = payerReady && pricingTemplate
+                      ? getEligibleBogoCategories(pricingTemplate, {
+                          pricingCategoryId: payer.categoryId,
+                          pricingTier: payer.tierId,
+                          pricingBracket: payer.bracketId,
+                        })
+                      : [];
+                    const update = (patch: Partial<BogoSlot>) => {
+                      setBogoSlots(prev => prev.map((s, idx) => idx === i ? { ...s, ...patch } : s));
+                    };
+                    return (
+                      <div key={i} className="rounded-xl border border-emerald-200 bg-white p-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="text-sm text-emerald-900">
+                            <strong>Free guest paired with:</strong>{' '}
+                            {payer?.label ?? `Paid ticket ${i + 1}`}
+                            {payer?.categoryName && (
+                              <span className="text-emerald-700"> ({payer.categoryName})</span>
+                            )}
+                          </div>
+                        </div>
+
+                        {!payerReady ? (
+                          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
+                            Finish picking this ticket's category {i === 0 ? 'above' : 'in the group section'} to unlock the free guest.
+                          </p>
+                        ) : (
+                          <>
+                            <div className="flex flex-wrap gap-2 mb-3 text-xs">
+                              {(['inline', 'claim_link', 'skip'] as const).map(m => (
+                                <label key={m} className={`px-3 py-1.5 rounded-full border cursor-pointer transition ${slot.mode === m ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-emerald-800 border-emerald-300 hover:bg-emerald-100'}`}>
+                                  <input
+                                    type="radio"
+                                    name={`bogo-mode-${i}`}
+                                    className="sr-only"
+                                    checked={slot.mode === m}
+                                    onChange={() => update({ mode: m })}
+                                  />
+                                  {m === 'inline' && 'Add my guest now'}
+                                  {m === 'claim_link' && 'Send claim link later'}
+                                  {m === 'skip' && 'Skip'}
+                                </label>
+                              ))}
+                            </div>
+
+                            {slot.mode === 'inline' && (
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <input
+                                  type="text"
+                                  placeholder="Guest name"
+                                  value={slot.guestName}
+                                  onChange={e => update({ guestName: e.target.value })}
+                                  className="px-3 py-2 border border-emerald-200 rounded-lg text-sm"
+                                />
+                                <input
+                                  type="email"
+                                  placeholder="Guest email"
+                                  value={slot.guestEmail}
+                                  onChange={e => update({ guestEmail: e.target.value })}
+                                  className="px-3 py-2 border border-emerald-200 rounded-lg text-sm"
+                                />
+                                <select
+                                  value={slot.categoryId}
+                                  onChange={e => update({ categoryId: e.target.value })}
+                                  className="px-3 py-2 border border-emerald-200 rounded-lg text-sm sm:col-span-2"
+                                >
+                                  <option value="">Select category…</option>
+                                  {eligibleCats.map(c => (
+                                    <option key={c.id} value={c.id}>
+                                      {c.name}{c.id === payer!.categoryId ? ' (same as yours)' : ''}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            )}
+
+                            {slot.mode === 'claim_link' && (
+                              <p className="text-xs text-emerald-800 bg-emerald-100/60 rounded p-2">
+                                We'll email you a claim link after payment. Forward it to your guest, or
+                                send it from your portal "My Tickets" page later. Your guest picks their
+                                own category (capped at this ticket's value).
+                              </p>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <p className="text-[11px] text-emerald-900/80 mt-3 leading-snug">
+                  ℹ Once you send a free ticket to an email and that guest signs up,
+                  claims it, or checks in, the email is locked. Until then you can edit
+                  it. Need an exception? <a className="underline" href={`mailto:${BOGO_ADMIN_CONTACT}`}>{BOGO_ADMIN_CONTACT}</a>.
+                </p>
+              </div>
+            )}
+
             {form.settings?.renderMode !== 'stepped' && (
               <div className="pt-4">
                 <button
                   type="submit"
-                  disabled={loading || (!isAnyPendingClaim && pricingTemplate != null && (!selectedCategoryId || !activeTier || !activeBracket || dynamicTotal == null)) || (!isAnyPendingClaim && registrationMode === 'group' && (!groupPricingResult?.ok || groupMembers.some(m => !m.name.trim() || !m.email.trim() || !m.countryCode || !m.categoryId))) || (isAnyPendingClaim && claimSignupOptIn && !user && !isExhibitorStaffPending && claimSignupPassword.length > 0 && claimSignupPassword.length < 8)}
+                  disabled={loading || (!isAnyPendingClaim && pricingTemplate != null && (!selectedCategoryId || !activeTier || !activeBracket || dynamicTotal == null)) || (!isAnyPendingClaim && registrationMode === 'group' && (!groupPricingResult?.ok || groupMembers.some(m => !m.name.trim() || !m.email.trim() || !m.countryCode || !m.categoryId))) || (isAnyPendingClaim && claimSignupOptIn && !user && !isExhibitorStaffPending && claimSignupPassword.length > 0 && claimSignupPassword.length < 8) || !bogoSlotsValid}
                   className="w-full py-4 text-white rounded-xl font-black uppercase tracking-widest transition shadow-lg flex justify-center items-center gap-2 transform hover:scale-[1.02] active:scale-95 disabled:opacity-70 disabled:grayscale disabled:cursor-not-allowed"
                   style={{ backgroundColor: form.settings?.formAccentColor || '#4F46E5' }}
                 >

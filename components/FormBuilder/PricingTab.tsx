@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import type { Form, PricingTemplate, AppSettings } from '../../types';
 import { getPricingTemplates, getSettings } from '../../services/storageService';
 import { resolveBracket } from '../../utils/pricing';
+import { CURRENT_SITE } from '../../config/sites';
 
 interface Props {
   form: Form;
@@ -30,9 +31,34 @@ export default function PricingTab({ form, onFormChange }: Props) {
   const enabled = !!selectedId;
 
   const setTemplate = (id: string | null) => {
+    // When dynamic pricing is turned off, BOGO must also be cleared since
+    // the price-ceiling rule depends on category prices from the template.
+    const next: any = { ...(form.settings ?? {}), pricingTemplateId: id };
+    if (!id) {
+      next.bogoEnabled = false;
+    }
+    onFormChange({ ...form, settings: next });
+  };
+
+  // BOGO is event-form only and portal-tenant only. SCAGO (portalEnabled
+  // = false) doesn't have the portal "My Tickets" surface that powers
+  // post-purchase sends/edits, so the toggle is hidden there.
+  const bogoSupported =
+    (CURRENT_SITE.portalEnabled ?? false) &&
+    (form.formType ?? 'event') === 'event';
+  const bogoEnabled = (form.settings as any)?.bogoEnabled === true;
+  const bogoNote = (form.settings as any)?.bogoNoteToBuyer ?? '';
+
+  const setBogoEnabled = (on: boolean) => {
     onFormChange({
       ...form,
-      settings: { ...(form.settings ?? {}), pricingTemplateId: id } as any,
+      settings: { ...(form.settings ?? {}), bogoEnabled: on } as any,
+    });
+  };
+  const setBogoNote = (s: string) => {
+    onFormChange({
+      ...form,
+      settings: { ...(form.settings ?? {}), bogoNoteToBuyer: s } as any,
     });
   };
 
@@ -66,7 +92,52 @@ export default function PricingTab({ form, onFormChange }: Props) {
               <div>Active bracket: <strong>{resolveBracket(selected, new Date())?.name ?? '(none)'}</strong></div>
             </div>
           )}
+
+          {bogoSupported && (
+            <div className="border-t pt-4 mt-4">
+              <label className="flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  checked={bogoEnabled}
+                  onChange={e => setBogoEnabled(e.target.checked)}
+                  className="mt-1"
+                />
+                <span className="text-sm">
+                  <span className="font-medium text-slate-800">
+                    Enable Buy-One-Get-One-Free
+                  </span>
+                  <span className="block text-slate-600 mt-0.5">
+                    Each paid attendee on this form can bring one guest free,
+                    with a ticket category of equal or lesser value than their
+                    own (compared at their tier &amp; bracket).
+                  </span>
+                </span>
+              </label>
+
+              {bogoEnabled && (
+                <label className="block mt-3">
+                  <span className="text-xs text-slate-600">
+                    Message to buyer (optional — shown in the BOGO section at checkout)
+                  </span>
+                  <textarea
+                    className="mt-1 w-full border rounded px-3 py-2 text-sm"
+                    rows={2}
+                    value={bogoNote}
+                    placeholder="Bring a colleague — equal or lesser ticket value free."
+                    onChange={e => setBogoNote(e.target.value)}
+                  />
+                </label>
+              )}
+            </div>
+          )}
         </>
+      )}
+
+      {bogoSupported && !enabled && (form.settings as any)?.bogoEnabled && (
+        <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
+          BOGO was enabled but the pricing template was removed. Re-enable dynamic
+          pricing to keep BOGO active — otherwise it will be ignored at runtime.
+        </div>
       )}
     </div>
   );

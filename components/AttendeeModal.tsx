@@ -118,10 +118,38 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
   };
 
   const handleDeleteAttendee = async (id: string) => {
-    if (window.confirm("Are you sure you want to delete this registration? This cannot be undone.")) {
+    // Detect linked BOGO free guest so we can warn before cascade-delete.
+    const linkedFree = attendees?.find(
+      a => a.isBogoClaim && a.bogoSourceAttendeeId === id,
+    );
+    const confirmMsg = linkedFree
+      ? `This ticket has 1 free guest paired with it (${linkedFree.name} — ${linkedFree.email}).\n\n` +
+        `Deleting will also delete that free guest's ticket and send them a "withdrawn" notification email. This cannot be undone.\n\nContinue?`
+      : 'Are you sure you want to delete this registration? This cannot be undone.';
+    if (!window.confirm(confirmMsg)) return;
+
+    // Route through admin-cancel-attendee so the BOGO cascade + notification
+    // email runs server-side. Fall back to direct delete only if the cascade
+    // endpoint is unreachable (e.g. local dev without functions running).
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const { data, error } = await supabase.functions.invoke('admin-cancel-attendee', {
+        body: { attendeeId: id },
+        headers: session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {},
+      });
+      if (error) throw new Error((data as any)?.error || error.message || 'Cancel failed');
+      onDelete(id);
+      showNotification(
+        linkedFree
+          ? 'Registration and linked free guest deleted'
+          : 'Registration deleted',
+        'info',
+      );
+    } catch (e: any) {
+      console.error('admin-cancel-attendee failed, falling back to direct delete', e);
       await deleteAttendee(id);
       onDelete(id);
-      showNotification('Registration deleted', 'info');
+      showNotification('Registration deleted (cascade fallback)', 'info');
     }
   };
 
@@ -574,6 +602,70 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
                     <div className="text-sm font-semibold text-slate-700">{localAttendee.dietaryPreferences}</div>
                   </div>
                 )}
+
+                {/* BOGO panel — context-sensitive: paid source shows linked free guest;
+                    free claim row shows source. Read-only summary; lifecycle actions
+                    (send/resend/edit/dismiss) live in the user's portal "My Tickets". */}
+                {(() => {
+                  if (!attendees) return null;
+                  // Free claim row → show its source.
+                  if (localAttendee.isBogoClaim) {
+                    const src = attendees.find(a => a.id === localAttendee.bogoSourceAttendeeId);
+                    return (
+                      <div className="bg-emerald-50/60 rounded-xl p-4 border border-emerald-200 shadow-sm">
+                        <h4 className="text-[10px] font-bold text-emerald-700 uppercase tracking-[0.15em] mb-2">
+                          🎁 BOGO Free Ticket
+                        </h4>
+                        {src ? (
+                          <div className="text-sm text-emerald-900">
+                            <div>Source: <strong>{src.name}</strong> ({src.email})</div>
+                            {src.ticketType && <div className="text-xs text-emerald-700 mt-0.5">{src.ticketType}</div>}
+                            <button
+                              type="button"
+                              onClick={() => onOpenAttendee?.(src)}
+                              className="mt-2 text-xs underline text-emerald-700 hover:text-emerald-900"
+                            >Open source record →</button>
+                          </div>
+                        ) : (
+                          <div className="text-sm text-amber-700">
+                            Source attendee not found (may have been deleted).
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }
+                  // Paid row → show linked free guest if any.
+                  const linkedFree = attendees.find(
+                    a => a.isBogoClaim && a.bogoSourceAttendeeId === localAttendee.id,
+                  );
+                  if (linkedFree) {
+                    return (
+                      <div className="bg-emerald-50/60 rounded-xl p-4 border border-emerald-200 shadow-sm">
+                        <h4 className="text-[10px] font-bold text-emerald-700 uppercase tracking-[0.15em] mb-2">
+                          🎁 Free Guest Paired
+                        </h4>
+                        <div className="text-sm text-emerald-900">
+                          <strong>{linkedFree.name}</strong> ({linkedFree.email})
+                          {linkedFree.guestType === 'pending-claim' && (
+                            <span className="ml-2 text-[10px] uppercase font-bold text-amber-700">PENDING CLAIM</span>
+                          )}
+                          {linkedFree.guestType === 'claimed' && (
+                            <span className="ml-2 text-[10px] uppercase font-bold text-emerald-700">CLAIMED</span>
+                          )}
+                          {linkedFree.bogoDismissedByPayerAt && (
+                            <span className="ml-2 text-[10px] uppercase font-bold text-slate-500">HIDDEN BY PAYER</span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => onOpenAttendee?.(linkedFree)}
+                            className="block mt-2 text-xs underline text-emerald-700 hover:text-emerald-900"
+                          >Open guest record →</button>
+                        </div>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
 
                 {/* Linked Guests — manage guest pairings for primary attendees */}
                 {localAttendee.isPrimary !== false && attendees && (

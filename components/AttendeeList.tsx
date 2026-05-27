@@ -1251,6 +1251,14 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                                 DONATED SEAT CLAIM
                               </span>
                             )}
+                            {attendee.isBogoClaim && (
+                              <span
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200"
+                                title="This is a Buy-One-Get-One-Free guest ticket"
+                              >
+                                🎁 FREE GUEST
+                              </span>
+                            )}
                             {((attendee.donatedSeats || 0) > 0 || (attendee.donatedTables || 0) > 0) && (
                               <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-700">
                                 {attendee.donationType === 'table' && (attendee.donatedTables || 0) > 0
