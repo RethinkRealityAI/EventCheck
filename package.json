@@ -13,7 +13,11 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:ui": "vitest --ui"
+    "test:ui": "vitest --ui",
+    "lint:migrations": "node scripts/lint-migrations.mjs",
+    "smoke:db": "node scripts/smoke-db.mjs",
+    "predeploy": "npm run lint:migrations && tsc --noEmit && npm run test && npm run build",
+    "postdeploy": "npm run smoke:db"
   },
   "dependencies": {
     "@paypal/react-paypal-js": "^8.9.2",

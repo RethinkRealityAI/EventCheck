@@ -33,3 +33,4 @@ AGENTS.md
 *.sln
 *.sw?
 .env
+.env.smoke
