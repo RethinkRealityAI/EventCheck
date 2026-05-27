@@ -1,3 +1,4 @@
+import { Check } from 'lucide-react';
 import type { FormStep } from '../../../types';
 
 interface StepperSidebarProps {
@@ -36,16 +37,16 @@ export function StepperSidebar({ steps, currentIndex, completedSteps, onStepClic
               onClick={() => isReachable && onStepClick?.(i)}
               disabled={!isReachable}
               className={[
-                'relative z-10 shrink-0 h-9 w-9 lg:h-14 lg:w-14 rounded-full flex items-center justify-center font-display font-bold text-sm lg:text-xl transition-all duration-300 ease-viscous',
+                'relative z-10 shrink-0 h-10 w-10 lg:h-14 lg:w-14 rounded-full flex items-center justify-center font-display font-bold text-sm lg:text-lg transition-all duration-300 ease-viscous border-2',
                 isCurrent
-                  ? 'bg-gansid-primary-gradient text-white shadow-lg ring-4 ring-gansid-primary/15'
+                  ? 'border-transparent bg-gansid-primary-gradient text-white shadow-lg ring-4 ring-gansid-primary/20 scale-105'
                   : isComplete
-                  ? 'bg-gansid-primary-container text-white shadow-md'
-                  : 'bg-gansid-surface-container-low text-gansid-on-surface/40',
+                  ? 'border-transparent bg-gansid-primary-gradient text-white shadow-md'
+                  : 'border-gansid-outline-variant/35 bg-white text-gansid-on-surface/35',
               ].join(' ')}
               aria-current={isCurrent ? 'step' : undefined}
             >
-              {isComplete ? '✓' : i + 1}
+              {isComplete ? <Check className="h-5 w-5 lg:h-7 lg:w-7 stroke-[2.5]" aria-hidden /> : i + 1}
             </button>
             <div className="flex flex-col items-center lg:items-start text-center lg:text-left min-w-0 max-w-full lg:pt-2 lg:pb-1">
               <span
@@ -58,15 +59,12 @@ export function StepperSidebar({ steps, currentIndex, completedSteps, onStepClic
               </span>
               <span
                 className={[
-                  'font-display font-semibold leading-tight text-[10px] lg:text-[17px] lg:leading-tight max-w-full px-0.5 lg:px-0',
+                  'font-display font-semibold leading-tight text-[10px] lg:text-[15px] lg:leading-tight max-w-full px-0.5 lg:px-0 line-clamp-2',
                   isCurrent ? 'text-gansid-on-surface' : 'text-gansid-on-surface/50',
                 ].join(' ')}
               >
                 {step.label}
               </span>
-              {step.description && isCurrent && (
-                <span className="hidden lg:block text-sm text-gansid-on-surface/70 mt-1">{step.description}</span>
-              )}
             </div>
             {!isLast && (
               <>
@@ -88,10 +86,10 @@ export function StepperSidebar({ steps, currentIndex, completedSteps, onStepClic
                 {/* Mobile: horizontal connector from right edge of this circle
                     to left edge of next. */}
                 <span
-                  className="lg:hidden absolute top-[17px] h-[2px] rounded-full"
+                  className="lg:hidden absolute top-[19px] h-[2px] rounded-full"
                   style={{
-                    left: 'calc(50% + 18px)',
-                    right: 'calc(-50% + 18px)',
+                    left: 'calc(50% + 20px)',
+                    right: 'calc(-50% + 20px)',
                     background: isComplete || isCurrent
                       ? 'linear-gradient(to right, #E0243C, #2260a1)'
                       : 'rgba(26, 28, 28, 0.12)',

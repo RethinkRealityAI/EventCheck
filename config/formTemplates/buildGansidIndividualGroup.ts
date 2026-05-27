@@ -12,6 +12,7 @@ export function buildGansidIndividualGroup(): Omit<Form, 'id' | 'status' | 'crea
       groupPath: { enabled: true, maxSize: 5 },
       sendGuestConfirmationEmails: false,
       currency: 'USD',
+      bogoEnabled: true,
     },
     fields: [
       { id: `f_${now}_mode`, type: 'registration-mode-selector',

@@ -2,8 +2,11 @@ import { describe, it, expect } from 'vitest';
 import {
   findPromoCode,
   applyPromoDiscount,
+  applyPromoToPricing,
   isFreeAfterPromo,
   describePromo,
+  promoAppliedMessage,
+  DEFAULT_SPEAKER_PROMO_APPLIED_MESSAGE,
 } from '../utils/promoCodes';
 import type { PromoCode } from '../types';
 
@@ -58,6 +61,21 @@ describe('applyPromoDiscount', () => {
   });
 });
 
+describe('applyPromoToPricing', () => {
+  const REG_ONLY: PromoCode = { code: 'REG10', type: 'percent', value: 10, appliesTo: 'registration_only' };
+
+  it('discounts overall total when appliesTo is all (default)', () => {
+    expect(applyPromoToPricing(10000, 2000, HALF)).toBe(6000);
+  });
+  it('discounts registration fee only when appliesTo is registration_only', () => {
+    expect(applyPromoToPricing(10000, 2000, REG_ONLY)).toBe(11000);
+  });
+  it('registration_only 100% off leaves add-ons payable', () => {
+    const fullReg: PromoCode = { code: 'FREE', type: 'percent', value: 100, appliesTo: 'registration_only' };
+    expect(applyPromoToPricing(50000, 3000, fullReg)).toBe(3000);
+  });
+});
+
 describe('isFreeAfterPromo', () => {
   it('true when promo zeros out the total', () => {
     expect(isFreeAfterPromo(50000, SPEAKER)).toBe(true);
@@ -67,6 +85,18 @@ describe('isFreeAfterPromo', () => {
   });
   it('false when no promo', () => {
     expect(isFreeAfterPromo(50000, undefined)).toBe(false);
+  });
+});
+
+describe('promoAppliedMessage', () => {
+  it('uses custom appliedMessage when set', () => {
+    expect(promoAppliedMessage({ ...SPEAKER, appliedMessage: 'VIP discount active' })).toBe('VIP discount active');
+  });
+  it('defaults speaker codes to the standard speaker message', () => {
+    expect(promoAppliedMessage(SPEAKER)).toBe(DEFAULT_SPEAKER_PROMO_APPLIED_MESSAGE);
+  });
+  it('falls back to code label for generic promos', () => {
+    expect(promoAppliedMessage(HALF)).toBe('Promo code applied: HALF');
   });
 });
 

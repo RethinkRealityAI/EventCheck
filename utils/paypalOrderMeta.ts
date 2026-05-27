@@ -175,8 +175,10 @@ export function buildDynamicSingleExtras(params: {
   addonIds: string[];
   dynamicTotalCents: number;
   sitePrefix: string;
+  /** Pre-tax promo discount in minor units (cents) for PayPal breakdown. */
+  discountCents?: number;
 }): PayPalOrderExtras {
-  const { form, template, countryCode, categoryId, addonIds, dynamicTotalCents, sitePrefix } = params;
+  const { form, template, countryCode, categoryId, addonIds, dynamicTotalCents, sitePrefix, discountCents } = params;
 
   const base = {
     description: eventDescription(form),
@@ -213,7 +215,8 @@ export function buildDynamicSingleExtras(params: {
     });
   }
 
-  return withGuard(items, dynamicTotalCents / 100, template.currency, base);
+  const discount = (discountCents || 0) / 100;
+  return withGuard(items, dynamicTotalCents / 100, template.currency, base, discount);
 }
 
 // ---------------------------------------------------------------------------
@@ -236,8 +239,10 @@ export function buildDynamicGroupExtras(params: {
   members: GroupMemberInput[];
   groupTotalCents: number;
   sitePrefix: string;
+  /** Pre-tax promo discount in minor units (cents) for PayPal breakdown. */
+  discountCents?: number;
 }): PayPalOrderExtras {
-  const { form, template, members, groupTotalCents, sitePrefix } = params;
+  const { form, template, members, groupTotalCents, sitePrefix, discountCents } = params;
   const base = {
     description: eventDescription(form),
     invoice_id: makeInvoiceId(sitePrefix),
@@ -279,7 +284,8 @@ export function buildDynamicGroupExtras(params: {
     }
   }
 
-  return withGuard(items, groupTotalCents / 100, template.currency, base);
+  const discount = (discountCents || 0) / 100;
+  return withGuard(items, groupTotalCents / 100, template.currency, base, discount);
 }
 
 // ---------------------------------------------------------------------------

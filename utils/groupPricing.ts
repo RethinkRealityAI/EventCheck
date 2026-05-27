@@ -1,4 +1,4 @@
-import { resolveBracket, resolveTier, computeTotal } from './pricing';
+import { resolveBracket, resolveTier, computeTotal, sumAddonCents } from './pricing';
 import type { PricingTemplate } from '../types';
 
 export interface GroupMemberPricingInput {
@@ -42,4 +42,31 @@ export function computeGroupTotal(
     perPerson,
     bracketId: bracket.id,
   };
+}
+
+/** Category fees vs add-ons for group promo `registration_only` scope. */
+export function computeGroupBaseAndAddons(
+  template: PricingTemplate,
+  members: GroupMemberPricingInput[],
+  now: Date,
+): { ok: true; baseCents: number; addonsCents: number } | { ok: false; error: string } {
+  const bracket = resolveBracket(template, now);
+  if (!bracket) return { ok: false, error: 'No active pricing bracket' };
+
+  let baseCents = 0;
+  let addonsCents = 0;
+  for (let i = 0; i < members.length; i++) {
+    const m = members[i];
+    const tier = resolveTier(template, m.countryCode);
+    if (!tier) return { ok: false, error: `Member ${i + 1}: no tier resolvable` };
+    const category = template.categories.find(c => c.id === m.categoryId);
+    if (!category) return { ok: false, error: `Member ${i + 1}: unknown category` };
+    const fee = category.prices?.[tier.id]?.[bracket.id];
+    if (typeof fee !== 'number') {
+      return { ok: false, error: `Member ${i + 1}: category price not configured` };
+    }
+    baseCents += fee;
+    addonsCents += sumAddonCents(template, m.addonIds);
+  }
+  return { ok: true, baseCents, addonsCents };
 }

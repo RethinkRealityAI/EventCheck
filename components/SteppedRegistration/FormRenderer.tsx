@@ -1,6 +1,6 @@
 import React from 'react';
-import type { Form, FormField } from '../../types';
-import type { PricingTemplate } from '../../types';
+import type { Form, FormField, PromoCode, PricingTemplate } from '../../types';
+import { promoAppliedMessage } from '../../utils/promoCodes';
 import CountryField from '../FormBuilder/fields/CountryField';
 import { getCountryName } from '../../utils/countries';
 import GroupPersonRow from '../Group/GroupPersonRow';
@@ -80,7 +80,7 @@ export interface FormRendererProps {
   onQuantityChange: (itemId: string, qty: number) => void;
   promoCode: string;
   setPromoCode: React.Dispatch<React.SetStateAction<string>>;
-  appliedPromo: { code: string; value: number; type: 'percent' | 'fixed' } | null;
+  appliedPromo: PromoCode | null;
   onApplyPromo: () => void;
   paymentTotal: number;
 
@@ -179,11 +179,14 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
 
         // Registration Mode Selector field — always render so visitor can pick a path
         if (field.type === 'registration-mode-selector') {
+          const isSteppedMode = form.settings?.renderMode === 'stepped';
           return (
             <div key={field.id} className="sm:col-span-2 space-y-4">
-              <label className="block text-xs font-display font-semibold text-gansid-on-surface/70 uppercase tracking-wide mb-1.5">
-                {field.label} {field.required && <span className="text-gansid-primary">*</span>}
-              </label>
+              {!isSteppedMode && (
+                <label className="block text-xs font-display font-semibold text-gansid-on-surface/70 uppercase tracking-wide mb-1.5">
+                  {field.label} {field.required && <span className="text-gansid-primary">*</span>}
+                </label>
+              )}
               <div className="flex flex-wrap gap-3">
                 <label className={`flex items-center gap-2 px-4 py-2.5 rounded-full border-2 cursor-pointer transition ${registrationMode === 'individual' ? 'border-gansid-primary bg-gansid-primary-container/10 font-semibold' : 'border-gansid-outline-variant/40 hover:border-gansid-primary/50'}`}>
                   <input type="radio" name={field.id} className="accent-gansid-primary" checked={registrationMode === 'individual'}
@@ -359,7 +362,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
 
         return (
         <div key={field.id} className={colSpan}>
-          {field.type !== 'ticket' && field.type !== 'country' && (
+          {field.type !== 'ticket' && field.type !== 'country' && field.type !== 'radio' && field.type !== 'boolean' && (
             <label className="block text-xs font-display font-semibold text-gansid-on-surface/70 uppercase tracking-wide mb-1.5">
               {field.label} {field.required && <span className="text-gansid-primary">*</span>}
             </label>
@@ -403,6 +406,10 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                   value={selectedCategoryId}
                   onChange={setSelectedCategoryId}
                 />
+
+                {/* BOGO — directly under category; unlocks once a tier/category is chosen. */}
+                {selectedCategoryId && bogoSection}
+
                 <AddonsList
                   template={pricingTemplate}
                   selectedIds={selectedAddonIds}
@@ -442,15 +449,11 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                     </div>
                     {appliedPromo && (
                       <div className="text-xs text-green-600 flex items-center gap-1 mt-2">
-                        <Tag className="w-3 h-3" /> Code applied: {appliedPromo.code}
+                        <Tag className="w-3 h-3" /> {promoAppliedMessage(appliedPromo)}
                       </div>
                     )}
                   </div>
                 )}
-
-                {/* BOGO section — rendered here so it appears in both stepped
-                    and single form modes (FormRenderer is shared). */}
-                {bogoSection}
               </div>
             ) : (
             <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
@@ -484,6 +487,8 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                     ))}
                   </div>
 
+                  {field.ticketConfig?.items.some(item => (ticketQuantities[item.id] || 0) > 0) && bogoSection}
+
                   {/* Promo Code */}
                   <div className="flex gap-2 mb-2">
                     <input
@@ -501,7 +506,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                   </div>
                   {appliedPromo && (
                     <div className="text-xs text-green-600 flex items-center gap-1 mb-2">
-                      <Tag className="w-3 h-3" /> Code applied: {appliedPromo.code}
+                      <Tag className="w-3 h-3" /> {promoAppliedMessage(appliedPromo)}
                     </div>
                   )}
                 </>
@@ -737,13 +742,17 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                   </span>
                 </div>
               )}
-
-              {/* BOGO section — shared between dynamic + static-ticket branches. */}
-              {bogoSection}
             </div>
             )
           ) : field.type === 'radio' ? (
-            <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="space-y-2">
+              <label className="block text-xs font-display font-semibold text-gansid-on-surface/70 uppercase tracking-wide">
+                {field.label} {field.required && <span className="text-gansid-primary">*</span>}
+              </label>
+              {field.placeholder && (
+                <p className="text-sm text-gansid-on-surface/70 font-body leading-relaxed">{field.placeholder}</p>
+              )}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {field.options?.map(opt => {
                 const isSelected = answers[field.id] === opt;
                 return (
@@ -767,6 +776,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                   </label>
                 );
               })}
+            </div>
             </div>
           ) : field.type === 'checkbox' ? (
             <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">

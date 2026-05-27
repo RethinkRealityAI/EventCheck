@@ -12,6 +12,16 @@
 
 import type { PromoCode } from '../types';
 
+export const DEFAULT_SPEAKER_PROMO_APPLIED_MESSAGE = 'Speaker Registration Discount Applied';
+
+/** Message shown after a promo is applied in the registration UI. */
+export function promoAppliedMessage(promo: PromoCode): string {
+  const custom = promo.appliedMessage?.trim();
+  if (custom) return custom;
+  if (promo.appliesGuestType === 'speaker') return DEFAULT_SPEAKER_PROMO_APPLIED_MESSAGE;
+  return `Promo code applied: ${promo.code}`;
+}
+
 /** Case-insensitive lookup. Returns undefined if not found or disabled. */
 export function findPromoCode(
   codes: PromoCode[] | undefined | null,
@@ -23,6 +33,21 @@ export function findPromoCode(
   return codes.find(
     p => p.code.toLowerCase() === needle && p.enabled !== false,
   );
+}
+
+/** Apply promo to a base + add-ons split. When `appliesTo` is
+ *  `registration_only`, the discount applies to `baseCents` only; add-ons
+ *  are added after. Otherwise the discount applies to base + add-ons. */
+export function applyPromoToPricing(
+  baseCents: number,
+  addonsCents: number,
+  promo: PromoCode | undefined,
+): number {
+  if (!promo) return baseCents + addonsCents;
+  if (promo.appliesTo === 'registration_only') {
+    return applyPromoDiscount(baseCents, promo) + addonsCents;
+  }
+  return applyPromoDiscount(baseCents + addonsCents, promo);
 }
 
 /** Returns the discounted total in minor units (cents). The discount is

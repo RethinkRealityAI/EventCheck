@@ -225,8 +225,7 @@ export function SteppedFormShell(props: SteppedFormShellProps) {
             />
           </aside>
           <div className="flex-1 min-w-0 max-w-4xl">
-            <h2 className="text-xl md:text-2xl font-semibold mb-0.5 font-display">{currentStep?.label}</h2>
-            {currentStep?.description && <p className="text-gansid-on-surface/60 mb-4 font-body text-sm">{currentStep.description}</p>}
+            <h2 className="text-xl md:text-2xl font-semibold mb-4 font-display">{currentStep?.label}</h2>
             {/* 2-column grid on desktop — FormRenderer wraps each field in a div,
                 short inputs (text/email/phone/number) naturally share rows, long
                 fields (textarea, radio groups, ticket) stretch full-width via

@@ -105,17 +105,36 @@ async function processBogoClaims(args: {
 // this helper drives the dynamic-pricing branches via form.settings.promoCodes.
 function resolveFormPromoCode(formData: any, rawCode: any): any | null {
   if (!rawCode || typeof rawCode !== 'string') return null;
-  const settings = formData?.settings;
-  const codes = settings?.promoCodes;
-  if (!Array.isArray(codes) || codes.length === 0) return null;
   const needle = rawCode.trim().toLowerCase();
   if (!needle) return null;
-  const hit = codes.find((p: any) =>
-    typeof p?.code === 'string'
-    && p.code.toLowerCase() === needle
-    && p.enabled !== false,
-  );
-  return hit ?? null;
+
+  const findIn = (codes: any): any | null => {
+    if (!Array.isArray(codes) || codes.length === 0) return null;
+    const hit = codes.find((p: any) =>
+      typeof p?.code === 'string'
+      && p.code.toLowerCase() === needle
+      && p.enabled !== false,
+    );
+    return hit ?? null;
+  };
+
+  const fromSettings = findIn(formData?.settings?.promoCodes);
+  if (fromSettings) return fromSettings;
+
+  const ticketField = (formData?.fields ?? []).find((f: any) => f?.type === 'ticket');
+  return findIn(ticketField?.ticketConfig?.promoCodes);
+}
+
+function applyPromoToPricingCents(
+  baseCents: number,
+  addonsCents: number,
+  promo: any | null,
+): number {
+  if (!promo) return baseCents + addonsCents;
+  if (promo.appliesTo === 'registration_only') {
+    return applyPromoDiscountCents(baseCents, promo) + addonsCents;
+  }
+  return applyPromoDiscountCents(baseCents + addonsCents, promo);
 }
 
 function applyPromoDiscountCents(subtotalCents: number, promo: any | null): number {
@@ -1042,6 +1061,8 @@ serve(async (req: Request) => {
 
         // 3. Per-person resolution
         const memberResolutions: Array<{ cents: number; tierId: string; bracketId: string; categoryId: string }> = [];
+        let categoryCentsTotal = 0;
+        let addonsCentsTotal = 0;
         for (let i = 0; i < groupPricingSelections.length; i++) {
           const sel = groupPricingSelections[i];
           const code = (sel.countryCode ?? '').toUpperCase();
@@ -1055,10 +1076,12 @@ serve(async (req: Request) => {
             const a = (tpl.addons ?? []).find((x: any) => x.id === id);
             return sum + (typeof a?.price === 'number' ? a.price : 0);
           }, 0);
+          categoryCentsTotal += fee;
+          addonsCentsTotal += addonTotal;
           memberResolutions.push({ cents: fee + addonTotal, tierId: tier.id, bracketId: activeBracket.id, categoryId: cat.id });
         }
 
-        const expectedCents = memberResolutions.reduce((sum, m) => sum + m.cents, 0);
+        const expectedCents = categoryCentsTotal + addonsCentsTotal;
 
         // 3a. Promo code resolution — applied to the subtotal. Speaker-type
         // promos (those that stamp guest_type='speaker') are restricted to
@@ -1068,13 +1091,16 @@ serve(async (req: Request) => {
         if (groupPromo?.appliesGuestType === 'speaker') {
           return jsonResponse({ error: 'SPEAKER_PROMO_NOT_ALLOWED_IN_GROUP' }, 422);
         }
-        const groupDiscountedCents = applyPromoDiscountCents(expectedCents, groupPromo);
+        const groupDiscountedCents = applyPromoToPricingCents(categoryCentsTotal, addonsCentsTotal, groupPromo);
         const groupIsFreeViaPromo = !!groupPromo && groupDiscountedCents === 0;
         const groupAppliedPromoCode = groupPromo?.code ?? null;
 
         // 3b. BOGO pre-capture validation — runs BEFORE PayPal so we 422
         // cleanly without taking money on a malformed claim.
         const groupBogoClaims = Array.isArray(body.bogoClaims) ? body.bogoClaims : [];
+        if (groupBogoClaims.length > 0 && groupIsFreeViaPromo) {
+          return jsonResponse({ error: 'BOGO_NOT_ALLOWED_FOR_FREE_REGISTRATION' }, 422);
+        }
         const groupBogoValidationFail = validateBogoClaimsPreCapture({
           bogoClaims: groupBogoClaims,
           memberCount: memberResolutions.length,
@@ -1229,6 +1255,8 @@ serve(async (req: Request) => {
           appliedPromoCode: groupAppliedPromoCode,
           freeViaPromo: groupIsFreeViaPromo,
           currency: tpl.currency ?? 'USD',
+          amount: `${(groupDiscountedCents / 100).toFixed(2)} ${tpl.currency ?? 'USD'}`,
+          transactionId: groupTxId,
           primaryId,
           guestIds: rows.slice(1).map(r => r.id),
           partialBogoFailure: groupBogoResult.partialBogoFailure,
@@ -1290,7 +1318,7 @@ serve(async (req: Request) => {
         // attendee is inserted as `payment_status='free'`. Speaker-type
         // promos stamp `guest_type='speaker'` on the row.
         const soloPromo = resolveFormPromoCode(formData, promoCode);
-        const soloDiscountedCents = applyPromoDiscountCents(expectedCents, soloPromo);
+        const soloDiscountedCents = applyPromoToPricingCents(fee, addonTotal, soloPromo);
         const soloIsFreeViaPromo = !!soloPromo && soloDiscountedCents === 0;
         const soloAppliedPromoCode = soloPromo?.code ?? null;
         const soloPromoSpeakerStamp = soloPromo?.appliesGuestType === 'speaker';
@@ -1298,6 +1326,9 @@ serve(async (req: Request) => {
         // 7b. BOGO pre-capture validation — solo branch has exactly 1 paid
         // attendee, so any bogoClaim must have paidIndex=0.
         const soloBogoClaims = Array.isArray(body.bogoClaims) ? body.bogoClaims : [];
+        if (soloBogoClaims.length > 0 && (soloIsFreeViaPromo || soloPromoSpeakerStamp)) {
+          return jsonResponse({ error: 'BOGO_NOT_ALLOWED_FOR_FREE_OR_SPEAKER' }, 422);
+        }
         const soloBogoValidationFail = validateBogoClaimsPreCapture({
           bogoClaims: soloBogoClaims,
           memberCount: 1,
@@ -1462,6 +1493,8 @@ serve(async (req: Request) => {
           appliedPromoCode: soloAppliedPromoCode,
           freeViaPromo: soloIsFreeViaPromo,
           currency: tpl.currency ?? 'CAD',
+          amount: `${(soloDiscountedCents / 100).toFixed(2)} ${tpl.currency ?? 'CAD'}`,
+          transactionId: soloTxId,
           partialBogoFailure: soloBogoResult.partialBogoFailure,
         });
       }

@@ -168,6 +168,10 @@ export interface PromoCode {
    *  `guestType` stamped on their row. Today only 'speaker' is wired up
    *  — admin tools, dashboard pill, and Speakers tab all recognise it. */
   appliesGuestType?: 'speaker';
+  appliesTo?: 'all' | 'registration_only';
+  /** Shown in the registration form after Apply (and in the toast).
+   *  Defaults to "Speaker Registration Discount Applied" for speaker codes. */
+  appliedMessage?: string;
 }
 
 export interface TicketItem {

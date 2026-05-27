@@ -71,6 +71,29 @@ export function computeTotal(
   return fee + addonTotal;
 }
 
+/** Sum selected add-on prices in minor units (cents). */
+export function sumAddonCents(template: PricingTemplate, addonIds: string[]): number {
+  return addonIds.reduce((sum, id) => {
+    const addon = template.addons.find(a => a.id === id);
+    return sum + (addon?.price ?? 0);
+  }, 0);
+}
+
+/** Split registration fee vs add-ons for promo `registration_only` scope. */
+export function computeBaseAndAddons(
+  template: PricingTemplate,
+  categoryId: string,
+  tier: PricingTier,
+  bracket: DateBracket,
+  addonIds: string[],
+): { baseCents: number; addonsCents: number } | null {
+  const category = template.categories.find(c => c.id === categoryId);
+  if (!category) return null;
+  const fee = category.prices?.[tier.id]?.[bracket.id];
+  if (typeof fee !== 'number') return null;
+  return { baseCents: fee, addonsCents: sumAddonCents(template, addonIds) };
+}
+
 export function formatPrice(minorUnits: number, currency: string): string {
   try {
     return new Intl.NumberFormat('en-US', {

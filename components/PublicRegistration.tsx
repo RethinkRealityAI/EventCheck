@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { getFormById, getSettings, saveAttendee, getAttendee, getGuestsByPrimaryId, mapAttendeeToDb, updateAttendee } from '../services/storageService';
-import { FormField, AppSettings, Attendee, Form, DynamicPricingSelection, BogoClaim } from '../types';
+import { FormField, AppSettings, Attendee, Form, DynamicPricingSelection, BogoClaim, PromoCode } from '../types';
 import type { PricingTemplate } from '../types';
-import { resolveBracket, resolveTier, computeTotal, formatPrice } from '../utils/pricing';
+import { resolveBracket, resolveTier, computeTotal, computeBaseAndAddons, formatPrice } from '../utils/pricing';
 import { getEligibleBogoCategories, BOGO_ADMIN_CONTACT } from '../utils/bogo';
-import { findPromoCode, applyPromoDiscount } from '../utils/promoCodes';
-import { computeGroupTotal, type GroupMemberPricingInput } from '../utils/groupPricing';
+import { findPromoCode, applyPromoToPricing, promoAppliedMessage } from '../utils/promoCodes';
+import { computeGroupTotal, computeGroupBaseAndAddons, type GroupMemberPricingInput } from '../utils/groupPricing';
 import { clearAllProgress } from '../utils/registrationProgress';
 import CountryField from './FormBuilder/fields/CountryField';
 import { getCountryName } from '../utils/countries';
@@ -95,7 +95,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   // Map itemId -> quantity
   const [ticketQuantities, setTicketQuantities] = useState<Record<string, number>>({});
   const [promoCode, setPromoCode] = useState('');
-  const [appliedPromo, setAppliedPromo] = useState<{ code: string, value: number, type: 'percent' | 'fixed' } | null>(null);
+  const [appliedPromo, setAppliedPromo] = useState<PromoCode | null>(null);
 
   const [paymentTotal, setPaymentTotal] = useState(0);
 
@@ -214,6 +214,39 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
 
   const groupTotal = (groupPricingResult && groupPricingResult.ok) ? groupPricingResult.total : null;
 
+  const groupMembersPricingInput: GroupMemberPricingInput[] = [
+    {
+      countryCode: selectedCountryCode,
+      categoryId: selectedCategoryId ?? '',
+      addonIds: selectedAddonIds,
+    },
+    ...groupMembers.map(m => ({
+      countryCode: m.countryCode,
+      categoryId: m.categoryId ?? '',
+      addonIds: m.addonIds,
+    })),
+  ];
+
+  const dynamicParts = (pricingTemplate && activeBracket && activeTier && selectedCategoryId)
+    ? computeBaseAndAddons(pricingTemplate, selectedCategoryId, activeTier, activeBracket, selectedAddonIds)
+    : null;
+
+  const groupParts = (pricingTemplate && registrationMode === 'group')
+    ? computeGroupBaseAndAddons(pricingTemplate, groupMembersPricingInput, new Date())
+    : null;
+
+  const dynamicTotalAfterPromo = dynamicParts
+    ? applyPromoToPricing(dynamicParts.baseCents, dynamicParts.addonsCents, appliedPromo as any)
+    : null;
+
+  const groupTotalAfterPromo = (groupParts && groupParts.ok)
+    ? applyPromoToPricing(groupParts.baseCents, groupParts.addonsCents, appliedPromo as any)
+    : null;
+
+  // Totals shown in RunningTotal / payment step (post-promo when a code is applied).
+  const displayDynamicTotal = dynamicTotalAfterPromo ?? dynamicTotal;
+  const displayGroupTotal = groupTotalAfterPromo ?? groupTotal;
+
   // Pending-claim: group guest completing their personal details post-purchase
   const isPendingClaim = (loadedRefAttendee as any)?.guestType === 'pending-claim';
   const isExhibitorStaffPending = (loadedRefAttendee as any)?.guestType === 'exhibitor-staff-pending';
@@ -254,6 +287,14 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
         ];
       }
       return prev.slice(0, bogoSlotCount);
+    });
+  }, [bogoSlotCount]);
+
+  // Skip was removed from the UI — normalize any saved draft slots.
+  useEffect(() => {
+    setBogoSlots(prev => {
+      if (!prev.some(s => s.mode === 'skip')) return prev;
+      return prev.map(s => (s.mode === 'skip' ? { ...s, mode: 'inline' } : s));
     });
   }, [bogoSlotCount]);
 
@@ -573,9 +614,13 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
     const found = findPromoCode(dynamicCodes, promoCode)
       ?? findPromoCode(staticCodes as any, promoCode);
     if (found) {
-      setAppliedPromo(found as any);
+      if (found.appliesGuestType === 'speaker' && registrationMode === 'group') {
+        showNotification('Speaker promo codes cannot be used for group registrations.', 'error');
+        return;
+      }
+      setAppliedPromo(found);
       setPromoCode(''); // Clear input
-      showNotification('Promo code applied successfully', 'success');
+      showNotification(promoAppliedMessage(found), 'success');
     } else {
       showNotification('Invalid promo code', 'error');
     }
@@ -786,13 +831,6 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
     // entirely — finalizeRegistration('free') sends pricingSelection +
     // promoCode to verify-payment, which validates the discount server-side
     // and inserts the row with payment_status='free'.
-    const dynamicTotalAfterPromo = dynamicTotal != null
-      ? applyPromoDiscount(dynamicTotal, appliedPromo as any)
-      : null;
-    const groupTotalAfterPromo = groupTotal != null
-      ? applyPromoDiscount(groupTotal, appliedPromo as any)
-      : null;
-
     const hasPayableAmount = paymentTotal > 0
       || (pricingTemplate && (dynamicTotalAfterPromo ?? 0) > 0)
       || (pricingTemplate && registrationMode === 'group' && (groupTotalAfterPromo ?? 0) > 0);
@@ -1057,12 +1095,12 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
 
     // Include dynamic pricing selection when a pricing template is attached
     let pricingSelection: DynamicPricingSelection | undefined;
-    if (pricingTemplate && dynamicTotal != null && selectedCategoryId && activeTier && activeBracket) {
+    if (pricingTemplate && displayDynamicTotal != null && selectedCategoryId && activeTier && activeBracket) {
       pricingSelection = {
         countryCode: selectedCountryCode,
         categoryId: selectedCategoryId,
         addonIds: selectedAddonIds,
-        expectedTotal: dynamicTotal,
+        expectedTotal: displayDynamicTotal,
       };
     }
     if (pricingSelection) {
@@ -1191,12 +1229,15 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
     if (data?.error) throw new Error(data.error);
 
     if (paymentStatus === 'paid') {
-      // Update local objects for PDF generation with server-verified data
-      newAttendee.paymentAmount = data.amount;
+      const verifiedAmount = data.amount
+        ?? (typeof data.total === 'number' && data.currency
+          ? `${(data.total / 100).toFixed(2)} ${data.currency}`
+          : paymentAmount);
+      newAttendee.paymentAmount = verifiedAmount;
       newAttendee.transactionId = data.transactionId;
 
       for (const gt of guestTickets) {
-        gt.attendee.paymentAmount = data.amount;
+        gt.attendee.paymentAmount = verifiedAmount;
         gt.attendee.transactionId = data.transactionId;
       }
     }
@@ -1432,8 +1473,15 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
     setError('');
     // We pass the orderID straight to our Edge Function for server-side verification and capture
     const paypalOrderId = data.orderID;
-    const expectedCurrency = ticketField?.ticketConfig?.currency || "USD";
-    finalizeRegistration('paid', paypalOrderId, `${paymentTotal} ${expectedCurrency}`);
+    const expectedCurrency = pricingTemplate?.currency
+      || ticketField?.ticketConfig?.currency
+      || 'USD';
+    const paidDollars = pricingTemplate && registrationMode === 'group' && displayGroupTotal != null
+      ? (displayGroupTotal / 100)
+      : pricingTemplate && displayDynamicTotal != null
+        ? (displayDynamicTotal / 100)
+        : paymentTotal;
+    finalizeRegistration('paid', paypalOrderId, `${paidDollars.toFixed(2)} ${expectedCurrency}`);
   };
 
   // Safely access env with fallback
@@ -1505,10 +1553,17 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
 
   const isSteppedMode = form.settings?.renderMode === 'stepped';
 
+  // BOGO is only for paid checkouts — not 100%-off promos or speaker comps.
+  const payableAfterPromoCents = registrationMode === 'group'
+    ? (displayGroupTotal ?? groupTotal ?? 0)
+    : (displayDynamicTotal ?? dynamicTotal ?? 0);
+  const bogoBlockedByPromo = appliedPromo?.appliesGuestType === 'speaker'
+    || payableAfterPromoCents === 0;
+
   // BOGO section as a slot — rendered inside FormRenderer's ticket-field
   // block so it appears in BOTH stepped and single modes. Was previously
   // rendered at the form root, which kept it invisible in stepped mode.
-  const bogoSection: React.ReactNode = (bogoFeatureOn && !isAnyPendingClaim && bogoSlotCount > 0 && pricingTemplate) ? (
+  const bogoSection: React.ReactNode = (bogoFeatureOn && !isAnyPendingClaim && bogoSlotCount > 0 && pricingTemplate && !bogoBlockedByPromo) ? (
     <div className="rounded-2xl border-2 border-emerald-200 bg-emerald-50/60 p-5">
       <div className="flex items-start gap-3 mb-3">
         <span className="text-2xl">🎁</span>
@@ -1577,7 +1632,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
               ) : (
                 <>
                   <div className="flex flex-wrap gap-2 mb-3 text-xs">
-                    {(['inline', 'claim_link', 'skip'] as const).map(m => (
+                    {(['inline', 'claim_link'] as const).map(m => (
                       <label key={m} className={`px-3 py-1.5 rounded-full border cursor-pointer transition ${slot.mode === m ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-emerald-800 border-emerald-300 hover:bg-emerald-100'}`}>
                         <input
                           type="radio"
@@ -1588,7 +1643,6 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                         />
                         {m === 'inline' && 'Add my guest now'}
                         {m === 'claim_link' && 'Send claim link later'}
-                        {m === 'skip' && 'Skip'}
                       </label>
                     ))}
                   </div>
@@ -1633,8 +1687,8 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                   {slot.mode === 'claim_link' && (
                     <p className="text-xs text-emerald-800 bg-emerald-100/60 rounded p-2">
                       We'll email you a claim link after payment. Forward it to your guest, or
-                      send it from your portal "My Tickets" page later. Your guest picks their
-                      own category (capped at this ticket's value).
+                      send it from your portal "My Tickets" page later. Your guests will fill in
+                      their own details.
                     </p>
                   )}
                 </>
@@ -1657,11 +1711,9 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
         isSteppedMode
           ? (isEmbedded
               ? "w-full h-full flex flex-col relative min-h-0"
-              // items-center centers the form vertically within the viewport so the
-              // outer page doesn't scroll when the form is shorter than the screen.
-              // min-h-[100dvh] uses dynamic viewport height so the address-bar collapse
-              // on mobile doesn't clip the footer.
-              : "w-full min-h-[100dvh] py-6 md:py-10 px-3 sm:px-6 lg:px-8 flex items-center justify-center relative portal-root bg-gradient-to-br from-gansid-surface-container-lowest via-white to-gansid-secondary/5")
+              // Fixed-height shell on every step — avoid shrink/grow as step content changes.
+              // items-stretch (not items-center) keeps the card at full height on short steps.
+              : "w-full h-[100dvh] py-3 sm:py-6 md:py-10 px-3 sm:px-6 lg:px-8 flex items-stretch justify-center relative portal-root bg-gradient-to-br from-gansid-surface-container-lowest via-white to-gansid-secondary/5")
           : "w-full py-12 px-4 sm:px-6 lg:px-8 flex flex-col items-center relative"
       }
       style={isSteppedMode ? undefined : {
@@ -1696,12 +1748,8 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
             isSteppedMode
               ? (isEmbedded
                   ? 'w-full h-full flex flex-col relative z-10 min-h-0'
-                  // Consistent height across all steps — `min-h-[80vh]` on every
-                  // screen size (was `min-h-[640px]` on mobile, which let the
-                  // container shrink on short steps and grow on long ones).
-                  // `100dvh` everywhere so mobile address-bar collapse doesn't
-                  // clip the footer.
-                  : 'w-full lg:w-[80vw] max-w-[1600px] mx-auto bg-white rounded-gansid-xl shadow-2xl flex flex-col relative z-10 overflow-hidden min-h-[80vh] max-h-[calc(100dvh-3rem)]')
+                  // Same footprint on every step — scroll inside SteppedFormShell, not the page.
+                  : 'w-full lg:w-[80vw] max-w-[1600px] mx-auto bg-white rounded-gansid-xl shadow-2xl flex flex-col relative z-10 overflow-hidden h-full max-h-full min-h-0')
               : 'max-w-xl w-full bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl overflow-hidden relative z-10 border border-white/20'
           }
           style={!isSteppedMode && form.settings?.cardBackgroundImage ? {
@@ -1802,7 +1850,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                 setGroupAllSameCountry={setGroupAllSameCountry}
                 groupAllSameCategory={groupAllSameCategory}
                 setGroupAllSameCategory={setGroupAllSameCategory}
-                groupTotal={groupTotal}
+                groupTotal={displayGroupTotal}
                 answers={answers}
                 onFieldChange={handleInputChange}
                 pricingTemplate={pricingTemplate}
@@ -1812,7 +1860,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                 setSelectedAddonIds={setSelectedAddonIds}
                 activeTier={activeTier}
                 activeBracket={activeBracket}
-                dynamicTotal={dynamicTotal}
+                dynamicTotal={displayDynamicTotal}
                 ticketQuantities={ticketQuantities}
                 onQuantityChange={handleQuantityChange}
                 promoCode={promoCode}
@@ -1861,7 +1909,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                 setGroupAllSameCountry={setGroupAllSameCountry}
                 groupAllSameCategory={groupAllSameCategory}
                 setGroupAllSameCategory={setGroupAllSameCategory}
-                groupTotal={groupTotal}
+                groupTotal={displayGroupTotal}
                 answers={answers}
                 onFieldChange={handleInputChange}
                 pricingTemplate={pricingTemplate}
@@ -1871,7 +1919,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                 setSelectedAddonIds={setSelectedAddonIds}
                 activeTier={activeTier}
                 activeBracket={activeBracket}
-                dynamicTotal={dynamicTotal}
+                dynamicTotal={displayDynamicTotal}
                 ticketQuantities={ticketQuantities}
                 onQuantityChange={handleQuantityChange}
                 promoCode={promoCode}
@@ -1946,7 +1994,11 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                     <>Complete Registration <ArrowRight className="w-5 h-5" /></>
                   ) : mode === 'guest' ? (
                     <>Claim Your Ticket <ArrowRight className="w-5 h-5" /></>
-                  ) : (ticketField && paymentTotal > 0) ? (
+                  ) : (
+                    (ticketField && paymentTotal > 0)
+                    || (pricingTemplate && registrationMode === 'group' && (displayGroupTotal ?? 0) > 0)
+                    || (pricingTemplate && (displayDynamicTotal ?? 0) > 0)
+                  ) ? (
                     <>Proceed to Payment <ArrowRight className="w-5 h-5" /></>
                   ) : (form.settings?.submitButtonText || 'Register Now')}
                 </button>
@@ -1959,14 +2011,16 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
       {step === 'payment' && (() => {
         // Resolve the actual amount being charged. Dynamic pricing stores totals in cents.
         const displayCurrency = pricingTemplate?.currency || ticketField?.ticketConfig?.currency || 'USD';
-        const isGroup = pricingTemplate && registrationMode === 'group' && groupTotal != null;
-        const isDynamic = pricingTemplate && dynamicTotal != null;
-        const displayTotal = isGroup
-          ? (groupTotal! / 100)
-          : isDynamic
-            ? (dynamicTotal! / 100)
-            : paymentTotal;
-        const displaySubtotal = isGroup || isDynamic ? displayTotal : ticketSubtotal;
+        const isGroup = pricingTemplate && registrationMode === 'group' && displayGroupTotal != null;
+        const isDynamic = pricingTemplate && displayDynamicTotal != null;
+        const prePromoCents = isGroup ? groupTotal : isDynamic ? dynamicTotal : null;
+        const discountedCents = isGroup ? displayGroupTotal : isDynamic ? displayDynamicTotal : null;
+        const displayTotal = isGroup || isDynamic
+          ? (discountedCents! / 100)
+          : paymentTotal;
+        const displaySubtotal = isGroup || isDynamic
+          ? ((prePromoCents ?? discountedCents)! / 100)
+          : ticketSubtotal;
         return (
         <div className={isSteppedMode
           ? "flex-1 min-h-0 w-full flex items-center justify-center p-6 overflow-y-auto"
@@ -1987,7 +2041,13 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
               <span className="text-gray-600">{isGroup ? `Group total (${groupMembers.length})` : 'Ticket(s) Subtotal'}</span>
               <span className="font-medium text-gray-900">{displaySubtotal.toFixed(2)} {displayCurrency}</span>
             </div>
-            {appliedPromo && (
+            {appliedPromo && displaySubtotal > displayTotal && (
+              <div className="flex justify-between items-center text-sm text-green-600 border-t border-gray-200 pt-2 mt-2">
+                <span>Promo ({appliedPromo.code})</span>
+                <span>-{(displaySubtotal - displayTotal).toFixed(2)} {displayCurrency}</span>
+              </div>
+            )}
+            {appliedPromo && displaySubtotal <= displayTotal && (
               <div className="flex justify-between items-center text-sm text-green-600 border-t border-gray-200 pt-2 mt-2">
                 <span>Promo ({appliedPromo.code})</span>
                 <span>Applied</span>
@@ -2032,7 +2092,8 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                     if (_payerEmail) _payer.email_address = _payerEmail;
                     const _hasPayer = Object.keys(_payer).length > 0;
 
-                    if (pricingTemplate && registrationMode === 'group' && groupTotal != null) {
+                    if (pricingTemplate && registrationMode === 'group' && displayGroupTotal != null) {
+                      const groupDiscountCents = (groupTotal ?? displayGroupTotal) - displayGroupTotal;
                       const groupExtras = buildDynamicGroupExtras({
                         form,
                         template: pricingTemplate,
@@ -2050,14 +2111,15 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                             displayName: m.name,
                           })),
                         ],
-                        groupTotalCents: groupTotal,
+                        groupTotalCents: displayGroupTotal,
                         sitePrefix: CURRENT_SITE.key,
+                        discountCents: groupDiscountCents > 0 ? groupDiscountCents : undefined,
                       });
                       return actions.order.create({
                         purchase_units: [{
                           amount: {
                             currency_code: pricingTemplate.currency,
-                            value: (groupTotal / 100).toFixed(2),
+                            value: (displayGroupTotal / 100).toFixed(2),
                             ...(groupExtras.breakdown ? { breakdown: groupExtras.breakdown } : {}),
                           },
                           description: groupExtras.description,
@@ -2068,21 +2130,23 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                         ...(_hasPayer ? { payer: _payer } : {}),
                       });
                     }
-                    if (pricingTemplate && dynamicTotal != null) {
+                    if (pricingTemplate && displayDynamicTotal != null) {
+                      const soloDiscountCents = (dynamicTotal ?? displayDynamicTotal) - displayDynamicTotal;
                       const dynExtras = buildDynamicSingleExtras({
                         form,
                         template: pricingTemplate,
                         countryCode: selectedCountryCode,
                         categoryId: selectedCategoryId ?? '',
                         addonIds: selectedAddonIds,
-                        dynamicTotalCents: dynamicTotal,
+                        dynamicTotalCents: displayDynamicTotal,
                         sitePrefix: CURRENT_SITE.key,
+                        discountCents: soloDiscountCents > 0 ? soloDiscountCents : undefined,
                       });
                       return actions.order.create({
                         purchase_units: [{
                           amount: {
                             currency_code: pricingTemplate.currency,
-                            value: (dynamicTotal / 100).toFixed(2),
+                            value: (displayDynamicTotal / 100).toFixed(2),
                             ...(dynExtras.breakdown ? { breakdown: dynExtras.breakdown } : {}),
                           },
                           description: dynExtras.description,

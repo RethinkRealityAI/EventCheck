@@ -31,7 +31,7 @@ export function RegisterModal({ formId, onClose, onSaveAndClose }: Props) {
       <div className="absolute inset-0 bg-gansid-on-surface/50 backdrop-blur-md" aria-hidden="true" />
       {/* Card: fixed height, flex-col. Children control their own scroll. */}
       <div
-        className="relative bg-white rounded-gansid-xl shadow-2xl w-full max-w-[1280px] h-[95vh] flex flex-col overflow-hidden"
+        className="relative bg-white rounded-gansid-xl shadow-2xl w-full max-w-[1280px] h-[min(95dvh,calc(100dvh-1rem))] min-h-[min(95dvh,calc(100dvh-1rem))] flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         <button
