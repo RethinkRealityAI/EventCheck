@@ -247,6 +247,16 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   const displayDynamicTotal = dynamicTotalAfterPromo ?? dynamicTotal;
   const displayGroupTotal = groupTotalAfterPromo ?? groupTotal;
 
+  // BOGO is only for paid checkouts — not 100%-off promos or speaker comps.
+  const payableAfterPromoCents = registrationMode === 'group'
+    ? (displayGroupTotal ?? groupTotal ?? 0)
+    : (displayDynamicTotal ?? dynamicTotal ?? 0);
+  // Match verify-payment: block BOGO only for speaker promos or when an
+  // applied promo zeroes the total — not when total is 0 because category
+  // isn't chosen yet (null dynamicTotal coerces to 0).
+  const bogoBlockedByPromo = appliedPromo?.appliesGuestType === 'speaker'
+    || (!!appliedPromo && payableAfterPromoCents === 0);
+
   // Pending-claim: group guest completing their personal details post-purchase
   const isPendingClaim = (loadedRefAttendee as any)?.guestType === 'pending-claim';
   const isExhibitorStaffPending = (loadedRefAttendee as any)?.guestType === 'exhibitor-staff-pending';
@@ -298,6 +308,28 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
     });
   }, [bogoSlotCount]);
 
+  // Promo/speaker comps hide BOGO — clear in-progress guest slots so submit
+  // doesn't send stale bogoClaims (server: BOGO_NOT_ALLOWED_FOR_FREE_OR_SPEAKER).
+  useEffect(() => {
+    if (!bogoBlockedByPromo) return;
+    setBogoSlots(prev => {
+      const cleared = prev.map(() => ({
+        mode: 'inline' as const,
+        guestName: '',
+        guestEmail: '',
+        categoryId: '',
+      }));
+      const unchanged = prev.every(
+        (s, i) =>
+          s.mode === cleared[i].mode
+          && !s.guestName
+          && !s.guestEmail
+          && !s.categoryId,
+      );
+      return unchanged ? prev : cleared;
+    });
+  }, [bogoBlockedByPromo]);
+
   // Per-payer pricing info for BOGO — used to drive each slot's category
   // dropdown and to flag a slot as un-fillable (payer hasn't picked a
   // category yet). Index 0 = buyer; 1..N = group members.
@@ -341,7 +373,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   })();
 
   // BOGO inline-slot validity for submit-button gating
-  const bogoSlotsValid = !bogoFeatureOn || bogoSlots.every((s, i) => {
+  const bogoSlotsValid = !bogoFeatureOn || bogoBlockedByPromo || bogoSlots.every((s, i) => {
     if (s.mode === 'skip' || s.mode === 'claim_link') return true;
     const payer = bogoPayerInfos[i];
     if (!payer || !payer.categoryId || !payer.tierId) return false; // payer not ready
@@ -1110,7 +1142,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
     // BOGO claims — build from non-skip slots. paidIndex matches the order
     // attendees are inserted server-side: 0 = primary buyer, 1..N = group
     // members in their list order.
-    if (bogoFeatureOn && bogoSlots.length > 0) {
+    if (bogoFeatureOn && !bogoBlockedByPromo && bogoSlots.length > 0) {
       const claims: BogoClaim[] = [];
       for (let i = 0; i < bogoSlots.length; i++) {
         const s = bogoSlots[i];
@@ -1219,6 +1251,11 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
       try {
         const body = await fnResponse?.json();
         detail = body?.error || fnError.message || detail;
+        if (detail.includes('BOGO_NOT_ALLOWED_FOR_FREE_OR_SPEAKER')) {
+          detail =
+            'Your promo code cannot be combined with a complimentary guest ticket. '
+            + 'Remove any free-guest details or use a different registration path.';
+        }
         if (body?.diagnostic) detail += ` [diag: ${JSON.stringify(body.diagnostic)}]`;
         if (body?.details && typeof body.details === 'object') console.error('verify-payment error details:', body.details);
       } catch {
@@ -1226,7 +1263,15 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
       }
       throw new Error(detail);
     }
-    if (data?.error) throw new Error(data.error);
+    if (data?.error) {
+      const errMsg = String(data.error);
+      throw new Error(
+        errMsg.includes('BOGO_NOT_ALLOWED_FOR_FREE_OR_SPEAKER')
+          ? 'Your promo code cannot be combined with a complimentary guest ticket. '
+            + 'Remove any free-guest details or use a different registration path.'
+          : errMsg,
+      );
+    }
 
     if (paymentStatus === 'paid') {
       const verifiedAmount = data.amount
@@ -1553,17 +1598,26 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
 
   const isSteppedMode = form.settings?.renderMode === 'stepped';
 
-  // BOGO is only for paid checkouts — not 100%-off promos or speaker comps.
-  const payableAfterPromoCents = registrationMode === 'group'
-    ? (displayGroupTotal ?? groupTotal ?? 0)
-    : (displayDynamicTotal ?? dynamicTotal ?? 0);
-  const bogoBlockedByPromo = appliedPromo?.appliesGuestType === 'speaker'
-    || payableAfterPromoCents === 0;
+  const bogoBlockedNotice: React.ReactNode = (bogoFeatureOn && !isAnyPendingClaim && bogoSlotCount > 0 && pricingTemplate && bogoBlockedByPromo) ? (
+    <div className="rounded-2xl border-2 border-amber-200 bg-amber-50/80 p-4">
+      <div className="flex items-start gap-3">
+        <Info className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+        <div>
+          <p className="font-semibold text-amber-900 text-sm">Complimentary guest offer unavailable</p>
+          <p className="text-sm text-amber-800 mt-1 leading-snug">
+            {appliedPromo?.appliesGuestType === 'speaker'
+              ? 'Speaker promo codes register you at no charge but do not include a free guest ticket. You can still complete registration without adding a guest.'
+              : 'Your promo code covers the full registration fee, so the bring-a-guest-free offer does not apply for this checkout.'}
+          </p>
+        </div>
+      </div>
+    </div>
+  ) : null;
 
   // BOGO section as a slot — rendered inside FormRenderer's ticket-field
   // block so it appears in BOTH stepped and single modes. Was previously
   // rendered at the form root, which kept it invisible in stepped mode.
-  const bogoSection: React.ReactNode = (bogoFeatureOn && !isAnyPendingClaim && bogoSlotCount > 0 && pricingTemplate && !bogoBlockedByPromo) ? (
+  const bogoFreeGuestSection: React.ReactNode = (bogoFeatureOn && !isAnyPendingClaim && bogoSlotCount > 0 && pricingTemplate && !bogoBlockedByPromo) ? (
     <div className="rounded-2xl border-2 border-emerald-200 bg-emerald-50/60 p-5">
       <div className="flex items-start gap-3 mb-3">
         <span className="text-2xl">🎁</span>
@@ -1704,6 +1758,8 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
       </p>
     </div>
   ) : null;
+
+  const bogoSection: React.ReactNode = bogoBlockedNotice ?? bogoFreeGuestSection;
 
   return (
     <div

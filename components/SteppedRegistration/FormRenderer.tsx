@@ -407,29 +407,8 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                   onChange={setSelectedCategoryId}
                 />
 
-                {/* BOGO — directly under category; unlocks once a tier/category is chosen. */}
-                {selectedCategoryId && bogoSection}
-
-                <AddonsList
-                  template={pricingTemplate}
-                  selectedIds={selectedAddonIds}
-                  onToggle={setSelectedAddonIds}
-                />
-                <RunningTotal
-                  template={pricingTemplate}
-                  total={registrationMode === 'group' ? groupTotal : dynamicTotal}
-                  bracket={activeBracket}
-                  tier={activeTier}
-                  // In group mode the total sums across members who can be in
-                  // different tiers — don't show a single tier pill or it'd mislead.
-                  showTier={registrationMode !== 'group'}
-                  label={registrationMode === 'group' ? `Total (${1 + groupMembers.length} people — you + ${groupMembers.length} additional)` : undefined}
-                />
-
-                {/* Promo Code (dynamic-pricing) — same input pattern as the
-                    static-ticket branch below, but discounts the dynamic
-                    subtotal via form.settings.promoCodes (server-validated). */}
-                {mode === 'purchaser' && (
+                {/* Promo before total/BOGO so users apply discounts before seeing the amount. */}
+                {mode === 'purchaser' && selectedCategoryId && (
                   <div>
                     <div className="flex gap-2">
                       <input
@@ -454,6 +433,25 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                     )}
                   </div>
                 )}
+
+                {/* BOGO or promo-blocked notice — after category + promo. */}
+                {selectedCategoryId && bogoSection}
+
+                <AddonsList
+                  template={pricingTemplate}
+                  selectedIds={selectedAddonIds}
+                  onToggle={setSelectedAddonIds}
+                />
+                <RunningTotal
+                  template={pricingTemplate}
+                  total={registrationMode === 'group' ? groupTotal : dynamicTotal}
+                  bracket={activeBracket}
+                  tier={activeTier}
+                  // In group mode the total sums across members who can be in
+                  // different tiers — don't show a single tier pill or it'd mislead.
+                  showTier={registrationMode !== 'group'}
+                  label={registrationMode === 'group' ? `Total (${1 + groupMembers.length} people — you + ${groupMembers.length} additional)` : undefined}
+                />
               </div>
             ) : (
             <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
@@ -487,9 +485,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                     ))}
                   </div>
 
-                  {field.ticketConfig?.items.some(item => (ticketQuantities[item.id] || 0) > 0) && bogoSection}
-
-                  {/* Promo Code */}
+                  {/* Promo before BOGO / payment-related sections */}
                   <div className="flex gap-2 mb-2">
                     <input
                       type="text" placeholder="Promo Code"
@@ -509,6 +505,8 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                       <Tag className="w-3 h-3" /> {promoAppliedMessage(appliedPromo)}
                     </div>
                   )}
+
+                  {field.ticketConfig?.items.some(item => (ticketQuantities[item.id] || 0) > 0) && bogoSection}
                 </>
               )}
 
