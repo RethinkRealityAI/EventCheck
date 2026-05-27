@@ -1505,13 +1505,163 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
 
   const isSteppedMode = form.settings?.renderMode === 'stepped';
 
+  // BOGO section as a slot — rendered inside FormRenderer's ticket-field
+  // block so it appears in BOTH stepped and single modes. Was previously
+  // rendered at the form root, which kept it invisible in stepped mode.
+  const bogoSection: React.ReactNode = (bogoFeatureOn && !isAnyPendingClaim && bogoSlotCount > 0 && pricingTemplate) ? (
+    <div className="rounded-2xl border-2 border-emerald-200 bg-emerald-50/60 p-5">
+      <div className="flex items-start gap-3 mb-3">
+        <span className="text-2xl">🎁</span>
+        <div>
+          <h3 className="font-bold text-emerald-900 text-lg leading-tight">
+            {bogoSlotCount === 1 ? 'Bring a guest free' : `Bring up to ${bogoSlotCount} guests free`}
+          </h3>
+          <p className="text-sm text-emerald-800 mt-1">
+            {form.settings?.bogoNoteToBuyer
+              || 'Each paid ticket includes one free guest of equal or lesser ticket value.'}
+          </p>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        {bogoSlots.map((slot, i) => {
+          const payer = bogoPayerInfos[i];
+          const payerReady = payer && payer.categoryId && payer.tierId;
+          const eligibleCats = payerReady && pricingTemplate
+            ? getEligibleBogoCategories(pricingTemplate, {
+                pricingCategoryId: payer.categoryId,
+                pricingTier: payer.tierId,
+                pricingBracket: payer.bracketId,
+              })
+            : [];
+          const update = (patch: Partial<BogoSlot>) => {
+            setBogoSlots(prev => prev.map((s, idx) => idx === i ? { ...s, ...patch } : s));
+          };
+          // Soft-warn (not blocker) when an inline-mode guest email collides
+          // with another attendee on this checkout.
+          const guestEmailLc = slot.mode === 'inline' ? slot.guestEmail.trim().toLowerCase() : '';
+          const otherEmails: string[] = [];
+          const buyerEmailField = form.fields.find(f => f.type === 'email' || f.label.toLowerCase().includes('email'));
+          if (buyerEmailField) {
+            const buyerEmail = String(answers[buyerEmailField.id] || '').trim().toLowerCase();
+            if (buyerEmail) otherEmails.push(buyerEmail);
+          }
+          if (registrationMode === 'group') {
+            for (const m of groupMembers) {
+              const e = String(m.email || '').trim().toLowerCase();
+              if (e) otherEmails.push(e);
+            }
+          }
+          bogoSlots.forEach((other, j) => {
+            if (j === i) return;
+            if (other.mode !== 'inline') return;
+            const e = other.guestEmail.trim().toLowerCase();
+            if (e) otherEmails.push(e);
+          });
+          const emailDupWarning = guestEmailLc && otherEmails.includes(guestEmailLc);
+          return (
+            <div key={i} className="rounded-xl border border-emerald-200 bg-white p-4">
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-sm text-emerald-900">
+                  <strong>Free guest paired with:</strong>{' '}
+                  {payer?.label ?? `Paid ticket ${i + 1}`}
+                  {payer?.categoryName && (
+                    <span className="text-emerald-700"> ({payer.categoryName})</span>
+                  )}
+                </div>
+              </div>
+              {!payerReady ? (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
+                  Finish picking this ticket's category {i === 0 ? 'above' : 'in the group section'} to unlock the free guest.
+                </p>
+              ) : (
+                <>
+                  <div className="flex flex-wrap gap-2 mb-3 text-xs">
+                    {(['inline', 'claim_link', 'skip'] as const).map(m => (
+                      <label key={m} className={`px-3 py-1.5 rounded-full border cursor-pointer transition ${slot.mode === m ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-emerald-800 border-emerald-300 hover:bg-emerald-100'}`}>
+                        <input
+                          type="radio"
+                          name={`bogo-mode-${i}`}
+                          className="sr-only"
+                          checked={slot.mode === m}
+                          onChange={() => update({ mode: m })}
+                        />
+                        {m === 'inline' && 'Add my guest now'}
+                        {m === 'claim_link' && 'Send claim link later'}
+                        {m === 'skip' && 'Skip'}
+                      </label>
+                    ))}
+                  </div>
+                  {slot.mode === 'inline' && (
+                    <div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <input
+                          type="text"
+                          placeholder="Guest name"
+                          value={slot.guestName}
+                          onChange={e => update({ guestName: e.target.value })}
+                          className="px-3 py-2 border border-emerald-200 rounded-lg text-sm"
+                        />
+                        <input
+                          type="email"
+                          placeholder="Guest email"
+                          value={slot.guestEmail}
+                          onChange={e => update({ guestEmail: e.target.value })}
+                          className={`px-3 py-2 border rounded-lg text-sm ${emailDupWarning ? 'border-amber-400 bg-amber-50' : 'border-emerald-200'}`}
+                        />
+                        <select
+                          value={slot.categoryId}
+                          onChange={e => update({ categoryId: e.target.value })}
+                          className="px-3 py-2 border border-emerald-200 rounded-lg text-sm sm:col-span-2"
+                        >
+                          <option value="">Select category…</option>
+                          {eligibleCats.map(c => (
+                            <option key={c.id} value={c.id}>
+                              {c.name}{c.id === payer!.categoryId ? ' (same as yours)' : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      {emailDupWarning && (
+                        <p className="text-[11px] text-amber-700 mt-2">
+                          ⚠ This email matches another attendee on this form. Submitting will still
+                          work — but double-check it's not a typo.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  {slot.mode === 'claim_link' && (
+                    <p className="text-xs text-emerald-800 bg-emerald-100/60 rounded p-2">
+                      We'll email you a claim link after payment. Forward it to your guest, or
+                      send it from your portal "My Tickets" page later. Your guest picks their
+                      own category (capped at this ticket's value).
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <p className="text-[11px] text-emerald-900/80 mt-3 leading-snug">
+        ℹ Once you send a free ticket to an email and that guest signs up,
+        claims it, or checks in, the email is locked. Until then you can edit
+        it. Need an exception? <a className="underline" href={`mailto:${BOGO_ADMIN_CONTACT}`}>{BOGO_ADMIN_CONTACT}</a>.
+      </p>
+    </div>
+  ) : null;
+
   return (
     <div
       className={
         isSteppedMode
           ? (isEmbedded
               ? "w-full h-full flex flex-col relative min-h-0"
-              : "w-full min-h-screen py-6 md:py-10 px-3 sm:px-6 lg:px-8 flex justify-center relative portal-root bg-gradient-to-br from-gansid-surface-container-lowest via-white to-gansid-secondary/5")
+              // items-center centers the form vertically within the viewport so the
+              // outer page doesn't scroll when the form is shorter than the screen.
+              // min-h-[100dvh] uses dynamic viewport height so the address-bar collapse
+              // on mobile doesn't clip the footer.
+              : "w-full min-h-[100dvh] py-6 md:py-10 px-3 sm:px-6 lg:px-8 flex items-center justify-center relative portal-root bg-gradient-to-br from-gansid-surface-container-lowest via-white to-gansid-secondary/5")
           : "w-full py-12 px-4 sm:px-6 lg:px-8 flex flex-col items-center relative"
       }
       style={isSteppedMode ? undefined : {
@@ -1546,7 +1696,12 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
             isSteppedMode
               ? (isEmbedded
                   ? 'w-full h-full flex flex-col relative z-10 min-h-0'
-                  : 'w-full lg:w-[80vw] max-w-[1600px] mx-auto bg-white rounded-gansid-xl shadow-2xl flex flex-col relative z-10 overflow-hidden min-h-[640px] lg:min-h-[80vh] max-h-[calc(100vh-3rem)] self-start')
+                  // Consistent height across all steps — `min-h-[80vh]` on every
+                  // screen size (was `min-h-[640px]` on mobile, which let the
+                  // container shrink on short steps and grow on long ones).
+                  // `100dvh` everywhere so mobile address-bar collapse doesn't
+                  // clip the footer.
+                  : 'w-full lg:w-[80vw] max-w-[1600px] mx-auto bg-white rounded-gansid-xl shadow-2xl flex flex-col relative z-10 overflow-hidden min-h-[80vh] max-h-[calc(100dvh-3rem)]')
               : 'max-w-xl w-full bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl overflow-hidden relative z-10 border border-white/20'
           }
           style={!isSteppedMode && form.settings?.cardBackgroundImage ? {
@@ -1683,6 +1838,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                 userId={user?.id ?? null}
                 onRestoreAnswers={(restored) => setAnswers(restored)}
                 onSaveAndClose={onSaveAndClose}
+                bogoSection={bogoSection}
               />
             ) : (
               <SingleFormShell
@@ -1737,6 +1893,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                 donatedTables={donatedTables}
                 setDonatedTables={setDonatedTables}
                 setSelectedCountryCode={setSelectedCountryCode}
+                bogoSection={bogoSection}
               />
             )}
 
@@ -1772,156 +1929,6 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                     <p className="text-[11px] text-indigo-700 mt-1">You'll receive a verification email to activate your account.</p>
                   </div>
                 )}
-              </div>
-            )}
-
-            {bogoFeatureOn && !isAnyPendingClaim && bogoSlotCount > 0 && pricingTemplate && (
-              <div className="rounded-2xl border-2 border-emerald-200 bg-emerald-50/60 p-5">
-                <div className="flex items-start gap-3 mb-3">
-                  <span className="text-2xl">🎁</span>
-                  <div>
-                    <h3 className="font-bold text-emerald-900 text-lg leading-tight">
-                      {bogoSlotCount === 1 ? 'Bring a guest free' : `Bring up to ${bogoSlotCount} guests free`}
-                    </h3>
-                    <p className="text-sm text-emerald-800 mt-1">
-                      {form.settings?.bogoNoteToBuyer
-                        || 'Each paid ticket includes one free guest of equal or lesser ticket value.'}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  {bogoSlots.map((slot, i) => {
-                    const payer = bogoPayerInfos[i];
-                    const payerReady = payer && payer.categoryId && payer.tierId;
-                    const eligibleCats = payerReady && pricingTemplate
-                      ? getEligibleBogoCategories(pricingTemplate, {
-                          pricingCategoryId: payer.categoryId,
-                          pricingTier: payer.tierId,
-                          pricingBracket: payer.bracketId,
-                        })
-                      : [];
-                    const update = (patch: Partial<BogoSlot>) => {
-                      setBogoSlots(prev => prev.map((s, idx) => idx === i ? { ...s, ...patch } : s));
-                    };
-                    // Soft-warn (not blocker) when an inline-mode guest email
-                    // collides with another attendee on this checkout — the
-                    // buyer's own email, a group member's, or another BOGO
-                    // slot. Most often a typo; occasionally legitimate
-                    // (one person managing multiple tickets).
-                    const guestEmailLc = slot.mode === 'inline' ? slot.guestEmail.trim().toLowerCase() : '';
-                    const otherEmails: string[] = [];
-                    const buyerEmailField = form.fields.find(f => f.type === 'email' || f.label.toLowerCase().includes('email'));
-                    if (buyerEmailField) {
-                      const buyerEmail = String(answers[buyerEmailField.id] || '').trim().toLowerCase();
-                      if (buyerEmail) otherEmails.push(buyerEmail);
-                    }
-                    if (registrationMode === 'group') {
-                      for (const m of groupMembers) {
-                        const e = String(m.email || '').trim().toLowerCase();
-                        if (e) otherEmails.push(e);
-                      }
-                    }
-                    bogoSlots.forEach((other, j) => {
-                      if (j === i) return;
-                      if (other.mode !== 'inline') return;
-                      const e = other.guestEmail.trim().toLowerCase();
-                      if (e) otherEmails.push(e);
-                    });
-                    const emailDupWarning = guestEmailLc && otherEmails.includes(guestEmailLc);
-                    return (
-                      <div key={i} className="rounded-xl border border-emerald-200 bg-white p-4">
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="text-sm text-emerald-900">
-                            <strong>Free guest paired with:</strong>{' '}
-                            {payer?.label ?? `Paid ticket ${i + 1}`}
-                            {payer?.categoryName && (
-                              <span className="text-emerald-700"> ({payer.categoryName})</span>
-                            )}
-                          </div>
-                        </div>
-
-                        {!payerReady ? (
-                          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
-                            Finish picking this ticket's category {i === 0 ? 'above' : 'in the group section'} to unlock the free guest.
-                          </p>
-                        ) : (
-                          <>
-                            <div className="flex flex-wrap gap-2 mb-3 text-xs">
-                              {(['inline', 'claim_link', 'skip'] as const).map(m => (
-                                <label key={m} className={`px-3 py-1.5 rounded-full border cursor-pointer transition ${slot.mode === m ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-emerald-800 border-emerald-300 hover:bg-emerald-100'}`}>
-                                  <input
-                                    type="radio"
-                                    name={`bogo-mode-${i}`}
-                                    className="sr-only"
-                                    checked={slot.mode === m}
-                                    onChange={() => update({ mode: m })}
-                                  />
-                                  {m === 'inline' && 'Add my guest now'}
-                                  {m === 'claim_link' && 'Send claim link later'}
-                                  {m === 'skip' && 'Skip'}
-                                </label>
-                              ))}
-                            </div>
-
-                            {slot.mode === 'inline' && (
-                              <div>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                  <input
-                                    type="text"
-                                    placeholder="Guest name"
-                                    value={slot.guestName}
-                                    onChange={e => update({ guestName: e.target.value })}
-                                    className="px-3 py-2 border border-emerald-200 rounded-lg text-sm"
-                                  />
-                                  <input
-                                    type="email"
-                                    placeholder="Guest email"
-                                    value={slot.guestEmail}
-                                    onChange={e => update({ guestEmail: e.target.value })}
-                                    className={`px-3 py-2 border rounded-lg text-sm ${emailDupWarning ? 'border-amber-400 bg-amber-50' : 'border-emerald-200'}`}
-                                  />
-                                  <select
-                                    value={slot.categoryId}
-                                    onChange={e => update({ categoryId: e.target.value })}
-                                    className="px-3 py-2 border border-emerald-200 rounded-lg text-sm sm:col-span-2"
-                                  >
-                                    <option value="">Select category…</option>
-                                    {eligibleCats.map(c => (
-                                      <option key={c.id} value={c.id}>
-                                        {c.name}{c.id === payer!.categoryId ? ' (same as yours)' : ''}
-                                      </option>
-                                    ))}
-                                  </select>
-                                </div>
-                                {emailDupWarning && (
-                                  <p className="text-[11px] text-amber-700 mt-2">
-                                    ⚠ This email matches another attendee on this form. Submitting will still
-                                    work — but double-check it's not a typo.
-                                  </p>
-                                )}
-                              </div>
-                            )}
-
-                            {slot.mode === 'claim_link' && (
-                              <p className="text-xs text-emerald-800 bg-emerald-100/60 rounded p-2">
-                                We'll email you a claim link after payment. Forward it to your guest, or
-                                send it from your portal "My Tickets" page later. Your guest picks their
-                                own category (capped at this ticket's value).
-                              </p>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <p className="text-[11px] text-emerald-900/80 mt-3 leading-snug">
-                  ℹ Once you send a free ticket to an email and that guest signs up,
-                  claims it, or checks in, the email is locked. Until then you can edit
-                  it. Need an exception? <a className="underline" href={`mailto:${BOGO_ADMIN_CONTACT}`}>{BOGO_ADMIN_CONTACT}</a>.
-                </p>
               </div>
             )}
 

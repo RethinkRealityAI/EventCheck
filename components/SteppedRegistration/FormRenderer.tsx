@@ -103,6 +103,12 @@ export interface FormRendererProps {
 
   // Pricing country sync
   setSelectedCountryCode: React.Dispatch<React.SetStateAction<string>>;
+
+  /** Optional BOGO section JSX. Owned by PublicRegistration (it holds the
+   *  bogoSlots state + handlers); injected here as a slot so the section
+   *  renders inside the ticket-field block in BOTH stepped and single
+   *  modes (FormRenderer is shared). Null when BOGO isn't enabled. */
+  bogoSection?: React.ReactNode;
 }
 
 export const FormRenderer: React.FC<FormRendererProps> = ({
@@ -158,6 +164,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   donatedTables,
   setDonatedTables,
   setSelectedCountryCode,
+  bogoSection,
 }) => {
   return (
     <>
@@ -411,6 +418,39 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                   showTier={registrationMode !== 'group'}
                   label={registrationMode === 'group' ? `Total (${1 + groupMembers.length} people — you + ${groupMembers.length} additional)` : undefined}
                 />
+
+                {/* Promo Code (dynamic-pricing) — same input pattern as the
+                    static-ticket branch below, but discounts the dynamic
+                    subtotal via form.settings.promoCodes (server-validated). */}
+                {mode === 'purchaser' && (
+                  <div>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="Promo Code"
+                        className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+                        value={promoCode}
+                        onChange={e => setPromoCode(e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        onClick={onApplyPromo}
+                        className="px-4 py-2 bg-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-300"
+                      >
+                        Apply
+                      </button>
+                    </div>
+                    {appliedPromo && (
+                      <div className="text-xs text-green-600 flex items-center gap-1 mt-2">
+                        <Tag className="w-3 h-3" /> Code applied: {appliedPromo.code}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* BOGO section — rendered here so it appears in both stepped
+                    and single form modes (FormRenderer is shared). */}
+                {bogoSection}
               </div>
             ) : (
             <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
@@ -697,6 +737,9 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                   </span>
                 </div>
               )}
+
+              {/* BOGO section — shared between dynamic + static-ticket branches. */}
+              {bogoSection}
             </div>
             )
           ) : field.type === 'radio' ? (
