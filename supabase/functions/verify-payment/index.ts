@@ -98,6 +98,38 @@ async function processBogoClaims(args: {
   return { partialBogoFailure: false };
 }
 
+// ── Promo code resolution + discount (dynamic-pricing branches) ──────────
+// Mirror of utils/promoCodes.ts on the client. Server-authoritative —
+// never trusts the client's pre-discounted total. The legacy static-ticket
+// branch still has its own promo lookup against ticketConfig.promoCodes;
+// this helper drives the dynamic-pricing branches via form.settings.promoCodes.
+function resolveFormPromoCode(formData: any, rawCode: any): any | null {
+  if (!rawCode || typeof rawCode !== 'string') return null;
+  const settings = formData?.settings;
+  const codes = settings?.promoCodes;
+  if (!Array.isArray(codes) || codes.length === 0) return null;
+  const needle = rawCode.trim().toLowerCase();
+  if (!needle) return null;
+  const hit = codes.find((p: any) =>
+    typeof p?.code === 'string'
+    && p.code.toLowerCase() === needle
+    && p.enabled !== false,
+  );
+  return hit ?? null;
+}
+
+function applyPromoDiscountCents(subtotalCents: number, promo: any | null): number {
+  if (!promo) return subtotalCents;
+  if (subtotalCents <= 0) return 0;
+  if (promo.type === 'percent') {
+    const pct = Math.max(0, Math.min(100, Number(promo.value) || 0));
+    const discount = Math.round((subtotalCents * pct) / 100);
+    return Math.max(0, subtotalCents - discount);
+  }
+  // 'fixed' — value is in minor units (cents).
+  return Math.max(0, subtotalCents - Math.max(0, Number(promo.value) || 0));
+}
+
 // Validates bogoClaims request shape against per-member pricing resolutions.
 // Runs BEFORE PayPal capture so we 422 cleanly without taking money.
 // Returns null when valid, or a Response (already a 422) when not.
@@ -1028,6 +1060,18 @@ serve(async (req: Request) => {
 
         const expectedCents = memberResolutions.reduce((sum, m) => sum + m.cents, 0);
 
+        // 3a. Promo code resolution — applied to the subtotal. Speaker-type
+        // promos (those that stamp guest_type='speaker') are restricted to
+        // solo registrations; using one on a group is rejected here so we
+        // don't accidentally tag a primary's colleagues as speakers.
+        const groupPromo = resolveFormPromoCode(formData, promoCode);
+        if (groupPromo?.appliesGuestType === 'speaker') {
+          return jsonResponse({ error: 'SPEAKER_PROMO_NOT_ALLOWED_IN_GROUP' }, 422);
+        }
+        const groupDiscountedCents = applyPromoDiscountCents(expectedCents, groupPromo);
+        const groupIsFreeViaPromo = !!groupPromo && groupDiscountedCents === 0;
+        const groupAppliedPromoCode = groupPromo?.code ?? null;
+
         // 3b. BOGO pre-capture validation — runs BEFORE PayPal so we 422
         // cleanly without taking money on a malformed claim.
         const groupBogoClaims = Array.isArray(body.bogoClaims) ? body.bogoClaims : [];
@@ -1042,7 +1086,10 @@ serve(async (req: Request) => {
         });
         if (groupBogoValidationFail) return groupBogoValidationFail;
 
-        // 4. Capture PayPal order — replicate the inlined OAuth + capture logic
+        // 4. Capture PayPal order — replicate the inlined OAuth + capture logic.
+        //    Skipped entirely when a promo zeroes out the total.
+        let groupTxId: string | null = null;
+        if (!groupIsFreeViaPromo) {
         if (!paypalOrderId) return jsonResponse({ error: 'paypalOrderId required for group payment' }, 400);
         const ppMode = (Deno.env.get('PAYPAL_MODE') || '').toLowerCase();
         const allTest = attendees.every((a: any) => a.is_test === true);
@@ -1082,13 +1129,21 @@ serve(async (req: Request) => {
         if (!ppCapture) return jsonResponse({ error: 'No capture data in PayPal response' }, 502);
         const capturedCents = Math.round(Number(ppCapture.amount?.value ?? 0) * 100);
 
-        if (Math.abs(capturedCents - expectedCents) > 1) {
-          return jsonResponse({ error: 'Group price mismatch', expected: expectedCents, received: capturedCents }, 400);
+        if (Math.abs(capturedCents - groupDiscountedCents) > 1) {
+          return jsonResponse({ error: 'Group price mismatch', expected: groupDiscountedCents, received: capturedCents }, 400);
+        }
+        groupTxId = ppCapture.id;
+        } // end if (!groupIsFreeViaPromo)
+
+        // 5. Duplicate tx guard — only relevant when an actual PayPal tx exists
+        if (groupTxId) {
+          const { data: existingGroupTx } = await supabase.from('attendees').select('id').eq('transaction_id', groupTxId).limit(1);
+          if (existingGroupTx && existingGroupTx.length > 0) return jsonResponse({ error: 'This payment has already been processed' }, 409);
         }
 
-        // 5. Duplicate tx guard
-        const { data: existingGroupTx } = await supabase.from('attendees').select('id').eq('transaction_id', ppCapture.id).limit(1);
-        if (existingGroupTx && existingGroupTx.length > 0) return jsonResponse({ error: 'This payment has already been processed' }, 409);
+        // For the free-via-promo path we still need a stable id for grouping
+        // (used by BOGO claim processing + downstream email payloads).
+        const groupInvoiceId = groupTxId ?? crypto.randomUUID();
 
         // 6. Persist N attendees
         const primaryId = attendees[0]?.id ?? crypto.randomUUID();
@@ -1100,13 +1155,17 @@ serve(async (req: Request) => {
             form_id: formId,
             is_primary: i === 0,
             primary_attendee_id: i === 0 ? null : primaryId,
-            payment_status: 'paid',
-            transaction_id: ppCapture.id,
-            payment_amount: `${(m.cents / 100).toFixed(2)} ${tpl.currency ?? 'USD'}`,
+            payment_status: groupIsFreeViaPromo ? 'free' : 'paid',
+            transaction_id: groupTxId,
+            payment_method: groupIsFreeViaPromo ? 'promo' : (attendeeDraft.payment_method ?? null),
+            payment_amount: groupIsFreeViaPromo
+              ? `0.00 ${tpl.currency ?? 'USD'}`
+              : `${(m.cents / 100).toFixed(2)} ${tpl.currency ?? 'USD'}`,
             pricing_template_id: tpl.id,
             pricing_tier: m.tierId,
             pricing_bracket: m.bracketId,
             pricing_category_id: m.categoryId,
+            applied_promo_code: groupAppliedPromoCode,
             // Primary submitter gets user_id stamped; pending-claim guests get null
             // (they'll claim via ?ref= link without auth — a future task can stamp
             // the claiming user's id at claim time)
@@ -1116,11 +1175,13 @@ serve(async (req: Request) => {
 
         const { error: insertErr } = await supabase.from('attendees').upsert(rows);
         if (insertErr) {
-          console.error('CRITICAL: group PayPal captured but DB insert failed', JSON.stringify({
-            transactionId: ppCapture.id, expectedCents, capturedCents, rowCount: rows.length, dbError: insertErr.message,
+          console.error('CRITICAL: group insert failed', JSON.stringify({
+            transactionId: groupTxId, expectedCents, discountedCents: groupDiscountedCents, isFreeViaPromo: groupIsFreeViaPromo, rowCount: rows.length, dbError: insertErr.message,
           }));
           return jsonResponse({
-            error: `Your payment was processed but we encountered a database error. Please contact the event organizer with this reference: ${ppCapture.id}`,
+            error: groupTxId
+              ? `Your payment was processed but we encountered a database error. Please contact the event organizer with this reference: ${groupTxId}`
+              : 'We encountered a database error completing your free registration. Please try again or contact the event organizer.',
           }, 500);
         }
 
@@ -1152,7 +1213,7 @@ serve(async (req: Request) => {
           supabase,
           paidRows: rows,
           bogoClaims: groupBogoClaims,
-          invoiceId: ppCapture.id,
+          invoiceId: groupInvoiceId,
           formId,
           formSettings: formData.settings,
           formTitle: formData.title ?? null,
@@ -1163,7 +1224,10 @@ serve(async (req: Request) => {
 
         return jsonResponse({
           ok: true,
-          total: expectedCents,
+          total: groupDiscountedCents,
+          subtotal: expectedCents,
+          appliedPromoCode: groupAppliedPromoCode,
+          freeViaPromo: groupIsFreeViaPromo,
           currency: tpl.currency ?? 'USD',
           primaryId,
           guestIds: rows.slice(1).map(r => r.id),
@@ -1221,6 +1285,16 @@ serve(async (req: Request) => {
         // 7. expectedCents = base fee (already in cents) + addons
         const expectedCents = fee + addonTotal;
 
+        // 7a. Promo code resolution — applied to the subtotal. When the
+        // discounted total hits $0, PayPal is bypassed entirely and the
+        // attendee is inserted as `payment_status='free'`. Speaker-type
+        // promos stamp `guest_type='speaker'` on the row.
+        const soloPromo = resolveFormPromoCode(formData, promoCode);
+        const soloDiscountedCents = applyPromoDiscountCents(expectedCents, soloPromo);
+        const soloIsFreeViaPromo = !!soloPromo && soloDiscountedCents === 0;
+        const soloAppliedPromoCode = soloPromo?.code ?? null;
+        const soloPromoSpeakerStamp = soloPromo?.appliesGuestType === 'speaker';
+
         // 7b. BOGO pre-capture validation — solo branch has exactly 1 paid
         // attendee, so any bogoClaim must have paidIndex=0.
         const soloBogoClaims = Array.isArray(body.bogoClaims) ? body.bogoClaims : [];
@@ -1235,7 +1309,10 @@ serve(async (req: Request) => {
         });
         if (soloBogoValidationFail) return soloBogoValidationFail;
 
-        // 8. Capture PayPal order and extract amount in cents
+        // 8. Capture PayPal order and extract amount in cents.
+        //    Skipped entirely when a promo zeroes out the total.
+        let soloTxId: string | null = null;
+        if (!soloIsFreeViaPromo) {
         if (!paypalOrderId) return jsonResponse({ error: 'paypalOrderId required for dynamic pricing payment' }, 400);
 
         const ppMode = (Deno.env.get('PAYPAL_MODE') || '').toLowerCase();
@@ -1294,48 +1371,63 @@ serve(async (req: Request) => {
         const capturedCents = Math.round(Number(ppCapture.amount?.value ?? 0) * 100);
 
         // 9. Reject if captured amount differs from expected by > 1 cent
-        if (Math.abs(capturedCents - expectedCents) > 1) {
+        if (Math.abs(capturedCents - soloDiscountedCents) > 1) {
           return jsonResponse({
             error: 'Price mismatch',
-            expected: expectedCents,
+            expected: soloDiscountedCents,
             received: capturedCents,
           }, 400);
         }
+        soloTxId = ppCapture.id;
+        } // end if (!soloIsFreeViaPromo)
 
-        // Duplicate transaction protection
-        const { data: existingDynTx } = await supabase
-          .from('attendees')
-          .select('id')
-          .eq('transaction_id', ppCapture.id)
-          .limit(1);
-        if (existingDynTx && existingDynTx.length > 0) {
-          return jsonResponse({ error: 'This payment has already been processed' }, 409);
+        // Duplicate transaction protection — only when we have a real tx
+        if (soloTxId) {
+          const { data: existingDynTx } = await supabase
+            .from('attendees')
+            .select('id')
+            .eq('transaction_id', soloTxId)
+            .limit(1);
+          if (existingDynTx && existingDynTx.length > 0) {
+            return jsonResponse({ error: 'This payment has already been processed' }, 409);
+          }
         }
+
+        // Stable id for BOGO grouping (also used by future email payloads).
+        const soloInvoiceId = soloTxId ?? crypto.randomUUID();
 
         // 10. Persist attendee with pricing metadata
         const primary = attendees[0] ?? {};
         const { error: insertErr } = await supabase.from('attendees').upsert([{
           ...primary,
-          payment_status: 'paid',
-          transaction_id: ppCapture.id,
-          payment_amount: `${(expectedCents / 100).toFixed(2)} ${tpl.currency ?? 'CAD'}`,
+          payment_status: soloIsFreeViaPromo ? 'free' : 'paid',
+          transaction_id: soloTxId,
+          payment_method: soloIsFreeViaPromo ? 'promo' : (primary.payment_method ?? null),
+          payment_amount: soloIsFreeViaPromo
+            ? `0.00 ${tpl.currency ?? 'CAD'}`
+            : `${(soloDiscountedCents / 100).toFixed(2)} ${tpl.currency ?? 'CAD'}`,
           pricing_template_id: tpl.id,
           pricing_bracket: activeBracket.id,
           pricing_tier: activeTier.id,
           pricing_category_id: cat.id,
+          applied_promo_code: soloAppliedPromoCode,
+          guest_type: soloPromoSpeakerStamp ? 'speaker' : (primary.guest_type ?? null),
           user_id: authUserId,
         }]);
         if (insertErr) {
-          console.error('CRITICAL: Dynamic pricing PayPal captured but DB insert failed!', JSON.stringify({
-            transactionId: ppCapture.id,
-            capturedCents,
+          console.error('CRITICAL: Dynamic pricing insert failed!', JSON.stringify({
+            transactionId: soloTxId,
+            isFreeViaPromo: soloIsFreeViaPromo,
+            discountedCents: soloDiscountedCents,
             expectedCents,
             pricingTemplateId: tpl.id,
             email: primary.email,
             dbError: insertErr.message,
           }));
           return jsonResponse({
-            error: `Your payment was processed but we encountered a database error. Please contact the event organizer with this reference: ${ppCapture.id}`,
+            error: soloTxId
+              ? `Your payment was processed but we encountered a database error. Please contact the event organizer with this reference: ${soloTxId}`
+              : 'We encountered a database error completing your free registration. Please try again or contact the event organizer.',
           }, 500);
         }
 
@@ -1353,7 +1445,7 @@ serve(async (req: Request) => {
           supabase,
           paidRows: [soloPaidRowForBogo],
           bogoClaims: soloBogoClaims,
-          invoiceId: ppCapture.id,
+          invoiceId: soloInvoiceId,
           formId,
           formSettings: formData.settings,
           formTitle: formData.title ?? null,
@@ -1365,7 +1457,10 @@ serve(async (req: Request) => {
         // 12. Return success
         return jsonResponse({
           ok: true,
-          total: expectedCents,
+          total: soloDiscountedCents,
+          subtotal: expectedCents,
+          appliedPromoCode: soloAppliedPromoCode,
+          freeViaPromo: soloIsFreeViaPromo,
           currency: tpl.currency ?? 'CAD',
           partialBogoFailure: soloBogoResult.partialBogoFailure,
         });

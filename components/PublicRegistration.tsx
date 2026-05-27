@@ -4,6 +4,7 @@ import { FormField, AppSettings, Attendee, Form, DynamicPricingSelection, BogoCl
 import type { PricingTemplate } from '../types';
 import { resolveBracket, resolveTier, computeTotal, formatPrice } from '../utils/pricing';
 import { getEligibleBogoCategories, BOGO_ADMIN_CONTACT } from '../utils/bogo';
+import { findPromoCode, applyPromoDiscount } from '../utils/promoCodes';
 import { computeGroupTotal, type GroupMemberPricingInput } from '../utils/groupPricing';
 import { clearAllProgress } from '../utils/registrationProgress';
 import CountryField from './FormBuilder/fields/CountryField';
@@ -563,14 +564,20 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   };
 
   const applyPromo = () => {
-    if (!ticketField?.ticketConfig?.promoCodes) return;
-    const found = ticketField.ticketConfig.promoCodes.find(p => p.code.toLowerCase() === promoCode.toLowerCase());
+    // Codes can live in either form.settings.promoCodes (dynamic-pricing
+    // forms — GANSID) or ticketField.ticketConfig.promoCodes (static-ticket
+    // forms — legacy). Check the dynamic source first so a GANSID form with
+    // both sets defined prefers the form-level codes.
+    const dynamicCodes = (form?.settings as any)?.promoCodes as any[] | undefined;
+    const staticCodes = ticketField?.ticketConfig?.promoCodes;
+    const found = findPromoCode(dynamicCodes, promoCode)
+      ?? findPromoCode(staticCodes as any, promoCode);
     if (found) {
-      setAppliedPromo(found);
+      setAppliedPromo(found as any);
       setPromoCode(''); // Clear input
-      showNotification("Promo code applied successfully", 'success');
+      showNotification('Promo code applied successfully', 'success');
     } else {
-      showNotification("Invalid promo code", 'error');
+      showNotification('Invalid promo code', 'error');
     }
   };
 
@@ -774,12 +781,21 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
       return;
     }
 
-    // Route to payment screen if any pricing path has a non-zero total.
-    // paymentTotal = static-ticket total, dynamicTotal = dynamic per-person,
-    // groupTotal = dynamic group sum. Any of these > 0 means payment required.
+    // Route to payment screen if any pricing path has a non-zero total
+    // AFTER promo. A 100%-off promo (e.g. SPEAKER2026) bypasses PayPal
+    // entirely — finalizeRegistration('free') sends pricingSelection +
+    // promoCode to verify-payment, which validates the discount server-side
+    // and inserts the row with payment_status='free'.
+    const dynamicTotalAfterPromo = dynamicTotal != null
+      ? applyPromoDiscount(dynamicTotal, appliedPromo as any)
+      : null;
+    const groupTotalAfterPromo = groupTotal != null
+      ? applyPromoDiscount(groupTotal, appliedPromo as any)
+      : null;
+
     const hasPayableAmount = paymentTotal > 0
-      || (pricingTemplate && (dynamicTotal ?? 0) > 0)
-      || (pricingTemplate && registrationMode === 'group' && (groupTotal ?? 0) > 0);
+      || (pricingTemplate && (dynamicTotalAfterPromo ?? 0) > 0)
+      || (pricingTemplate && registrationMode === 'group' && (groupTotalAfterPromo ?? 0) > 0);
 
     if (mode === 'purchaser' && (ticketField || pricingTemplate) && hasPayableAmount) {
       setStep('payment');

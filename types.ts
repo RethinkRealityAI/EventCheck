@@ -23,7 +23,8 @@ export interface Attendee {
   isPrimary?: boolean; // Defaults to true
   guestType?: 'adult' | 'child' | 'pending-claim' | 'claimed'
             | 'exhibitor-staff-pending' | 'exhibitor-staff-claimed'
-            | 'staff-pending' | 'staff-claimed'; // Whether this guest is an adult or child (+ group-flow states)
+            | 'staff-pending' | 'staff-claimed'
+            | 'speaker'; // Whether this guest is an adult or child (+ group-flow states + presenter/speaker designation)
   // Seating Assignment
   assignedTableId?: string | null;
   assignedSeat?: number | null;
@@ -66,6 +67,10 @@ export interface Attendee {
    *  a free ticket gifted by another paying attendee. The paying source
    *  is identified by `bogoSourceAttendeeId`. Free rows have
    *  `paymentStatus='free'`, `paymentAmount=0`, `paymentMethod='bogo'`. */
+  /** Promo code applied at registration. Stamped server-side from the
+   *  validated code; not the raw client input. Used by the dashboard
+   *  ("Promo: SPEAKER2026" tooltip) and by reporting. */
+  appliedPromoCode?: string | null;
   isBogoClaim?: boolean;
   /** Set on BOGO claim rows only. References the paid attendee row whose
    *  BOGO slot this free ticket consumes. Enforces 1:1 via partial unique
@@ -147,6 +152,17 @@ export interface PromoCode {
   code: string;
   type: 'percent' | 'fixed';
   value: number;
+  /** Optional admin label shown in FormBuilder + the dashboard (never
+   *  exposed to the registrant). E.g. "Confirmed speakers Oct 2026". */
+  description?: string;
+  /** Set false to disable the code without removing it. Defaults to true
+   *  when unset (so legacy promo codes added before this field keep
+   *  working). */
+  enabled?: boolean;
+  /** When set, attendees registering with this code get the given
+   *  `guestType` stamped on their row. Today only 'speaker' is wired up
+   *  — admin tools, dashboard pill, and Speakers tab all recognise it. */
+  appliesGuestType?: 'speaker';
 }
 
 export interface TicketItem {
@@ -244,6 +260,12 @@ export interface Form {
     sendGuestConfirmationEmails?: boolean;
     renderMode?: 'single' | 'stepped';
     steps?: FormStep[];
+    /** Promo codes that apply to dynamic-pricing flows on this form. The
+     *  legacy `ticketField.ticketConfig.promoCodes` only worked on the
+     *  static-ticket branch; this field is honored by both the solo and
+     *  group dynamic-pricing branches of verify-payment. Codes are
+     *  case-insensitive. */
+    promoCodes?: PromoCode[];
     /** When true, each paid attendee on this form unlocks one BOGO free
      *  guest ticket of equal or lesser value (compared at the payer's
      *  tier+bracket). Only meaningful on `formType='event'` forms with a

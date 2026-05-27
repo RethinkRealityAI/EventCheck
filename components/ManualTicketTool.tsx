@@ -85,6 +85,9 @@ const ManualTicketTool: React.FC = () => {
   // Forces paymentStatus to 'free' since the recipient doesn't pay for a
   // donated seat.
   const [markAsDonatedClaim, setMarkAsDonatedClaim] = useState(false);
+  // Stamps guest_type='speaker' on the issued row — admins use this for
+  // confirmed speakers issued outside the public promo-code flow.
+  const [issueAsSpeaker, setIssueAsSpeaker] = useState(false);
 
   // Multi-ticket controls. Useful when an admin needs to manually issue a
   // full table (e.g. 8 seats) to one buyer: each seat becomes its own
@@ -302,7 +305,10 @@ const ManualTicketTool: React.FC = () => {
       qrPayload: JSON.stringify({ id: primaryId, formId: formData.formId, action: 'checkin' }),
       paymentStatus: effectivePaymentStatus,
       isPrimary: true,
-      guestType: formData.guestType as any,
+      // Speaker override beats the default adult/child selector since it's
+      // a stronger semantic tag. Only applies to the primary — placeholder
+      // guests below stay as pending-claim seat holders.
+      guestType: (issueAsSpeaker ? 'speaker' : formData.guestType) as any,
       isDonatedSeatClaim: markAsDonatedClaim,
     };
 
@@ -712,6 +718,29 @@ const ManualTicketTool: React.FC = () => {
                             {markAsDonatedClaim && ' Ticket will be issued as free.'}
                           </>
                         )}
+                      </div>
+                    </div>
+                  </label>
+                </div>
+              )}
+
+              {/* Speaker toggle — admin-issued path for confirmed presenters
+                  who don't go through the public promo-code flow. */}
+              {formData.formId && (
+                <div className={`rounded-lg border p-3 transition-all ${issueAsSpeaker ? 'border-amber-300 bg-amber-50/70' : 'border-amber-200 bg-amber-50/30'}`}>
+                  <label className="flex items-start gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={issueAsSpeaker}
+                      onChange={e => setIssueAsSpeaker(e.target.checked)}
+                      className="mt-0.5 w-4 h-4 rounded text-amber-600 focus:ring-amber-500"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-semibold text-amber-900 flex items-center gap-1.5">
+                        🎤 Issue as speaker
+                      </div>
+                      <div className="text-xs text-amber-800/80 mt-0.5">
+                        Tags this row with <code className="text-[11px] bg-amber-100 px-1 rounded">guest_type='speaker'</code> — surfaces in the Speakers tab and adds a 🎤 pill in the dashboard. Use for confirmed presenters issued outside the public promo flow.
                       </div>
                     </div>
                   </label>

@@ -603,6 +603,32 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
                   </div>
                 )}
 
+                {/* Presenter type — surfaces the GANSID `_present` question on
+                    the modal for at-a-glance "is this a speaker?" lookups.
+                    Tolerates the per-form id suffix (f_${timestamp}_present)
+                    by matching any key that ends in "_present". */}
+                {(() => {
+                  const answers = (localAttendee.answers ?? {}) as Record<string, any>;
+                  const presentKey = Object.keys(answers).find(k => k === 'f_present' || k.endsWith('_present'));
+                  const raw = presentKey ? answers[presentKey] : null;
+                  if (!raw || typeof raw !== 'string') return null;
+                  const isYes = raw.toLowerCase().startsWith('yes');
+                  return (
+                    <div className={`rounded-xl p-3 border shadow-sm ${isYes ? 'bg-amber-50/60 border-amber-200' : 'bg-white/60 border-white/60'}`}>
+                      <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.15em] mb-1">
+                        <span>{isYes ? '🎤' : '🧑‍🎓'}</span>
+                        <span className={isYes ? 'text-amber-700' : 'text-slate-600'}>Presenter type</span>
+                      </div>
+                      <div className="text-sm text-slate-800">{raw}</div>
+                      {isYes && localAttendee.guestType !== 'speaker' && (
+                        <div className="text-[11px] text-amber-700 mt-1">
+                          Marked as presenting — consider tagging this row as a Speaker.
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 {/* BOGO panel — context-sensitive: paid source shows linked free guest;
                     free claim row shows source. Read-only summary; lifecycle actions
                     (send/resend/edit/dismiss) live in the user's portal "My Tickets". */}

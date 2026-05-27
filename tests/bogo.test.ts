@@ -107,6 +107,12 @@ describe('isBogoEligibleSource', () => {
     expect(isBogoEligibleSource(paid({ guestType: 'staff-pending' }), FORM_BOGO_ON)).toBe(false);
     expect(isBogoEligibleSource(paid({ guestType: 'staff-claimed' }), FORM_BOGO_ON)).toBe(false);
   });
+  it('ineligible for speaker rows (free via promo)', () => {
+    expect(isBogoEligibleSource(paid({ guestType: 'speaker' }), FORM_BOGO_ON)).toBe(false);
+  });
+  it('ineligible for any payment_status="free" row (promo waived)', () => {
+    expect(isBogoEligibleSource(paid({ paymentStatus: 'free' }), FORM_BOGO_ON)).toBe(false);
+  });
   it('eligible for group members with pending-claim or claimed guest types', () => {
     expect(isBogoEligibleSource(paid({ guestType: 'pending-claim' }), FORM_BOGO_ON)).toBe(true);
     expect(isBogoEligibleSource(paid({ guestType: 'claimed' }), FORM_BOGO_ON)).toBe(true);

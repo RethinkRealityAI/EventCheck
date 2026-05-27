@@ -75,11 +75,13 @@ export function checkBogoSourceEligibility(
   if (paid.is_test === true) return 'BOGO_INELIGIBLE_SOURCE';
   if (paid.is_bogo_claim === true) return 'BOGO_INELIGIBLE_SOURCE';
   if (paid.is_donated_seat_claim === true) return 'BOGO_INELIGIBLE_SOURCE';
+  if (paid.payment_status === 'free') return 'BOGO_INELIGIBLE_SOURCE';
   const blockedGuestTypes = [
     'exhibitor-staff-pending',
     'exhibitor-staff-claimed',
     'staff-pending',
     'staff-claimed',
+    'speaker',
   ];
   if (paid.guest_type && blockedGuestTypes.includes(paid.guest_type)) {
     return 'BOGO_INELIGIBLE_SOURCE';

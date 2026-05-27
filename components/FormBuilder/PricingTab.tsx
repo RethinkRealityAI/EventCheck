@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import type { Form, PricingTemplate, AppSettings } from '../../types';
+import type { Form, PricingTemplate, AppSettings, PromoCode } from '../../types';
 import { getPricingTemplates, getSettings } from '../../services/storageService';
 import { resolveBracket } from '../../utils/pricing';
 import { CURRENT_SITE } from '../../config/sites';
@@ -62,6 +62,27 @@ export default function PricingTab({ form, onFormChange }: Props) {
     });
   };
 
+  // ── Promo codes (form-level, for dynamic-pricing forms) ─────────────
+  const promoCodes: PromoCode[] = ((form.settings as any)?.promoCodes ?? []) as PromoCode[];
+  const setPromoCodes = (next: PromoCode[]) => {
+    onFormChange({
+      ...form,
+      settings: { ...(form.settings ?? {}), promoCodes: next } as any,
+    });
+  };
+  const addPromoCode = () => {
+    setPromoCodes([
+      ...promoCodes,
+      { code: '', type: 'percent', value: 100, enabled: true },
+    ]);
+  };
+  const updatePromoCode = (i: number, patch: Partial<PromoCode>) => {
+    setPromoCodes(promoCodes.map((p, idx) => idx === i ? { ...p, ...patch } : p));
+  };
+  const removePromoCode = (i: number) => {
+    setPromoCodes(promoCodes.filter((_, idx) => idx !== i));
+  };
+
   return (
     <div className="space-y-4">
       <label className="flex items-center gap-2">
@@ -92,6 +113,95 @@ export default function PricingTab({ form, onFormChange }: Props) {
               <div>Active bracket: <strong>{resolveBracket(selected, new Date())?.name ?? '(none)'}</strong></div>
             </div>
           )}
+
+          {/* Promo codes — applies to dynamic-pricing forms only. The
+              legacy ticketConfig.promoCodes are still honored on static-
+              ticket forms via the static-ticket branch of verify-payment. */}
+          <div className="border-t pt-4 mt-4">
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-800">Promo codes</h3>
+                <p className="text-xs text-slate-600">
+                  Discounts applied to the dynamic-pricing subtotal. Set to 100% off
+                  for free registrations (e.g. SPEAKER2026). Codes are case-insensitive.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={addPromoCode}
+                className="text-xs px-3 py-1.5 rounded border border-slate-300 hover:bg-slate-50"
+              >
+                + Add code
+              </button>
+            </div>
+
+            {promoCodes.length === 0 ? (
+              <p className="text-xs text-slate-500 italic">No promo codes configured.</p>
+            ) : (
+              <div className="space-y-2">
+                {promoCodes.map((p, i) => (
+                  <div key={i} className="rounded border border-slate-200 bg-slate-50 p-3 space-y-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto_auto] gap-2">
+                      <input
+                        type="text"
+                        placeholder="CODE (e.g. SPEAKER2026)"
+                        value={p.code}
+                        onChange={e => updatePromoCode(i, { code: e.target.value.toUpperCase() })}
+                        className="px-2 py-1.5 text-sm border border-slate-300 rounded font-mono"
+                      />
+                      <select
+                        value={p.type}
+                        onChange={e => updatePromoCode(i, { type: e.target.value as 'percent' | 'fixed' })}
+                        className="px-2 py-1.5 text-sm border border-slate-300 rounded"
+                      >
+                        <option value="percent">% off</option>
+                        <option value="fixed">fixed (cents)</option>
+                      </select>
+                      <input
+                        type="number"
+                        min={0}
+                        value={p.value}
+                        onChange={e => updatePromoCode(i, { value: Number(e.target.value) || 0 })}
+                        className="w-24 px-2 py-1.5 text-sm border border-slate-300 rounded"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removePromoCode(i)}
+                        className="text-xs px-2 py-1.5 text-rose-600 hover:bg-rose-50 rounded"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap gap-3 text-xs">
+                      <label className="flex items-center gap-1.5">
+                        <input
+                          type="checkbox"
+                          checked={p.enabled !== false}
+                          onChange={e => updatePromoCode(i, { enabled: e.target.checked })}
+                        />
+                        <span>Enabled</span>
+                      </label>
+                      <label className="flex items-center gap-1.5">
+                        <input
+                          type="checkbox"
+                          checked={p.appliesGuestType === 'speaker'}
+                          onChange={e => updatePromoCode(i, { appliesGuestType: e.target.checked ? 'speaker' : undefined })}
+                        />
+                        <span>Tag registrant as Speaker (solo registrations only)</span>
+                      </label>
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="Internal description (admin-only, optional)"
+                      value={p.description ?? ''}
+                      onChange={e => updatePromoCode(i, { description: e.target.value })}
+                      className="w-full px-2 py-1.5 text-xs border border-slate-300 rounded text-slate-600"
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
 
           {bogoSupported && (
             <div className="border-t pt-4 mt-4">

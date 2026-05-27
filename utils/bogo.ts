@@ -36,11 +36,13 @@ export function isBogoEligibleSource(paid: Attendee, form: Form): boolean {
   if (paid.isTest === true) return false;
   if (paid.isBogoClaim === true) return false;          // no chaining
   if (paid.isDonatedSeatClaim === true) return false;   // free claims don't grant
+  if (paid.paymentStatus === 'free') return false;      // promo-free / waived → no BOGO
   // Sponsor/exhibitor staff have specific guest_type values — exclude.
   if (paid.guestType === 'exhibitor-staff-pending') return false;
   if (paid.guestType === 'exhibitor-staff-claimed') return false;
   if (paid.guestType === 'staff-pending') return false;
   if (paid.guestType === 'staff-claimed') return false;
+  if (paid.guestType === 'speaker') return false;       // free speakers don't unlock BOGO
   return true;
 }
 

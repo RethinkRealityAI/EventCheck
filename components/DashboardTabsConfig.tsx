@@ -9,6 +9,7 @@ export type DashboardTabId =
   | 'tables'
   | 'sponsor-tickets'
   | 'groups'
+  | 'speakers'
   | 'test'
   | 'exhibitors'
   | 'signups';
@@ -21,6 +22,10 @@ export interface DashboardTabMeta {
   requiresExhibitorForms?: boolean;
   /** When true, the tab only appears on portal-enabled deployments (GANSID). */
   requiresPortal?: boolean;
+  /** When true, the tab only appears when at least one attendee row has
+   *  `guestType='speaker'` — keeps the tab from cluttering forms that
+   *  don't use the speaker promo flow. */
+  requiresSpeakerData?: boolean;
 }
 
 /** Default display order — matches the order the tabs had before this feature landed.
@@ -31,6 +36,7 @@ export const DASHBOARD_TAB_META: readonly DashboardTabMeta[] = [
   { id: 'tables', label: 'Tables', description: 'Grouped table view' },
   { id: 'sponsor-tickets', label: 'Sponsor Tickets', description: 'Guest seats from sponsor purchases' },
   { id: 'groups', label: 'Groups', description: 'Group-registration primaries + their guests' },
+  { id: 'speakers', label: 'Speakers', description: 'Registrants tagged as Speaker (via promo code or admin-issued)', requiresSpeakerData: true },
   { id: 'test', label: 'Test', description: 'Form-preview submissions' },
   { id: 'exhibitors', label: 'Exhibitors', description: 'Exhibitor org + staff rows', requiresExhibitorForms: true },
   { id: 'signups', label: 'Signups', description: 'Portal users + registration progress', requiresPortal: true },
@@ -40,7 +46,7 @@ export const DASHBOARD_TAB_META: readonly DashboardTabMeta[] = [
  *  gates AND admin preferences (order + hidden). Pure — no React state. */
 export function resolveVisibleTabs(
   prefs: AppSettings['dashboardTabPrefs'] | undefined,
-  gates: { hasExhibitorForms: boolean; portalEnabled: boolean },
+  gates: { hasExhibitorForms: boolean; portalEnabled: boolean; hasSpeakers?: boolean },
 ): DashboardTabMeta[] {
   const knownIds = new Set(DASHBOARD_TAB_META.map(m => m.id));
   const metaById = new Map(DASHBOARD_TAB_META.map(m => [m.id, m]));
@@ -65,6 +71,7 @@ export function resolveVisibleTabs(
       if (hidden.has(m.id)) return false;
       if (m.requiresExhibitorForms && !gates.hasExhibitorForms) return false;
       if (m.requiresPortal && !gates.portalEnabled) return false;
+      if (m.requiresSpeakerData && !gates.hasSpeakers) return false;
       return true;
     });
 }

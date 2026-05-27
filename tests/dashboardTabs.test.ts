@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { resolveVisibleTabs, DASHBOARD_TAB_META } from '../components/DashboardTabsConfig';
 
-const ALL_AVAILABLE = { hasExhibitorForms: true, portalEnabled: true };
-const SCAGO_LIKE = { hasExhibitorForms: false, portalEnabled: false };
+const ALL_AVAILABLE = { hasExhibitorForms: true, portalEnabled: true, hasSpeakers: true };
+const SCAGO_LIKE = { hasExhibitorForms: false, portalEnabled: false, hasSpeakers: false };
 
 describe('resolveVisibleTabs', () => {
   it('returns default order when prefs is undefined', () => {

@@ -468,6 +468,7 @@ function mapAttendeeFromDb(db: AttendeeRow): Attendee {
     isBogoClaim: (db as any).is_bogo_claim ?? false,
     bogoSourceAttendeeId: (db as any).bogo_source_attendee_id ?? null,
     bogoDismissedByPayerAt: (db as any).bogo_dismissed_by_payer_at ?? null,
+    appliedPromoCode: (db as any).applied_promo_code ?? null,
   };
 }
 
@@ -513,6 +514,7 @@ export function mapAttendeeToDb(a: Attendee): AttendeeInsert {
     is_bogo_claim: a.isBogoClaim ?? false,
     bogo_source_attendee_id: a.bogoSourceAttendeeId ?? null,
     bogo_dismissed_by_payer_at: a.bogoDismissedByPayerAt ?? null,
+    applied_promo_code: a.appliedPromoCode ?? null,
   } as AttendeeInsert;
 }
 

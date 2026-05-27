@@ -27,6 +27,7 @@ const AddAttendeeModal: React.FC<AddAttendeeModalProps> = ({ forms, selectedForm
   const [paymentStatus, setPaymentStatus] = useState<'free' | 'paid' | 'pending'>('free');
   const [isTest, setIsTest] = useState(false);
   const [isDonatedSeatClaim, setIsDonatedSeatClaim] = useState(false);
+  const [issueAsSpeaker, setIssueAsSpeaker] = useState(false);
   const [answers, setAnswers] = useState<Record<string, any>>({});
 
   // Live donated-seat pool from the attendee list. Drives the hint copy on
@@ -127,6 +128,7 @@ const AddAttendeeModal: React.FC<AddAttendeeModalProps> = ({ forms, selectedForm
         donatedTables: 0,
         donatedSeats: 0,
         isDonatedSeatClaim,
+        guestType: issueAsSpeaker ? 'speaker' : undefined,
       };
 
       await saveAttendee(attendee);
@@ -203,6 +205,27 @@ const AddAttendeeModal: React.FC<AddAttendeeModalProps> = ({ forms, selectedForm
                   ) : (
                     <><strong>{donationPool.available}</strong> donated seat{donationPool.available !== 1 ? 's' : ''} available ({donationPool.claimed}/{donationPool.donated} already claimed). Checking this issues the ticket as free against the donor pool.</>
                   )}
+                </p>
+              </div>
+            </div>
+
+            {/* Issue as speaker — admins use this for confirmed speakers
+                who weren't given a promo code. Tags the row with
+                guest_type='speaker' so the Speakers tab + 🎤 pill light up. */}
+            <div className={`rounded-2xl px-5 py-3.5 border flex items-start gap-3 transition-all ${issueAsSpeaker ? 'bg-amber-50/80 border-amber-200/60' : 'bg-amber-50/40 border-amber-200/40'}`}>
+              <input
+                type="checkbox"
+                id="issueAsSpeaker"
+                checked={issueAsSpeaker}
+                onChange={e => setIssueAsSpeaker(e.target.checked)}
+                className="mt-0.5 w-4 h-4 rounded text-amber-600 focus:ring-amber-500"
+              />
+              <div className="flex-1 min-w-0">
+                <label htmlFor="issueAsSpeaker" className="text-sm text-amber-800 font-bold cursor-pointer select-none flex items-center gap-1.5">
+                  🎤 Issue as speaker
+                </label>
+                <p className="text-xs text-amber-700/80 mt-0.5">
+                  Tags this registration as a Speaker — shows the 🎤 pill in the dashboard and surfaces them in the Speakers tab. Use for confirmed presenters who didn't self-register with a promo code.
                 </p>
               </div>
             </div>

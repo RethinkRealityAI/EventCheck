@@ -126,7 +126,7 @@ const STANDARD_COLUMNS: ColumnDef[] = [
 
 const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading = false, onRefresh }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState<'live' | 'test' | 'donated' | 'tables' | 'sponsor-tickets' | 'exhibitors' | 'groups' | 'signups'>('live');
+  const [activeTab, setActiveTab] = useState<'live' | 'test' | 'donated' | 'tables' | 'sponsor-tickets' | 'exhibitors' | 'groups' | 'signups' | 'speakers'>('live');
   const [tabsConfigOpen, setTabsConfigOpen] = useState(false);
   const [selectedAttendee, setSelectedAttendee] = useState<Attendee | null>(null);
   const { showNotification } = useNotifications();
@@ -318,14 +318,23 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     return t === 'exhibitor' || t === 'sponsor_exhibitor';
   });
 
+  // Speakers tab only renders when at least one attendee row has been
+  // tagged. Excludes test rows so a single test speaker registration
+  // doesn't surface the tab in production-style dashboards.
+  const hasSpeakers = useMemo(
+    () => attendees.some(a => a.guestType === 'speaker' && a.isTest !== true),
+    [attendees],
+  );
+
   // Resolved tab list — driven by admin prefs + site-availability gates.
   // Memoized so the active-tab fallback effect below doesn't fire on every render.
   const visibleTabs = useMemo(
     () => resolveVisibleTabs(settings?.dashboardTabPrefs, {
       hasExhibitorForms,
       portalEnabled: CURRENT_SITE.portalEnabled,
+      hasSpeakers,
     }),
-    [settings?.dashboardTabPrefs, hasExhibitorForms],
+    [settings?.dashboardTabPrefs, hasExhibitorForms, hasSpeakers],
   );
 
   // If the admin hides (or site availability strips) the currently-active tab,
@@ -475,6 +484,9 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     else if (activeTab === 'groups') {
       // Show group primaries + their guests, so admins can see whole groups at a glance
       matchesTab = !isTest && !isStaffRow && (groupPrimaryIds.has(a.id) || (!!a.primaryAttendeeId && groupPrimaryIds.has(a.primaryAttendeeId)));
+    }
+    else if (activeTab === 'speakers') {
+      matchesTab = !isTest && a.guestType === 'speaker';
     }
     else matchesTab = !isTest && !isStaffRow;
 
@@ -1257,6 +1269,16 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                                 title="This is a Buy-One-Get-One-Free guest ticket"
                               >
                                 🎁 FREE GUEST
+                              </span>
+                            )}
+                            {attendee.guestType === 'speaker' && (
+                              <span
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200"
+                                title={attendee.appliedPromoCode
+                                  ? `Speaker — registered with promo ${attendee.appliedPromoCode}`
+                                  : 'Speaker — issued by admin'}
+                              >
+                                🎤 SPEAKER
                               </span>
                             )}
                             {/* Tag on paid rows whose BOGO slot has been used */}
