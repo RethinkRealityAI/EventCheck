@@ -21,9 +21,12 @@
 --
 -- See docs/superpowers/specs/2026-05-26-bogo-gansid-design.md.
 
+-- NOTE: attendees.id is TEXT on production (legacy choice from initial schema),
+-- so the FK column must also be TEXT — UUID would fail with "incompatible
+-- types" at constraint creation. Discovered live during SCAGO migration apply.
 ALTER TABLE attendees
   ADD COLUMN IF NOT EXISTS is_bogo_claim BOOLEAN NOT NULL DEFAULT false,
-  ADD COLUMN IF NOT EXISTS bogo_source_attendee_id UUID
+  ADD COLUMN IF NOT EXISTS bogo_source_attendee_id TEXT
     REFERENCES attendees(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS bogo_dismissed_by_payer_at TIMESTAMPTZ NULL;
 
