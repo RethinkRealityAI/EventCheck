@@ -7,6 +7,8 @@ import {
   describePromo,
   promoAppliedMessage,
   DEFAULT_SPEAKER_PROMO_APPLIED_MESSAGE,
+  isSpeakerRegistrationCategory,
+  formHasEnabledPromoCodes,
 } from '../utils/promoCodes';
 import type { PromoCode } from '../types';
 
@@ -97,6 +99,27 @@ describe('promoAppliedMessage', () => {
   });
   it('falls back to code label for generic promos', () => {
     expect(promoAppliedMessage(HALF)).toBe('Promo code applied: HALF');
+  });
+});
+
+describe('isSpeakerRegistrationCategory', () => {
+  it('matches Speaker category names', () => {
+    expect(isSpeakerRegistrationCategory('Speaker')).toBe(true);
+    expect(isSpeakerRegistrationCategory('Industry Speaker Pass')).toBe(true);
+  });
+  it('does not match physician or industry partner', () => {
+    expect(isSpeakerRegistrationCategory('Physician')).toBe(false);
+    expect(isSpeakerRegistrationCategory('Industry Partner')).toBe(false);
+  });
+});
+
+describe('formHasEnabledPromoCodes', () => {
+  it('true when dynamic promos exist', () => {
+    expect(formHasEnabledPromoCodes([SPEAKER], null)).toBe(true);
+  });
+  it('false when all disabled or empty', () => {
+    expect(formHasEnabledPromoCodes([{ ...SPEAKER, enabled: false }], null)).toBe(false);
+    expect(formHasEnabledPromoCodes([], [])).toBe(false);
   });
 });
 

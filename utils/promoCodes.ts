@@ -70,6 +70,21 @@ export function isFreeAfterPromo(subtotalCents: number, promo: PromoCode | undef
   return applyPromoDiscount(subtotalCents, promo) === 0 && !!promo;
 }
 
+/** True when the pricing category label is a Speaker tier (e.g. "Speaker"). */
+export function isSpeakerRegistrationCategory(categoryName: string | undefined | null): boolean {
+  return !!categoryName && /\bspeaker\b/i.test(categoryName);
+}
+
+/** Any enabled promo codes configured on this form (dynamic or static ticket). */
+export function formHasEnabledPromoCodes(
+  settingsPromos: PromoCode[] | undefined | null,
+  staticPromos: PromoCode[] | undefined | null,
+): boolean {
+  const has = (codes: PromoCode[] | undefined | null) =>
+    !!codes?.some(p => p.enabled !== false && String(p.code || '').trim());
+  return has(settingsPromos) || has(staticPromos);
+}
+
 /** UI-friendly description: "100% off" / "$5 off" / etc. */
 export function describePromo(promo: PromoCode, currency = 'USD'): string {
   if (promo.type === 'percent') return `${promo.value}% off`;

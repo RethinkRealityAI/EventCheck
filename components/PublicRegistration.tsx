@@ -4,7 +4,13 @@ import { FormField, AppSettings, Attendee, Form, DynamicPricingSelection, BogoCl
 import type { PricingTemplate } from '../types';
 import { resolveBracket, resolveTier, computeTotal, computeBaseAndAddons, formatPrice } from '../utils/pricing';
 import { getEligibleBogoCategories, BOGO_ADMIN_CONTACT } from '../utils/bogo';
-import { findPromoCode, applyPromoToPricing, promoAppliedMessage } from '../utils/promoCodes';
+import {
+  findPromoCode,
+  applyPromoToPricing,
+  promoAppliedMessage,
+  isSpeakerRegistrationCategory,
+  formHasEnabledPromoCodes,
+} from '../utils/promoCodes';
 import { computeGroupTotal, computeGroupBaseAndAddons, type GroupMemberPricingInput } from '../utils/groupPricing';
 import { clearAllProgress } from '../utils/registrationProgress';
 import CountryField from './FormBuilder/fields/CountryField';
@@ -535,6 +541,29 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
 
   const ticketField = form?.fields.find(f => f.type === 'ticket');
 
+  const selectedPricingCategory = pricingTemplate?.categories.find(c => c.id === selectedCategoryId);
+  const isSpeakerCategory = isSpeakerRegistrationCategory(selectedPricingCategory?.name);
+  const hasFormPromoCodes = formHasEnabledPromoCodes(
+    (form?.settings as any)?.promoCodes,
+    ticketField?.ticketConfig?.promoCodes as PromoCode[] | undefined,
+  );
+  const staticTicketQty = Object.values(ticketQuantities).reduce((a, b) => a + b, 0);
+  /** Promo input appears after category (dynamic) or ticket qty (static). */
+  const showPromoCodeField = hasFormPromoCodes && (
+    (!!pricingTemplate && !!selectedCategoryId)
+    || (!pricingTemplate && staticTicketQty > 0)
+  );
+  const promoFieldHint = !showPromoCodeField
+    ? undefined
+    : isSpeakerCategory
+      ? 'Speaker registration requires a promo code. Enter your code and click Apply before continuing.'
+      : 'Promo codes apply to your selected registration category — enter your code and click Apply.';
+  const postPromoCheckoutCents = payableAfterPromoCents;
+  const prePromoCheckoutCents = registrationMode === 'group'
+    ? (groupTotal ?? 0)
+    : (dynamicTotal ?? 0);
+  const needsPaymentStep = postPromoCheckoutCents > 0;
+
   // Compute ticket subtotal separately for display on payment page
   const ticketSubtotal = (() => {
     if (!ticketField?.ticketConfig) return 0;
@@ -858,16 +887,35 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
       return;
     }
 
-    // Route to payment screen if any pricing path has a non-zero total
-    // AFTER promo. A 100%-off promo (e.g. SPEAKER2026) bypasses PayPal
-    // entirely — finalizeRegistration('free') sends pricingSelection +
-    // promoCode to verify-payment, which validates the discount server-side
-    // and inserts the row with payment_status='free'.
-    const hasPayableAmount = paymentTotal > 0
-      || (pricingTemplate && (dynamicTotalAfterPromo ?? 0) > 0)
-      || (pricingTemplate && registrationMode === 'group' && (groupTotalAfterPromo ?? 0) > 0);
+    // Dynamic pricing: route by post-promo total. Speaker-named categories
+    // require an applied promo (prevents "free" checkout from a $0 tier alone).
+    if (mode === 'purchaser' && pricingTemplate) {
+      if (registrationMode !== 'group' && !selectedCategoryId) {
+        setError('Please select a registration category.');
+        return;
+      }
+      if (isSpeakerCategory && !appliedPromo) {
+        setError(
+          'Speaker registration requires a promo code. Choose the Speaker category, '
+          + 'enter your code, click Apply, then complete registration.',
+        );
+        return;
+      }
+      if (needsPaymentStep) {
+        setStep('payment');
+        return;
+      }
+      if (appliedPromo || prePromoCheckoutCents === 0) {
+        finalizeRegistration('free');
+        return;
+      }
+      setError('Please apply a valid promo code to continue.');
+      return;
+    }
 
-    if (mode === 'purchaser' && (ticketField || pricingTemplate) && hasPayableAmount) {
+    // Static tickets / legacy paths
+    const hasPayableAmount = paymentTotal > 0;
+    if (mode === 'purchaser' && ticketField && hasPayableAmount) {
       setStep('payment');
     } else {
       finalizeRegistration('free');
@@ -1943,6 +1991,8 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                 onRestoreAnswers={(restored) => setAnswers(restored)}
                 onSaveAndClose={onSaveAndClose}
                 bogoSection={bogoSection}
+                showPromoCodeField={showPromoCodeField}
+                promoFieldHint={promoFieldHint}
               />
             ) : (
               <SingleFormShell
@@ -1998,6 +2048,8 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                 setDonatedTables={setDonatedTables}
                 setSelectedCountryCode={setSelectedCountryCode}
                 bogoSection={bogoSection}
+                showPromoCodeField={showPromoCodeField}
+                promoFieldHint={promoFieldHint}
               />
             )}
 
@@ -2052,8 +2104,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                     <>Claim Your Ticket <ArrowRight className="w-5 h-5" /></>
                   ) : (
                     (ticketField && paymentTotal > 0)
-                    || (pricingTemplate && registrationMode === 'group' && (displayGroupTotal ?? 0) > 0)
-                    || (pricingTemplate && (displayDynamicTotal ?? 0) > 0)
+                    || (pricingTemplate && needsPaymentStep)
                   ) ? (
                     <>Proceed to Payment <ArrowRight className="w-5 h-5" /></>
                   ) : (form.settings?.submitButtonText || 'Register Now')}

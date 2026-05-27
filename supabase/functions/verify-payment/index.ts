@@ -1443,6 +1443,7 @@ serve(async (req: Request) => {
           pricing_category_id: cat.id,
           applied_promo_code: soloAppliedPromoCode,
           guest_type: soloPromoSpeakerStamp ? 'speaker' : (primary.guest_type ?? null),
+          attendee_category: soloPromoSpeakerStamp ? 'speaker' : (primary.attendee_category ?? null),
           user_id: authUserId,
         }]);
         if (insertErr) {

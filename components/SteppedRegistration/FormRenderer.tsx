@@ -109,6 +109,9 @@ export interface FormRendererProps {
    *  renders inside the ticket-field block in BOTH stepped and single
    *  modes (FormRenderer is shared). Null when BOGO isn't enabled. */
   bogoSection?: React.ReactNode;
+  /** When false, hide promo UI until the user picks a registration category. */
+  showPromoCodeField?: boolean;
+  promoFieldHint?: string;
 }
 
 export const FormRenderer: React.FC<FormRendererProps> = ({
@@ -165,6 +168,8 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   setDonatedTables,
   setSelectedCountryCode,
   bogoSection,
+  showPromoCodeField = false,
+  promoFieldHint,
 }) => {
   return (
     <>
@@ -407,9 +412,12 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                   onChange={setSelectedCategoryId}
                 />
 
-                {/* Promo before total/BOGO so users apply discounts before seeing the amount. */}
-                {mode === 'purchaser' && selectedCategoryId && (
+                {/* Promo — only after registration category is selected. */}
+                {mode === 'purchaser' && showPromoCodeField && (
                   <div>
+                    {promoFieldHint && (
+                      <p className="text-xs text-gansid-on-surface/70 mb-2">{promoFieldHint}</p>
+                    )}
                     <div className="flex gap-2">
                       <input
                         type="text"
@@ -485,7 +493,11 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                     ))}
                   </div>
 
-                  {/* Promo before BOGO / payment-related sections */}
+                  {showPromoCodeField && (
+                  <>
+                  {promoFieldHint && (
+                    <p className="text-xs text-gray-500 mb-2">{promoFieldHint}</p>
+                  )}
                   <div className="flex gap-2 mb-2">
                     <input
                       type="text" placeholder="Promo Code"
@@ -504,6 +516,8 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                     <div className="text-xs text-green-600 flex items-center gap-1 mb-2">
                       <Tag className="w-3 h-3" /> {promoAppliedMessage(appliedPromo)}
                     </div>
+                  )}
+                  </>
                   )}
 
                   {field.ticketConfig?.items.some(item => (ticketQuantities[item.id] || 0) > 0) && bogoSection}
