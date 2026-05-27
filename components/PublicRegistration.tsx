@@ -1788,6 +1788,31 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                     const update = (patch: Partial<BogoSlot>) => {
                       setBogoSlots(prev => prev.map((s, idx) => idx === i ? { ...s, ...patch } : s));
                     };
+                    // Soft-warn (not blocker) when an inline-mode guest email
+                    // collides with another attendee on this checkout — the
+                    // buyer's own email, a group member's, or another BOGO
+                    // slot. Most often a typo; occasionally legitimate
+                    // (one person managing multiple tickets).
+                    const guestEmailLc = slot.mode === 'inline' ? slot.guestEmail.trim().toLowerCase() : '';
+                    const otherEmails: string[] = [];
+                    const buyerEmailField = form.fields.find(f => f.type === 'email' || f.label.toLowerCase().includes('email'));
+                    if (buyerEmailField) {
+                      const buyerEmail = String(answers[buyerEmailField.id] || '').trim().toLowerCase();
+                      if (buyerEmail) otherEmails.push(buyerEmail);
+                    }
+                    if (registrationMode === 'group') {
+                      for (const m of groupMembers) {
+                        const e = String(m.email || '').trim().toLowerCase();
+                        if (e) otherEmails.push(e);
+                      }
+                    }
+                    bogoSlots.forEach((other, j) => {
+                      if (j === i) return;
+                      if (other.mode !== 'inline') return;
+                      const e = other.guestEmail.trim().toLowerCase();
+                      if (e) otherEmails.push(e);
+                    });
+                    const emailDupWarning = guestEmailLc && otherEmails.includes(guestEmailLc);
                     return (
                       <div key={i} className="rounded-xl border border-emerald-200 bg-white p-4">
                         <div className="flex items-center justify-between mb-2">
@@ -1824,33 +1849,41 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                             </div>
 
                             {slot.mode === 'inline' && (
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                <input
-                                  type="text"
-                                  placeholder="Guest name"
-                                  value={slot.guestName}
-                                  onChange={e => update({ guestName: e.target.value })}
-                                  className="px-3 py-2 border border-emerald-200 rounded-lg text-sm"
-                                />
-                                <input
-                                  type="email"
-                                  placeholder="Guest email"
-                                  value={slot.guestEmail}
-                                  onChange={e => update({ guestEmail: e.target.value })}
-                                  className="px-3 py-2 border border-emerald-200 rounded-lg text-sm"
-                                />
-                                <select
-                                  value={slot.categoryId}
-                                  onChange={e => update({ categoryId: e.target.value })}
-                                  className="px-3 py-2 border border-emerald-200 rounded-lg text-sm sm:col-span-2"
-                                >
-                                  <option value="">Select category…</option>
-                                  {eligibleCats.map(c => (
-                                    <option key={c.id} value={c.id}>
-                                      {c.name}{c.id === payer!.categoryId ? ' (same as yours)' : ''}
-                                    </option>
-                                  ))}
-                                </select>
+                              <div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                  <input
+                                    type="text"
+                                    placeholder="Guest name"
+                                    value={slot.guestName}
+                                    onChange={e => update({ guestName: e.target.value })}
+                                    className="px-3 py-2 border border-emerald-200 rounded-lg text-sm"
+                                  />
+                                  <input
+                                    type="email"
+                                    placeholder="Guest email"
+                                    value={slot.guestEmail}
+                                    onChange={e => update({ guestEmail: e.target.value })}
+                                    className={`px-3 py-2 border rounded-lg text-sm ${emailDupWarning ? 'border-amber-400 bg-amber-50' : 'border-emerald-200'}`}
+                                  />
+                                  <select
+                                    value={slot.categoryId}
+                                    onChange={e => update({ categoryId: e.target.value })}
+                                    className="px-3 py-2 border border-emerald-200 rounded-lg text-sm sm:col-span-2"
+                                  >
+                                    <option value="">Select category…</option>
+                                    {eligibleCats.map(c => (
+                                      <option key={c.id} value={c.id}>
+                                        {c.name}{c.id === payer!.categoryId ? ' (same as yours)' : ''}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                                {emailDupWarning && (
+                                  <p className="text-[11px] text-amber-700 mt-2">
+                                    ⚠ This email matches another attendee on this form. Submitting will still
+                                    work — but double-check it's not a typo.
+                                  </p>
+                                )}
                               </div>
                             )}
 

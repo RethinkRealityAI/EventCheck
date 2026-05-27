@@ -18,6 +18,7 @@ import { AvailableFormsGrid } from './AvailableFormsGrid';
 import { CredentialCard } from './CredentialCard';
 import { AnnouncementsFeed } from './AnnouncementsFeed';
 import { QuickLinks } from './QuickLinks';
+import { TicketsSummaryTile } from './TicketsSummaryTile';
 import { RegisterModal } from './RegisterModal';
 import TeamTable from '../../SponsorExhibitor/TeamTable';
 
@@ -192,6 +193,7 @@ export function PortalDashboard() {
         </div>
         <aside className="space-y-6">
           <CredentialCard profile={profile} attendee={latestPaidAttendee} />
+          <TicketsSummaryTile />
           <QuickLinks />
         </aside>
       </div>

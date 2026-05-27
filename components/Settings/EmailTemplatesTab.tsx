@@ -148,6 +148,49 @@ const TEMPLATES: TemplateEntry[] = [
     placeholders: ['name', 'contact_name', 'org_name', 'event'],
     global: false,
   },
+  // BOGO (Buy-One-Get-One-Free) — sent on GANSID forms with bogoEnabled.
+  // Defaults are baked into the send-ticket-email edge function, so leaving
+  // these blank means "use the default copy". Filling them overrides.
+  {
+    key: 'bogo-ticket',
+    label: 'BOGO — Free Guest Ticket',
+    group: 'BOGO',
+    description: 'Sent to the free guest when the payer entered their details inline at checkout OR via the portal "Send free ticket" action.',
+    subjectField: 'emailBogoTicketSubject',
+    bodyField: 'emailBogoTicketBody',
+    placeholders: ['name', 'purchaser', 'event', 'free_category_name', 'qr_image_url', 'registration_id', 'signup_url', 'admin_contact'],
+    global: false,
+  },
+  {
+    key: 'bogo-claim-link',
+    label: 'BOGO — Claim Link for Payer',
+    group: 'BOGO',
+    description: 'Sent to the buyer (NOT the guest) when they chose "send claim link later" — contains a forwardable claim URL.',
+    subjectField: 'emailBogoClaimLinkSubject',
+    bodyField: 'emailBogoClaimLinkBody',
+    placeholders: ['payer_name', 'event', 'claim_url', 'portal_tickets_url', 'admin_contact'],
+    global: false,
+  },
+  {
+    key: 'bogo-ticket-updated',
+    label: 'BOGO — Ticket Updated',
+    group: 'BOGO',
+    description: 'Sent to the free guest when the payer edited recipient details (uncommitted only). Re-attaches the QR image so prior copies should be discarded.',
+    subjectField: 'emailBogoTicketUpdatedSubject',
+    bodyField: 'emailBogoTicketUpdatedBody',
+    placeholders: ['name', 'purchaser', 'event', 'qr_image_url', 'admin_contact'],
+    global: false,
+  },
+  {
+    key: 'bogo-ticket-withdrawn',
+    label: 'BOGO — Ticket Withdrawn',
+    group: 'BOGO',
+    description: 'Sent to the free guest when admin deletes the paid source attendee (cascade-cancel notification).',
+    subjectField: 'emailBogoTicketWithdrawnSubject',
+    bodyField: 'emailBogoTicketWithdrawnBody',
+    placeholders: ['name', 'purchaser', 'event', 'admin_contact'],
+    global: false,
+  },
   // Sponsor templates — surfaced here so admins see the full inventory of
   // emails the platform sends in one place. These same fields are also
   // editable in the Sponsors → Templates tab; both UIs write to the same

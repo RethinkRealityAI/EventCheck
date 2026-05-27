@@ -1259,6 +1259,17 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                                 🎁 FREE GUEST
                               </span>
                             )}
+                            {/* Tag on paid rows whose BOGO slot has been used */}
+                            {!attendee.isBogoClaim && attendees.some(
+                              a => a.isBogoClaim && a.bogoSourceAttendeeId === attendee.id,
+                            ) && (
+                              <span
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                title="This paid ticket has a free BOGO guest paired"
+                              >
+                                + 1 free guest
+                              </span>
+                            )}
                             {((attendee.donatedSeats || 0) > 0 || (attendee.donatedTables || 0) > 0) && (
                               <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-700">
                                 {attendee.donationType === 'table' && (attendee.donatedTables || 0) > 0

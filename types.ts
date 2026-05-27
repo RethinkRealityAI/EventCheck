@@ -334,6 +334,21 @@ export interface AppSettings {
   emailExhibitorStaffCompletionNotifySubject?: string;
   emailExhibitorStaffCompletionNotifyBody?: string;
 
+  // BOGO (Buy-One-Get-One-Free) Email Templates — all use placeholders
+  // {{name}} {{purchaser}} {{event}} {{admin_contact}} where applicable;
+  // bogoTicket adds {{free_category_name}} {{qr_image_url}} {{registration_id}}
+  // {{signup_url}}; bogoClaimLinkForPayer adds {{payer_name}} {{claim_url}}
+  // {{portal_tickets_url}}. Defaults are baked into send-ticket-email so an
+  // empty value here means "use default".
+  emailBogoTicketSubject?: string;
+  emailBogoTicketBody?: string;
+  emailBogoClaimLinkSubject?: string;
+  emailBogoClaimLinkBody?: string;
+  emailBogoTicketUpdatedSubject?: string;
+  emailBogoTicketUpdatedBody?: string;
+  emailBogoTicketWithdrawnSubject?: string;
+  emailBogoTicketWithdrawnBody?: string;
+
   // Sponsor Email Templates
   sponsorInvitationSubject: string;
   sponsorInvitationBody: string;
