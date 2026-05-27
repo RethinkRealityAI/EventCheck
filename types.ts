@@ -71,6 +71,11 @@ export interface Attendee {
    *  validated code; not the raw client input. Used by the dashboard
    *  ("Promo: SPEAKER2026" tooltip) and by reporting. */
   appliedPromoCode?: string | null;
+  /** Role/category tag — distinct from guestType (which is flow state).
+   *  See utils/attendeeCategories.ts for the enum + pill metadata.
+   *  Drives the pill on AttendeeList, AttendeeModal, GuestSidebar, and
+   *  the 3D seating scene labels. */
+  attendeeCategory?: import('./utils/attendeeCategories').AttendeeCategory | null;
   isBogoClaim?: boolean;
   /** Set on BOGO claim rows only. References the paid attendee row whose
    *  BOGO slot this free ticket consumes. Enforces 1:1 via partial unique

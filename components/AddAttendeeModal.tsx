@@ -5,6 +5,12 @@ import { X, UserPlus, Loader2, Calendar, CreditCard, Heart } from 'lucide-react'
 import { saveAttendee } from '../services/storageService';
 import { useNotifications } from './NotificationSystem';
 import { computeDonationPool } from '../utils/donationPool';
+import { CURRENT_SITE } from '../config/sites';
+import {
+  type AttendeeCategory,
+  getCategoryOptionsForSite,
+  CATEGORY_META,
+} from '../utils/attendeeCategories';
 
 interface AddAttendeeModalProps {
   forms: Form[];
@@ -27,7 +33,8 @@ const AddAttendeeModal: React.FC<AddAttendeeModalProps> = ({ forms, selectedForm
   const [paymentStatus, setPaymentStatus] = useState<'free' | 'paid' | 'pending'>('free');
   const [isTest, setIsTest] = useState(false);
   const [isDonatedSeatClaim, setIsDonatedSeatClaim] = useState(false);
-  const [issueAsSpeaker, setIssueAsSpeaker] = useState(false);
+  const [attendeeCategory, setAttendeeCategory] = useState<AttendeeCategory | ''>('');
+  const categoryOptions = getCategoryOptionsForSite(CURRENT_SITE.portalEnabled);
   const [answers, setAnswers] = useState<Record<string, any>>({});
 
   // Live donated-seat pool from the attendee list. Drives the hint copy on
@@ -128,7 +135,10 @@ const AddAttendeeModal: React.FC<AddAttendeeModalProps> = ({ forms, selectedForm
         donatedTables: 0,
         donatedSeats: 0,
         isDonatedSeatClaim,
-        guestType: issueAsSpeaker ? 'speaker' : undefined,
+        // Speaker is GANSID-only and ALSO stamps guest_type for the
+        // legacy Speakers tab. Other categories only write attendee_category.
+        guestType: attendeeCategory === 'speaker' ? 'speaker' : undefined,
+        attendeeCategory: attendeeCategory || null,
       };
 
       await saveAttendee(attendee);
@@ -209,25 +219,36 @@ const AddAttendeeModal: React.FC<AddAttendeeModalProps> = ({ forms, selectedForm
               </div>
             </div>
 
-            {/* Issue as speaker — admins use this for confirmed speakers
-                who weren't given a promo code. Tags the row with
-                guest_type='speaker' so the Speakers tab + 🎤 pill light up. */}
-            <div className={`rounded-2xl px-5 py-3.5 border flex items-start gap-3 transition-all ${issueAsSpeaker ? 'bg-amber-50/80 border-amber-200/60' : 'bg-amber-50/40 border-amber-200/40'}`}>
-              <input
-                type="checkbox"
-                id="issueAsSpeaker"
-                checked={issueAsSpeaker}
-                onChange={e => setIssueAsSpeaker(e.target.checked)}
-                className="mt-0.5 w-4 h-4 rounded text-amber-600 focus:ring-amber-500"
-              />
-              <div className="flex-1 min-w-0">
-                <label htmlFor="issueAsSpeaker" className="text-sm text-amber-800 font-bold cursor-pointer select-none flex items-center gap-1.5">
-                  🎤 Issue as speaker
-                </label>
-                <p className="text-xs text-amber-700/80 mt-0.5">
-                  Tags this registration as a Speaker — shows the 🎤 pill in the dashboard and surfaces them in the Speakers tab. Use for confirmed presenters who didn't self-register with a promo code.
+            {/* Attendee category dropdown — tags attendee with a role pill
+                that surfaces on the dashboard, attendee modal, and 3D
+                seating configurator.  */}
+            <div className={`rounded-2xl px-5 py-3.5 border transition-all ${attendeeCategory ? 'bg-slate-50 border-slate-300' : 'bg-white border-slate-200'}`}>
+              <label className="block">
+                <div className="text-sm text-slate-800 font-bold mb-0.5">
+                  Attendee category <span className="text-xs font-normal text-slate-500">(optional)</span>
+                </div>
+                <p className="text-xs text-slate-600 mb-2">
+                  Tags this registration with a role pill (🎩 Dignitary, 🏆 Awardee, 🎓 Scholarship, 🎭 Performer, 🤝 Volunteer). Leave as "None" for regular attendees.
                 </p>
-              </div>
+                <select
+                  value={attendeeCategory}
+                  onChange={e => setAttendeeCategory((e.target.value || '') as AttendeeCategory | '')}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white"
+                >
+                  <option value="">— None (regular attendee) —</option>
+                  {categoryOptions.map(c => (
+                    <option key={c.id} value={c.id}>{c.icon}  {c.label}</option>
+                  ))}
+                </select>
+                {attendeeCategory && (
+                  <div className="mt-2">
+                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${CATEGORY_META[attendeeCategory].pillBg} ${CATEGORY_META[attendeeCategory].pillText} ${CATEGORY_META[attendeeCategory].pillBorder}`}>
+                      {CATEGORY_META[attendeeCategory].icon} {CATEGORY_META[attendeeCategory].shortLabel}
+                    </span>
+                    <span className="text-[11px] text-slate-500 ml-2">preview</span>
+                  </div>
+                )}
+              </label>
             </div>
 
             {/* Event Selector Card */}

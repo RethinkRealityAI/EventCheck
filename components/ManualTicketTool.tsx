@@ -5,6 +5,12 @@ import { getAttendees, saveAttendee, getSettings, getForms, updateAttendee } fro
 import { generateTicketPDF } from '../utils/pdfGenerator';
 import { sendTicketEmail, arrayBufferToBase64 } from '../services/smtpService';
 import { computeDonationPool } from '../utils/donationPool';
+import { CURRENT_SITE } from '../config/sites';
+import {
+  type AttendeeCategory,
+  getCategoryOptionsForSite,
+  CATEGORY_META,
+} from '../utils/attendeeCategories';
 
 type Mode = 'existing' | 'new';
 type PreviewTab = 'email' | 'ticket';
@@ -85,9 +91,12 @@ const ManualTicketTool: React.FC = () => {
   // Forces paymentStatus to 'free' since the recipient doesn't pay for a
   // donated seat.
   const [markAsDonatedClaim, setMarkAsDonatedClaim] = useState(false);
-  // Stamps guest_type='speaker' on the issued row — admins use this for
-  // confirmed speakers issued outside the public promo-code flow.
-  const [issueAsSpeaker, setIssueAsSpeaker] = useState(false);
+  // Role/category tag — drives the dashboard pill, GuestSidebar badge, and
+  // 3D scene label. Stored in attendees.attendee_category. "speaker" is the
+  // legacy GANSID-only value and ALSO writes guest_type='speaker' for
+  // backward compat with the existing Speakers tab + promo flow.
+  const [attendeeCategory, setAttendeeCategory] = useState<AttendeeCategory | ''>('');
+  const categoryOptions = getCategoryOptionsForSite(CURRENT_SITE.portalEnabled);
 
   // Multi-ticket controls. Useful when an admin needs to manually issue a
   // full table (e.g. 8 seats) to one buyer: each seat becomes its own
@@ -305,10 +314,12 @@ const ManualTicketTool: React.FC = () => {
       qrPayload: JSON.stringify({ id: primaryId, formId: formData.formId, action: 'checkin' }),
       paymentStatus: effectivePaymentStatus,
       isPrimary: true,
-      // Speaker override beats the default adult/child selector since it's
-      // a stronger semantic tag. Only applies to the primary — placeholder
-      // guests below stay as pending-claim seat holders.
-      guestType: (issueAsSpeaker ? 'speaker' : formData.guestType) as any,
+      // Role/category tag (attendee_category column). Speaker is legacy
+      // and ALSO stamps guest_type='speaker' so the existing Speakers tab
+      // + promo-stamped speaker rows behave identically. The other five
+      // categories only write to attendee_category.
+      guestType: (attendeeCategory === 'speaker' ? 'speaker' : formData.guestType) as any,
+      attendeeCategory: attendeeCategory || null,
       isDonatedSeatClaim: markAsDonatedClaim,
     };
 
@@ -724,25 +735,40 @@ const ManualTicketTool: React.FC = () => {
                 </div>
               )}
 
-              {/* Speaker toggle — admin-issued path for confirmed presenters
-                  who don't go through the public promo-code flow. */}
+              {/* Category dropdown — tags the issued row with an
+                  attendee_category for the dashboard pill, GuestSidebar
+                  badge, and 3D scene label. Speaker is GANSID-only and
+                  also stamps guest_type='speaker' for the legacy Speakers
+                  tab + promo flow. */}
               {formData.formId && (
-                <div className={`rounded-lg border p-3 transition-all ${issueAsSpeaker ? 'border-amber-300 bg-amber-50/70' : 'border-amber-200 bg-amber-50/30'}`}>
-                  <label className="flex items-start gap-3 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={issueAsSpeaker}
-                      onChange={e => setIssueAsSpeaker(e.target.checked)}
-                      className="mt-0.5 w-4 h-4 rounded text-amber-600 focus:ring-amber-500"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-semibold text-amber-900 flex items-center gap-1.5">
-                        🎤 Issue as speaker
-                      </div>
-                      <div className="text-xs text-amber-800/80 mt-0.5">
-                        Tags this row with <code className="text-[11px] bg-amber-100 px-1 rounded">guest_type='speaker'</code> — surfaces in the Speakers tab and adds a 🎤 pill in the dashboard. Use for confirmed presenters issued outside the public promo flow.
-                      </div>
+                <div className={`rounded-lg border p-3 transition-all ${attendeeCategory ? 'border-slate-300 bg-slate-50' : 'border-slate-200 bg-white'}`}>
+                  <label className="block">
+                    <div className="text-sm font-semibold text-slate-800 mb-0.5">
+                      Attendee category <span className="text-xs font-normal text-slate-500">(optional)</span>
                     </div>
+                    <div className="text-xs text-slate-600 mb-2">
+                      Tags this ticket with a role pill that surfaces on the dashboard, attendee modal, and seating configurator. Leave as "None" for regular attendees.
+                    </div>
+                    <select
+                      value={attendeeCategory}
+                      onChange={e => setAttendeeCategory((e.target.value || '') as AttendeeCategory | '')}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white"
+                    >
+                      <option value="">— None (regular attendee) —</option>
+                      {categoryOptions.map(c => (
+                        <option key={c.id} value={c.id}>
+                          {c.icon}  {c.label}
+                        </option>
+                      ))}
+                    </select>
+                    {attendeeCategory && (
+                      <div className="mt-2 flex items-center gap-2">
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${CATEGORY_META[attendeeCategory].pillBg} ${CATEGORY_META[attendeeCategory].pillText} ${CATEGORY_META[attendeeCategory].pillBorder}`}>
+                          {CATEGORY_META[attendeeCategory].icon} {CATEGORY_META[attendeeCategory].shortLabel}
+                        </span>
+                        <span className="text-[11px] text-slate-500">preview</span>
+                      </div>
+                    )}
                   </label>
                 </div>
               )}

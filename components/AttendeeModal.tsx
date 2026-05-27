@@ -8,6 +8,13 @@ import { updateAttendee, deleteAttendee, getSettings, getAttendee } from '../ser
 import { supabase } from '../services/supabaseClient';
 import { useNotifications } from './NotificationSystem';
 import { sendEmail } from '../services/emailService';
+import { CURRENT_SITE } from '../config/sites';
+import {
+  type AttendeeCategory,
+  getCategoryOptionsForSite,
+  CATEGORY_META,
+  resolveAttendeeCategory,
+} from '../utils/attendeeCategories';
 import { generateEmailHtml } from '../utils/emailTemplates';
 
 interface AttendeeModalProps {
@@ -374,6 +381,44 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
                       <option value="paid">Paid</option>
                       <option value="pending">Pending</option>
                     </select>
+                  </div>
+                  {/* Attendee category — drives the dashboard pill, attendee
+                      modal badge, and 3D seating scene label. Speaker is
+                      GANSID-only; Speaker selection also stamps
+                      guest_type='speaker' for the legacy Speakers tab. */}
+                  <div className="space-y-1.5 md:col-span-2">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                      Attendee Category <span className="text-[9px] font-normal text-slate-400">(optional pill)</span>
+                    </label>
+                    <select
+                      className="w-full px-3 py-2 bg-white/80 border border-white/60 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium text-slate-800 shadow-sm"
+                      value={editData.attendeeCategory ?? ''}
+                      onChange={e => {
+                        const val = (e.target.value || null) as AttendeeCategory | null;
+                        setEditData(prev => ({
+                          ...prev,
+                          attendeeCategory: val,
+                          // Mirror the legacy `guest_type='speaker'` stamp so
+                          // the Speakers tab + promo filters keep working.
+                          guestType: val === 'speaker'
+                            ? 'speaker'
+                            : (prev.guestType === 'speaker' ? undefined : prev.guestType),
+                        }));
+                      }}
+                    >
+                      <option value="">— None (regular attendee) —</option>
+                      {getCategoryOptionsForSite(CURRENT_SITE.portalEnabled).map(c => (
+                        <option key={c.id} value={c.id}>{c.icon}  {c.label}</option>
+                      ))}
+                    </select>
+                    {editData.attendeeCategory && CATEGORY_META[editData.attendeeCategory] && (
+                      <div className="mt-1">
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${CATEGORY_META[editData.attendeeCategory].pillBg} ${CATEGORY_META[editData.attendeeCategory].pillText} ${CATEGORY_META[editData.attendeeCategory].pillBorder}`}>
+                          {CATEGORY_META[editData.attendeeCategory].icon} {CATEGORY_META[editData.attendeeCategory].shortLabel}
+                        </span>
+                        <span className="text-[10px] text-slate-500 ml-2">preview</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

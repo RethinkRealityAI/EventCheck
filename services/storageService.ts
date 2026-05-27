@@ -469,6 +469,7 @@ function mapAttendeeFromDb(db: AttendeeRow): Attendee {
     bogoSourceAttendeeId: (db as any).bogo_source_attendee_id ?? null,
     bogoDismissedByPayerAt: (db as any).bogo_dismissed_by_payer_at ?? null,
     appliedPromoCode: (db as any).applied_promo_code ?? null,
+    attendeeCategory: (db as any).attendee_category ?? null,
   };
 }
 
@@ -515,6 +516,7 @@ export function mapAttendeeToDb(a: Attendee): AttendeeInsert {
     bogo_source_attendee_id: a.bogoSourceAttendeeId ?? null,
     bogo_dismissed_by_payer_at: a.bogoDismissedByPayerAt ?? null,
     applied_promo_code: a.appliedPromoCode ?? null,
+    attendee_category: a.attendeeCategory ?? null,
   } as AttendeeInsert;
 }
 

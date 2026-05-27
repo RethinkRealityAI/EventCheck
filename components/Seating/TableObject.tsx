@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { SeatingTable, Attendee } from '../../types';
+import { CATEGORY_META, resolveAttendeeCategory } from '../../utils/attendeeCategories';
 
 // ── Shared geometries (created ONCE at module level) ──
 const CHAIR_SEAT_GEO = new THREE.CylinderGeometry(0.2, 0.2, 0.05, 8);
@@ -25,7 +26,7 @@ interface TableObjectProps {
     guests: Attendee[];
 }
 
-const Chair = React.memo(function Chair({ position, rotation, isOccupied, hasDietary }: { position: [number, number, number]; rotation: [number, number, number]; isOccupied: boolean; hasDietary?: boolean }) {
+const Chair = React.memo(function Chair({ position, rotation, isOccupied, hasDietary, categoryHex, categoryLabel }: { position: [number, number, number]; rotation: [number, number, number]; isOccupied: boolean; hasDietary?: boolean; categoryHex?: string | null; categoryLabel?: string | null }) {
     return (
         <group position={position} rotation={rotation}>
             <mesh geometry={CHAIR_SEAT_GEO} material={CHAIR_MAT} position={[0, 0.35, 0]} />
@@ -39,6 +40,17 @@ const Chair = React.memo(function Chair({ position, rotation, isOccupied, hasDie
                         <mesh position={[0.2, 0.7, 0]}>
                             <sphereGeometry args={[0.06, 8, 8]} />
                             <meshBasicMaterial color="#f59e0b" />
+                        </mesh>
+                    )}
+                    {/* Category indicator — small colored sphere floating above the
+                        head, hex sourced from utils/attendeeCategories so it matches
+                        the dashboard pill color. The Html label appears on hover via
+                        the per-table tooltip; this dot keeps the 3D scene readable
+                        at a glance for VIP/Speaker/Awardee placement decisions. */}
+                    {categoryHex && (
+                        <mesh position={[-0.2, 0.78, 0]}>
+                            <sphereGeometry args={[0.08, 10, 10]} />
+                            <meshBasicMaterial color={categoryHex} />
                         </mesh>
                     )}
                 </group>
@@ -123,6 +135,8 @@ function TableObject({ table, isSelected, onClick, guests }: TableObjectProps) {
             {/* Chairs */}
             {chairPositions.map((chair, i) => {
                 const occupant = guests.find(g => g.assignedSeat === chair.seatId);
+                const occupantCategory = occupant ? resolveAttendeeCategory(occupant) : null;
+                const meta = occupantCategory ? CATEGORY_META[occupantCategory] : null;
                 return (
                     <Chair
                         key={i}
@@ -130,6 +144,8 @@ function TableObject({ table, isSelected, onClick, guests }: TableObjectProps) {
                         rotation={chair.rot}
                         isOccupied={!!occupant}
                         hasDietary={!!occupant?.dietaryPreferences}
+                        categoryHex={meta?.hex ?? null}
+                        categoryLabel={meta?.label ?? null}
                     />
                 );
             })}

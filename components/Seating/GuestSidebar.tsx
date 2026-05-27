@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Search, UserPlus, Users, X, ChevronDown, ChevronUp, Shuffle, UserMinus, Table as TableIcon, PanelRightClose, CheckCheck } from 'lucide-react';
 import { Attendee, SeatingTable } from '../../types';
+import { CATEGORY_META, resolveAttendeeCategory } from '../../utils/attendeeCategories';
 
 interface PartyGroup {
     primaryId: string;
@@ -291,6 +292,20 @@ export default function GuestSidebar({
                                                     {guest.guestType === 'child' && (
                                                         <span className="text-[9px] bg-sky-500/20 text-sky-300 px-1.5 py-0.5 rounded-full font-bold uppercase">Child</span>
                                                     )}
+                                                    {(() => {
+                                                        const cat = resolveAttendeeCategory(guest);
+                                                        if (!cat) return null;
+                                                        const m = CATEGORY_META[cat];
+                                                        return (
+                                                            <span
+                                                                className={`inline-flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase border ${m.pillBgDark} ${m.pillTextDark} ${m.pillBorderDark} flex-shrink-0`}
+                                                                title={m.label}
+                                                            >
+                                                                <span aria-hidden>{m.icon}</span>
+                                                                {m.shortLabel}
+                                                            </span>
+                                                        );
+                                                    })()}
                                                 </div>
                                                 <div className="flex items-center gap-2">
                                                     <p className="text-xs text-slate-400 truncate">{guest.email}</p>
@@ -366,6 +381,20 @@ export default function GuestSidebar({
                                                         {guest.guestType === 'child' && (
                                                             <span className="text-[9px] bg-sky-500/20 text-sky-300 px-1.5 py-0.5 rounded-full font-bold uppercase">Child</span>
                                                         )}
+                                                        {(() => {
+                                                            const cat = resolveAttendeeCategory(guest);
+                                                            if (!cat) return null;
+                                                            const m = CATEGORY_META[cat];
+                                                            return (
+                                                                <span
+                                                                    className={`inline-flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase border ${m.pillBgDark} ${m.pillTextDark} ${m.pillBorderDark} flex-shrink-0`}
+                                                                    title={m.label}
+                                                                >
+                                                                    <span aria-hidden>{m.icon}</span>
+                                                                    {m.shortLabel}
+                                                                </span>
+                                                            );
+                                                        })()}
                                                     </div>
                                                     <div className="flex items-center gap-2">
                                                         <p className="text-xs text-slate-400 truncate">{guest.email}</p>

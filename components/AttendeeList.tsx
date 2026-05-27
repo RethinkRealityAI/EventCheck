@@ -8,6 +8,7 @@ import { useNotifications } from './NotificationSystem';
 import AttendeeModal from './AttendeeModal';
 import AddAttendeeModal from './AddAttendeeModal';
 import ColumnVisibilityDropdown, { ColumnDef } from './ColumnVisibilityDropdown';
+import { CATEGORY_META, resolveAttendeeCategory } from '../utils/attendeeCategories';
 import ExhibitorsTab from './Exhibitor/ExhibitorsTab';
 import SignupsTab from './Signups/SignupsTab';
 import { CURRENT_SITE } from '../config/sites';
@@ -1271,16 +1272,25 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                                 🎁 FREE GUEST
                               </span>
                             )}
-                            {attendee.guestType === 'speaker' && (
-                              <span
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200"
-                                title={attendee.appliedPromoCode
-                                  ? `Speaker — registered with promo ${attendee.appliedPromoCode}`
-                                  : 'Speaker — issued by admin'}
-                              >
-                                🎤 SPEAKER
-                              </span>
-                            )}
+                            {/* Category pill — resolved from attendeeCategory
+                                with legacy guest_type='speaker' fallback so
+                                pre-rollout speaker rows still display. */}
+                            {(() => {
+                              const cat = resolveAttendeeCategory(attendee);
+                              if (!cat) return null;
+                              const m = CATEGORY_META[cat];
+                              const title = cat === 'speaker' && attendee.appliedPromoCode
+                                ? `${m.label} — registered with promo ${attendee.appliedPromoCode}`
+                                : `${m.label} — admin-tagged`;
+                              return (
+                                <span
+                                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${m.pillBg} ${m.pillText} ${m.pillBorder}`}
+                                  title={title}
+                                >
+                                  {m.icon} {m.shortLabel}
+                                </span>
+                              );
+                            })()}
                             {/* Tag on paid rows whose BOGO slot has been used */}
                             {!attendee.isBogoClaim && attendees.some(
                               a => a.isBogoClaim && a.bogoSourceAttendeeId === attendee.id,
