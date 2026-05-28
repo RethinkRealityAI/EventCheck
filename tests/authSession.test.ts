@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   isEmailVerified,
-  verifiedPaymentAuthHeaders,
+  paymentAuthHeaders,
 } from '../utils/authSession';
 
 describe('isEmailVerified', () => {
@@ -14,22 +14,14 @@ describe('isEmailVerified', () => {
   });
 });
 
-describe('verifiedPaymentAuthHeaders', () => {
-  it('omits Authorization for unverified user', () => {
-    expect(
-      verifiedPaymentAuthHeaders(
-        { access_token: 'tok' } as never,
-        { id: '1' } as never,
-      ),
-    ).toEqual({});
+describe('paymentAuthHeaders', () => {
+  it('omits Authorization without session', () => {
+    expect(paymentAuthHeaders(null)).toEqual({});
   });
 
-  it('includes Authorization when verified', () => {
+  it('includes Authorization when session has access_token', () => {
     expect(
-      verifiedPaymentAuthHeaders(
-        { access_token: 'tok' } as never,
-        { email_confirmed_at: '2026-01-01' } as never,
-      ),
+      paymentAuthHeaders({ access_token: 'tok' } as never),
     ).toEqual({ Authorization: 'Bearer tok' });
   });
 });

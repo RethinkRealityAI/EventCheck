@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { getFormById, getSettings, saveAttendee, getAttendee, getGuestsByPrimaryId, mapAttendeeToDb, updateAttendee } from '../services/storageService';
-import { FormField, AppSettings, Attendee, Form, DynamicPricingSelection, BogoClaim, PromoCode } from '../types';
+import { FormField, AppSettings, Attendee, Form, DynamicPricingSelection, PromoCode } from '../types';
 import type { PricingTemplate } from '../types';
 import { resolveBracket, resolveTier, computeTotal, computeBaseAndAddons, formatPrice } from '../utils/pricing';
 import { getEligibleBogoCategories, BOGO_ADMIN_CONTACT } from '../utils/bogo';
@@ -12,11 +12,13 @@ import {
   formHasEnabledPromoCodes,
 } from '../utils/promoCodes';
 import { portalEmailRedirectTo } from '../utils/authHashCallback';
+import { paymentAuthHeaders } from '../utils/authSession';
 import {
-  EMAIL_VERIFY_BEFORE_REGISTER_MSG,
-  isEmailVerified,
-  verifiedPaymentAuthHeaders,
-} from '../utils/authSession';
+  BOGO_CHECKOUT_INCOMPLETE_HINT,
+  buildBogoClaimsForCheckout,
+  countIncompleteInlineBogoSlots,
+} from '../utils/bogoCheckout';
+import { buildBogoPostCheckoutNotice, formatVerifyPaymentError } from '../utils/verifyPaymentErrors';
 import { computeGroupTotal, computeGroupBaseAndAddons, type GroupMemberPricingInput } from '../utils/groupPricing';
 import { clearAllProgress } from '../utils/registrationProgress';
 import CountryField from './FormBuilder/fields/CountryField';
@@ -97,6 +99,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   const [step, setStep] = useState<'form' | 'payment' | 'success'>('form');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [bogoSuccessNotice, setBogoSuccessNotice] = useState<string | null>(null);
   const [generatedTicket, setGeneratedTicket] = useState<Attendee | null>(null);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [previewPdfUrl, setPreviewPdfUrl] = useState<string | null>(null);
@@ -384,16 +387,9 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
     return infos;
   })();
 
-  // BOGO inline-slot validity for submit-button gating
-  const bogoSlotsValid = !bogoFeatureOn || bogoBlockedByPromo || bogoSlots.every((s, i) => {
-    if (s.mode === 'skip' || s.mode === 'claim_link') return true;
-    const payer = bogoPayerInfos[i];
-    if (!payer || !payer.categoryId || !payer.tierId) return false; // payer not ready
-    if (!s.guestName.trim()) return false;
-    if (!/^.+@.+\..+$/.test(s.guestEmail)) return false;
-    if (!s.categoryId) return false;
-    return true;
-  });
+  const bogoIncompleteInlineCount = bogoFeatureOn && !bogoBlockedByPromo
+    ? countIncompleteInlineBogoSlots(bogoSlots)
+    : 0;
 
   // "Same country" shortcut — propagate first member's country to all
   useEffect(() => {
@@ -935,12 +931,9 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
 
   const finalizeRegistration = async (paymentStatus: 'paid' | 'free', transactionId?: string, paymentAmount?: string) => {
     if (!form) return;
-    if (user && !isEmailVerified(user)) {
-      setError(EMAIL_VERIFY_BEFORE_REGISTER_MSG);
-      return;
-    }
     setLoading(true);
     setError('');
+    setBogoSuccessNotice(null);
 
     try {
     const submissionId = crypto.randomUUID();
@@ -1200,24 +1193,11 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
     // BOGO claims — build from non-skip slots. paidIndex matches the order
     // attendees are inserted server-side: 0 = primary buyer, 1..N = group
     // members in their list order.
+    let bogoOmittedIncomplete = 0;
     if (bogoFeatureOn && !bogoBlockedByPromo && bogoSlots.length > 0) {
-      const claims: BogoClaim[] = [];
-      for (let i = 0; i < bogoSlots.length; i++) {
-        const s = bogoSlots[i];
-        if (s.mode === 'skip') continue;
-        if (s.mode === 'inline') {
-          claims.push({
-            paidIndex: i,
-            mode: 'inline',
-            guestName: s.guestName.trim(),
-            guestEmail: s.guestEmail.trim(),
-            categoryId: s.categoryId,
-          });
-        } else {
-          claims.push({ paidIndex: i, mode: 'claim_link', categoryId: null });
-        }
-      }
-      if (claims.length > 0) verifyBody.bogoClaims = claims;
+      const built = buildBogoClaimsForCheckout(bogoSlots);
+      bogoOmittedIncomplete = built.omittedIncomplete;
+      if (built.claims.length > 0) verifyBody.bogoClaims = built.claims;
     }
 
     // Track IDs we generate for each group member so we can reuse them
@@ -1294,7 +1274,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
     // Authorization header automatically when a session is active, but we make
     // it explicit here to document the intent.
     const { data: { session: verifySession } } = await supabase.auth.getSession();
-    const verifyAuthHeaders = verifiedPaymentAuthHeaders(verifySession, user);
+    const verifyAuthHeaders = paymentAuthHeaders(verifySession);
 
     const { data, error: fnError, response: fnResponse } = await supabase.functions.invoke('verify-payment', {
       body: verifyBody,
@@ -1306,15 +1286,10 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
       let detail = 'Registration failed';
       try {
         const body = await fnResponse?.json();
-        detail = body?.message || body?.error || fnError.message || detail;
-        if (body?.error === 'email_not_verified' || detail.includes('email_not_verified')) {
-          detail = EMAIL_VERIFY_BEFORE_REGISTER_MSG;
-        }
-        if (detail.includes('BOGO_NOT_ALLOWED_FOR_FREE_OR_SPEAKER')) {
-          detail =
-            'Your promo code cannot be combined with a complimentary guest ticket. '
-            + 'Remove any free-guest details or use a different registration path.';
-        }
+        detail = formatVerifyPaymentError(
+          body?.message || body?.error || fnError.message || detail,
+          body?.error,
+        );
         if (body?.diagnostic) detail += ` [diag: ${JSON.stringify(body.diagnostic)}]`;
         if (body?.details && typeof body.details === 'object') console.error('verify-payment error details:', body.details);
       } catch {
@@ -1323,14 +1298,15 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
       throw new Error(detail);
     }
     if (data?.error) {
-      const errMsg = String(data.error);
-      throw new Error(
-        errMsg.includes('BOGO_NOT_ALLOWED_FOR_FREE_OR_SPEAKER')
-          ? 'Your promo code cannot be combined with a complimentary guest ticket. '
-            + 'Remove any free-guest details or use a different registration path.'
-          : errMsg,
-      );
+      throw new Error(formatVerifyPaymentError(String(data.error), data.error));
     }
+
+    const postBogoNotice = buildBogoPostCheckoutNotice({
+      omittedIncompleteAtCheckout: bogoOmittedIncomplete,
+      serverSkipped: typeof data?.bogoClaimsSkipped === 'number' ? data.bogoClaimsSkipped : 0,
+      partialBogoFailure: !!data?.partialBogoFailure,
+    });
+    setBogoSuccessNotice(postBogoNotice);
 
     if (paymentStatus === 'paid') {
       const verifiedAmount = data.amount
@@ -1810,6 +1786,11 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
           );
         })}
       </div>
+      {bogoIncompleteInlineCount > 0 && (
+        <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-3 leading-snug">
+          {BOGO_CHECKOUT_INCOMPLETE_HINT}
+        </p>
+      )}
       <p className="text-[11px] text-emerald-900/80 mt-3 leading-snug">
         ℹ Once you send a free ticket to an email and that guest signs up,
         claims it, or checks in, the email is locked. Until then you can edit
@@ -2103,7 +2084,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
               <div className="pt-4">
                 <button
                   type="submit"
-                  disabled={loading || (!isAnyPendingClaim && pricingTemplate != null && (!selectedCategoryId || !activeTier || !activeBracket || dynamicTotal == null)) || (!isAnyPendingClaim && registrationMode === 'group' && (!groupPricingResult?.ok || groupMembers.some(m => !m.name.trim() || !m.email.trim() || !m.countryCode || !m.categoryId))) || (isAnyPendingClaim && claimSignupOptIn && !user && !isExhibitorStaffPending && claimSignupPassword.length > 0 && claimSignupPassword.length < 8) || !bogoSlotsValid}
+                  disabled={loading || (!isAnyPendingClaim && pricingTemplate != null && (!selectedCategoryId || !activeTier || !activeBracket || dynamicTotal == null)) || (!isAnyPendingClaim && registrationMode === 'group' && (!groupPricingResult?.ok || groupMembers.some(m => !m.name.trim() || !m.email.trim() || !m.countryCode || !m.categoryId))) || (isAnyPendingClaim && claimSignupOptIn && !user && !isExhibitorStaffPending && claimSignupPassword.length > 0 && claimSignupPassword.length < 8)}
                   className="w-full py-4 text-white rounded-xl font-black uppercase tracking-widest transition shadow-lg flex justify-center items-center gap-2 transform hover:scale-[1.02] active:scale-95 disabled:opacity-70 disabled:grayscale disabled:cursor-not-allowed"
                   style={{ backgroundColor: form.settings?.formAccentColor || '#4F46E5' }}
                 >
@@ -2382,6 +2363,12 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                 <h2 className="text-2xl font-bold text-gray-900 mb-2">You're going!</h2>
                 <p className="text-gray-500 mb-6">A confirmation email with your ticket{guestTicketsData.length > 0 ? 's' : ''} has been sent to <span className="font-semibold">{generatedTicket.email}</span>.</p>
               </>
+            )}
+
+            {bogoSuccessNotice && (
+              <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 text-left">
+                {bogoSuccessNotice}
+              </div>
             )}
 
             {/* ── Your Ticket Card ── */}

@@ -149,51 +149,78 @@ function applyPromoDiscountCents(subtotalCents: number, promo: any | null): numb
   return Math.max(0, subtotalCents - Math.max(0, Number(promo.value) || 0));
 }
 
-// Validates bogoClaims request shape against per-member pricing resolutions.
-// Runs BEFORE PayPal capture so we 422 cleanly without taking money.
-// Returns null when valid, or a Response (already a 422) when not.
-function validateBogoClaimsPreCapture(args: {
+// Drops invalid/incomplete BOGO claims before PayPal capture — payment must
+// never fail because of BOGO. Payers can send guests later from the portal.
+function sanitizeBogoClaimsForCapture(args: {
   bogoClaims: Array<any>;
   memberCount: number;
   formSettings: any;
   tpl: any;
   payerResolutionByIndex: Array<{ tierId: string; bracketId: string; categoryId: string }>;
-}): Response | null {
+}): { claims: Array<any>; skipped: number } | Response {
   const { bogoClaims, memberCount, formSettings, tpl, payerResolutionByIndex } = args;
-  if (!bogoClaims || bogoClaims.length === 0) return null;
+  if (!bogoClaims || bogoClaims.length === 0) return { claims: [], skipped: 0 };
   if (!formSettings?.bogoEnabled) {
     return jsonResponse({ error: 'BOGO_NOT_ENABLED' }, 422);
   }
+
   const seenIdxs = new Set<number>();
+  const kept: Array<any> = [];
+  let skipped = 0;
+
   for (const claim of bogoClaims) {
     if (typeof claim.paidIndex !== 'number' || claim.paidIndex < 0 || claim.paidIndex >= memberCount) {
-      return jsonResponse({ error: 'BOGO_BAD_INDEX' }, 422);
+      skipped += 1;
+      continue;
     }
     if (seenIdxs.has(claim.paidIndex)) {
-      return jsonResponse({ error: 'BOGO_DUPLICATE_SOURCE' }, 422);
+      skipped += 1;
+      continue;
     }
-    seenIdxs.add(claim.paidIndex);
     if (claim.mode !== 'inline' && claim.mode !== 'claim_link') {
-      return jsonResponse({ error: 'BOGO_BAD_MODE' }, 422);
+      skipped += 1;
+      continue;
     }
-    if (claim.mode === 'inline') {
-      if (!claim.guestName || typeof claim.guestName !== 'string' || claim.guestName.trim().length === 0) {
-        return jsonResponse({ error: 'BOGO_MISSING_FIELDS' }, 422);
-      }
-      if (!claim.guestEmail || !/^.+@.+\..+$/.test(String(claim.guestEmail))) {
-        return jsonResponse({ error: 'BOGO_MISSING_FIELDS' }, 422);
-      }
-      if (!claim.categoryId || typeof claim.categoryId !== 'string') {
-        return jsonResponse({ error: 'BOGO_MISSING_FIELDS' }, 422);
-      }
-      const payer = payerResolutionByIndex[claim.paidIndex];
-      if (!payer) return jsonResponse({ error: 'BOGO_BAD_INDEX' }, 422);
-      if (!isCategoryAtOrBelowCeiling(tpl, payer.categoryId, payer.tierId, payer.bracketId, claim.categoryId)) {
-        return jsonResponse({ error: 'BOGO_PRICE_EXCEEDED' }, 422);
-      }
+
+    if (claim.mode === 'claim_link') {
+      seenIdxs.add(claim.paidIndex);
+      kept.push({ paidIndex: claim.paidIndex, mode: 'claim_link', categoryId: null });
+      continue;
     }
+
+    const guestName = typeof claim.guestName === 'string' ? claim.guestName.trim() : '';
+    const guestEmail = typeof claim.guestEmail === 'string' ? claim.guestEmail.trim() : '';
+    const categoryId = typeof claim.categoryId === 'string' ? claim.categoryId : '';
+    if (!guestName || !/^.+@.+\..+$/.test(guestEmail) || !categoryId) {
+      skipped += 1;
+      continue;
+    }
+
+    const payer = payerResolutionByIndex[claim.paidIndex];
+    if (!payer) {
+      skipped += 1;
+      continue;
+    }
+    if (!isCategoryAtOrBelowCeiling(tpl, payer.categoryId, payer.tierId, payer.bracketId, categoryId)) {
+      skipped += 1;
+      continue;
+    }
+
+    seenIdxs.add(claim.paidIndex);
+    kept.push({
+      paidIndex: claim.paidIndex,
+      mode: 'inline',
+      guestName,
+      guestEmail,
+      categoryId,
+    });
   }
-  return null;
+
+  if (skipped > 0) {
+    console.warn('[verify-payment] BOGO claims sanitized (skipped)', JSON.stringify({ skipped, kept: kept.length }));
+  }
+
+  return { claims: kept, skipped };
 }
 
 interface TicketItem {
@@ -261,12 +288,8 @@ serve(async (req: Request) => {
         );
         const { data: userData, error: userErr } = await adminClient.auth.getUser(jwt);
         if (!userErr && userData?.user) {
-          if (!userData.user.email_confirmed_at) {
-            return new Response(
-              JSON.stringify({ error: 'email_not_verified', message: 'Please verify your email before registering.' }),
-              { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
-            );
-          }
+          // Stamp user_id when a session JWT is present — email confirmation is
+          // not required for payment (accounts may exist unverified in Auth).
           authUserId = userData.user.id;
         }
       } catch (e) {
@@ -1097,12 +1120,12 @@ serve(async (req: Request) => {
 
         // 3b. BOGO pre-capture validation — runs BEFORE PayPal so we 422
         // cleanly without taking money on a malformed claim.
-        const groupBogoClaims = Array.isArray(body.bogoClaims) ? body.bogoClaims : [];
-        if (groupBogoClaims.length > 0 && groupIsFreeViaPromo) {
+        const groupBogoClaimsRaw = Array.isArray(body.bogoClaims) ? body.bogoClaims : [];
+        if (groupBogoClaimsRaw.length > 0 && groupIsFreeViaPromo) {
           return jsonResponse({ error: 'BOGO_NOT_ALLOWED_FOR_FREE_REGISTRATION' }, 422);
         }
-        const groupBogoValidationFail = validateBogoClaimsPreCapture({
-          bogoClaims: groupBogoClaims,
+        const groupBogoSanitized = sanitizeBogoClaimsForCapture({
+          bogoClaims: groupBogoClaimsRaw,
           memberCount: memberResolutions.length,
           formSettings: formData.settings,
           tpl,
@@ -1110,7 +1133,9 @@ serve(async (req: Request) => {
             tierId: m.tierId, bracketId: m.bracketId, categoryId: m.categoryId,
           })),
         });
-        if (groupBogoValidationFail) return groupBogoValidationFail;
+        if (groupBogoSanitized instanceof Response) return groupBogoSanitized;
+        const groupBogoClaims = groupBogoSanitized.claims;
+        const groupBogoClaimsSkipped = groupBogoSanitized.skipped;
 
         // 4. Capture PayPal order — replicate the inlined OAuth + capture logic.
         //    Skipped entirely when a promo zeroes out the total.
@@ -1260,6 +1285,7 @@ serve(async (req: Request) => {
           primaryId,
           guestIds: rows.slice(1).map(r => r.id),
           partialBogoFailure: groupBogoResult.partialBogoFailure,
+          bogoClaimsSkipped: groupBogoClaimsSkipped,
         });
       }
       // ── END GROUP DYNAMIC BRANCH — fall through to single-person dynamic branch below ──
@@ -1325,12 +1351,12 @@ serve(async (req: Request) => {
 
         // 7b. BOGO pre-capture validation — solo branch has exactly 1 paid
         // attendee, so any bogoClaim must have paidIndex=0.
-        const soloBogoClaims = Array.isArray(body.bogoClaims) ? body.bogoClaims : [];
-        if (soloBogoClaims.length > 0 && (soloIsFreeViaPromo || soloPromoSpeakerStamp)) {
+        const soloBogoClaimsRaw = Array.isArray(body.bogoClaims) ? body.bogoClaims : [];
+        if (soloBogoClaimsRaw.length > 0 && (soloIsFreeViaPromo || soloPromoSpeakerStamp)) {
           return jsonResponse({ error: 'BOGO_NOT_ALLOWED_FOR_FREE_OR_SPEAKER' }, 422);
         }
-        const soloBogoValidationFail = validateBogoClaimsPreCapture({
-          bogoClaims: soloBogoClaims,
+        const soloBogoSanitized = sanitizeBogoClaimsForCapture({
+          bogoClaims: soloBogoClaimsRaw,
           memberCount: 1,
           formSettings: formData.settings,
           tpl,
@@ -1338,7 +1364,9 @@ serve(async (req: Request) => {
             tierId: activeTier.id, bracketId: activeBracket.id, categoryId: cat.id,
           }],
         });
-        if (soloBogoValidationFail) return soloBogoValidationFail;
+        if (soloBogoSanitized instanceof Response) return soloBogoSanitized;
+        const soloBogoClaims = soloBogoSanitized.claims;
+        const soloBogoClaimsSkipped = soloBogoSanitized.skipped;
 
         // 8. Capture PayPal order and extract amount in cents.
         //    Skipped entirely when a promo zeroes out the total.
@@ -1497,6 +1525,7 @@ serve(async (req: Request) => {
           amount: `${(soloDiscountedCents / 100).toFixed(2)} ${tpl.currency ?? 'CAD'}`,
           transactionId: soloTxId,
           partialBogoFailure: soloBogoResult.partialBogoFailure,
+          bogoClaimsSkipped: soloBogoClaimsSkipped,
         });
       }
       // ── END DYNAMIC PRICING BRANCH — fall through to static-pricing event branch ──
