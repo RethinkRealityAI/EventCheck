@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Outlet, Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../AuthContext';
+import { AuthNoticeBanner } from '../AuthNoticeBanner';
 
 export function PortalLayout() {
   const { profile, signOut } = useAuth();
@@ -56,6 +57,7 @@ export function PortalLayout() {
         </div>
       </header>
       <main className="max-w-7xl mx-auto px-6 py-8">
+        <AuthNoticeBanner className="!px-0 !pt-0 !pb-4" />
         <Outlet />
       </main>
     </div>

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '../../AuthContext';
 import { supabase } from '../../../services/supabaseClient';
+import { portalEmailRedirectTo } from '../../../utils/authHashCallback';
 
 export function VerifyEmailBanner() {
   const { user } = useAuth();
@@ -12,7 +13,11 @@ export function VerifyEmailBanner() {
   const resend = async () => {
     if (!user.email) return;
     setSending(true);
-    await supabase.auth.resend({ type: 'signup', email: user.email });
+    await supabase.auth.resend({
+      type: 'signup',
+      email: user.email,
+      options: { emailRedirectTo: portalEmailRedirectTo() },
+    });
     setSending(false);
     setResent(true);
     setTimeout(() => setResent(false), 5000);
@@ -21,7 +26,7 @@ export function VerifyEmailBanner() {
   return (
     <div className="mb-6 rounded-gansid-lg bg-gradient-to-r from-gansid-primary-container/15 via-white to-gansid-secondary/15 border border-gansid-outline-variant/30 px-6 py-4 flex items-center justify-between gap-4">
       <p className="font-body text-sm text-gansid-on-surface">
-        <strong>Verify your email.</strong> Registration requires a verified account. Check your inbox for the verification link.
+        <strong>Verify your email.</strong> Sign-in is blocked until you confirm. After you click the link in your email, return here to register.
       </p>
       <button
         type="button"

@@ -10,6 +10,8 @@ interface Props {
   userAttendees: Attendee[];
   role: Profile['role'];
   userId: string | null;
+  /** When false, start/resume buttons are disabled (unverified email). */
+  canRegister?: boolean;
   /** `fresh=true` signals the caller should wipe any saved localStorage progress before opening the form. */
   onStartRegistration: (formId: string, opts: { fresh: boolean }) => void;
 }
@@ -40,7 +42,7 @@ function formatAgo(ts: number): string {
   return `${days} day${days !== 1 ? 's' : ''} ago`;
 }
 
-export function AvailableFormsGrid({ forms, userAttendees, role, userId, onStartRegistration }: Props) {
+export function AvailableFormsGrid({ forms, userAttendees, role, userId, canRegister = true, onStartRegistration }: Props) {
   const allowedTypes = ROLE_TO_FORM_TYPES[role] ?? ['event'];
   const completedFormIds = new Set(
     userAttendees
@@ -124,7 +126,7 @@ export function AvailableFormsGrid({ forms, userAttendees, role, userId, onStart
                       {saved.savedAt ? ` Last saved ${formatAgo(saved.savedAt)}.` : ''}
                     </p>
                   </div>
-                  <ViscousButton variant="primary" onClick={() => onStartRegistration(form.id, { fresh: false })}>
+                  <ViscousButton variant="primary" disabled={!canRegister} onClick={() => onStartRegistration(form.id, { fresh: false })}>
                     Resume Registration
                   </ViscousButton>
                   <button
@@ -136,7 +138,7 @@ export function AvailableFormsGrid({ forms, userAttendees, role, userId, onStart
                   </button>
                 </div>
               ) : (
-                <ViscousButton variant="primary" onClick={() => onStartRegistration(form.id, { fresh: false })}>
+                <ViscousButton variant="primary" disabled={!canRegister} onClick={() => onStartRegistration(form.id, { fresh: false })}>
                   Start Registration
                 </ViscousButton>
               )}

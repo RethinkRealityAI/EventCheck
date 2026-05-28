@@ -11,6 +11,12 @@ import {
   isSpeakerRegistrationCategory,
   formHasEnabledPromoCodes,
 } from '../utils/promoCodes';
+import { portalEmailRedirectTo } from '../utils/authHashCallback';
+import {
+  EMAIL_VERIFY_BEFORE_REGISTER_MSG,
+  isEmailVerified,
+  verifiedPaymentAuthHeaders,
+} from '../utils/authSession';
 import { computeGroupTotal, computeGroupBaseAndAddons, type GroupMemberPricingInput } from '../utils/groupPricing';
 import { clearAllProgress } from '../utils/registrationProgress';
 import CountryField from './FormBuilder/fields/CountryField';
@@ -816,7 +822,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                   full_name: loadedRefAttendee.name ?? '',
                   role: 'attendee',
                 },
-                emailRedirectTo: `${window.location.origin}/#/portal`,
+                emailRedirectTo: portalEmailRedirectTo(),
               },
             });
             // Verification email goes out automatically. The trigger already ran
@@ -929,6 +935,10 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
 
   const finalizeRegistration = async (paymentStatus: 'paid' | 'free', transactionId?: string, paymentAmount?: string) => {
     if (!form) return;
+    if (user && !isEmailVerified(user)) {
+      setError(EMAIL_VERIFY_BEFORE_REGISTER_MSG);
+      return;
+    }
     setLoading(true);
     setError('');
 
@@ -1284,9 +1294,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
     // Authorization header automatically when a session is active, but we make
     // it explicit here to document the intent.
     const { data: { session: verifySession } } = await supabase.auth.getSession();
-    const verifyAuthHeaders: Record<string, string> = verifySession?.access_token
-      ? { Authorization: `Bearer ${verifySession.access_token}` }
-      : {};
+    const verifyAuthHeaders = verifiedPaymentAuthHeaders(verifySession, user);
 
     const { data, error: fnError, response: fnResponse } = await supabase.functions.invoke('verify-payment', {
       body: verifyBody,
@@ -1298,7 +1306,10 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
       let detail = 'Registration failed';
       try {
         const body = await fnResponse?.json();
-        detail = body?.error || fnError.message || detail;
+        detail = body?.message || body?.error || fnError.message || detail;
+        if (body?.error === 'email_not_verified' || detail.includes('email_not_verified')) {
+          detail = EMAIL_VERIFY_BEFORE_REGISTER_MSG;
+        }
         if (detail.includes('BOGO_NOT_ALLOWED_FOR_FREE_OR_SPEAKER')) {
           detail =
             'Your promo code cannot be combined with a complimentary guest ticket. '

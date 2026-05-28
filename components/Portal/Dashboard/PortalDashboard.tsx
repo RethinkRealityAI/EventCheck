@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../AuthContext';
+import { isEmailVerified } from '../../../utils/authSession';
 import {
   getAttendeesForUser,
   getPortalForms,
@@ -166,6 +167,8 @@ export function PortalDashboard() {
 
   if (!profile || !user) return null;
 
+  const emailVerified = isEmailVerified(user);
+
   const latestPaidAttendee = attendees.find((a) => a.paymentStatus === 'paid') ?? null;
   const latestAttendee = attendees[0] ?? null;
 
@@ -187,7 +190,17 @@ export function PortalDashboard() {
             userAttendees={attendees}
             role={profile.role}
             userId={user.id}
-            onStartRegistration={(id, _opts) => setRegisterFormId(id)}
+            canRegister={emailVerified}
+            onStartRegistration={(id, _opts) => {
+              if (!emailVerified) {
+                showNotification(
+                  'Verify your email before starting registration — use the link we sent you, or Resend above.',
+                  'error',
+                );
+                return;
+              }
+              setRegisterFormId(id);
+            }}
           />
           <AnnouncementsFeed />
         </div>

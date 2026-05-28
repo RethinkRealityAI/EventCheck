@@ -9,4 +9,11 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 import { Database } from './database.types';
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    // HashRouter apps parse `/#/route?code=` manually in utils/authHashCallback.ts.
+    detectSessionInUrl: false,
+    flowType: 'pkce',
+    persistSession: true,
+  },
+});

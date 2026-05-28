@@ -2,6 +2,11 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Eye, EyeOff } from 'lucide-react';
 import { supabase } from '../../../services/supabaseClient';
+import { portalEmailRedirectTo } from '../../../utils/authHashCallback';
+import {
+  EMAIL_VERIFY_BEFORE_SIGNIN_MSG,
+  isEmailVerified,
+} from '../../../utils/authSession';
 import { FloatingToggleTabs } from '../ui/FloatingToggleTabs';
 import { GlassInput } from '../ui/GlassInput';
 import { ViscousButton } from '../ui/ViscousButton';
@@ -45,7 +50,7 @@ export function AuthPanel() {
     const { error: err } = await supabase.auth.resend({
       type: 'signup',
       email,
-      options: { emailRedirectTo: `${window.location.origin}/#/portal` },
+      options: { emailRedirectTo: portalEmailRedirectTo() },
     });
     setResending(false);
     if (err) {
@@ -75,7 +80,7 @@ export function AuthPanel() {
         // Supabase's verification link redirects here after token confirmation.
         // Without this, Supabase uses the project's default Site URL which may
         // not be set or may not match the current deployment (landing vs portal).
-        emailRedirectTo: `${window.location.origin}/#/portal`,
+        emailRedirectTo: portalEmailRedirectTo(),
       },
     });
     setLoading(false);
@@ -99,6 +104,11 @@ export function AuthPanel() {
       setError('A user with that email already exists. Please sign in instead.');
       return;
     }
+    // Some Supabase configs briefly issue a session before confirm — drop it so
+    // the user stays on "check your email" instead of entering the portal unverified.
+    if (data.session && data.user && !isEmailVerified(data.user)) {
+      await supabase.auth.signOut();
+    }
     setSignupSuccess(true);
   };
 
@@ -117,7 +127,7 @@ export function AuthPanel() {
         || /email not confirmed/i.test(err.message);
       if (unverified) {
         setShowResendOnSignin(true);
-        setError('Your email isn\u2019t verified yet. Check your inbox for the link, or resend it below.');
+        setError(EMAIL_VERIFY_BEFORE_SIGNIN_MSG);
       } else {
         setError(err.message);
       }
@@ -126,6 +136,14 @@ export function AuthPanel() {
 
     const user = data.user;
     if (!user) { setLoading(false); navigate('/portal'); return; }
+
+    if (!isEmailVerified(user)) {
+      await supabase.auth.signOut();
+      setLoading(false);
+      setShowResendOnSignin(true);
+      setError(EMAIL_VERIFY_BEFORE_SIGNIN_MSG);
+      return;
+    }
 
     // Check if the user has any existing attendee rows
     const { count } = await supabase

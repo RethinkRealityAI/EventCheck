@@ -3,6 +3,7 @@ import { supabase } from '../services/supabaseClient';
 import { User, Session } from '@supabase/supabase-js';
 import type { Profile } from '../types';
 import { fetchProfile } from '../services/profileService';
+import { handleSupabaseAuthCallback } from '../utils/authHashCallback';
 
 interface AuthContextType {
     user: User | null;
@@ -11,6 +12,9 @@ interface AuthContextType {
     signOut: () => Promise<void>;
     profile: Profile | null;
     refreshProfile: () => Promise<void>;
+    /** Set when an email-confirm / magic-link redirect fails (e.g. otp_expired). */
+    authNotice: string | null;
+    clearAuthNotice: () => void;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -20,6 +24,8 @@ const AuthContext = createContext<AuthContextType>({
     signOut: async () => { },
     profile: null,
     refreshProfile: async () => { },
+    authNotice: null,
+    clearAuthNotice: () => { },
 });
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -27,16 +33,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [session, setSession] = useState<Session | null>(null);
     const [loading, setLoading] = useState(true);
     const [profile, setProfile] = useState<Profile | null>(null);
+    const [authNotice, setAuthNotice] = useState<string | null>(null);
 
     useEffect(() => {
-        // Get initial session
-        supabase.auth.getSession().then(({ data: { session } }) => {
+        let cancelled = false;
+
+        const init = async () => {
+            // Email-confirm links land as /#/portal?code=… — exchange before getSession.
+            const callback = await handleSupabaseAuthCallback(supabase);
+            if (callback.status === 'error' && !cancelled) {
+                setAuthNotice(callback.errorMessage ?? 'Email verification failed.');
+            } else if (callback.status === 'success' && !cancelled) {
+                setAuthNotice(null);
+            }
+
+            const { data: { session } } = await supabase.auth.getSession();
+            if (cancelled) return;
             setSession(session);
             setUser(session?.user ?? null);
             setLoading(false);
-        });
+        };
 
-        // Listen for auth changes
+        void init();
+
         const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
             setSession(session);
             setUser(session?.user ?? null);
@@ -44,6 +63,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
 
         return () => {
+            cancelled = true;
             subscription.unsubscribe();
         };
     }, []);
@@ -74,7 +94,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     return (
-        <AuthContext.Provider value={{ user, session, loading, signOut, profile, refreshProfile }}>
+        <AuthContext.Provider value={{
+            user,
+            session,
+            loading,
+            signOut,
+            profile,
+            refreshProfile,
+            authNotice,
+            clearAuthNotice: () => setAuthNotice(null),
+        }}>
             {children}
         </AuthContext.Provider>
     );

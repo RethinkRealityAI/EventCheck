@@ -1,12 +1,27 @@
+import { useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { HeroSection } from './HeroSection';
 import { AuthPanel } from './AuthPanel';
 import { InfoTabs } from './InfoTabs';
 import { FeesSection } from './FeesSection';
 import { RegistrationOverview } from './RegistrationOverview';
+import { useAuth } from '../../AuthContext';
+import { AuthNoticeBanner } from '../../AuthNoticeBanner';
 
 export function Landing() {
+  const navigate = useNavigate();
+  const { user, loading: authLoading, authNotice } = useAuth();
+
+  // Verified users on the public home page → portal. Skip when showing an auth
+  // error (expired link) so they can use Sign In + resend on the landing panel.
+  useEffect(() => {
+    if (authLoading || authNotice || !user?.email_confirmed_at) return;
+    navigate('/portal', { replace: true });
+  }, [authLoading, authNotice, user, navigate]);
+
   return (
     <div className="portal-root min-h-screen relative overflow-hidden">
+      <AuthNoticeBanner />
       {/* Viscous background — tri-color glow */}
       <div className="absolute inset-0 bg-gradient-to-br from-gansid-primary-container/15 via-white to-gansid-secondary/15 -z-10" />
       <div className="absolute top-0 right-0 w-[700px] h-[700px] rounded-full bg-gansid-gradient-radial opacity-15 blur-3xl -z-10" />

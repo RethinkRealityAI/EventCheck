@@ -2,6 +2,10 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Eye, EyeOff } from 'lucide-react';
 import { supabase } from '../../services/supabaseClient';
+import {
+  EMAIL_VERIFY_BEFORE_SIGNIN_MSG,
+  isEmailVerified,
+} from '../../utils/authSession';
 import { FloatingToggleTabs } from '../Portal/ui/FloatingToggleTabs';
 import { GlassInput } from '../Portal/ui/GlassInput';
 import { ViscousButton } from '../Portal/ui/ViscousButton';
@@ -126,6 +130,9 @@ export function SponsorExhibitorAuthPanel({ sponsorExhibitorFormId }: Props) {
       setError('A user with that email already exists. Please sign in instead.');
       return;
     }
+    if (data.session && data.user && !isEmailVerified(data.user)) {
+      await supabase.auth.signOut();
+    }
     setSignupSuccess(true);
   };
 
@@ -141,7 +148,7 @@ export function SponsorExhibitorAuthPanel({ sponsorExhibitorFormId }: Props) {
         || /email not confirmed/i.test(err.message);
       if (unverified) {
         setShowResendOnSignin(true);
-        setError('Your email isn’t verified yet. Check your inbox for the link, or resend it below.');
+        setError(EMAIL_VERIFY_BEFORE_SIGNIN_MSG);
       } else {
         setError(err.message);
       }
@@ -150,6 +157,12 @@ export function SponsorExhibitorAuthPanel({ sponsorExhibitorFormId }: Props) {
 
     setLoading(false);
     if (!data.user) { navigate('/portal'); return; }
+    if (!isEmailVerified(data.user)) {
+      await supabase.auth.signOut();
+      setShowResendOnSignin(true);
+      setError(EMAIL_VERIFY_BEFORE_SIGNIN_MSG);
+      return;
+    }
     // Send the signed-in user straight to the combined sponsor/exhibitor form.
     navigate(postAuthPath);
   };
