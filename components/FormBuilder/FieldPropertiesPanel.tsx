@@ -7,10 +7,17 @@ interface FieldPropertiesPanelProps {
     field: FormField;
     form: Form;
     onChange: (updated: FormField) => void;
+    onFormChange: (next: Form) => void;
     onClose: () => void;
 }
 
-const FieldPropertiesPanel: React.FC<FieldPropertiesPanelProps> = ({ field, form, onChange, onClose }) => {
+const FieldPropertiesPanel: React.FC<FieldPropertiesPanelProps> = ({
+    field,
+    form,
+    onChange,
+    onFormChange,
+    onClose,
+}) => {
     const update = (updates: Partial<FormField>) => onChange({ ...field, ...updates });
 
     return (
@@ -298,7 +305,12 @@ const FieldPropertiesPanel: React.FC<FieldPropertiesPanelProps> = ({ field, form
 
                 {/* Ticket Config */}
                 {field.type === 'ticket' && field.ticketConfig && (
-                    <TicketConfigEditor field={field} onChange={onChange} />
+                    <TicketConfigEditor
+                        field={field}
+                        form={form}
+                        onChange={onChange}
+                        onFormChange={onFormChange}
+                    />
                 )}
             </div>
         </div>

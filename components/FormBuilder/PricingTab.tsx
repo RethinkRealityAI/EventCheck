@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import type { Form, PricingTemplate, AppSettings, PromoCode, PricingCategory } from '../../types';
-import { DEFAULT_SPEAKER_PROMO_APPLIED_MESSAGE, promoUsageLimitCategories } from '../../utils/promoCodes';
 import { getPricingTemplates, getSettings } from '../../services/storageService';
 import { resolveBracket } from '../../utils/pricing';
 import { CURRENT_SITE } from '../../config/sites';
+import PromoCodesEditor from './PromoCodesEditor';
 
 interface Props {
   form: Form;
@@ -13,21 +13,24 @@ interface Props {
 export default function PricingTab({ form, onFormChange }: Props) {
   const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
   const [templates, setTemplates] = useState<PricingTemplate[]>([]);
+  const selectedId = (form.settings as any)?.pricingTemplateId ?? '';
+  const hasLinkedPricingTemplate = !!selectedId;
 
   useEffect(() => {
     getSettings().then(s => {
       setAppSettings(s);
-      if (s.feature_pricing_templates) getPricingTemplates().then(setTemplates);
+      if (s.feature_pricing_templates || hasLinkedPricingTemplate) {
+        getPricingTemplates().then(setTemplates);
+      }
     });
-  }, []);
+  }, [hasLinkedPricingTemplate]);
 
   if (!appSettings) return <p className="text-sm text-slate-500">Loading…</p>;
 
-  if (!appSettings.feature_pricing_templates) {
+  if (!appSettings.feature_pricing_templates && !hasLinkedPricingTemplate) {
     return <p className="text-sm text-slate-500">Enable "Pricing Templates" in Settings → General to use dynamic pricing.</p>;
   }
 
-  const selectedId = (form.settings as any)?.pricingTemplateId ?? '';
   const selected = templates.find(t => t.id === selectedId);
   const enabled = !!selectedId;
 
@@ -71,52 +74,8 @@ export default function PricingTab({ form, onFormChange }: Props) {
       settings: { ...(form.settings ?? {}), promoCodes: next } as any,
     });
   };
-  const addPromoCode = () => {
-    setPromoCodes([
-      ...promoCodes,
-      { code: '', type: 'percent', value: 100, enabled: true },
-    ]);
-  };
-  const updatePromoCode = (i: number, patch: Partial<PromoCode>) => {
-    setPromoCodes(promoCodes.map((p, idx) => idx === i ? { ...p, ...patch } : p));
-  };
-  const removePromoCode = (i: number) => {
-    setPromoCodes(promoCodes.filter((_, idx) => idx !== i));
-  };
 
   const templateCategories: Pick<PricingCategory, 'id' | 'name'>[] = selected?.categories ?? [];
-
-  const setPromoCategoryScope = (i: number, global: boolean) => {
-    if (global) {
-      updatePromoCode(i, { allowedCategoryIds: undefined });
-      return;
-    }
-    const firstId = templateCategories[0]?.id;
-    updatePromoCode(i, { allowedCategoryIds: firstId ? [firstId] : [] });
-  };
-
-  const togglePromoCategory = (i: number, categoryId: string, checked: boolean) => {
-    const p = promoCodes[i];
-    const current = p.allowedCategoryIds ?? [];
-    const next = checked
-      ? [...current, categoryId]
-      : current.filter(id => id !== categoryId);
-    updatePromoCode(i, { allowedCategoryIds: next.length > 0 ? next : [] });
-  };
-
-  const setPromoUsageLimit = (i: number, categoryId: string, raw: string) => {
-    const p = promoCodes[i];
-    const n = Number(raw);
-    const next = { ...(p.usageLimits ?? {}) };
-    if (!raw.trim() || !Number.isFinite(n) || n <= 0) {
-      delete next[categoryId];
-    } else {
-      next[categoryId] = Math.floor(n);
-    }
-    updatePromoCode(i, {
-      usageLimits: Object.keys(next).length > 0 ? next : undefined,
-    });
-  };
 
   return (
     <div className="space-y-4">
@@ -153,183 +112,11 @@ export default function PricingTab({ form, onFormChange }: Props) {
               legacy ticketConfig.promoCodes are still honored on static-
               ticket forms via the static-ticket branch of verify-payment. */}
           <div className="border-t pt-4 mt-4">
-            <div className="flex items-center justify-between mb-2">
-              <div>
-                <h3 className="text-sm font-semibold text-slate-800">Promo codes</h3>
-                <p className="text-xs text-slate-600">
-                  Discounts applied to the dynamic-pricing subtotal. Set to 100% off
-                  for free registrations (e.g. SPEAKER2026). Codes are case-insensitive.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={addPromoCode}
-                className="text-xs px-3 py-1.5 rounded border border-slate-300 hover:bg-slate-50"
-              >
-                + Add code
-              </button>
-            </div>
-
-            {promoCodes.length === 0 ? (
-              <p className="text-xs text-slate-500 italic">No promo codes configured.</p>
-            ) : (
-              <div className="space-y-2">
-                {promoCodes.map((p, i) => (
-                  <div key={i} className="rounded border border-slate-200 bg-slate-50 p-3 space-y-2">
-                    <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto_auto] gap-2">
-                      <input
-                        type="text"
-                        placeholder="CODE (e.g. SPEAKER2026)"
-                        value={p.code}
-                        onChange={e => updatePromoCode(i, { code: e.target.value.toUpperCase() })}
-                        className="px-2 py-1.5 text-sm border border-slate-300 rounded font-mono"
-                      />
-                      <select
-                        value={p.type}
-                        onChange={e => updatePromoCode(i, { type: e.target.value as 'percent' | 'fixed' })}
-                        className="px-2 py-1.5 text-sm border border-slate-300 rounded"
-                      >
-                        <option value="percent">% off</option>
-                        <option value="fixed">fixed (cents)</option>
-                      </select>
-                      <input
-                        type="number"
-                        min={0}
-                        value={p.value}
-                        onChange={e => updatePromoCode(i, { value: Number(e.target.value) || 0 })}
-                        className="w-24 px-2 py-1.5 text-sm border border-slate-300 rounded"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => removePromoCode(i)}
-                        className="text-xs px-2 py-1.5 text-rose-600 hover:bg-rose-50 rounded"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                    <select
-                      value={p.appliesTo || 'all'}
-                      onChange={e => updatePromoCode(i, { appliesTo: e.target.value as 'all' | 'registration_only' })}
-                      className="w-full px-2 py-1.5 text-sm border border-slate-300 rounded"
-                    >
-                      <option value="all">Applies to: Overall pricing (tickets + add-ons)</option>
-                      <option value="registration_only">Applies to: Registration fee only (excludes add-ons)</option>
-                    </select>
-                    <div className="flex flex-wrap gap-3 text-xs">
-                      <label className="flex items-center gap-1.5">
-                        <input
-                          type="checkbox"
-                          checked={p.enabled !== false}
-                          onChange={e => updatePromoCode(i, { enabled: e.target.checked })}
-                        />
-                        <span>Enabled</span>
-                      </label>
-                      <label className="flex items-center gap-1.5">
-                        <input
-                          type="checkbox"
-                          checked={p.appliesGuestType === 'speaker'}
-                          onChange={e => {
-                            const speaker = e.target.checked;
-                            updatePromoCode(i, {
-                              appliesGuestType: speaker ? 'speaker' : undefined,
-                              appliedMessage: speaker && !p.appliedMessage
-                                ? DEFAULT_SPEAKER_PROMO_APPLIED_MESSAGE
-                                : p.appliedMessage,
-                            });
-                          }}
-                        />
-                        <span>Tag registrant as Speaker (solo registrations only)</span>
-                      </label>
-                    </div>
-                    <input
-                      type="text"
-                      placeholder="Message after Apply (e.g. Speaker Registration Discount Applied)"
-                      value={p.appliedMessage ?? ''}
-                      onChange={e => updatePromoCode(i, { appliedMessage: e.target.value })}
-                      className="w-full px-2 py-1.5 text-sm border border-slate-300 rounded"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Internal description (admin-only, optional)"
-                      value={p.description ?? ''}
-                      onChange={e => updatePromoCode(i, { description: e.target.value })}
-                      className="w-full px-2 py-1.5 text-xs border border-slate-300 rounded text-slate-600"
-                    />
-
-                    {/* Category scope */}
-                    {templateCategories.length > 0 && (
-                      <div className="border-t border-slate-200 pt-2 space-y-2">
-                        <div className="text-xs font-medium text-slate-700">Registration category scope</div>
-                        <div className="flex flex-wrap gap-3 text-xs">
-                          <label className="flex items-center gap-1.5">
-                            <input
-                              type="radio"
-                              name={`promo-scope-${i}`}
-                              checked={p.allowedCategoryIds === undefined}
-                              onChange={() => setPromoCategoryScope(i, true)}
-                            />
-                            <span>All categories (global)</span>
-                          </label>
-                          <label className="flex items-center gap-1.5">
-                            <input
-                              type="radio"
-                              name={`promo-scope-${i}`}
-                              checked={p.allowedCategoryIds !== undefined}
-                              onChange={() => setPromoCategoryScope(i, false)}
-                            />
-                            <span>Specific categories only</span>
-                          </label>
-                        </div>
-                        {p.allowedCategoryIds !== undefined && (
-                          <>
-                            <div className="flex flex-wrap gap-2">
-                              {templateCategories.map(cat => (
-                                <label key={cat.id} className="flex items-center gap-1 text-xs bg-white border border-slate-200 rounded px-2 py-1">
-                                  <input
-                                    type="checkbox"
-                                    checked={p.allowedCategoryIds.includes(cat.id)}
-                                    onChange={e => togglePromoCategory(i, cat.id, e.target.checked)}
-                                  />
-                                  <span>{cat.name}</span>
-                                </label>
-                              ))}
-                            </div>
-                            {p.allowedCategoryIds.length === 0 && (
-                              <p className="text-xs text-amber-700">Select at least one category, or switch back to global.</p>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Per-category usage limits */}
-                    {templateCategories.length > 0 && (
-                      <div className="border-t border-slate-200 pt-2 space-y-2">
-                        <div className="text-xs font-medium text-slate-700">Usage limits (optional)</div>
-                        <p className="text-xs text-slate-500">
-                          Max redemptions per category. Leave blank for unlimited. Counted from completed registrations on this form.
-                        </p>
-                        <div className="space-y-1">
-                          {promoUsageLimitCategories(p, templateCategories).map(cat => (
-                            <label key={cat.id} className="flex items-center justify-between gap-2 text-xs">
-                              <span className="text-slate-700 truncate">{cat.name}</span>
-                              <input
-                                type="number"
-                                min={1}
-                                placeholder="∞"
-                                value={p.usageLimits?.[cat.id] ?? ''}
-                                onChange={e => setPromoUsageLimit(i, cat.id, e.target.value)}
-                                className="w-20 px-2 py-1 border border-slate-300 rounded text-right"
-                              />
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
+            <PromoCodesEditor
+              promoCodes={promoCodes}
+              onChange={setPromoCodes}
+              templateCategories={templateCategories}
+            />
           </div>
 
           {bogoSupported && (

@@ -350,6 +350,7 @@ const FormBuilder: React.FC = () => {
                                 field={editingField}
                                 form={form}
                                 onChange={updated => setEditingField(updated)}
+                                onFormChange={f => setForm(f)}
                                 onClose={() => setEditingField(null)}
                             />
                         )}

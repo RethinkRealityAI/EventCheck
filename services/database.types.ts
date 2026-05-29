@@ -187,6 +187,7 @@ export type Database = {
                     email_staff_invite_body: string | null
                     email_staff_confirmed_subject: string | null
                     email_staff_confirmed_body: string | null
+                    feature_pricing_templates: boolean | null
                 }
                 Insert: {
                     id?: number
@@ -226,6 +227,7 @@ export type Database = {
                     email_staff_invite_body?: string | null
                     email_staff_confirmed_subject?: string | null
                     email_staff_confirmed_body?: string | null
+                    feature_pricing_templates?: boolean | null
                 }
                 Update: {
                     id?: number
@@ -265,6 +267,7 @@ export type Database = {
                     email_staff_invite_body?: string | null
                     email_staff_confirmed_subject?: string | null
                     email_staff_confirmed_body?: string | null
+                    feature_pricing_templates?: boolean | null
                 }
             }
             seating_tables: {

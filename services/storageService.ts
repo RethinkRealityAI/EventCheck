@@ -336,6 +336,7 @@ export const getSettings = async (): Promise<AppSettings> => {
     defaultDashboardFormId: (data as any).default_dashboard_form_id || undefined,
     dashboardColumnPrefs: ((data as any).dashboard_column_prefs as Record<string, Record<string, boolean>>) || {},
     dashboardTabPrefs: ((data as any).dashboard_tab_prefs as { order?: string[]; hidden?: string[] }) || undefined,
+    feature_pricing_templates: (data as any).feature_pricing_templates === true,
   };
 
   return settings;
@@ -391,6 +392,7 @@ export const saveSettings = async (settings: AppSettings): Promise<void> => {
     default_dashboard_form_id: settings.defaultDashboardFormId || null,
     dashboard_column_prefs: settings.dashboardColumnPrefs || {},
     dashboard_tab_prefs: (settings.dashboardTabPrefs as unknown as Database['public']['Tables']['app_settings']['Row']['dashboard_tab_prefs']) ?? null,
+    feature_pricing_templates: settings.feature_pricing_templates ?? false,
     sponsor_invitation_subject: settings.sponsorInvitationSubject,
     sponsor_invitation_body: settings.sponsorInvitationBody,
     sponsor_confirmation_paid_subject: settings.sponsorConfirmationPaidSubject,
