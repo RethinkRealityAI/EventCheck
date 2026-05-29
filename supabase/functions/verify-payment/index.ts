@@ -149,6 +149,88 @@ function applyPromoDiscountCents(subtotalCents: number, promo: any | null): numb
   return Math.max(0, subtotalCents - Math.max(0, Number(promo.value) || 0));
 }
 
+function categoryRequiresPromoCode(cat: any): boolean {
+  if (!cat) return false;
+  if (cat.requiresPromoCode === true) return true;
+  const name = typeof cat.name === 'string' ? cat.name : '';
+  return /\bspeaker\b/i.test(name);
+}
+
+function isPromoGlobal(promo: any): boolean {
+  return promo?.allowedCategoryIds === undefined;
+}
+
+function isPromoAllowedForCategory(promo: any, categoryId: string): boolean {
+  if (!promo) return false;
+  if (isPromoGlobal(promo)) return true;
+  const ids = promo.allowedCategoryIds;
+  if (!Array.isArray(ids) || ids.length === 0) return false;
+  return ids.includes(categoryId);
+}
+
+function getPromoUsageLimit(promo: any, categoryId: string): number | null {
+  const limit = promo?.usageLimits?.[categoryId];
+  if (typeof limit !== 'number' || limit <= 0) return null;
+  return limit;
+}
+
+/** Validates category scope + per-category usage caps before capture/insert. */
+async function assertPromoCheckoutAllowed(args: {
+  supabase: any;
+  formId: string;
+  promo: any | null;
+  categoryIds: string[];
+  categoriesById: Map<string, any>;
+  allTest: boolean;
+}): Promise<Response | null> {
+  const { supabase, formId, promo, categoryIds, categoriesById, allTest } = args;
+
+  for (const categoryId of categoryIds) {
+    const cat = categoriesById.get(categoryId);
+    if (categoryRequiresPromoCode(cat) && !promo) {
+      return jsonResponse({ error: 'PROMO_REQUIRED_FOR_CATEGORY' }, 422);
+    }
+  }
+
+  if (!promo) return null;
+
+  for (const categoryId of categoryIds) {
+    if (!isPromoAllowedForCategory(promo, categoryId)) {
+      return jsonResponse({ error: 'PROMO_NOT_VALID_FOR_CATEGORY' }, 422);
+    }
+  }
+
+  const incomingByCat = new Map<string, number>();
+  for (const categoryId of categoryIds) {
+    incomingByCat.set(categoryId, (incomingByCat.get(categoryId) ?? 0) + 1);
+  }
+
+  for (const [categoryId, incoming] of incomingByCat) {
+    const limit = getPromoUsageLimit(promo, categoryId);
+    if (limit == null) continue;
+
+    let q = supabase
+      .from('attendees')
+      .select('id', { count: 'exact', head: true })
+      .eq('form_id', formId)
+      .ilike('applied_promo_code', promo.code)
+      .eq('pricing_category_id', categoryId);
+    if (!allTest) {
+      q = q.or('is_test.is.null,is_test.eq.false');
+    }
+    const { count, error } = await q;
+    if (error) {
+      console.error('[verify-payment] promo usage count failed', error.message);
+      return jsonResponse({ error: 'Could not validate promo code usage' }, 500);
+    }
+    if ((count ?? 0) + incoming > limit) {
+      return jsonResponse({ error: 'PROMO_USAGE_LIMIT_EXCEEDED', categoryId, limit }, 422);
+    }
+  }
+
+  return null;
+}
+
 // Drops invalid/incomplete BOGO claims before PayPal capture — payment must
 // never fail because of BOGO. Payers can send guests later from the portal.
 function sanitizeBogoClaimsForCapture(args: {
@@ -296,6 +378,75 @@ serve(async (req: Request) => {
         console.error('verify-payment: JWT verification failed', e);
         // Continue with authUserId = null — anonymous submissions are allowed
       }
+    }
+
+    // ── PROMO VALIDATION (usage limits + category scope preview on Apply) ──
+    if (body.mode === 'validate-promo') {
+      const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+      const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+      const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+      const validateFormId = body.formId;
+      const rawPromo = body.promoCode;
+      const rawCategoryIds = body.categoryIds;
+      const singleCategoryId = body.categoryId;
+      if (!validateFormId || !rawPromo) {
+        return jsonResponse({ error: 'Missing formId or promoCode' }, 400);
+      }
+      const categoryIds: string[] = Array.isArray(rawCategoryIds) && rawCategoryIds.length > 0
+        ? rawCategoryIds.filter((id: unknown) => typeof id === 'string' && id)
+        : (typeof singleCategoryId === 'string' && singleCategoryId ? [singleCategoryId] : []);
+      if (categoryIds.length === 0) {
+        return jsonResponse({ error: 'Missing categoryId' }, 400);
+      }
+
+      const { data: validateForm, error: validateFormErr } = await supabase
+        .from('forms').select('*').eq('id', validateFormId).maybeSingle();
+      if (validateFormErr || !validateForm) {
+        return jsonResponse({ error: 'Form not found' }, 404);
+      }
+
+      const validatePromo = resolveFormPromoCode(validateForm, rawPromo);
+      if (!validatePromo) {
+        return jsonResponse({ ok: false, error: 'INVALID_PROMO' });
+      }
+
+      for (const cid of categoryIds) {
+        if (!isPromoAllowedForCategory(validatePromo, cid)) {
+          return jsonResponse({ ok: false, error: 'PROMO_NOT_VALID_FOR_CATEGORY' });
+        }
+      }
+
+      const incomingByCat = new Map<string, number>();
+      for (const cid of categoryIds) {
+        incomingByCat.set(cid, (incomingByCat.get(cid) ?? 0) + 1);
+      }
+      const validateAllTest = body.isTest === true;
+
+      for (const [categoryId, incoming] of incomingByCat) {
+        const limit = getPromoUsageLimit(validatePromo, categoryId);
+        if (limit == null) continue;
+
+        let q = supabase
+          .from('attendees')
+          .select('id', { count: 'exact', head: true })
+          .eq('form_id', validateFormId)
+          .ilike('applied_promo_code', validatePromo.code)
+          .eq('pricing_category_id', categoryId);
+        if (!validateAllTest) {
+          q = q.or('is_test.is.null,is_test.eq.false');
+        }
+        const { count, error: countErr } = await q;
+        if (countErr) {
+          console.error('[verify-payment] validate-promo count failed', countErr.message);
+          return jsonResponse({ error: 'Could not validate promo code usage' }, 500);
+        }
+        if ((count ?? 0) + incoming > limit) {
+          return jsonResponse({ ok: false, error: 'PROMO_USAGE_LIMIT_EXCEEDED' });
+        }
+      }
+
+      return jsonResponse({ ok: true });
     }
 
     // ── EXHIBITOR BRANCH: no PayPal, no attendees array — just insert rows ──
@@ -1114,6 +1265,21 @@ serve(async (req: Request) => {
         if (groupPromo?.appliesGuestType === 'speaker') {
           return jsonResponse({ error: 'SPEAKER_PROMO_NOT_ALLOWED_IN_GROUP' }, 422);
         }
+
+        const groupCategoriesById = new Map<string, any>(
+          (tpl.categories ?? []).map((c: any) => [c.id, c]),
+        );
+        const groupAllTest = attendees.every((a: any) => a.is_test === true);
+        const groupPromoGuard = await assertPromoCheckoutAllowed({
+          supabase,
+          formId,
+          promo: groupPromo,
+          categoryIds: memberResolutions.map(m => m.categoryId),
+          categoriesById: groupCategoriesById,
+          allTest: groupAllTest,
+        });
+        if (groupPromoGuard) return groupPromoGuard;
+
         const groupDiscountedCents = applyPromoToPricingCents(categoryCentsTotal, addonsCentsTotal, groupPromo);
         const groupIsFreeViaPromo = !!groupPromo && groupDiscountedCents === 0;
         const groupAppliedPromoCode = groupPromo?.code ?? null;
@@ -1344,6 +1510,21 @@ serve(async (req: Request) => {
         // attendee is inserted as `payment_status='free'`. Speaker-type
         // promos stamp `guest_type='speaker'` on the row.
         const soloPromo = resolveFormPromoCode(formData, promoCode);
+
+        const soloCategoriesById = new Map<string, any>(
+          (tpl.categories ?? []).map((c: any) => [c.id, c]),
+        );
+        const soloAllTest = attendees.every((a: any) => a.is_test === true);
+        const soloPromoGuard = await assertPromoCheckoutAllowed({
+          supabase,
+          formId,
+          promo: soloPromo,
+          categoryIds: [cat.id],
+          categoriesById: soloCategoriesById,
+          allTest: soloAllTest,
+        });
+        if (soloPromoGuard) return soloPromoGuard;
+
         const soloDiscountedCents = applyPromoToPricingCents(fee, addonTotal, soloPromo);
         const soloIsFreeViaPromo = !!soloPromo && soloDiscountedCents === 0;
         const soloAppliedPromoCode = soloPromo?.code ?? null;

@@ -74,12 +74,20 @@ export default function PricingMatrixSection({ draft, onChange }: Props) {
           <tbody>
             {draft.categories.map(cat => (
               <tr key={cat.id}>
-                <td className="border px-2 py-1">
+                <td className="border px-2 py-1 align-top">
                   <input
-                    className="w-full border rounded px-1 py-0.5"
+                    className="w-full border rounded px-1 py-0.5 mb-1"
                     value={cat.name}
                     onChange={e => updateCategory(cat.id, { name: e.target.value })}
                   />
+                  <label className="flex items-center gap-1 text-[10px] text-slate-600 whitespace-nowrap">
+                    <input
+                      type="checkbox"
+                      checked={cat.requiresPromoCode === true}
+                      onChange={e => updateCategory(cat.id, { requiresPromoCode: e.target.checked || undefined })}
+                    />
+                    Requires promo code
+                  </label>
                 </td>
                 {draft.tiers.flatMap(t => draft.dateBrackets.map(b => (
                   <td key={`${cat.id}-${t.id}-${b.id}`} className="border px-1 py-1">

@@ -10,9 +10,12 @@
 // static-ticket forms is still supported on the static branch and is
 // unaffected by this helper.
 
-import type { PromoCode } from '../types';
+import type { PromoCode, PricingCategory } from '../types';
 
 export const DEFAULT_SPEAKER_PROMO_APPLIED_MESSAGE = 'Speaker Registration Discount Applied';
+
+export const PROMO_USAGE_LIMIT_MESSAGE =
+  'This promo code has reached its maximum use. Please reach out to admin@inheritedblooddisorders.world if you think this is a mistake.';
 
 /** Message shown after a promo is applied in the registration UI. */
 export function promoAppliedMessage(promo: PromoCode): string {
@@ -73,6 +76,81 @@ export function isFreeAfterPromo(subtotalCents: number, promo: PromoCode | undef
 /** True when the pricing category label is a Speaker tier (e.g. "Speaker"). */
 export function isSpeakerRegistrationCategory(categoryName: string | undefined | null): boolean {
   return !!categoryName && /\bspeaker\b/i.test(categoryName);
+}
+
+/** Speaker / promo-required tiers show "Free" instead of dollar amounts in UI. */
+export function shouldMaskCategoryPricing(
+  category: Pick<PricingCategory, 'name' | 'requiresPromoCode'> | null | undefined,
+): boolean {
+  return categoryRequiresPromoCode(category);
+}
+
+/** Speaker-style categories require a promo before checkout completes. */
+export function categoryRequiresPromoCode(
+  category: Pick<PricingCategory, 'name' | 'requiresPromoCode'> | null | undefined,
+): boolean {
+  if (!category) return false;
+  if (category.requiresPromoCode === true) return true;
+  return isSpeakerRegistrationCategory(category.name);
+}
+
+/** Legacy/global promos omit allowedCategoryIds (undefined). An explicit
+ *  array — even empty — means category-scoped. */
+export function isPromoGlobal(promo: PromoCode): boolean {
+  return promo.allowedCategoryIds === undefined;
+}
+
+/** Whether `promo` may be applied to the selected pricing category. */
+export function isPromoAllowedForCategory(
+  promo: PromoCode,
+  categoryId: string | null | undefined,
+): boolean {
+  if (isPromoGlobal(promo)) return true;
+  if (!categoryId) return false;
+  return promo.allowedCategoryIds!.includes(categoryId);
+}
+
+/** Configured max uses for this promo + category, or null when unlimited. */
+export function getPromoUsageLimit(
+  promo: PromoCode,
+  categoryId: string,
+): number | null {
+  const limit = promo.usageLimits?.[categoryId];
+  if (typeof limit !== 'number' || limit <= 0) return null;
+  return limit;
+}
+
+/** True when usage count has reached or exceeded the configured limit. */
+export function isPromoUsageLimitReached(
+  promo: PromoCode,
+  categoryId: string,
+  currentUsageCount: number,
+): boolean {
+  const limit = getPromoUsageLimit(promo, categoryId);
+  if (limit == null) return false;
+  return currentUsageCount >= limit;
+}
+
+/** Categories that should appear in the usage-limit editor for a promo. */
+export function promoUsageLimitCategories(
+  promo: PromoCode,
+  templateCategories: Pick<PricingCategory, 'id' | 'name'>[],
+): Pick<PricingCategory, 'id' | 'name'>[] {
+  if (isPromoGlobal(promo)) return templateCategories;
+  const allowed = new Set(promo.allowedCategoryIds ?? []);
+  return templateCategories.filter(c => allowed.has(c.id));
+}
+
+/** True when any of the given category ids require a promo at checkout. */
+export function anyCategoryRequiresPromoCode(
+  template: { categories: Pick<PricingCategory, 'id' | 'name' | 'requiresPromoCode'>[] } | null | undefined,
+  categoryIds: Array<string | null | undefined>,
+): boolean {
+  if (!template) return false;
+  const byId = new Map(template.categories.map(c => [c.id, c]));
+  return categoryIds
+    .filter((id): id is string => !!id)
+    .some(id => categoryRequiresPromoCode(byId.get(id)));
 }
 
 /** Any enabled promo codes configured on this form (dynamic or static ticket). */

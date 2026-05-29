@@ -172,6 +172,13 @@ export interface PromoCode {
   /** Shown in the registration form after Apply (and in the toast).
    *  Defaults to "Speaker Registration Discount Applied" for speaker codes. */
   appliedMessage?: string;
+  /** When set, promo is only valid for these pricing-template category IDs.
+   *  Omit or empty = valid for all categories (legacy default). */
+  allowedCategoryIds?: string[];
+  /** Max redemptions per category (key = pricing category id). Omit, 0, or
+   *  missing key = unlimited for that category. Enforced server-side via
+   *  attendees.applied_promo_code + pricing_category_id counts. */
+  usageLimits?: Record<string, number>;
 }
 
 export interface TicketItem {
@@ -559,6 +566,8 @@ export interface PricingCategory {
   id: string;
   name: string;
   prices: Record<string, Record<string, number>>;
+  /** When true, checkout requires a valid promo code (e.g. Speaker at $0). */
+  requiresPromoCode?: boolean;
 }
 
 export interface PricingAddon {

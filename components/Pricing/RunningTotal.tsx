@@ -4,7 +4,7 @@ import { formatPrice } from '../../utils/pricing';
 import type { PricingTemplate } from '../../types';
 
 export default function RunningTotal({
-  template, total, bracket, tier, showTier = true, label,
+  template, total, bracket, tier, showTier = true, label, showAsFree = false,
 }: {
   template: PricingTemplate;
   total: number | null;
@@ -14,6 +14,8 @@ export default function RunningTotal({
   showTier?: boolean;
   /** Optional override for the "Total" label (e.g. "Group total (4 people)"). */
   label?: string;
+  /** Speaker / promo-required category — show "Free" instead of currency amounts. */
+  showAsFree?: boolean;
 }) {
   if (total == null) return null;
   const bracketName = bracket?.name ?? '';
@@ -23,8 +25,9 @@ export default function RunningTotal({
       <div className="min-w-0">
         <div className="text-[11px] font-display text-gansid-on-surface/50 uppercase tracking-wider mb-1">{label ?? 'Total'}</div>
         <div className="text-2xl font-display font-bold text-gansid-on-surface">
-          {formatPrice(total, template.currency)}
+          {showAsFree ? 'Free' : formatPrice(total, template.currency)}
         </div>
+        {!showAsFree && (
         <div className="flex flex-wrap items-center gap-1.5 mt-2">
           {bracket && (
             <span
@@ -45,6 +48,7 @@ export default function RunningTotal({
             </span>
           )}
         </div>
+        )}
       </div>
     </div>
   );

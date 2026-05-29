@@ -112,6 +112,8 @@ export interface FormRendererProps {
   /** When false, hide promo UI until the user picks a registration category. */
   showPromoCodeField?: boolean;
   promoFieldHint?: string;
+  /** Speaker / promo-required category — mask dollar amounts in category + total UI. */
+  maskSpeakerPricing?: boolean;
 }
 
 export const FormRenderer: React.FC<FormRendererProps> = ({
@@ -170,6 +172,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   bogoSection,
   showPromoCodeField = false,
   promoFieldHint,
+  maskSpeakerPricing = false,
 }) => {
   return (
     <>
@@ -458,6 +461,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                   // In group mode the total sums across members who can be in
                   // different tiers — don't show a single tier pill or it'd mislead.
                   showTier={registrationMode !== 'group'}
+                  showAsFree={maskSpeakerPricing && registrationMode !== 'group'}
                   label={registrationMode === 'group' ? `Total (${1 + groupMembers.length} people — you + ${groupMembers.length} additional)` : undefined}
                 />
               </div>

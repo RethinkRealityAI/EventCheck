@@ -1,6 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { formatPrice } from '../../utils/pricing';
+import { shouldMaskCategoryPricing } from '../../utils/promoCodes';
 import type { PricingTemplate, PricingTier, DateBracket } from '../../types';
 
 interface Props {
@@ -11,6 +12,18 @@ interface Props {
   onChange: (categoryId: string) => void;
 }
 
+function categoryPriceLabel(
+  cat: { id: string; name: string; requiresPromoCode?: boolean; prices?: Record<string, Record<string, number>> },
+  tier: PricingTier | null,
+  bracket: DateBracket | null,
+  currency: string,
+): string | null {
+  if (shouldMaskCategoryPricing(cat)) return 'Free';
+  const price = tier && bracket ? cat.prices?.[tier.id]?.[bracket.id] : undefined;
+  if (typeof price !== 'number') return null;
+  return formatPrice(price, currency);
+}
+
 export default function LivePriceCategory({ template, tier, bracket, value, onChange }: Props) {
   const [open, setOpen] = useState(false);
   const [dropUp, setDropUp] = useState(false);
@@ -18,7 +31,9 @@ export default function LivePriceCategory({ template, tier, bracket, value, onCh
   const listRef = useRef<HTMLDivElement | null>(null);
 
   const selected = template.categories.find(c => c.id === value) || null;
-  const selectedPrice = selected && tier && bracket ? selected.prices?.[tier.id]?.[bracket.id] : undefined;
+  const selectedSuffix = selected
+    ? categoryPriceLabel(selected, tier, bracket, template.currency)
+    : null;
 
   // Decide whether to open upward based on available viewport space below the trigger.
   useLayoutEffect(() => {
@@ -62,7 +77,7 @@ export default function LivePriceCategory({ template, tier, bracket, value, onCh
         >
           <span className={selected ? 'text-gansid-on-surface' : 'text-gansid-on-surface/50'}>
             {selected
-              ? `${selected.name}${typeof selectedPrice === 'number' ? ` — ${formatPrice(selectedPrice, template.currency)}` : ''}`
+              ? `${selected.name}${selectedSuffix ? ` — ${selectedSuffix}` : ''}`
               : 'Select a category…'}
           </span>
           <ChevronDown className={`w-4 h-4 text-gansid-on-surface/60 transition-transform ${open ? 'rotate-180' : ''}`} />
@@ -77,7 +92,7 @@ export default function LivePriceCategory({ template, tier, bracket, value, onCh
             }`}
           >
             {template.categories.map(cat => {
-              const price = tier && bracket ? cat.prices?.[tier.id]?.[bracket.id] : undefined;
+              const suffix = categoryPriceLabel(cat, tier, bracket, template.currency);
               const isSelected = cat.id === value;
               return (
                 <button
@@ -93,8 +108,8 @@ export default function LivePriceCategory({ template, tier, bracket, value, onCh
                   }`}
                 >
                   <span>{cat.name}</span>
-                  {typeof price === 'number' && (
-                    <span className="text-xs text-gansid-on-surface/60">{formatPrice(price, template.currency)}</span>
+                  {suffix && (
+                    <span className="text-xs text-gansid-on-surface/60">{suffix}</span>
                   )}
                 </button>
               );

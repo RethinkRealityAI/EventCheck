@@ -21,6 +21,8 @@ export function buildBogoPostCheckoutNotice(args: {
 }
 
 /** User-facing copy for verify-payment error codes. */
+import { PROMO_USAGE_LIMIT_MESSAGE } from './promoCodes';
+
 export function formatVerifyPaymentError(raw: string, errorCode?: string): string {
   const code = errorCode ?? raw;
   switch (code) {
@@ -30,6 +32,14 @@ export function formatVerifyPaymentError(raw: string, errorCode?: string): strin
       return 'Your promo code cannot be combined with a complimentary guest ticket. Remove free-guest details or use a different registration path.';
     case 'BOGO_NOT_ALLOWED_FOR_FREE_REGISTRATION':
       return 'Complimentary guest tickets are not available on free registrations.';
+    case 'PROMO_REQUIRED_FOR_CATEGORY':
+      return 'This registration category requires a valid promo code. Enter your code and click Apply before continuing.';
+    case 'PROMO_NOT_VALID_FOR_CATEGORY':
+      return 'This promo code is not valid for your selected registration category.';
+    case 'PROMO_USAGE_LIMIT_EXCEEDED':
+      return PROMO_USAGE_LIMIT_MESSAGE;
+    case 'SPEAKER_PROMO_NOT_ALLOWED_IN_GROUP':
+      return 'Speaker promo codes cannot be used for group registrations.';
     case 'BOGO_PRICE_EXCEEDED':
       return 'The free guest category must be equal to or less than the paid ticket category.';
     case 'BOGO_BAD_INDEX':

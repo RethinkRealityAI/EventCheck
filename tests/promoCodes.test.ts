@@ -8,6 +8,13 @@ import {
   promoAppliedMessage,
   DEFAULT_SPEAKER_PROMO_APPLIED_MESSAGE,
   isSpeakerRegistrationCategory,
+  categoryRequiresPromoCode,
+  isPromoGlobal,
+  isPromoAllowedForCategory,
+  getPromoUsageLimit,
+  isPromoUsageLimitReached,
+  promoUsageLimitCategories,
+  anyCategoryRequiresPromoCode,
   formHasEnabledPromoCodes,
 } from '../utils/promoCodes';
 import type { PromoCode } from '../types';
@@ -110,6 +117,75 @@ describe('isSpeakerRegistrationCategory', () => {
   it('does not match physician or industry partner', () => {
     expect(isSpeakerRegistrationCategory('Physician')).toBe(false);
     expect(isSpeakerRegistrationCategory('Industry Partner')).toBe(false);
+  });
+});
+
+describe('categoryRequiresPromoCode', () => {
+  it('true when requiresPromoCode flag is set', () => {
+    expect(categoryRequiresPromoCode({ name: 'Presenter', requiresPromoCode: true })).toBe(true);
+  });
+  it('true for legacy speaker-named categories', () => {
+    expect(categoryRequiresPromoCode({ name: 'Speaker' })).toBe(true);
+  });
+  it('false for standard categories', () => {
+    expect(categoryRequiresPromoCode({ name: 'Physician' })).toBe(false);
+  });
+});
+
+describe('promo category scope + usage limits', () => {
+  const SCOPED: PromoCode = {
+    code: 'STUDENT50',
+    type: 'percent',
+    value: 50,
+    allowedCategoryIds: ['stud'],
+  };
+  const LIMITED: PromoCode = {
+    code: 'SPEAKER2026',
+    type: 'percent',
+    value: 100,
+    allowedCategoryIds: ['speaker'],
+    usageLimits: { speaker: 25 },
+    appliesGuestType: 'speaker',
+  };
+  const CATS = [
+    { id: 'speaker', name: 'Speaker' },
+    { id: 'stud', name: 'Student' },
+    { id: 'md', name: 'Physician' },
+  ];
+
+  it('treats missing allowedCategoryIds as global', () => {
+    expect(isPromoGlobal(SPEAKER)).toBe(true);
+    expect(isPromoAllowedForCategory(SPEAKER, 'anything')).toBe(true);
+  });
+  it('restricts scoped promos to allowed categories', () => {
+    expect(isPromoGlobal(SCOPED)).toBe(false);
+    expect(isPromoAllowedForCategory(SCOPED, 'stud')).toBe(true);
+    expect(isPromoAllowedForCategory(SCOPED, 'md')).toBe(false);
+  });
+  it('reads per-category usage limits', () => {
+    expect(getPromoUsageLimit(LIMITED, 'speaker')).toBe(25);
+    expect(getPromoUsageLimit(LIMITED, 'md')).toBeNull();
+  });
+  it('detects when usage limit is reached', () => {
+    expect(isPromoUsageLimitReached(LIMITED, 'speaker', 24)).toBe(false);
+    expect(isPromoUsageLimitReached(LIMITED, 'speaker', 25)).toBe(true);
+  });
+  it('lists categories for the usage-limit editor', () => {
+    expect(promoUsageLimitCategories(SPEAKER, CATS).length).toBe(3);
+    expect(promoUsageLimitCategories(SCOPED, CATS).map(c => c.id)).toEqual(['stud']);
+  });
+});
+
+describe('anyCategoryRequiresPromoCode', () => {
+  const TPL = {
+    categories: [
+      { id: 'sp', name: 'Speaker', requiresPromoCode: true, prices: {} },
+      { id: 'md', name: 'Physician', prices: {} },
+    ],
+  };
+  it('true when any selected id is promo-required', () => {
+    expect(anyCategoryRequiresPromoCode(TPL, ['md', 'sp'])).toBe(true);
+    expect(anyCategoryRequiresPromoCode(TPL, ['md'])).toBe(false);
   });
 });
 

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import type { Form, PricingTemplate, AppSettings, PromoCode } from '../../types';
-import { DEFAULT_SPEAKER_PROMO_APPLIED_MESSAGE } from '../../utils/promoCodes';
+import type { Form, PricingTemplate, AppSettings, PromoCode, PricingCategory } from '../../types';
+import { DEFAULT_SPEAKER_PROMO_APPLIED_MESSAGE, promoUsageLimitCategories } from '../../utils/promoCodes';
 import { getPricingTemplates, getSettings } from '../../services/storageService';
 import { resolveBracket } from '../../utils/pricing';
 import { CURRENT_SITE } from '../../config/sites';
@@ -82,6 +82,40 @@ export default function PricingTab({ form, onFormChange }: Props) {
   };
   const removePromoCode = (i: number) => {
     setPromoCodes(promoCodes.filter((_, idx) => idx !== i));
+  };
+
+  const templateCategories: Pick<PricingCategory, 'id' | 'name'>[] = selected?.categories ?? [];
+
+  const setPromoCategoryScope = (i: number, global: boolean) => {
+    if (global) {
+      updatePromoCode(i, { allowedCategoryIds: undefined });
+      return;
+    }
+    const firstId = templateCategories[0]?.id;
+    updatePromoCode(i, { allowedCategoryIds: firstId ? [firstId] : [] });
+  };
+
+  const togglePromoCategory = (i: number, categoryId: string, checked: boolean) => {
+    const p = promoCodes[i];
+    const current = p.allowedCategoryIds ?? [];
+    const next = checked
+      ? [...current, categoryId]
+      : current.filter(id => id !== categoryId);
+    updatePromoCode(i, { allowedCategoryIds: next.length > 0 ? next : [] });
+  };
+
+  const setPromoUsageLimit = (i: number, categoryId: string, raw: string) => {
+    const p = promoCodes[i];
+    const n = Number(raw);
+    const next = { ...(p.usageLimits ?? {}) };
+    if (!raw.trim() || !Number.isFinite(n) || n <= 0) {
+      delete next[categoryId];
+    } else {
+      next[categoryId] = Math.floor(n);
+    }
+    updatePromoCode(i, {
+      usageLimits: Object.keys(next).length > 0 ? next : undefined,
+    });
   };
 
   return (
@@ -221,6 +255,77 @@ export default function PricingTab({ form, onFormChange }: Props) {
                       onChange={e => updatePromoCode(i, { description: e.target.value })}
                       className="w-full px-2 py-1.5 text-xs border border-slate-300 rounded text-slate-600"
                     />
+
+                    {/* Category scope */}
+                    {templateCategories.length > 0 && (
+                      <div className="border-t border-slate-200 pt-2 space-y-2">
+                        <div className="text-xs font-medium text-slate-700">Registration category scope</div>
+                        <div className="flex flex-wrap gap-3 text-xs">
+                          <label className="flex items-center gap-1.5">
+                            <input
+                              type="radio"
+                              name={`promo-scope-${i}`}
+                              checked={p.allowedCategoryIds === undefined}
+                              onChange={() => setPromoCategoryScope(i, true)}
+                            />
+                            <span>All categories (global)</span>
+                          </label>
+                          <label className="flex items-center gap-1.5">
+                            <input
+                              type="radio"
+                              name={`promo-scope-${i}`}
+                              checked={p.allowedCategoryIds !== undefined}
+                              onChange={() => setPromoCategoryScope(i, false)}
+                            />
+                            <span>Specific categories only</span>
+                          </label>
+                        </div>
+                        {p.allowedCategoryIds !== undefined && (
+                          <>
+                            <div className="flex flex-wrap gap-2">
+                              {templateCategories.map(cat => (
+                                <label key={cat.id} className="flex items-center gap-1 text-xs bg-white border border-slate-200 rounded px-2 py-1">
+                                  <input
+                                    type="checkbox"
+                                    checked={p.allowedCategoryIds.includes(cat.id)}
+                                    onChange={e => togglePromoCategory(i, cat.id, e.target.checked)}
+                                  />
+                                  <span>{cat.name}</span>
+                                </label>
+                              ))}
+                            </div>
+                            {p.allowedCategoryIds.length === 0 && (
+                              <p className="text-xs text-amber-700">Select at least one category, or switch back to global.</p>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Per-category usage limits */}
+                    {templateCategories.length > 0 && (
+                      <div className="border-t border-slate-200 pt-2 space-y-2">
+                        <div className="text-xs font-medium text-slate-700">Usage limits (optional)</div>
+                        <p className="text-xs text-slate-500">
+                          Max redemptions per category. Leave blank for unlimited. Counted from completed registrations on this form.
+                        </p>
+                        <div className="space-y-1">
+                          {promoUsageLimitCategories(p, templateCategories).map(cat => (
+                            <label key={cat.id} className="flex items-center justify-between gap-2 text-xs">
+                              <span className="text-slate-700 truncate">{cat.name}</span>
+                              <input
+                                type="number"
+                                min={1}
+                                placeholder="∞"
+                                value={p.usageLimits?.[cat.id] ?? ''}
+                                onChange={e => setPromoUsageLimit(i, cat.id, e.target.value)}
+                                className="w-20 px-2 py-1 border border-slate-300 rounded text-right"
+                              />
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

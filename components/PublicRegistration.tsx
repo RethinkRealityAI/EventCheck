@@ -8,7 +8,11 @@ import {
   findPromoCode,
   applyPromoToPricing,
   promoAppliedMessage,
-  isSpeakerRegistrationCategory,
+  categoryRequiresPromoCode,
+  isPromoAllowedForCategory,
+  anyCategoryRequiresPromoCode,
+  getPromoUsageLimit,
+  PROMO_USAGE_LIMIT_MESSAGE,
   formHasEnabledPromoCodes,
 } from '../utils/promoCodes';
 import { portalEmailRedirectTo } from '../utils/authHashCallback';
@@ -345,6 +349,14 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
     });
   }, [bogoBlockedByPromo]);
 
+  // Changing category can invalidate a scoped promo — drop it so totals stay honest.
+  useEffect(() => {
+    if (!appliedPromo || !selectedCategoryId) return;
+    if (!isPromoAllowedForCategory(appliedPromo, selectedCategoryId)) {
+      setAppliedPromo(null);
+    }
+  }, [selectedCategoryId, appliedPromo]);
+
   // Per-payer pricing info for BOGO — used to drive each slot's category
   // dropdown and to flag a slot as un-fillable (payer hasn't picked a
   // category yet). Index 0 = buyer; 1..N = group members.
@@ -544,21 +556,25 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   const ticketField = form?.fields.find(f => f.type === 'ticket');
 
   const selectedPricingCategory = pricingTemplate?.categories.find(c => c.id === selectedCategoryId);
-  const isSpeakerCategory = isSpeakerRegistrationCategory(selectedPricingCategory?.name);
+  const isSpeakerCategory = categoryRequiresPromoCode(selectedPricingCategory);
+  const selectedCategoryIds = registrationMode === 'group'
+    ? [selectedCategoryId, ...groupMembers.map(m => m.categoryId)]
+    : [selectedCategoryId];
+  const anyPromoRequiredCategory = anyCategoryRequiresPromoCode(pricingTemplate, selectedCategoryIds);
   const hasFormPromoCodes = formHasEnabledPromoCodes(
     (form?.settings as any)?.promoCodes,
     ticketField?.ticketConfig?.promoCodes as PromoCode[] | undefined,
   );
   const staticTicketQty = Object.values(ticketQuantities).reduce((a, b) => a + b, 0);
   /** Promo input appears after category (dynamic) or ticket qty (static). */
-  const showPromoCodeField = hasFormPromoCodes && (
-    (!!pricingTemplate && !!selectedCategoryId)
-    || (!pricingTemplate && staticTicketQty > 0)
+  const showPromoCodeField = (
+    (!!pricingTemplate && !!selectedCategoryId && (hasFormPromoCodes || anyPromoRequiredCategory))
+    || (!pricingTemplate && staticTicketQty > 0 && hasFormPromoCodes)
   );
   const promoFieldHint = !showPromoCodeField
     ? undefined
-    : isSpeakerCategory
-      ? 'Speaker registration requires a promo code. Enter your code and click Apply before continuing.'
+    : anyPromoRequiredCategory
+      ? 'Add your speaker code below to complete registration. Enter your code and click Apply.'
       : 'Promo codes apply to your selected registration category — enter your code and click Apply.';
   const postPromoCheckoutCents = payableAfterPromoCents;
   const prePromoCheckoutCents = registrationMode === 'group'
@@ -667,7 +683,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
     });
   };
 
-  const applyPromo = () => {
+  const applyPromo = async () => {
     // Codes can live in either form.settings.promoCodes (dynamic-pricing
     // forms — GANSID) or ticketField.ticketConfig.promoCodes (static-ticket
     // forms — legacy). Check the dynamic source first so a GANSID form with
@@ -681,6 +697,49 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
         showNotification('Speaker promo codes cannot be used for group registrations.', 'error');
         return;
       }
+
+      const categoryIdsForUsage: string[] = registrationMode === 'group'
+        ? [
+            ...(selectedCategoryId ? [selectedCategoryId] : []),
+            ...groupMembers.map(m => m.categoryId).filter((id): id is string => !!id),
+          ]
+        : (selectedCategoryId ? [selectedCategoryId] : []);
+
+      if (pricingTemplate && categoryIdsForUsage.length > 0) {
+        for (const cid of categoryIdsForUsage) {
+          if (!isPromoAllowedForCategory(found, cid)) {
+            showNotification('This promo code is not valid for your selected registration category.', 'error');
+            return;
+          }
+        }
+      }
+      if (found.allowedCategoryIds !== undefined && found.allowedCategoryIds.length === 0) {
+        showNotification('This promo code is not configured for any registration category.', 'error');
+        return;
+      }
+
+      const needsUsageCheck = categoryIdsForUsage.some(
+        cid => getPromoUsageLimit(found, cid) != null,
+      );
+      if (needsUsageCheck && form?.id && categoryIdsForUsage.length > 0) {
+        try {
+          const { data } = await supabase.functions.invoke('verify-payment', {
+            body: {
+              mode: 'validate-promo',
+              formId: form.id,
+              promoCode: found.code,
+              categoryIds: categoryIdsForUsage,
+            },
+          });
+          if (data?.error === 'PROMO_USAGE_LIMIT_EXCEEDED') {
+            showNotification(PROMO_USAGE_LIMIT_MESSAGE, 'error');
+            return;
+          }
+        } catch {
+          // Server check unavailable — allow apply; submit will re-validate.
+        }
+      }
+
       setAppliedPromo(found);
       setPromoCode(''); // Clear input
       showNotification(promoAppliedMessage(found), 'success');
@@ -896,10 +955,10 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
         setError('Please select a registration category.');
         return;
       }
-      if (isSpeakerCategory && !appliedPromo) {
+      if (anyPromoRequiredCategory && !appliedPromo) {
         setError(
-          'Speaker registration requires a promo code. Choose the Speaker category, '
-          + 'enter your code, click Apply, then complete registration.',
+          'Speaker registration requires a promo code. Add your speaker code above, '
+          + 'click Apply, then complete registration.',
         );
         return;
       }
@@ -1985,6 +2044,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                 bogoSection={bogoSection}
                 showPromoCodeField={showPromoCodeField}
                 promoFieldHint={promoFieldHint}
+                maskSpeakerPricing={isSpeakerCategory}
               />
             ) : (
               <SingleFormShell
@@ -2042,6 +2102,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                 bogoSection={bogoSection}
                 showPromoCodeField={showPromoCodeField}
                 promoFieldHint={promoFieldHint}
+                maskSpeakerPricing={isSpeakerCategory}
               />
             )}
 
