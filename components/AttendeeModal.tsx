@@ -7,7 +7,8 @@ import QRCode from 'react-qr-code';
 import { updateAttendee, deleteAttendee, getSettings, getAttendee } from '../services/storageService';
 import { supabase } from '../services/supabaseClient';
 import { useNotifications } from './NotificationSystem';
-import { sendEmail } from '../services/emailService';
+import { sendTicketEmail, arrayBufferToBase64 } from '../services/smtpService';
+import { generateTicketPDF } from '../utils/pdfGenerator';
 import { CURRENT_SITE } from '../config/sites';
 import {
   type AttendeeCategory,
@@ -15,7 +16,6 @@ import {
   CATEGORY_META,
   resolveAttendeeCategory,
 } from '../utils/attendeeCategories';
-import { generateEmailHtml } from '../utils/emailTemplates';
 
 interface AttendeeModalProps {
   attendee: Attendee;
@@ -95,9 +95,101 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
         showNotification(`Claim invitation re-sent to ${localAttendee.email}`, 'success');
       } else {
         const settings = await getSettings();
-        const html = generateEmailHtml(settings, settings.emailBodyTemplate, localAttendee);
-        await sendEmail(localAttendee.email, settings.emailSubject, html);
-        showNotification(`Ticket resent to ${localAttendee.email}`, 'success');
+        if (!settings.smtpUser || !settings.smtpPass) {
+          throw new Error('SMTP is not configured. Set it up in Settings before resending tickets.');
+        }
+        const form = forms.find(f => f.id === localAttendee.formId);
+        const origin = window.location.origin;
+
+        // Reconstruct this primary's guests from the dashboard's in-memory list
+        // so a table purchaser gets the EXACT email they received at checkout:
+        // their own ticket plus every guest's PDF, plus the per-guest claim
+        // links for any seats that haven't been claimed yet. Guest rows (not
+        // primaries) just resend their own single ticket.
+        const guests = localAttendee.isPrimary !== false
+          ? (attendees || []).filter(a => a.primaryAttendeeId === localAttendee.id)
+          : [];
+
+        const safe = (n: string) => n.replace(/[^a-zA-Z0-9 ]/g, '_') || 'Ticket';
+        const attachments: Array<{ filename: string; content: string; contentType: string }> = [];
+
+        const primaryDoc = await generateTicketPDF(localAttendee, settings, form);
+        attachments.push({
+          filename: `${safe(localAttendee.name)}_Ticket.pdf`,
+          content: arrayBufferToBase64(primaryDoc.output('arraybuffer')),
+          contentType: 'application/pdf',
+        });
+
+        const claimLinks: Array<{ name: string; url: string }> = [];
+        for (let i = 0; i < guests.length; i++) {
+          const g = guests[i];
+          const isPending = g.guestType === 'pending-claim';
+          // Pending-claim seats carry a registration URL so the recipient can
+          // self-claim; claimed/named guests just get their entry ticket.
+          const registrationUrl = isPending ? `${origin}/#/form/${g.formId}?ref=${g.id}` : undefined;
+          const guestDoc = await generateTicketPDF(g, settings, form, registrationUrl);
+          const isPlaceholder = g.name.includes('Guest Ticket #');
+          attachments.push({
+            filename: `${isPlaceholder ? `Guest_${i + 2}` : safe(g.name)}_Ticket.pdf`,
+            content: arrayBufferToBase64(guestDoc.output('arraybuffer')),
+            contentType: 'application/pdf',
+          });
+          if (registrationUrl) claimLinks.push({ name: g.name, url: registrationUrl });
+        }
+
+        // Same claim-links block the checkout flow appends to the purchaser email.
+        const claimLinksBlock = claimLinks.length > 0
+          ? `<div style="margin-top:16px;padding:12px 16px;background:#f8fafc;border-left:3px solid #4f46e5;border-radius:4px;">
+               <p style="margin:0 0 8px;font-weight:600;">Registration links for your guests</p>
+               <p style="margin:0 0 10px;font-size:13px;color:#475569;">Forward a link below to each guest so they can complete their own details. Each link claims one seat.</p>
+               <ol style="margin:0;padding-left:20px;line-height:1.8;font-size:13px;">
+                 ${claimLinks.map(g => `<li><strong>${g.name}</strong> — <a href="${g.url}">Claim / register</a><br><span style="color:#64748b;font-size:12px;">${g.url}</span></li>`).join('')}
+               </ol>
+             </div>`
+          : '';
+
+        // Table/group purchasers get the dedicated table-purchaser template;
+        // solo tickets get the standard one — mirrors PublicRegistration.
+        const isTable = guests.length > 0;
+        const subjectTpl = isTable
+          ? (settings.emailTablePurchaserSubject || settings.emailSubject || 'Your ticket for {{event}}')
+          : (settings.emailSubject || 'Your ticket for {{event}}');
+        const bodyTpl = isTable
+          ? (settings.emailTablePurchaserBody || settings.emailBodyTemplate || '<p>Thank you for registering for <strong>{{event}}</strong>.</p>')
+          : (settings.emailBodyTemplate || '<p>Thank you for registering for <strong>{{event}}</strong>.</p>');
+        const render = (s: string) => s
+          .replace(/\{\{event\}\}/g, localAttendee.formTitle || form?.title || '')
+          .replace(/\{\{name\}\}/g, localAttendee.name || '')
+          .replace(/\{\{id\}\}/g, localAttendee.id || '')
+          .replace(/\{\{invoiceId\}\}/g, localAttendee.invoiceId || '')
+          .replace(/\{\{amount\}\}/g, localAttendee.paymentAmount || '');
+
+        await sendTicketEmail(settings, {
+          to: localAttendee.email,
+          subject: render(subjectTpl),
+          name: localAttendee.name,
+          title: localAttendee.formTitle || form?.title || undefined,
+          message: render(bodyTpl) + claimLinksBlock,
+          attachments,
+        });
+
+        // Stamp the guests too so the dashboard "Sent" status stays accurate
+        // for the whole table (the primary is stamped by the shared block below).
+        if (guests.length > 0) {
+          try {
+            const ts = new Date().toISOString();
+            await Promise.all(guests.map(g => updateAttendee(g.id, { lastTicketEmailAt: ts })));
+          } catch (err) {
+            console.warn('Failed to stamp lastTicketEmailAt on table guests', err);
+          }
+        }
+
+        showNotification(
+          isTable
+            ? `Ticket email (with ${guests.length} guest ticket${guests.length !== 1 ? 's' : ''}) resent to ${localAttendee.email}`
+            : `Ticket resent to ${localAttendee.email}`,
+          'success',
+        );
       }
       // Stamp send-time on the attendee record so the dashboard reflects
       // "Sent" without forcing a page refresh. Best-effort — the email is
