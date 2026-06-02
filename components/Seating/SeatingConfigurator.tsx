@@ -12,6 +12,7 @@ import {
     deleteSeatingConfiguration,
     getSeatingAssignments,
     saveSeatingAssignments,
+    syncSeatingAssignmentsToAttendees,
     getSceneElements,
     saveSceneElements,
     getForms,
@@ -231,12 +232,28 @@ export default function SeatingConfigurator() {
             ]);
             setTables(t);
             setAttendees(a);
-            setAssignments(as);
+            // Merge manual dashboard assignments (attendees.assigned_table_id) so
+            // admins who set table/seat in AttendeeModal see them on chart load.
+            const tableIds = new Set(t.map(table => table.id));
+            const mergedAssignments = [...as];
+            for (const att of a) {
+                if (!att.assignedTableId || !tableIds.has(att.assignedTableId)) continue;
+                if (mergedAssignments.some(x => x.attendeeId === att.id)) continue;
+                const seatsAtTable = mergedAssignments.filter(x => x.tableId === att.assignedTableId).length;
+                mergedAssignments.push({
+                    id: crypto.randomUUID(),
+                    configurationId: activeConfigId,
+                    attendeeId: att.id,
+                    tableId: att.assignedTableId,
+                    seatNumber: att.assignedSeat ?? seatsAtTable + 1,
+                });
+            }
+            setAssignments(mergedAssignments);
             setSceneElements(se);
             setSelectedTableId(null);
             setSelectedElementId(null);
             setLoading(false);
-            setLastSavedSnapshot(JSON.stringify({ tables: t, assignments: as, sceneElements: se }));
+            setLastSavedSnapshot(JSON.stringify({ tables: t, assignments: mergedAssignments, sceneElements: se }));
             // Push initial snapshot for undo baseline
             setTimeout(() => {
                 pushHistory();
@@ -455,6 +472,7 @@ export default function SeatingConfigurator() {
                 saveSeatingAssignments(assignments, activeConfigId),
                 saveSceneElements(sceneElements, activeConfigId)
             ]);
+            await syncSeatingAssignmentsToAttendees(assignments, tables.map(t => t.id));
             showNotification('Layout saved successfully', 'success');
             setLastSavedSnapshot(JSON.stringify({ tables, assignments, sceneElements }));
         } catch (err) {

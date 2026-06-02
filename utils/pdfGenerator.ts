@@ -1,5 +1,6 @@
 import jsPDF from 'jspdf';
 import { Attendee, AppSettings, Form } from '../types';
+import { resolveAttendeeDisplayName } from './resolveAttendeeDisplayName';
 
 // In-memory cache of fetched image URLs → data URLs. jsPDF's addImage only
 // handles data URLs reliably in the browser; an http URL (e.g. a Supabase
@@ -194,7 +195,7 @@ export const generateTicketPDF = async (
   currentY += 8;
   doc.setTextColor(30, 30, 30);
   doc.setFontSize(20);
-  doc.text(attendee.name || 'Attendee', labelX, currentY, { maxWidth: 90 });
+  doc.text(resolveAttendeeDisplayName(attendee, form), labelX, currentY, { maxWidth: 90 });
 
   currentY += 15;
   doc.setTextColor(150, 150, 150);
