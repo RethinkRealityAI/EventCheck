@@ -4,11 +4,10 @@ import { Attendee, Form, SeatingTable } from '../types';
 import { User, Users, UserPlus, Search, X, Edit3, Trash2, CheckCircle, Clock, Mail, Check, QrCode, Calendar, CreditCard, Armchair, ExternalLink } from 'lucide-react';
 import { format } from 'date-fns';
 import QRCode from 'react-qr-code';
-import { updateAttendee, deleteAttendee, getSettings, getAttendee } from '../services/storageService';
+import { updateAttendee, deleteAttendee, getAttendee, getAllSeatingTablesForForm, createGuestForPrimary, syncAttendeeSeatingToChart } from '../services/storageService';
 import { supabase } from '../services/supabaseClient';
 import { useNotifications } from './NotificationSystem';
-import { sendTicketEmail, arrayBufferToBase64 } from '../services/smtpService';
-import { generateTicketPDF } from '../utils/pdfGenerator';
+import { resendTicketEmailForAttendee } from '../utils/resendTicketEmail';
 import { CURRENT_SITE } from '../config/sites';
 import {
   type AttendeeCategory,
@@ -25,9 +24,10 @@ interface AttendeeModalProps {
   onClose: () => void;
   onDelete: (id: string) => void;
   onOpenAttendee?: (attendee: Attendee) => void;
+  onAttendeeUpdated?: () => void;
 }
 
-const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingTables, attendees, onClose, onDelete, onOpenAttendee }) => {
+const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingTables, attendees, onClose, onDelete, onOpenAttendee, onAttendeeUpdated }) => {
   const [resending, setResending] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState<Partial<Attendee>>({});
@@ -35,6 +35,14 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
   const [localAttendee, setLocalAttendee] = useState(attendee);
   const [purchaser, setPurchaser] = useState<Attendee | null>(null);
   const [showLinkPanel, setShowLinkPanel] = useState(false);
+  const [showAddGuestPanel, setShowAddGuestPanel] = useState(false);
+  const [newGuestName, setNewGuestName] = useState('');
+  const [newGuestEmail, setNewGuestEmail] = useState('');
+  const [addingGuest, setAddingGuest] = useState(false);
+  const [localSeatingTables, setLocalSeatingTables] = useState<SeatingTable[]>(seatingTables);
+  const [draftSeat, setDraftSeat] = useState<string>(() =>
+    attendee.assignedSeat != null ? String(attendee.assignedSeat) : '',
+  );
   const [searchQuery, setSearchQuery] = useState('');
   const [pendingLinkIds, setPendingLinkIds] = useState<Set<string>>(new Set());
   const [localGuestIds, setLocalGuestIds] = useState<string[]>(() =>
@@ -52,11 +60,41 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
     setIsEditing(false);
     setActiveTab('details');
     setShowLinkPanel(false);
+    setShowAddGuestPanel(false);
+    setNewGuestName('');
+    setNewGuestEmail('');
     setPendingLinkIds(new Set());
     setSearchQuery('');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    setLocalGuestIds((attendees || []).filter(a => a.primaryAttendeeId === attendee.id).map(a => a.id));
+    setDraftSeat(attendee.assignedSeat != null ? String(attendee.assignedSeat) : '');
   }, [attendee.id]);
+
+  useEffect(() => {
+    setLocalGuestIds((attendees || []).filter(a => a.primaryAttendeeId === attendee.id).map(a => a.id));
+  }, [attendees, attendee.id]);
+
+  // Load seating tables for this attendee's form when the parent list didn't
+  // pass any (e.g. dashboard pinned to "All Forms").
+  useEffect(() => {
+    if (seatingTables.length > 0) {
+      setLocalSeatingTables(seatingTables);
+      return;
+    }
+    let cancelled = false;
+    getAllSeatingTablesForForm(localAttendee.formId).then(tables => {
+      if (!cancelled) setLocalSeatingTables(tables);
+    });
+    return () => { cancelled = true; };
+  }, [seatingTables, localAttendee.formId]);
+
+  // Merge realtime dashboard updates without clobbering an in-progress edit.
+  useEffect(() => {
+    if (isEditing) return;
+    const fresh = attendees?.find(a => a.id === attendee.id);
+    if (fresh) {
+      setLocalAttendee(fresh);
+      setDraftSeat(fresh.assignedSeat != null ? String(fresh.assignedSeat) : '');
+    }
+  }, [attendees, attendee.id, isEditing]);
 
   // For guest rows, look up the purchaser so we can show their name and offer
   // a "view purchaser" affordance.
@@ -84,9 +122,6 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
   const handleResendEmail = async () => {
     setResending(true);
     try {
-      // Pending-claim guests need the claim-invitation email (with their
-      // completion URL), not a ticket. Use the same edge function the Live
-      // tab's GuestActions chip uses so the two paths stay in sync.
       if (isPendingClaimGuest) {
         const { error } = await supabase.functions.invoke('send-ticket-email', {
           body: { mode: 'group-invite', attendeeId: localAttendee.id, origin: window.location.origin },
@@ -94,113 +129,21 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
         if (error) throw error;
         showNotification(`Claim invitation re-sent to ${localAttendee.email}`, 'success');
       } else {
-        const settings = await getSettings();
-        if (!settings.smtpUser || !settings.smtpPass) {
-          throw new Error('SMTP is not configured. Set it up in Settings before resending tickets.');
-        }
-        const form = forms.find(f => f.id === localAttendee.formId);
-        const origin = window.location.origin;
-
-        // Reconstruct this primary's guests from the dashboard's in-memory list
-        // so a table purchaser gets the EXACT email they received at checkout:
-        // their own ticket plus every guest's PDF, plus the per-guest claim
-        // links for any seats that haven't been claimed yet. Guest rows (not
-        // primaries) just resend their own single ticket.
-        const guests = localAttendee.isPrimary !== false
-          ? (attendees || []).filter(a => a.primaryAttendeeId === localAttendee.id)
-          : [];
-
-        const safe = (n: string) => n.replace(/[^a-zA-Z0-9 ]/g, '_') || 'Ticket';
-        const attachments: Array<{ filename: string; content: string; contentType: string }> = [];
-
-        const primaryDoc = await generateTicketPDF(localAttendee, settings, form);
-        attachments.push({
-          filename: `${safe(localAttendee.name)}_Ticket.pdf`,
-          content: arrayBufferToBase64(primaryDoc.output('arraybuffer')),
-          contentType: 'application/pdf',
-        });
-
-        const claimLinks: Array<{ name: string; url: string }> = [];
-        for (let i = 0; i < guests.length; i++) {
-          const g = guests[i];
-          const isPending = g.guestType === 'pending-claim';
-          // Pending-claim seats carry a registration URL so the recipient can
-          // self-claim; claimed/named guests just get their entry ticket.
-          const registrationUrl = isPending ? `${origin}/#/form/${g.formId}?ref=${g.id}` : undefined;
-          const guestDoc = await generateTicketPDF(g, settings, form, registrationUrl);
-          const isPlaceholder = g.name.includes('Guest Ticket #');
-          attachments.push({
-            filename: `${isPlaceholder ? `Guest_${i + 2}` : safe(g.name)}_Ticket.pdf`,
-            content: arrayBufferToBase64(guestDoc.output('arraybuffer')),
-            contentType: 'application/pdf',
-          });
-          if (registrationUrl) claimLinks.push({ name: g.name, url: registrationUrl });
-        }
-
-        // Same claim-links block the checkout flow appends to the purchaser email.
-        const claimLinksBlock = claimLinks.length > 0
-          ? `<div style="margin-top:16px;padding:12px 16px;background:#f8fafc;border-left:3px solid #4f46e5;border-radius:4px;">
-               <p style="margin:0 0 8px;font-weight:600;">Registration links for your guests</p>
-               <p style="margin:0 0 10px;font-size:13px;color:#475569;">Forward a link below to each guest so they can complete their own details. Each link claims one seat.</p>
-               <ol style="margin:0;padding-left:20px;line-height:1.8;font-size:13px;">
-                 ${claimLinks.map(g => `<li><strong>${g.name}</strong> — <a href="${g.url}">Claim / register</a><br><span style="color:#64748b;font-size:12px;">${g.url}</span></li>`).join('')}
-               </ol>
-             </div>`
-          : '';
-
-        // Table/group purchasers get the dedicated table-purchaser template;
-        // solo tickets get the standard one — mirrors PublicRegistration.
-        const isTable = guests.length > 0;
-        const subjectTpl = isTable
-          ? (settings.emailTablePurchaserSubject || settings.emailSubject || 'Your ticket for {{event}}')
-          : (settings.emailSubject || 'Your ticket for {{event}}');
-        const bodyTpl = isTable
-          ? (settings.emailTablePurchaserBody || settings.emailBodyTemplate || '<p>Thank you for registering for <strong>{{event}}</strong>.</p>')
-          : (settings.emailBodyTemplate || '<p>Thank you for registering for <strong>{{event}}</strong>.</p>');
-        const render = (s: string) => s
-          .replace(/\{\{event\}\}/g, localAttendee.formTitle || form?.title || '')
-          .replace(/\{\{name\}\}/g, localAttendee.name || '')
-          .replace(/\{\{id\}\}/g, localAttendee.id || '')
-          .replace(/\{\{invoiceId\}\}/g, localAttendee.invoiceId || '')
-          .replace(/\{\{amount\}\}/g, localAttendee.paymentAmount || '');
-
-        await sendTicketEmail(settings, {
-          to: localAttendee.email,
-          subject: render(subjectTpl),
-          name: localAttendee.name,
-          title: localAttendee.formTitle || form?.title || undefined,
-          message: render(bodyTpl) + claimLinksBlock,
-          attachments,
-        });
-
-        // Stamp the guests too so the dashboard "Sent" status stays accurate
-        // for the whole table (the primary is stamped by the shared block below).
-        if (guests.length > 0) {
-          try {
-            const ts = new Date().toISOString();
-            await Promise.all(guests.map(g => updateAttendee(g.id, { lastTicketEmailAt: ts })));
-          } catch (err) {
-            console.warn('Failed to stamp lastTicketEmailAt on table guests', err);
-          }
-        }
-
+        const result = await resendTicketEmailForAttendee(
+          localAttendee.id,
+          forms,
+          window.location.origin,
+        );
         showNotification(
-          isTable
-            ? `Ticket email (with ${guests.length} guest ticket${guests.length !== 1 ? 's' : ''}) resent to ${localAttendee.email}`
-            : `Ticket resent to ${localAttendee.email}`,
+          result.isTablePurchaser
+            ? `Ticket email (with ${result.guestCount} guest ticket${result.guestCount !== 1 ? 's' : ''}) resent to ${result.recipientEmail}`
+            : `Ticket resent to ${result.recipientEmail}`,
           'success',
         );
       }
-      // Stamp send-time on the attendee record so the dashboard reflects
-      // "Sent" without forcing a page refresh. Best-effort — the email is
-      // already out the door, this is just metadata.
       const stampedAt = new Date().toISOString();
-      try {
-        await updateAttendee(localAttendee.id, { lastTicketEmailAt: stampedAt });
-        setLocalAttendee({ ...localAttendee, lastTicketEmailAt: stampedAt });
-      } catch (err) {
-        console.warn('Failed to stamp lastTicketEmailAt on resend', err);
-      }
+      setLocalAttendee(prev => ({ ...prev, lastTicketEmailAt: stampedAt }));
+      onAttendeeUpdated?.();
     } catch (err: any) {
       console.error(err);
       showNotification(`Failed to resend email: ${err.message}`, 'error');
@@ -214,6 +157,7 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
     setLocalAttendee({ ...localAttendee, ...updates });
     setIsEditing(false);
     showNotification('Attendee updated', 'success');
+    onAttendeeUpdated?.();
   };
 
   const handleDeleteAttendee = async (id: string) => {
@@ -255,8 +199,74 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
   const handleTableAssignment = async (tableId: string | null) => {
     const updates: Partial<Attendee> = { assignedTableId: tableId, assignedSeat: null };
     await updateAttendee(localAttendee.id, updates);
-    setLocalAttendee({ ...localAttendee, ...updates });
+    await syncAttendeeSeatingToChart(localAttendee.formId, localAttendee.id, tableId, null);
+    setLocalAttendee(prev => ({ ...prev, ...updates }));
+    setDraftSeat('');
     showNotification(tableId ? 'Assigned to table' : 'Removed from table', 'success');
+    onAttendeeUpdated?.();
+  };
+
+  const commitSeatAssignment = async () => {
+    if (!localAttendee.assignedTableId) return;
+    const table = localSeatingTables.find(t => t.id === localAttendee.assignedTableId);
+    const maxSeat = table?.capacity ?? 99;
+    if (draftSeat.trim() === '') {
+      if (localAttendee.assignedSeat != null) {
+        await handleSeatAssignment(null);
+      }
+      return;
+    }
+    const n = parseInt(draftSeat, 10);
+    if (Number.isNaN(n) || n < 1 || n > maxSeat) {
+      showNotification(`Enter a seat between 1 and ${maxSeat}`, 'warning');
+      setDraftSeat(localAttendee.assignedSeat != null ? String(localAttendee.assignedSeat) : '');
+      return;
+    }
+    if (n === localAttendee.assignedSeat) return;
+    await handleSeatAssignment(n);
+  };
+
+  const handleSeatAssignment = async (seat: number | null) => {
+    const updates: Partial<Attendee> = { assignedSeat: seat };
+    await updateAttendee(localAttendee.id, updates);
+    if (localAttendee.assignedTableId) {
+      await syncAttendeeSeatingToChart(
+        localAttendee.formId,
+        localAttendee.id,
+        localAttendee.assignedTableId,
+        seat,
+      );
+    }
+    setLocalAttendee(prev => ({ ...prev, ...updates }));
+    setDraftSeat(seat != null ? String(seat) : '');
+    showNotification(seat != null ? `Seat ${seat} saved` : 'Seat cleared', 'success');
+    onAttendeeUpdated?.();
+  };
+
+  const handleAddGuest = async () => {
+    if (!newGuestName.trim() && !newGuestEmail.trim()) {
+      showNotification('Enter at least a guest name or email', 'warning');
+      return;
+    }
+    setAddingGuest(true);
+    try {
+      const form = forms.find(f => f.id === localAttendee.formId);
+      const guest = await createGuestForPrimary(localAttendee, {
+        name: newGuestName,
+        email: newGuestEmail || localAttendee.email,
+        guestType: 'adult',
+      }, form);
+      setLocalGuestIds(prev => [...prev, guest.id]);
+      setShowAddGuestPanel(false);
+      setNewGuestName('');
+      setNewGuestEmail('');
+      showNotification(`${guest.name} added as guest`, 'success');
+      onAttendeeUpdated?.();
+    } catch (err: any) {
+      showNotification(`Failed to add guest: ${err.message}`, 'error');
+    } finally {
+      setAddingGuest(false);
+    }
   };
 
   const handleToggleCheckIn = async () => {
@@ -278,6 +288,7 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
       setPendingLinkIds(new Set());
       setSearchQuery('');
       showNotification(`${pendingLinkIds.size} guest${pendingLinkIds.size !== 1 ? 's' : ''} linked`, 'success');
+      onAttendeeUpdated?.();
     } catch (err: any) {
       showNotification(`Failed to link guests: ${err.message}`, 'error');
     } finally {
@@ -601,12 +612,12 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
                     </span>
                   </div>
 
-                  {/* Seating assignment — table only. Driven by the Seating Chart admin
-                      page; assignment here syncs back to the chart in real time via
-                      assignedTableId. Always visible so admins know where to manage it. */}
+                  {/* Seating assignment — table + optional seat #. Dashboard edits
+                      write to attendee rows; Seating Chart save can override on
+                      the next layout save (and merges manual rows on load). */}
                   <div className="bg-white/60 p-2.5 rounded-xl border border-white/60 text-sm shadow-sm space-y-1.5">
                     <span className="text-slate-500 font-bold text-[10px] uppercase tracking-wider block">Seating Table</span>
-                    {seatingTables.length > 0 ? (
+                    {localSeatingTables.length > 0 ? (
                       <>
                         <select
                           value={localAttendee.assignedTableId || ''}
@@ -614,15 +625,33 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
                           className="w-full px-3 py-2 bg-white/80 backdrop-blur-sm border border-white/60 rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
                         >
                           <option value="">Unassigned</option>
-                          {seatingTables.map(t => (
+                          {localSeatingTables.map(t => (
                             <option key={t.id} value={t.id}>{t.name} ({t.capacity} seats)</option>
                           ))}
                         </select>
+                        {localAttendee.assignedTableId && (
+                          <div className="flex items-center gap-2">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider whitespace-nowrap">Seat #</label>
+                            <input
+                              type="number"
+                              min={1}
+                              max={localSeatingTables.find(t => t.id === localAttendee.assignedTableId)?.capacity ?? 99}
+                              value={draftSeat}
+                              onChange={e => setDraftSeat(e.target.value)}
+                              onBlur={() => { void commitSeatAssignment(); }}
+                              onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                              placeholder="Optional"
+                              className="flex-1 px-3 py-1.5 bg-white/80 border border-white/60 rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
+                            />
+                          </div>
+                        )}
                         {localAttendee.assignedTableId && (() => {
-                          const t = seatingTables.find(t => t.id === localAttendee.assignedTableId);
+                          const t = localSeatingTables.find(t => t.id === localAttendee.assignedTableId);
                           return t ? (
                             <div className="text-[11px] text-slate-500">
-                              Currently at <span className="font-bold text-amber-700">{t.name}</span>. Use the Seating Chart admin to rearrange the room.
+                              {localAttendee.assignedSeat
+                                ? <>Seat <span className="font-bold text-amber-700">{localAttendee.assignedSeat}</span> at <span className="font-bold text-amber-700">{t.name}</span>. The Seating Chart can override this on save.</>
+                                : <>At <span className="font-bold text-amber-700">{t.name}</span>. Pick a seat # or use the Seating Chart.</>}
                             </div>
                           ) : null;
                         })()}
@@ -841,14 +870,23 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
                           <span className="bg-indigo-100 text-indigo-600 text-[10px] px-2 py-0.5 rounded-full font-bold">{localGuestIds.length}</span>
                         )}
                       </h4>
-                      {!showLinkPanel && (
-                        <button
-                          onClick={() => setShowLinkPanel(true)}
-                          className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1.5 px-2.5 py-1 rounded-lg hover:bg-indigo-50/60 transition-all"
-                        >
-                          <UserPlus className="w-3.5 h-3.5" />
-                          Link Guest
-                        </button>
+                      {!showLinkPanel && !showAddGuestPanel && (
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => setShowAddGuestPanel(true)}
+                            className="text-[11px] font-bold text-emerald-600 hover:text-emerald-800 flex items-center gap-1.5 px-2.5 py-1 rounded-lg hover:bg-emerald-50/60 transition-all"
+                          >
+                            <UserPlus className="w-3.5 h-3.5" />
+                            Add Guest
+                          </button>
+                          <button
+                            onClick={() => setShowLinkPanel(true)}
+                            className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1.5 px-2.5 py-1 rounded-lg hover:bg-indigo-50/60 transition-all"
+                          >
+                            <UserPlus className="w-3.5 h-3.5" />
+                            Link Existing
+                          </button>
+                        </div>
                       )}
                     </div>
 
@@ -889,11 +927,45 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
                     )}
 
                     {/* Empty state */}
-                    {existingGuests.length === 0 && !showLinkPanel && (
+                    {existingGuests.length === 0 && !showLinkPanel && !showAddGuestPanel && (
                       <div className="text-center py-3">
                         <Users className="w-6 h-6 text-slate-200 mx-auto mb-1.5" />
                         <p className="text-xs text-slate-400 font-medium">No guests linked yet.</p>
-                        <p className="text-[11px] text-slate-300 mt-0.5">Use "Link Guest" to group attendees together for viewing.</p>
+                        <p className="text-[11px] text-slate-300 mt-0.5">Add a new guest or link an existing attendee.</p>
+                      </div>
+                    )}
+
+                    {showAddGuestPanel && (
+                      <div className="space-y-3 mt-1 p-3 bg-emerald-50/40 rounded-xl border border-emerald-100/60">
+                        <p className="text-[11px] font-bold text-emerald-700 uppercase tracking-wider">New guest for this table</p>
+                        <input
+                          autoFocus
+                          className="w-full px-3 py-2 bg-white/80 border border-white/60 rounded-xl text-sm font-medium text-slate-800 outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
+                          placeholder="Guest name"
+                          value={newGuestName}
+                          onChange={e => setNewGuestName(e.target.value)}
+                        />
+                        <input
+                          className="w-full px-3 py-2 bg-white/80 border border-white/60 rounded-xl text-sm font-medium text-slate-800 outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
+                          placeholder={`Email (defaults to ${localAttendee.email})`}
+                          value={newGuestEmail}
+                          onChange={e => setNewGuestEmail(e.target.value)}
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => { setShowAddGuestPanel(false); setNewGuestName(''); setNewGuestEmail(''); }}
+                            className="flex-1 py-2 text-xs font-bold text-slate-500 hover:bg-white/60 rounded-lg transition"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            onClick={handleAddGuest}
+                            disabled={addingGuest}
+                            className="flex-1 py-2 text-xs font-bold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition disabled:opacity-50"
+                          >
+                            {addingGuest ? 'Adding…' : 'Add Guest'}
+                          </button>
+                        </div>
                       </div>
                     )}
 

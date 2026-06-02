@@ -15,6 +15,7 @@ import {
   PROMO_USAGE_LIMIT_MESSAGE,
   formHasEnabledPromoCodes,
 } from '../utils/promoCodes';
+import { resolveNameFromFormFields } from '../utils/resolveAttendeeDisplayName';
 import { portalEmailRedirectTo } from '../utils/authHashCallback';
 import { paymentAuthHeaders } from '../utils/authSession';
 import {
@@ -72,18 +73,7 @@ interface PublicRegistrationProps {
 // Congress) by concatenating both, instead of returning only the first text
 // field (which is always just the first name on those forms).
 function resolveDisplayName(fields: FormField[], answers: Record<string, any>): string {
-  const firstF = fields.find(f => f.type === 'text' && /first\s*name|given\s*name/i.test(f.label));
-  const lastF  = fields.find(f => f.type === 'text' && /last\s*name|surname|family\s*name/i.test(f.label));
-  if (firstF || lastF) {
-    const parts = [
-      firstF ? (answers[firstF.id] || '') : '',
-      lastF  ? (answers[lastF.id]  || '') : '',
-    ].filter(Boolean);
-    return parts.join(' ') || 'Guest';
-  }
-  // Fall back to the first field whose type is 'text' or whose label mentions 'name'
-  const nameF = fields.find(f => f.type === 'text' || /\bname\b/i.test(f.label));
-  return nameF ? (answers[nameF.id] || 'Guest') : 'Guest';
+  return resolveNameFromFormFields(fields, answers) || 'Guest';
 }
 
 const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: PublicRegistrationProps = {}) => {

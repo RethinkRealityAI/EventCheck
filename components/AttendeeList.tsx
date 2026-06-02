@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { Attendee, Form, AppSettings, SeatingTable } from '../types';
 import { LayoutDashboard, Users, ChevronDown, ChevronRight, UserPlus, CheckCircle, Clock, Search, Calendar, Eye, X, Mail, User, Download, FileSpreadsheet, Check, ChevronLeft, Filter, Loader2, Copy, ChevronsDown, ChevronsRight, Star, Pin, Plus, SlidersHorizontal, Heart } from 'lucide-react';
 import { format } from 'date-fns';
-import { updateAttendee, getSettings, saveSettings, getSeatingTables } from '../services/storageService';
+import { updateAttendee, getSettings, saveSettings, getAllSeatingTablesForForm, createGuestForPrimary, syncAttendeeSeatingToChart } from '../services/storageService';
 import { supabase } from '../services/supabaseClient';
 import { useNotifications } from './NotificationSystem';
 import AttendeeModal from './AttendeeModal';
@@ -117,8 +117,10 @@ interface AttendeeListProps {
 
 const STANDARD_COLUMNS: ColumnDef[] = [
   { key: 'name', label: 'Name', group: 'standard' },
+  { key: 'email', label: 'Email', group: 'standard' },
   { key: 'formTitle', label: 'Event/Form', group: 'standard' },
   { key: 'ticketType', label: 'Ticket Type', group: 'standard' },
+  { key: 'seating', label: 'Seating', group: 'standard' },
   { key: 'status', label: 'Check-in Status', group: 'standard' },
   { key: 'registered', label: 'Registered', group: 'standard' },
   { key: 'ticketSent', label: 'Ticket Sent', group: 'standard' },
@@ -171,6 +173,10 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
   const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>>({});
   const [seatingTables, setSeatingTables] = useState<SeatingTable[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [addingGuestForPrimaryId, setAddingGuestForPrimaryId] = useState<string | null>(null);
+  const [tableGuestName, setTableGuestName] = useState('');
+  const [tableGuestEmail, setTableGuestEmail] = useState('');
+  const [addingTableGuest, setAddingTableGuest] = useState(false);
 
   // Advanced Filter State
   const [statusFilter, setStatusFilter] = useState<'all' | 'checked-in' | 'pending'>('all');
@@ -232,18 +238,34 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     loadSettings();
   }, []);
 
-  // When selectedFormId changes, fetch seating tables
+  // When selectedFormId changes, fetch seating tables (including all forms on "_all")
   useEffect(() => {
-    if (selectedFormId && selectedFormId !== '_all') {
-      const loadTables = async () => {
-        const tables = await getSeatingTables(selectedFormId);
+    const loadTables = async () => {
+      if (selectedFormId && selectedFormId !== '_all') {
+        const tables = await getAllSeatingTablesForForm(selectedFormId);
         setSeatingTables(tables);
-      };
-      loadTables();
-    } else {
+        return;
+      }
+      if (selectedFormId === '_all' && forms.length > 0) {
+        const batches = await Promise.all(forms.map(f => getAllSeatingTablesForForm(f.id)));
+        const byId = new Map<string, SeatingTable>();
+        for (const batch of batches) {
+          for (const t of batch) byId.set(t.id, t);
+        }
+        setSeatingTables([...byId.values()]);
+        return;
+      }
       setSeatingTables([]);
-    }
-  }, [selectedFormId]);
+    };
+    loadTables();
+  }, [selectedFormId, forms]);
+
+  // Keep the open modal in sync with realtime attendee updates.
+  useEffect(() => {
+    if (!selectedAttendee) return;
+    const fresh = attendees.find(a => a.id === selectedAttendee.id);
+    if (fresh) setSelectedAttendee(fresh);
+  }, [attendees, selectedAttendee?.id]);
 
   // When selectedFormId or settings change, load column visibility prefs
   useEffect(() => {
@@ -352,8 +374,6 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
   const allColumns = useMemo(() => [...STANDARD_COLUMNS, ...dynamicColumns], [dynamicColumns]);
 
   const isColumnVisible = useCallback((key: string) => {
-    // actions column is always visible
-    if (key === 'actions') return true;
     return columnVisibility[key] !== false;
   }, [columnVisibility]);
 
@@ -397,7 +417,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
 
   const handleHideAllColumns = useCallback(async () => {
     const newVis: Record<string, boolean> = {};
-    allColumns.forEach(c => { newVis[c.key] = c.key === 'actions' ? true : false; });
+    allColumns.forEach(c => { newVis[c.key] = false; });
     setColumnVisibility(newVis);
     if (settings) {
       const newSettings = {
@@ -585,10 +605,42 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     showNotification("Guest registration link copied to clipboard!", 'success');
   };
 
-  const handleSeatingAssignment = async (attendeeId: string, tableId: string | null) => {
-    await updateAttendee(attendeeId, { assignedTableId: tableId, assignedSeat: null });
+  const handleSeatingAssignment = async (attendeeId: string, tableId: string | null, seat?: number | null) => {
+    const row = attendees.find(a => a.id === attendeeId);
+    await updateAttendee(attendeeId, {
+      assignedTableId: tableId,
+      assignedSeat: tableId ? (seat ?? null) : null,
+    });
+    if (row?.formId) {
+      await syncAttendeeSeatingToChart(row.formId, attendeeId, tableId, tableId ? (seat ?? null) : null);
+    }
     onRefresh?.();
     showNotification(tableId ? 'Assigned to table' : 'Removed from table', 'success');
+  };
+
+  const handleAddTableGuest = async (primary: Attendee) => {
+    if (!tableGuestName.trim() && !tableGuestEmail.trim()) {
+      showNotification('Enter at least a guest name or email', 'warning');
+      return;
+    }
+    setAddingTableGuest(true);
+    try {
+      const form = forms.find(f => f.id === primary.formId);
+      await createGuestForPrimary(primary, {
+        name: tableGuestName,
+        email: tableGuestEmail || primary.email,
+        guestType: 'adult',
+      }, form);
+      setAddingGuestForPrimaryId(null);
+      setTableGuestName('');
+      setTableGuestEmail('');
+      showNotification('Guest added to table', 'success');
+      onRefresh?.();
+    } catch (err: any) {
+      showNotification(`Failed to add guest: ${err.message}`, 'error');
+    } finally {
+      setAddingTableGuest(false);
+    }
   };
 
   const toggleField = (field: string) => {
@@ -1125,6 +1177,53 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                                   </td>
                                 </tr>
                               )}
+                              <tr className="bg-emerald-50/30">
+                                <td colSpan={seatingTables.length > 0 ? 6 : 5} className="px-4 py-3">
+                                  {addingGuestForPrimaryId === primary.id ? (
+                                    <div className="flex flex-wrap items-end gap-2">
+                                      <input
+                                        className="flex-1 min-w-[140px] px-3 py-2 border border-emerald-200 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-emerald-500"
+                                        placeholder="Guest name"
+                                        value={tableGuestName}
+                                        onChange={e => setTableGuestName(e.target.value)}
+                                        onClick={e => e.stopPropagation()}
+                                      />
+                                      <input
+                                        className="flex-1 min-w-[160px] px-3 py-2 border border-emerald-200 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-emerald-500"
+                                        placeholder={`Email (defaults to ${primary.email})`}
+                                        value={tableGuestEmail}
+                                        onChange={e => setTableGuestEmail(e.target.value)}
+                                        onClick={e => e.stopPropagation()}
+                                      />
+                                      <button
+                                        onClick={e => { e.stopPropagation(); handleAddTableGuest(primary); }}
+                                        disabled={addingTableGuest}
+                                        className="px-4 py-2 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-700 disabled:opacity-50"
+                                      >
+                                        {addingTableGuest ? 'Adding…' : 'Save Guest'}
+                                      </button>
+                                      <button
+                                        onClick={e => { e.stopPropagation(); setAddingGuestForPrimaryId(null); setTableGuestName(''); setTableGuestEmail(''); }}
+                                        className="px-3 py-2 text-xs font-bold text-slate-500 hover:bg-white rounded-lg"
+                                      >
+                                        Cancel
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      onClick={e => {
+                                        e.stopPropagation();
+                                        setAddingGuestForPrimaryId(primary.id);
+                                        setTableGuestName('');
+                                        setTableGuestEmail('');
+                                      }}
+                                      className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700 hover:text-emerald-900"
+                                    >
+                                      <UserPlus className="w-4 h-4" /> Add guest to this table
+                                    </button>
+                                  )}
+                                </td>
+                              </tr>
                             </tbody>
                           </table>
                         </div>
@@ -1140,8 +1239,10 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
             <thead className="bg-white/80 backdrop-blur-xl border-b border-white/60 text-slate-700 font-bold sticky top-0 z-10 shadow-sm">
               <tr>
                 {isColumnVisible('name') && <th className="px-4 py-2.5 min-w-[180px] text-xs font-semibold uppercase tracking-wide text-gray-500">Name</th>}
+                {isColumnVisible('email') && <th className="px-4 py-2.5 min-w-[160px] text-xs font-semibold uppercase tracking-wide text-gray-500">Email</th>}
                 {isColumnVisible('formTitle') && <th className="px-4 py-2.5 min-w-[140px] text-xs font-semibold uppercase tracking-wide text-gray-500">Event/Form</th>}
                 {isColumnVisible('ticketType') && <th className="px-4 py-2.5 min-w-[110px] text-xs font-semibold uppercase tracking-wide text-gray-500">Ticket Type</th>}
+                {isColumnVisible('seating') && <th className="px-4 py-2.5 min-w-[120px] text-xs font-semibold uppercase tracking-wide text-gray-500">Seating</th>}
                 {isColumnVisible('status') && <th className="px-4 py-2.5 min-w-[120px] text-xs font-semibold uppercase tracking-wide text-gray-500">Check-in Status</th>}
                 {isColumnVisible('registered') && <th className="px-4 py-2.5 min-w-[100px] text-xs font-semibold uppercase tracking-wide text-gray-500">Registered</th>}
                 {isColumnVisible('ticketSent') && <th className="px-4 py-2.5 min-w-[100px] text-xs font-semibold uppercase tracking-wide text-gray-500">Ticket Sent</th>}
@@ -1311,8 +1412,13 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                               </span>
                             )}
                           </div>
-                          <div className="text-gray-400 text-xs">{attendee.email}</div>
+                          {!isColumnVisible('email') && (
+                            <div className="text-gray-400 text-xs">{attendee.email}</div>
+                          )}
                         </td>
+                      )}
+                      {isColumnVisible('email') && (
+                        <td className="px-4 py-3 text-gray-600 text-xs">{attendee.email}</td>
                       )}
                       {isColumnVisible('formTitle') && (
                         <td className="px-4 py-3">
@@ -1329,6 +1435,16 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700">
                             {attendee.ticketType}
                           </span>
+                        </td>
+                      )}
+                      {isColumnVisible('seating') && (
+                        <td className="px-4 py-3 text-xs text-gray-600">
+                          {attendee.assignedTableId ? (() => {
+                            const t = seatingTables.find(st => st.id === attendee.assignedTableId);
+                            return t
+                              ? `${t.name}${attendee.assignedSeat ? ` · Seat ${attendee.assignedSeat}` : ''}`
+                              : 'Assigned';
+                          })() : <span className="text-gray-300">—</span>}
                         </td>
                       )}
                       {isColumnVisible('status') && (
@@ -1451,6 +1567,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
           onClose={() => setSelectedAttendee(null)}
           onDelete={handleDeleteAttendee}
           onOpenAttendee={(a) => setSelectedAttendee(a)}
+          onAttendeeUpdated={onRefresh}
         />
       )}
 
