@@ -482,10 +482,23 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
 
   // Filter logic
   const filtered = attendees.filter(a => {
-    const matchesSearch =
-      a.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      a.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      a.id.toLowerCase().includes(searchTerm.toLowerCase());
+    const q = searchTerm.toLowerCase();
+    const resolvedCat = resolveAttendeeCategory(a);
+    const catMeta = resolvedCat ? CATEGORY_META[resolvedCat] : null;
+    const matchesSearch = !q || (
+      a.name.toLowerCase().includes(q) ||
+      a.email.toLowerCase().includes(q) ||
+      a.id.toLowerCase().includes(q) ||
+      (a.ticketType?.toLowerCase().includes(q) ?? false) ||
+      (a.transactionId?.toLowerCase().includes(q) ?? false) ||
+      (a.appliedPromoCode?.toLowerCase().includes(q) ?? false) ||
+      (a.sponsorTier?.toLowerCase().includes(q) ?? false) ||
+      (a.guestType?.toLowerCase().includes(q) ?? false) ||
+      !!(catMeta && (
+        catMeta.label.toLowerCase().includes(q) ||
+        catMeta.shortLabel.toLowerCase().includes(q)
+      ))
+    );
 
     const matchesForm = selectedFormId === '_all' || a.formId === selectedFormId;
 
@@ -1278,10 +1291,16 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                   // Build a set of group-path guest IDs so they aren't rendered as standalone rows.
                   // Mirrors the inclusion rule below for groupGuestsByPrimary — keep these two in sync
                   // or guests will render twice.
+                  //
+                  // Only suppress a guest if their primary is ALSO in paginatedItems. When a search
+                  // matches a guest but not their primary (e.g. searching a guest name), the primary
+                  // won't be in paginatedItems and the guest would otherwise disappear entirely.
+                  const paginatedItemIds = new Set(paginatedItems.map(a => a.id));
                   const groupGuestIds = new Set(
                     paginatedItems
                       .filter(a =>
                         a.primaryAttendeeId &&
+                        paginatedItemIds.has(a.primaryAttendeeId) &&
                         (a.guestType === 'pending-claim' ||
                           a.guestType === 'claimed' ||
                           a.guestType === 'adult' ||

@@ -299,7 +299,9 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
   const handleUnlinkGuest = async (guestId: string) => {
     setUnlinkingIds(prev => new Set(prev).add(guestId));
     try {
-      await updateAttendee(guestId, { primaryAttendeeId: undefined, isPrimary: true, guestType: undefined });
+      // Pass null (not undefined) so updateAttendee actually sends primary_attendee_id=null to the DB.
+      // undefined is treated as "skip this field" by updateAttendee's guard clauses.
+      await updateAttendee(guestId, { primaryAttendeeId: null as any, isPrimary: true });
       setLocalGuestIds(prev => prev.filter(id => id !== guestId));
       showNotification('Guest unlinked', 'success');
     } catch (err: any) {
