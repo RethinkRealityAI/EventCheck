@@ -15,6 +15,7 @@ import {
   PROMO_USAGE_LIMIT_MESSAGE,
   formHasEnabledPromoCodes,
 } from '../utils/promoCodes';
+import { resolveNameFromFormFields } from '../utils/resolveAttendeeDisplayName';
 import { portalEmailRedirectTo } from '../utils/authHashCallback';
 import { paymentAuthHeaders } from '../utils/authSession';
 import {
@@ -72,18 +73,7 @@ interface PublicRegistrationProps {
 // Congress) by concatenating both, instead of returning only the first text
 // field (which is always just the first name on those forms).
 function resolveDisplayName(fields: FormField[], answers: Record<string, any>): string {
-  const firstF = fields.find(f => f.type === 'text' && /first\s*name|given\s*name/i.test(f.label));
-  const lastF  = fields.find(f => f.type === 'text' && /last\s*name|surname|family\s*name/i.test(f.label));
-  if (firstF || lastF) {
-    const parts = [
-      firstF ? (answers[firstF.id] || '') : '',
-      lastF  ? (answers[lastF.id]  || '') : '',
-    ].filter(Boolean);
-    return parts.join(' ') || 'Guest';
-  }
-  // Fall back to the first field whose type is 'text' or whose label mentions 'name'
-  const nameF = fields.find(f => f.type === 'text' || /\bname\b/i.test(f.label));
-  return nameF ? (answers[nameF.id] || 'Guest') : 'Guest';
+  return resolveNameFromFormFields(fields, answers) || 'Guest';
 }
 
 const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: PublicRegistrationProps = {}) => {
@@ -108,6 +98,13 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [previewPdfUrl, setPreviewPdfUrl] = useState<string | null>(null);
   const [guestTicketsData, setGuestTicketsData] = useState<Array<{ name: string, attendee: Attendee, registrationUrl?: string }>>([]);
+  // Tracks whether the buyer's confirmation email actually went out. false =
+  // either SMTP isn't configured or the send threw (errors are swallowed below
+  // so registration still completes). Drives a "download your tickets now"
+  // notice on the success screen so a failed email never leaves a buyer empty-
+  // handed — especially important for tables, where the email is the only
+  // durable copy of every guest's ticket + claim links on no-portal tenants.
+  const [emailDispatched, setEmailDispatched] = useState(false);
   const { showNotification } = useNotifications();
 
   // Ticket / Payment State
@@ -1383,6 +1380,10 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
 
     setGeneratedTicket(newAttendee);
 
+    // Reset per-submission; flipped to true only once the purchaser email send
+    // resolves successfully below.
+    setEmailDispatched(false);
+
     // --- SMTP Email Integration (runs for ALL registration types) ---
     if (settings && settings.smtpUser && settings.smtpPass) {
       try {
@@ -1495,6 +1496,9 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
           message: purchaserMessage,
           attachments
         });
+        // The buyer's email is out the door — drive the success-screen copy.
+        // (Later per-guest sends may still fail without affecting this.)
+        setEmailDispatched(true);
         // Stamp ticket-send timestamp so the dashboard reflects "Sent" for
         // this primary. Best-effort — log + continue on error so a
         // post-purchase confirmation never blocks on a metadata update.
@@ -2422,8 +2426,26 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
             ) : (
               <>
                 <h2 className="text-2xl font-bold text-gray-900 mb-2">You're going!</h2>
-                <p className="text-gray-500 mb-6">A confirmation email with your ticket{guestTicketsData.length > 0 ? 's' : ''} has been sent to <span className="font-semibold">{generatedTicket.email}</span>.</p>
+                {emailDispatched ? (
+                  <p className="text-gray-500 mb-6">A confirmation email with your ticket{guestTicketsData.length > 0 ? 's' : ''} has been sent to <span className="font-semibold">{generatedTicket.email}</span>.</p>
+                ) : (
+                  <p className="text-gray-500 mb-6">Your registration is confirmed. Please download your ticket{guestTicketsData.length > 0 ? 's' : ''} below.</p>
+                )}
               </>
+            )}
+
+            {/* Email didn't go out (SMTP off or the send failed) — make sure the
+                buyer saves their tickets now rather than relying on an email
+                that never arrived. Shows regardless of the thank-you variant. */}
+            {!emailDispatched && (
+              <div className="mb-6 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 text-left">
+                <p className="font-semibold mb-1">Save your ticket{guestTicketsData.length > 0 ? 's' : ''} now</p>
+                <p>
+                  We couldn't send your confirmation email automatically. Please download your
+                  ticket{guestTicketsData.length > 0 ? 's' : ''} below and keep {guestTicketsData.length > 0 ? 'them' : 'it'} safe —
+                  the QR code is required for entry. The event organizer can also re-send your email if needed.
+                </p>
+              </div>
             )}
 
             {bogoSuccessNotice && (

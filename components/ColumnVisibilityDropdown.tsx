@@ -46,13 +46,13 @@ const ColumnVisibilityDropdown: React.FC<ColumnVisibilityDropdownProps> = ({
         title="Toggle column visibility"
       >
         <Columns3 className="w-4 h-4" />
-        <span className="hidden sm:inline">Columns</span>
+        <span className="hidden sm:inline">Show/Hide Columns</span>
       </button>
 
       {open && (
         <div className="absolute right-0 top-full mt-2 w-64 bg-white border border-gray-200 rounded-xl shadow-xl z-50 animate-fade-in">
           <div className="p-3 border-b border-gray-100 flex items-center justify-between">
-            <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Visible Columns</span>
+            <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Show / Hide Columns</span>
             <div className="flex gap-2">
               <button onClick={onShowAll} className="text-[10px] font-bold text-indigo-600 hover:underline">All</button>
               <button onClick={onHideAll} className="text-[10px] font-bold text-gray-400 hover:underline">None</button>

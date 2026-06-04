@@ -1,6 +1,7 @@
 import { Attendee, Form, AppSettings, DEFAULT_SETTINGS, FormField, PdfSettings, SeatingTable, SeatingConfiguration, SeatingAssignment, SceneElement, SceneElementType, Custom3DModel, SponsorProspect, SponsorProspectStatus, PricingTemplate } from '../types';
 import { supabase } from './supabaseClient';
 import { Database } from './database.types';
+import { checkTableGuestCapacity } from '../utils/tableSeats';
 
 type AttendeeRow = Database['public']['Tables']['attendees']['Row'];
 type AttendeeInsert = Database['public']['Tables']['attendees']['Insert'];
@@ -605,6 +606,21 @@ function mapSeatingConfigToDb(c: SeatingConfiguration): SeatingConfigurationInse
   };
 }
 
+/** All seating tables for a form (legacy null-config + every saved configuration). */
+export async function getAllSeatingTablesForForm(formId: string): Promise<SeatingTable[]> {
+  const [legacy, configs] = await Promise.all([
+    getSeatingTables(formId, null),
+    getSeatingConfigurations(formId),
+  ]);
+  const byId = new Map<string, SeatingTable>();
+  for (const t of legacy) byId.set(t.id, t);
+  for (const cfg of configs) {
+    const scoped = await getSeatingTables(formId, cfg.id);
+    for (const t of scoped) byId.set(t.id, t);
+  }
+  return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
 // --- Seating Tables ---
 type SeatingTableRow = Database['public']['Tables']['seating_tables']['Row'];
 type SeatingTableInsert = Database['public']['Tables']['seating_tables']['Insert'];
@@ -750,6 +766,129 @@ export const saveSeatingAssignments = async (assignments: SeatingAssignment[], c
     if (error) console.error("Failed to save seating assignments", error);
   }
 };
+
+/** Push seating-chart assignments onto attendee rows (scanner + dashboard). */
+export async function syncSeatingAssignmentsToAttendees(
+  assignments: SeatingAssignment[],
+  configTableIds: string[],
+): Promise<void> {
+  const assignedIds = new Set(assignments.map(a => a.attendeeId));
+
+  await Promise.all(assignments.map(a =>
+    updateAttendee(a.attendeeId, {
+      assignedTableId: a.tableId,
+      assignedSeat: a.seatNumber,
+    }),
+  ));
+
+  if (configTableIds.length === 0) return;
+
+  const { data, error } = await supabase
+    .from('attendees')
+    .select('id')
+    .in('assigned_table_id', configTableIds);
+
+  if (error || !data) {
+    console.error('syncSeatingAssignmentsToAttendees: clear pass failed', error);
+    return;
+  }
+
+  await Promise.all(
+    data
+      .filter(row => !assignedIds.has(row.id))
+      .map(row => updateAttendee(row.id, { assignedTableId: null, assignedSeat: null })),
+  );
+}
+
+/**
+ * Mirror a dashboard table/seat edit into seating_assignments so the chart
+ * stays aligned without requiring a manual reload.
+ */
+export async function syncAttendeeSeatingToChart(
+  formId: string,
+  attendeeId: string,
+  tableId: string | null,
+  seatNumber: number | null,
+): Promise<void> {
+  const configs = await getSeatingConfigurations(formId);
+  if (configs.length === 0) return;
+
+  if (!tableId) {
+    for (const cfg of configs) {
+      const assignments = await getSeatingAssignments(cfg.id);
+      if (!assignments.some(a => a.attendeeId === attendeeId)) continue;
+      await saveSeatingAssignments(
+        assignments.filter(a => a.attendeeId !== attendeeId),
+        cfg.id,
+      );
+    }
+    return;
+  }
+
+  for (const cfg of configs) {
+    const tables = await getSeatingTables(formId, cfg.id);
+    if (!tables.some(t => t.id === tableId)) continue;
+
+    const assignments = await getSeatingAssignments(cfg.id);
+    const next = assignments.filter(a => a.attendeeId !== attendeeId);
+    next.push({
+      id: crypto.randomUUID(),
+      configurationId: cfg.id,
+      attendeeId,
+      tableId,
+      seatNumber: seatNumber ?? 1,
+    });
+    await saveSeatingAssignments(next, cfg.id);
+    return;
+  }
+}
+
+/**
+ * Create a guest row linked to an existing table purchaser / group primary.
+ * Used when admins manually add seats to an already-sold table.
+ */
+export async function createGuestForPrimary(
+  primary: Attendee,
+  opts: { name: string; email: string; guestType?: Attendee['guestType'] },
+  form?: Form,
+): Promise<Attendee> {
+  const existing = (await getStaffForPrimary(primary.id)).filter(g => {
+    const t = g.guestType;
+    return !t || (t !== 'staff-pending' && t !== 'staff-claimed'
+      && t !== 'exhibitor-staff-pending' && t !== 'exhibitor-staff-claimed');
+  });
+
+  const capacity = checkTableGuestCapacity(primary, existing, form);
+  if (!capacity.allowed) {
+    throw new Error(capacity.message || 'No remaining seats on this purchase.');
+  }
+  const guestNumber = existing.length + 1;
+  const guestId = crypto.randomUUID();
+  const invoiceId = primary.invoiceId;
+  const guest: Attendee = {
+    id: guestId,
+    formId: primary.formId,
+    formTitle: primary.formTitle,
+    name: opts.name.trim() || `${primary.name} - Guest Ticket #${guestNumber}`,
+    email: opts.email.trim() || primary.email,
+    ticketType: primary.ticketType?.includes('Guest') ? primary.ticketType : `Guest of ${primary.name}`,
+    registeredAt: new Date().toISOString(),
+    checkedInAt: null,
+    qrPayload: JSON.stringify({ id: guestId, invoiceId, formId: primary.formId, action: 'checkin' }),
+    paymentStatus: primary.paymentStatus,
+    paymentAmount: '0',
+    invoiceId,
+    transactionId: primary.transactionId,
+    isPrimary: false,
+    primaryAttendeeId: primary.id,
+    guestType: opts.guestType ?? 'adult',
+    donationType: 'none',
+    donatedTables: 0,
+    donatedSeats: 0,
+  };
+  await saveAttendee(guest);
+  return guest;
+}
 
 export const deleteSeatingAssignment = async (id: string): Promise<void> => {
   const { error } = await supabase
