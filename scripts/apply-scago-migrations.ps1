@@ -13,7 +13,8 @@ $files = @(
   '20260527010000_drop_recursive_bogo_policy.sql',
   '20260526190000_add_bogo_email_template_columns.sql',
   '20260526200000_add_applied_promo_code.sql',
-  '20260527120000_enable_bogo_gansid_congress.sql'
+  '20260527120000_enable_bogo_gansid_congress.sql',
+  '20260527150000_speaker_guest_type_and_promo_payment.sql'
 )
 
 foreach ($f in $files) {
