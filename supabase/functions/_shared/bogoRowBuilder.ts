@@ -42,11 +42,15 @@ export function buildBogoRow(args: BuildBogoRowArgs) {
     email: isInline ? (guestEmail || paid.email) : paid.email,
     ticket_type: 'Registration (Free Guest)',
     registered_at: new Date().toISOString(),
-    qr_payload: JSON.stringify({ id, invoiceId, formId, action: 'checkin' }),
     payment_status: 'free',
     payment_amount: '0',
     payment_method: 'bogo',
     invoice_id: invoiceId,
+    // Scanner contract: qr_payload MUST be exactly JSON.stringify({ id }).
+    // The scanner only reads parsed.id; any extra fields (formId/invoiceId/etc.)
+    // risk breaking check-in if the scanner is ever hardened to validate shape.
+    // invoiceId/formId are already persisted in their own columns above.
+    qr_payload: JSON.stringify({ id }),
     is_primary: true,
     primary_attendee_id: null,
     guest_type: isInline ? 'adult' : 'pending-claim',

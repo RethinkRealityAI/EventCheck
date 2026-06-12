@@ -81,13 +81,21 @@ export default function MyTicketsPage() {
         headers: session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {},
       });
       if (error) {
-        const msg = (data && (data as any).error) || error.message || 'Action failed';
-        showNotification(prettyBogoError(msg), 'error');
+        // supabase-js v2 sets data=null on non-2xx; the structured error body
+        // lives in error.context (the raw Response). Try to extract it first.
+        let errCode: string = error.message;
+        try {
+          const body = await (error as any).context?.json?.();
+          if (body?.error) errCode = body.error;
+        } catch { /* ignore parse failures */ }
+        console.error('bogo-send error:', errCode);
+        showNotification(prettyBogoError(errCode), 'error');
         return false;
       }
       return true;
     } catch (e: any) {
-      showNotification(e?.message || 'Action failed', 'error');
+      console.error('bogo-send caught:', e);
+      showNotification('Something went wrong. Please try again.', 'error');
       return false;
     } finally {
       setPendingAction(null);
@@ -418,13 +426,21 @@ function BogoSendForm({ card, pricingTemplate, busy, onCancel, onSubmit }: {
           />
           <select
             value={categoryId} onChange={e => setCategoryId(e.target.value)}
-            className="px-3 py-2 border border-emerald-200 rounded-lg text-sm sm:col-span-2"
+            disabled={eligibleCats.length === 0}
+            className="px-3 py-2 border border-emerald-200 rounded-lg text-sm sm:col-span-2 disabled:bg-slate-100 disabled:text-slate-400"
           >
-            <option value="">Select category…</option>
+            <option value="">{eligibleCats.length === 0 ? 'No eligible categories' : 'Select category…'}</option>
             {eligibleCats.map(c => (
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}
           </select>
+          {eligibleCats.length === 0 && (
+            <p className="sm:col-span-2 text-[11px] text-amber-700 leading-snug">
+              We couldn't load eligible ticket categories for your free guest right now. Try the
+              "Send me a claim link to forward" option above, or contact{' '}
+              <a className="underline" href={`mailto:${BOGO_ADMIN_CONTACT}`}>{BOGO_ADMIN_CONTACT}</a>.
+            </p>
+          )}
         </div>
       )}
 
@@ -556,6 +572,7 @@ function prettyBogoError(code: string): string {
     case 'BOGO_PRICE_EXCEEDED': return 'Selected category exceeds your ticket\'s value.';
     case 'BOGO_MISSING_FIELDS': return 'Please fill in name, email, and category.';
     case 'BOGO_NO_TEMPLATE': return 'BOGO unavailable: this ticket has no pricing template.';
-    default: return code;
+    default:
+      return `Something went wrong. Please try again or contact ${BOGO_ADMIN_CONTACT}.`;
   }
 }

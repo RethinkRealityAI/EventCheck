@@ -1,8 +1,8 @@
 export const HERO = {
-  badge: 'CONGRESS REGISTRATION NOW OPEN',
+  badge: 'REGISTER ONE, GET ONE FREE!',
   location: 'Hyderabad, India',
   dates: 'October 23–25, 2026',
-  venue: 'HITEX Exhibition Centre',
+  venue: 'HICC - Novotel',
   intro: 'We are pleased to announce that registration for the GANSID Congress 2026 is now open. We invite you to join us from October 23–25, 2026 in the wonderful city of Hyderabad, India! This event is the first in-person Congress of the GANSID after the successes of our previous virtual conferences. We look forward to three days of knowledge-sharing, innovation, and ongoing advocacy with the brightest minds and organizations in the inherited blood disorders community worldwide.',
   ctaLabel: 'Register Now!',
 };

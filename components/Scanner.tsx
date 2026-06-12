@@ -25,11 +25,6 @@ type ScanResult =
   | { status: 'error'; message: string }
   | { status: 'pending-capture'; attendee: Attendee };
 
-// How long the success card stays up before auto-resuming the camera. Tuned for
-// a busy door — long enough to read the name, short enough to not hold up a
-// queue. Tap "Close" to dismiss immediately.
-const AUTO_RESUME_MS = 2500;
-
 // Same QR may stay in the camera for a frame or two after a successful scan.
 // Reject duplicate decodes of the exact same payload within this window so we
 // don't fire processScan twice for one ticket.
@@ -80,7 +75,6 @@ const Scanner: React.FC<ScannerProps> = ({ onScan, onCapturePlaceholder, onClose
   const audioCtxRef = useRef<AudioContext | null>(null);
   const tablesByFormRef = useRef<Map<string, Map<string, string>>>(new Map());
   const lastScanRef = useRef<{ data: string; at: number } | null>(null);
-  const resumeTimerRef = useRef<number | null>(null);
   const isScanningRef = useRef(true);
   const firstFrameLoggedRef = useRef(false);
 
@@ -263,10 +257,6 @@ const Scanner: React.FC<ScannerProps> = ({ onScan, onCapturePlaceholder, onClose
         streamRef.current = null;
       }
       isScanningRef.current = false;
-      if (resumeTimerRef.current != null) {
-        window.clearTimeout(resumeTimerRef.current);
-        resumeTimerRef.current = null;
-      }
       const ctx = audioCtxRef.current;
       if (ctx) {
         ctx.close().catch(() => {});
@@ -279,10 +269,6 @@ const Scanner: React.FC<ScannerProps> = ({ onScan, onCapturePlaceholder, onClose
   }, []);
 
   const handleResume = useCallback(() => {
-    if (resumeTimerRef.current != null) {
-      window.clearTimeout(resumeTimerRef.current);
-      resumeTimerRef.current = null;
-    }
     // Clear the dedup cache so re-scanning the same ticket immediately
     // surfaces "Already Checked In" feedback instead of being silently
     // suppressed as a duplicate. The DUPLICATE_SUPPRESS_MS window is only
@@ -294,49 +280,6 @@ const Scanner: React.FC<ScannerProps> = ({ onScan, onCapturePlaceholder, onClose
     requestAnimationFrame(scan);
   }, [scan]);
 
-  // Visible countdown driving the "Resuming in Ns" pill. State (not a ref)
-  // because we're rendering it. Restarts every time a new scanResult lands.
-  const [resumeCountdown, setResumeCountdown] = useState<number | null>(null);
-  const countdownIntervalRef = useRef<number | null>(null);
-
-  // Auto-resume after a short delay so a queue of attendees can flow through
-  // without a tap between each. Cleared on manual close or unmount.
-  // Suppressed for pending-capture results — those require the door staff
-  // to type a name + email, so the modal stays up indefinitely until they
-  // confirm or exit.
-  useEffect(() => {
-    if (!scanResult) {
-      setResumeCountdown(null);
-      return;
-    }
-    if (scanResult.status === 'pending-capture') {
-      setResumeCountdown(null);
-      return;
-    }
-    if (resumeTimerRef.current != null) {
-      window.clearTimeout(resumeTimerRef.current);
-    }
-    if (countdownIntervalRef.current != null) {
-      window.clearInterval(countdownIntervalRef.current);
-    }
-    setResumeCountdown(Math.ceil(AUTO_RESUME_MS / 1000));
-    countdownIntervalRef.current = window.setInterval(() => {
-      setResumeCountdown(prev => (prev != null && prev > 1 ? prev - 1 : 0));
-    }, 1000);
-    resumeTimerRef.current = window.setTimeout(() => {
-      handleResume();
-    }, AUTO_RESUME_MS);
-    return () => {
-      if (resumeTimerRef.current != null) {
-        window.clearTimeout(resumeTimerRef.current);
-        resumeTimerRef.current = null;
-      }
-      if (countdownIntervalRef.current != null) {
-        window.clearInterval(countdownIntervalRef.current);
-        countdownIntervalRef.current = null;
-      }
-    };
-  }, [scanResult, handleResume]);
 
   // Inline capture form state for placeholder scans. Reset whenever a new
   // pending-capture result lands so the inputs don't keep stale text from
@@ -575,11 +518,6 @@ const Scanner: React.FC<ScannerProps> = ({ onScan, onCapturePlaceholder, onClose
                 className="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-500/20 inline-flex items-center justify-center gap-2"
               >
                 Scan Next
-                {resumeCountdown != null && resumeCountdown > 0 && (
-                  <span className="inline-flex items-center justify-center min-w-[1.5rem] h-6 px-1.5 rounded-full bg-white/20 text-white text-xs font-bold tabular-nums">
-                    {resumeCountdown}s
-                  </span>
-                )}
               </button>
               <p className="text-[10px] text-slate-400 text-center mt-3 uppercase tracking-widest font-bold">
                 Use the X at the top to exit

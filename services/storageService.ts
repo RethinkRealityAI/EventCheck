@@ -1469,6 +1469,10 @@ export async function getAttendeesForUserWithBogoClaims(
       .from('attendees')
       .select('*')
       .in('primary_attendee_id', myPrimaryIds)
+      // BOGO claim rows are surfaced by the dedicated third pass below; keep
+      // them out of the group-member pass so a claim never double-renders as
+      // a paid ticket card.
+      .or('is_bogo_claim.is.null,is_bogo_claim.eq.false')
       .not('guest_type', 'in', '(staff-pending,staff-claimed,exhibitor-staff-pending,exhibitor-staff-claimed)');
     if (error) console.error('getAttendeesForUserWithBogoClaims group pass', error);
     else groupRows = data ?? [];

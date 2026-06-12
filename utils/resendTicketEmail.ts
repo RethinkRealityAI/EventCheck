@@ -36,6 +36,7 @@ export async function resendTicketEmailForAttendee(
   attendeeId: string,
   forms: Form[],
   origin: string,
+  scope: 'primary-only' | 'all' = 'all',
 ): Promise<ResendTicketResult> {
   const fresh = await getAttendee(attendeeId);
   if (!fresh) {
@@ -50,7 +51,7 @@ export async function resendTicketEmailForAttendee(
   const form = forms.find(f => f.id === fresh.formId);
   const primaryDisplayName = resolveAttendeeDisplayName(fresh, form);
 
-  const guests = fresh.isPrimary !== false
+  const guests = (fresh.isPrimary !== false && scope === 'all')
     ? (await getStaffForPrimary(fresh.id))
         .filter(isTableGuestRow)
         .slice()

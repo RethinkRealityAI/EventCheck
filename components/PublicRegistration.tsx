@@ -263,15 +263,22 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   const displayDynamicTotal = dynamicTotalAfterPromo ?? dynamicTotal;
   const displayGroupTotal = groupTotalAfterPromo ?? groupTotal;
 
-  // BOGO is only for paid checkouts — not 100%-off promos or speaker comps.
+  // Checkout total (post-promo). Coerced to a number — drives needsPaymentStep.
   const payableAfterPromoCents = registrationMode === 'group'
     ? (displayGroupTotal ?? groupTotal ?? 0)
     : (displayDynamicTotal ?? dynamicTotal ?? 0);
-  // Match verify-payment: block BOGO only for speaker promos or when an
-  // applied promo zeroes the total — not when total is 0 because category
-  // isn't chosen yet (null dynamicTotal coerces to 0).
+
+  // BOGO is only for paid checkouts — not 100%-off promos or speaker comps.
+  // For the BOGO gate specifically, use the post-promo totals that are NULL
+  // when no category is chosen yet (dynamicParts/groupParts null ⇒
+  // ...AfterPromo null) so we can tell "category not picked" (null) apart from
+  // "promo zeroes the total" (0). Coercing null→0 here would wrongly hide BOGO
+  // for a global promo applied before category selection.
+  const bogoPayableAfterPromo = registrationMode === 'group'
+    ? groupTotalAfterPromo
+    : dynamicTotalAfterPromo;
   const bogoBlockedByPromo = appliedPromo?.appliesGuestType === 'speaker'
-    || (!!appliedPromo && payableAfterPromoCents === 0);
+    || (!!appliedPromo && bogoPayableAfterPromo === 0);
 
   // Pending-claim: group guest completing their personal details post-purchase
   const isPendingClaim = (loadedRefAttendee as any)?.guestType === 'pending-claim';

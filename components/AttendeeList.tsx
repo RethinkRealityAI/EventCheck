@@ -549,10 +549,19 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
   // Count donated seats for badge
   const totalDonatedCount = attendees.filter(a => !a.isTest && ((a.donatedSeats || 0) > 0 || (a.donatedTables || 0) > 0)).length;
 
+  // When checked-in filter is active, sort by check-in time descending (most recent first).
+  const sortedFiltered = statusFilter === 'checked-in'
+    ? [...filtered].sort((a, b) => {
+        const ta = a.checkedInAt ? new Date(a.checkedInAt).getTime() : 0;
+        const tb = b.checkedInAt ? new Date(b.checkedInAt).getTime() : 0;
+        return tb - ta;
+      })
+    : filtered;
+
   // Pagination Logic
-  const totalPages = Math.ceil(filtered.length / itemsPerPage);
+  const totalPages = Math.ceil(sortedFiltered.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
-  const paginatedItems = filtered.slice(startIndex, startIndex + itemsPerPage);
+  const paginatedItems = sortedFiltered.slice(startIndex, startIndex + itemsPerPage);
 
   // Grouping Logic for "Tables" view
   const groupedByTable = useMemo(() => {

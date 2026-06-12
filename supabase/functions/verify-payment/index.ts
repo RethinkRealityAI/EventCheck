@@ -407,14 +407,16 @@ serve(async (req: Request) => {
       }
 
       const validatePromo = resolveFormPromoCode(validateForm, rawPromo);
-      if (!validatePromo) {
+      // Anti-enumeration: this endpoint is unauthenticated, so a "code exists
+      // but wrong category" response would confirm the code string is real and
+      // let an attacker brute-force valid codes. Collapse not-found AND
+      // wrong-category into the SAME generic INVALID_PROMO so existence never
+      // leaks. (The authoritative submit-time check still distinguishes them
+      // for the real registrant who has already picked their category.)
+      const validForThisCategory = !!validatePromo
+        && categoryIds.every(cid => isPromoAllowedForCategory(validatePromo, cid));
+      if (!validForThisCategory) {
         return jsonResponse({ ok: false, error: 'INVALID_PROMO' });
-      }
-
-      for (const cid of categoryIds) {
-        if (!isPromoAllowedForCategory(validatePromo, cid)) {
-          return jsonResponse({ ok: false, error: 'PROMO_NOT_VALID_FOR_CATEGORY' });
-        }
       }
 
       const incomingByCat = new Map<string, number>();
@@ -1395,6 +1397,10 @@ serve(async (req: Request) => {
           console.error('CRITICAL: group insert failed', JSON.stringify({
             transactionId: groupTxId, expectedCents, discountedCents: groupDiscountedCents, isFreeViaPromo: groupIsFreeViaPromo, rowCount: rows.length, dbError: insertErr.message,
           }));
+          // Free-promo usage-limit trigger (race backstop) → clean 422.
+          if ((insertErr.message || '').includes('PROMO_USAGE_LIMIT_EXCEEDED')) {
+            return jsonResponse({ error: 'PROMO_USAGE_LIMIT_EXCEEDED' }, 422);
+          }
           return jsonResponse({
             error: groupTxId
               ? `Your payment was processed but we encountered a database error. Please contact the event organizer with this reference: ${groupTxId}`
@@ -1665,6 +1671,12 @@ serve(async (req: Request) => {
             email: primary.email,
             dbError: insertErr.message,
           }));
+          // The free-promo usage-limit trigger (race backstop) rejects with
+          // this marker — surface it as a clean 422, not a generic DB error.
+          // Only reachable on the free path (no capture), so no money is held.
+          if ((insertErr.message || '').includes('PROMO_USAGE_LIMIT_EXCEEDED')) {
+            return jsonResponse({ error: 'PROMO_USAGE_LIMIT_EXCEEDED' }, 422);
+          }
           return jsonResponse({
             error: soloTxId
               ? `Your payment was processed but we encountered a database error. Please contact the event organizer with this reference: ${soloTxId}`
@@ -1786,16 +1798,22 @@ serve(async (req: Request) => {
           }
         }
 
-        // Apply promo code server-side
+        // Apply promo code server-side. Static-ticket subtotal is in DOLLARS
+        // (config.items[].price are dollars) and the legacy ticketConfig promo
+        // `value` is dollars too — keep that unit so client + server agree.
+        // Guard against disabled codes, NaN/out-of-range values, and float
+        // drift (round to cents) so the amount-match check below stays exact.
         if (promoCode && config.promoCodes) {
           const promo = config.promoCodes.find(
-            (p: PromoCode) => p.code.toLowerCase() === promoCode.toLowerCase()
+            (p: PromoCode) =>
+              p.code.toLowerCase() === promoCode.toLowerCase()
+              && (p as any).enabled !== false
           );
           if (promo) {
-            const discount = promo.type === 'percent'
-              ? subtotal * (promo.value / 100)
-              : promo.value;
-            subtotal = Math.max(0, subtotal - discount);
+            const rawDiscount = promo.type === 'percent'
+              ? subtotal * (Math.max(0, Math.min(100, Number(promo.value) || 0)) / 100)
+              : Math.max(0, Number(promo.value) || 0);
+            subtotal = Math.max(0, Math.round((subtotal - rawDiscount) * 100) / 100);
           }
         }
 

@@ -41,6 +41,24 @@ function isUncommitted(free: any): boolean {
   return true;
 }
 
+/**
+ * Whether `authUid` owns `paidRow`'s BOGO slot. Direct match on `user_id`, OR
+ * — for a group member whose own `user_id` is null — the purchaser who owns
+ * the primary this row is linked to. Group-member rows are inserted with
+ * `user_id = null` (they claim later), but the purchaser holds the BOGO slot
+ * until then, so we walk up to the primary and check its `user_id`.
+ */
+async function ownsPaidRow(supabase: any, paidRow: any, authUid: string): Promise<boolean> {
+  if (paidRow.user_id && paidRow.user_id === authUid) return true;
+  if (paidRow.primary_attendee_id) {
+    const { data: primary } = await supabase
+      .from('attendees').select('user_id')
+      .eq('id', paidRow.primary_attendee_id).maybeSingle();
+    if (primary?.user_id && primary.user_id === authUid) return true;
+  }
+  return false;
+}
+
 serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -87,7 +105,9 @@ serve(async (req: Request) => {
       const { data: paid } = await supabase
         .from('attendees').select('*').eq('id', paidAttendeeId).maybeSingle();
       if (!paid) return jsonResponse({ error: 'PAID_NOT_FOUND' }, 404);
-      if (paid.user_id !== authUid) return jsonResponse({ error: 'BOGO_NOT_OWNER' }, 403);
+      if (!(await ownsPaidRow(supabase, paid, authUid))) {
+        return jsonResponse({ error: 'BOGO_NOT_OWNER' }, 403);
+      }
 
       const { data: form } = await supabase
         .from('forms').select('*').eq('id', paid.form_id).maybeSingle();
@@ -113,17 +133,24 @@ serve(async (req: Request) => {
         if (!/^.+@.+\..+$/.test(String(guestEmail))) {
           return jsonResponse({ error: 'BOGO_MISSING_FIELDS' }, 422);
         }
-        // Load template to validate ceiling
-        if (!paid.pricing_template_id) {
+        // Fall back to form-level template id for attendees registered before
+        // pricing_template_id was reliably written to the attendee row.
+        const templateId = paid.pricing_template_id || form.settings?.pricingTemplateId;
+        if (!templateId) {
           return jsonResponse({ error: 'BOGO_NO_TEMPLATE' }, 422);
         }
         const { data: tpl } = await supabase
-          .from('pricing_templates').select('*').eq('id', paid.pricing_template_id).maybeSingle();
+          .from('pricing_templates').select('*').eq('id', templateId).maybeSingle();
         if (!tpl) return jsonResponse({ error: 'BOGO_NO_TEMPLATE' }, 422);
-        if (!isCategoryAtOrBelowCeiling(tpl, paid.pricing_category_id, paid.pricing_tier, paid.pricing_bracket, categoryId)) {
-          return jsonResponse({ error: 'BOGO_PRICE_EXCEEDED' }, 422);
+        if (paid.pricing_category_id && paid.pricing_tier && paid.pricing_bracket) {
+          if (!isCategoryAtOrBelowCeiling(tpl, paid.pricing_category_id, paid.pricing_tier, paid.pricing_bracket, categoryId)) {
+            return jsonResponse({ error: 'BOGO_PRICE_EXCEEDED' }, 422);
+          }
         }
       }
+
+      // Resolve template id once (used for the free row and ceiling check above)
+      const resolvedTemplateId = paid.pricing_template_id || form.settings?.pricingTemplateId || null;
 
       // Build + insert row
       const row = buildBogoRow({
@@ -132,7 +159,7 @@ serve(async (req: Request) => {
           form_id: paid.form_id,
           form_title: paid.form_title,
           email: paid.email,
-          pricing_template_id: paid.pricing_template_id,
+          pricing_template_id: resolvedTemplateId,
           pricing_tier: paid.pricing_tier,
           pricing_bracket: paid.pricing_bracket,
         },
@@ -177,7 +204,9 @@ serve(async (req: Request) => {
       ? await supabase.from('attendees').select('*').eq('id', free.bogo_source_attendee_id).maybeSingle()
       : { data: null };
     if (!source) return jsonResponse({ error: 'SOURCE_NOT_FOUND' }, 404);
-    if (source.user_id !== authUid) return jsonResponse({ error: 'BOGO_NOT_OWNER' }, 403);
+    if (!(await ownsPaidRow(supabase, source, authUid))) {
+      return jsonResponse({ error: 'BOGO_NOT_OWNER' }, 403);
+    }
 
     // ── ACTION: resend ────────────────────────────────────────────────
     if (action === 'resend') {
@@ -221,13 +250,24 @@ serve(async (req: Request) => {
 
       // Re-validate ceiling if category changed
       if (newCategoryId && newCategoryId !== free.pricing_category_id) {
-        if (!source.pricing_template_id) {
+        // Fall back to the form-level template id for source rows registered
+        // before pricing_template_id was reliably written (mirrors `send`).
+        let templateId = source.pricing_template_id;
+        if (!templateId) {
+          const { data: srcForm } = await supabase
+            .from('forms').select('settings').eq('id', source.form_id).maybeSingle();
+          templateId = srcForm?.settings?.pricingTemplateId ?? null;
+        }
+        if (!templateId) {
           return jsonResponse({ error: 'BOGO_NO_TEMPLATE' }, 422);
         }
         const { data: tpl } = await supabase
-          .from('pricing_templates').select('*').eq('id', source.pricing_template_id).maybeSingle();
+          .from('pricing_templates').select('*').eq('id', templateId).maybeSingle();
         if (!tpl) return jsonResponse({ error: 'BOGO_NO_TEMPLATE' }, 422);
-        if (!isCategoryAtOrBelowCeiling(tpl, source.pricing_category_id, source.pricing_tier, source.pricing_bracket, newCategoryId)) {
+        // Only enforce the ceiling when the source has a full tier/bracket/
+        // category to compare against; older rows may lack these.
+        if (source.pricing_category_id && source.pricing_tier && source.pricing_bracket
+            && !isCategoryAtOrBelowCeiling(tpl, source.pricing_category_id, source.pricing_tier, source.pricing_bracket, newCategoryId)) {
           return jsonResponse({ error: 'BOGO_PRICE_EXCEEDED' }, 422);
         }
       }

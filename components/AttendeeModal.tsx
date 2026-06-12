@@ -28,7 +28,7 @@ interface AttendeeModalProps {
 }
 
 const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingTables, attendees, onClose, onDelete, onOpenAttendee, onAttendeeUpdated }) => {
-  const [resending, setResending] = useState(false);
+  const [resending, setResending] = useState<'idle' | 'primary' | 'all'>('idle');
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState<Partial<Attendee>>({});
   const [activeTab, setActiveTab] = useState<'details' | 'responses'>('details');
@@ -119,8 +119,8 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
     || localAttendee.guestType === 'exhibitor-staff-pending'
     || localAttendee.guestType === 'staff-pending';
 
-  const handleResendEmail = async () => {
-    setResending(true);
+  const handleResendEmail = async (scope: 'primary-only' | 'all' = 'all') => {
+    setResending(scope === 'all' ? 'all' : 'primary');
     try {
       if (isPendingClaimGuest) {
         const { error } = await supabase.functions.invoke('send-ticket-email', {
@@ -133,6 +133,7 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
           localAttendee.id,
           forms,
           window.location.origin,
+          scope,
         );
         showNotification(
           result.isTablePurchaser
@@ -148,7 +149,7 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
       console.error(err);
       showNotification(`Failed to resend email: ${err.message}`, 'error');
     } finally {
-      setResending(false);
+      setResending('idle');
     }
   };
 
@@ -665,16 +666,60 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
                     )}
                   </div>
 
-                  <button
-                    onClick={handleResendEmail}
-                    disabled={resending}
-                    className="w-full py-2.5 bg-white/60 border border-indigo-200/60 text-indigo-600 rounded-xl font-bold hover:bg-indigo-50/60 transition-all flex items-center justify-center gap-2 shadow-sm text-xs"
-                  >
-                    <Mail className="w-4 h-4" />
-                    {resending
-                      ? 'Sending...'
-                      : isPendingClaimGuest ? 'Resend Claim Invitation' : 'Resend Ticket Email'}
-                  </button>
+                  {(() => {
+                    const isPrimary = localAttendee.isPrimary !== false && !localAttendee.primaryAttendeeId && !isPendingClaimGuest;
+                    const linkedCount = isPrimary
+                      ? (attendees?.filter(a => a.primaryAttendeeId === localAttendee.id).length ?? 0)
+                      : 0;
+                    const isBusy = resending !== 'idle';
+
+                    if (isPendingClaimGuest) {
+                      return (
+                        <button
+                          onClick={() => handleResendEmail('all')}
+                          disabled={isBusy}
+                          className="w-full py-2.5 bg-white/60 border border-indigo-200/60 text-indigo-600 rounded-xl font-bold hover:bg-indigo-50/60 transition-all flex items-center justify-center gap-2 shadow-sm text-xs"
+                        >
+                          <Mail className="w-4 h-4" />
+                          {isBusy ? 'Sending...' : 'Resend Claim Invitation'}
+                        </button>
+                      );
+                    }
+
+                    if (isPrimary && linkedCount > 0) {
+                      return (
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleResendEmail('all')}
+                            disabled={isBusy}
+                            className="flex-1 py-2.5 bg-white/60 border border-indigo-200/60 text-indigo-600 rounded-xl font-bold hover:bg-indigo-50/60 transition-all flex items-center justify-center gap-2 shadow-sm text-xs"
+                          >
+                            <Mail className="w-4 h-4" />
+                            {resending === 'all' ? 'Sending...' : `Resend All (${linkedCount + 1})`}
+                          </button>
+                          <button
+                            onClick={() => handleResendEmail('primary-only')}
+                            disabled={isBusy}
+                            className="py-2.5 px-3 bg-white/60 border border-indigo-200/60 text-indigo-400 rounded-xl font-bold hover:bg-indigo-50/60 transition-all flex items-center justify-center gap-1.5 shadow-sm text-xs whitespace-nowrap"
+                          >
+                            <Mail className="w-3.5 h-3.5" />
+                            {resending === 'primary' ? 'Sending...' : 'Theirs Only'}
+                          </button>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <button
+                        onClick={() => handleResendEmail('all')}
+                        disabled={isBusy}
+                        className="w-full py-2.5 bg-white/60 border border-indigo-200/60 text-indigo-600 rounded-xl font-bold hover:bg-indigo-50/60 transition-all flex items-center justify-center gap-2 shadow-sm text-xs"
+                      >
+                        <Mail className="w-4 h-4" />
+                        {isBusy ? 'Sending...' : 'Resend Ticket Email'}
+                      </button>
+                    );
+                  })()}
                 </div>
               </div>
 
