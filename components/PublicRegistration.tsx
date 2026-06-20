@@ -12,6 +12,7 @@ import {
   isPromoAllowedForCategory,
   anyCategoryRequiresPromoCode,
   getPromoUsageLimit,
+  getPromoTotalUsageLimit,
   PROMO_USAGE_LIMIT_MESSAGE,
   formHasEnabledPromoCodes,
 } from '../utils/promoCodes';
@@ -722,9 +723,9 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
         return;
       }
 
-      const needsUsageCheck = categoryIdsForUsage.some(
-        cid => getPromoUsageLimit(found, cid) != null,
-      );
+      const needsUsageCheck =
+        getPromoTotalUsageLimit(found) != null ||
+        categoryIdsForUsage.some(cid => getPromoUsageLimit(found, cid) != null);
       if (needsUsageCheck && form?.id && categoryIdsForUsage.length > 0) {
         try {
           const { data } = await supabase.functions.invoke('verify-payment', {
@@ -737,6 +738,10 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
           });
           if (data?.error === 'PROMO_USAGE_LIMIT_EXCEEDED') {
             showNotification(PROMO_USAGE_LIMIT_MESSAGE, 'error');
+            return;
+          }
+          if (!data?.ok && data?.error) {
+            showNotification('Invalid promo code', 'error');
             return;
           }
         } catch {

@@ -441,6 +441,9 @@ serve(async (req: Request) => {
       // wrong-category into the SAME generic INVALID_PROMO so existence never
       // leaks. (The authoritative submit-time check still distinguishes them
       // for the real registrant who has already picked their category.)
+      // Usage-limit exhaustion is intentionally NOT collapsed — it returns
+      // PROMO_USAGE_LIMIT_EXCEEDED so the client can surface the "contact admin"
+      // copy to a legitimate user who has the right code but can't use it.
       const validForThisCategory = !!validatePromo
         && categoryIds.every(cid => isPromoAllowedForCategory(validatePromo, cid));
       if (!validForThisCategory) {
