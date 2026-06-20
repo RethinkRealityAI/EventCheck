@@ -174,6 +174,12 @@ function getPromoUsageLimit(promo: any, categoryId: string): number | null {
   return limit;
 }
 
+function getPromoTotalUsageLimit(promo: any): number | null {
+  const limit = promo?.totalUsageLimit;
+  if (typeof limit !== 'number' || limit <= 0) return null;
+  return limit;
+}
+
 /** Validates category scope + per-category usage caps before capture/insert. */
 async function assertPromoCheckoutAllowed(args: {
   supabase: any;
@@ -225,6 +231,28 @@ async function assertPromoCheckoutAllowed(args: {
     }
     if ((count ?? 0) + incoming > limit) {
       return jsonResponse({ error: 'PROMO_USAGE_LIMIT_EXCEEDED', categoryId, limit }, 422);
+    }
+  }
+
+  // Check global totalUsageLimit across all categories combined.
+  const totalLimit = getPromoTotalUsageLimit(promo);
+  if (totalLimit != null) {
+    const totalIncoming = categoryIds.length;
+    let tq = supabase
+      .from('attendees')
+      .select('id', { count: 'exact', head: true })
+      .eq('form_id', formId)
+      .ilike('applied_promo_code', promo.code);
+    if (!allTest) {
+      tq = tq.or('is_test.is.null,is_test.eq.false');
+    }
+    const { count: totalCount, error: totalErr } = await tq;
+    if (totalErr) {
+      console.error('[verify-payment] promo total usage count failed', totalErr.message);
+      return jsonResponse({ error: 'Could not validate promo code usage' }, 500);
+    }
+    if ((totalCount ?? 0) + totalIncoming > totalLimit) {
+      return jsonResponse({ error: 'PROMO_USAGE_LIMIT_EXCEEDED', totalLimit }, 422);
     }
   }
 
@@ -444,6 +472,28 @@ serve(async (req: Request) => {
           return jsonResponse({ error: 'Could not validate promo code usage' }, 500);
         }
         if ((count ?? 0) + incoming > limit) {
+          return jsonResponse({ ok: false, error: 'PROMO_USAGE_LIMIT_EXCEEDED' });
+        }
+      }
+
+      // Check global totalUsageLimit across all categories combined.
+      const validateTotalLimit = getPromoTotalUsageLimit(validatePromo);
+      if (validateTotalLimit != null) {
+        const totalIncoming = categoryIds.length;
+        let tq = supabase
+          .from('attendees')
+          .select('id', { count: 'exact', head: true })
+          .eq('form_id', validateFormId)
+          .ilike('applied_promo_code', validatePromo.code);
+        if (!validateAllTest) {
+          tq = tq.or('is_test.is.null,is_test.eq.false');
+        }
+        const { count: totalCount, error: totalErr } = await tq;
+        if (totalErr) {
+          console.error('[verify-payment] validate-promo total count failed', totalErr.message);
+          return jsonResponse({ error: 'Could not validate promo code usage' }, 500);
+        }
+        if ((totalCount ?? 0) + totalIncoming > validateTotalLimit) {
           return jsonResponse({ ok: false, error: 'PROMO_USAGE_LIMIT_EXCEEDED' });
         }
       }

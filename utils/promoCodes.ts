@@ -131,6 +131,23 @@ export function isPromoUsageLimitReached(
   return currentUsageCount >= limit;
 }
 
+/** Global max uses for this promo across ALL categories, or null when unlimited. */
+export function getPromoTotalUsageLimit(promo: PromoCode): number | null {
+  const limit = promo.totalUsageLimit;
+  if (typeof limit !== 'number' || limit <= 0) return null;
+  return limit;
+}
+
+/** True when total cross-category usage has reached or exceeded the global limit. */
+export function isPromoTotalUsageLimitReached(
+  promo: PromoCode,
+  currentTotalCount: number,
+): boolean {
+  const limit = getPromoTotalUsageLimit(promo);
+  if (limit == null) return false;
+  return currentTotalCount >= limit;
+}
+
 /** Categories that should appear in the usage-limit editor for a promo. */
 export function promoUsageLimitCategories(
   promo: PromoCode,

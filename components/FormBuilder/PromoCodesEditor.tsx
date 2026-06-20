@@ -56,6 +56,15 @@ export default function PromoCodesEditor({
     });
   };
 
+  const setPromoTotalLimit = (i: number, raw: string) => {
+    const n = Number(raw);
+    if (!raw.trim() || !Number.isFinite(n) || n <= 0) {
+      updatePromoCode(i, { totalUsageLimit: undefined });
+    } else {
+      updatePromoCode(i, { totalUsageLimit: Math.floor(n) });
+    }
+  };
+
   const inputCls = compact
     ? 'fb-input-sm w-full'
     : 'px-2 py-1.5 text-sm border border-slate-300 rounded w-full';
@@ -259,12 +268,23 @@ export default function PromoCodesEditor({
                 <div className="border-t border-gray-200 pt-2 space-y-2">
                   <div className="text-xs font-medium text-gray-700">Usage limits (optional)</div>
                   <p className="text-xs text-gray-500">
-                    Max redemptions per category. Blank = unlimited.
+                    Blank = unlimited. Set a total cap, per-category caps, or both.
                   </p>
                   <div className="space-y-1">
+                    <label className="flex items-center justify-between gap-2 text-xs">
+                      <span className="text-gray-700 font-medium">Total (all categories)</span>
+                      <input
+                        type="number"
+                        min={1}
+                        placeholder="∞"
+                        value={p.totalUsageLimit ?? ''}
+                        onChange={e => setPromoTotalLimit(i, e.target.value)}
+                        className="w-20 px-2 py-1 border border-gray-300 rounded text-right fb-input-sm"
+                      />
+                    </label>
                     {promoUsageLimitCategories(p, templateCategories).map(cat => (
                       <label key={cat.id} className="flex items-center justify-between gap-2 text-xs">
-                        <span className="text-gray-700 truncate">{cat.name}</span>
+                        <span className="text-gray-500 truncate pl-3">↳ {cat.name}</span>
                         <input
                           type="number"
                           min={1}

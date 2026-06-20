@@ -179,6 +179,11 @@ export interface PromoCode {
    *  missing key = unlimited for that category. Enforced server-side via
    *  attendees.applied_promo_code + pricing_category_id counts. */
   usageLimits?: Record<string, number>;
+  /** Global max redemptions across ALL eligible categories combined. When set
+   *  alongside per-category `usageLimits`, both constraints apply — the
+   *  tighter one wins. Omit or 0 = unlimited globally. Enforced server-side
+   *  (edge function pre-check + DB trigger race-free guard). */
+  totalUsageLimit?: number;
 }
 
 export interface TicketItem {
