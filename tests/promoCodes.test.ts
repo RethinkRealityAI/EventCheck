@@ -13,6 +13,8 @@ import {
   isPromoAllowedForCategory,
   getPromoUsageLimit,
   isPromoUsageLimitReached,
+  getPromoTotalUsageLimit,
+  isPromoTotalUsageLimitReached,
   promoUsageLimitCategories,
   anyCategoryRequiresPromoCode,
   formHasEnabledPromoCodes,
@@ -173,6 +175,57 @@ describe('promo category scope + usage limits', () => {
   it('lists categories for the usage-limit editor', () => {
     expect(promoUsageLimitCategories(SPEAKER, CATS).length).toBe(3);
     expect(promoUsageLimitCategories(SCOPED, CATS).map(c => c.id)).toEqual(['stud']);
+  });
+});
+
+describe('getPromoTotalUsageLimit', () => {
+  it('returns the limit when set to a positive integer', () => {
+    const p: PromoCode = { code: 'BULK50', type: 'percent', value: 20, totalUsageLimit: 50 };
+    expect(getPromoTotalUsageLimit(p)).toBe(50);
+  });
+  it('returns null when totalUsageLimit is absent', () => {
+    expect(getPromoTotalUsageLimit(HALF)).toBeNull();
+  });
+  it('returns null when totalUsageLimit is 0', () => {
+    const p: PromoCode = { code: 'ZERO', type: 'percent', value: 10, totalUsageLimit: 0 };
+    expect(getPromoTotalUsageLimit(p)).toBeNull();
+  });
+  it('returns null when totalUsageLimit is negative', () => {
+    const p: PromoCode = { code: 'NEG', type: 'percent', value: 10, totalUsageLimit: -5 };
+    expect(getPromoTotalUsageLimit(p)).toBeNull();
+  });
+});
+
+describe('isPromoTotalUsageLimitReached', () => {
+  const CAPPED: PromoCode = { code: 'CAP10', type: 'percent', value: 100, totalUsageLimit: 10 };
+  const UNCAPPED: PromoCode = { code: 'OPEN', type: 'percent', value: 50 };
+
+  it('false when count is below the limit', () => {
+    expect(isPromoTotalUsageLimitReached(CAPPED, 9)).toBe(false);
+  });
+  it('true when count equals the limit', () => {
+    expect(isPromoTotalUsageLimitReached(CAPPED, 10)).toBe(true);
+  });
+  it('true when count exceeds the limit', () => {
+    expect(isPromoTotalUsageLimitReached(CAPPED, 11)).toBe(true);
+  });
+  it('false when no totalUsageLimit is configured', () => {
+    expect(isPromoTotalUsageLimitReached(UNCAPPED, 9999)).toBe(false);
+  });
+  it('coexists with per-category limits independently', () => {
+    const BOTH: PromoCode = {
+      code: 'BOTH',
+      type: 'percent',
+      value: 20,
+      totalUsageLimit: 50,
+      usageLimits: { physician: 20 },
+    };
+    expect(getPromoTotalUsageLimit(BOTH)).toBe(50);
+    expect(getPromoUsageLimit(BOTH, 'physician')).toBe(20);
+    expect(isPromoTotalUsageLimitReached(BOTH, 49)).toBe(false);
+    expect(isPromoTotalUsageLimitReached(BOTH, 50)).toBe(true);
+    expect(isPromoUsageLimitReached(BOTH, 'physician', 19)).toBe(false);
+    expect(isPromoUsageLimitReached(BOTH, 'physician', 20)).toBe(true);
   });
 });
 
