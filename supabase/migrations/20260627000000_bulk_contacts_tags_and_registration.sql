@@ -1,7 +1,7 @@
 -- Tagging + free invite-to-register linkage for bulk-imported contacts.
 ALTER TABLE public.imported_contacts
   ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT '{}'::text[],
-  ADD COLUMN IF NOT EXISTS attendee_id UUID REFERENCES public.attendees(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS attendee_id TEXT REFERENCES public.attendees(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS registered_at TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS invite_sent_at TIMESTAMPTZ;
 
