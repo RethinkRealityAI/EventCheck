@@ -2,7 +2,8 @@
 ALTER TABLE public.imported_contacts
   ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT '{}'::text[],
   ADD COLUMN IF NOT EXISTS attendee_id UUID REFERENCES public.attendees(id) ON DELETE SET NULL,
-  ADD COLUMN IF NOT EXISTS registered_at TIMESTAMPTZ;
+  ADD COLUMN IF NOT EXISTS registered_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS invite_sent_at TIMESTAMPTZ;
 
 -- Seed multi-tags from the existing single batch tag (one-time, idempotent-safe).
 UPDATE public.imported_contacts

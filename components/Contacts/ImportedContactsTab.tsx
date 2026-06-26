@@ -242,6 +242,8 @@ export default function ImportedContactsTab({ settings }: Props) {
     setContacts(prev => prev.filter(x => !selected.has(x.id)));
     clearSelection();
     showNotification(`Deleted ${ok} contact${ok !== 1 ? 's' : ''}`, ok === ids.length ? 'success' : 'info');
+    // Refresh so allTags/counts reflect the deletion (mirrors the tag bulk actions).
+    await load();
   };
 
   const removeBatch = async (b: ImportBatch) => {
@@ -485,8 +487,15 @@ export default function ImportedContactsTab({ settings }: Props) {
                     />
                   </td>
                   <td className="px-4 py-2 font-medium text-gray-900">
-                    <span className="inline-flex items-center gap-1.5">
+                    <span className="inline-flex items-center gap-1.5 flex-wrap">
                       {c.name || <span className="text-gray-300">—</span>}
+                      {/* Invite state is distinct from the campaign "Sent" email status:
+                          invite_sent_at means a free-registration invite was emailed. */}
+                      {c.inviteSentAt && !c.registeredAt && (
+                        <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-violet-700 bg-violet-50 border border-violet-200 px-1.5 py-0.5 rounded-full" title={`Invite sent ${timeAgo(c.inviteSentAt)}`}>
+                          <Ticket className="w-3 h-3" /> Invited
+                        </span>
+                      )}
                       {c.registeredAt && (
                         <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-full" title={`Registered ${timeAgo(c.registeredAt)}`}>
                           <TicketCheck className="w-3 h-3" /> Registered

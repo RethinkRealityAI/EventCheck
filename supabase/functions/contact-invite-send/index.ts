@@ -65,10 +65,16 @@ serve(async (req: Request) => {
       body: JSON.stringify({ mode: 'contact-register-invite', to: (contact as any).email, subject: renderedSubject, html: renderedHtml }),
     });
     if (!resp.ok) {
-      await svc.from('imported_contacts').update({ email_status: 'failed', email_error: `send ${resp.status}` }).eq('id', contactId);
+      // Invites are DECOUPLED from the campaign email_status column: writing
+      // 'failed'/'sent' here would corrupt the marketing-campaign "sent" state
+      // (campaigns skip email_status='sent'). Just surface the error; the admin
+      // sees the failure in the modal's live send queue.
+      console.error('contact-invite-send: send failed', contactId, resp.status);
       return json({ error: 'send-failed', status: resp.status }, 502);
     }
-    await svc.from('imported_contacts').update({ email_status: 'sent', email_sent_at: new Date().toISOString(), email_subject: renderedSubject }).eq('id', contactId);
+    // Track invite delivery on the dedicated invite_sent_at column, NOT
+    // email_status — so an invited contact still flows into later campaigns.
+    await svc.from('imported_contacts').update({ invite_sent_at: new Date().toISOString(), email_subject: renderedSubject }).eq('id', contactId);
     return json({ ok: true });
   } catch (e) {
     return json({ error: 'server-error', detail: String(e) }, 500);

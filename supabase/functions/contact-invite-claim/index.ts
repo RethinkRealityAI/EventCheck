@@ -92,11 +92,22 @@ serve(async (req: Request) => {
       const { error: insErr } = await svc.from('attendees').insert(row);
       if (insErr) return json({ error: 'insert-failed', detail: insErr.message }, 500);
 
-      // Link the contact → registered. Rowcount-checked (§16 #4).
-      const { data: upd } = await svc.from('imported_contacts')
+      // Atomic claim: link the contact → this attendee ONLY if it's still
+      // unclaimed. The attendees FK requires the row to exist first, so we
+      // insert-then-claim. If a concurrent register already linked the contact
+      // (the early fast-path missed it by a few ms), the conditional UPDATE
+      // matches 0 rows — we lost the race, so delete our just-inserted orphan
+      // attendee and return the existing link as 409. Only the winner proceeds
+      // to send the confirmation email below.
+      const { data: claimed } = await svc.from('imported_contacts')
         .update({ attendee_id: id, registered_at: new Date().toISOString() })
-        .eq('id', v.contactId).select('id');
-      if (!upd || upd.length === 0) console.error('contact-invite-claim: contact link update affected 0 rows', v.contactId);
+        .eq('id', v.contactId).is('attendee_id', null).select('id');
+      if (!claimed || claimed.length === 0) {
+        // Lost the race — another concurrent register already linked this contact. Delete our orphan.
+        await svc.from('attendees').delete().eq('id', id);
+        const { data: existing } = await svc.from('imported_contacts').select('attendee_id').eq('id', v.contactId).maybeSingle();
+        return json({ error: 'already-registered', attendeeId: (existing as any)?.attendee_id ?? null }, 409);
+      }
 
       // Reuse the P4 registration-confirmed email (download link). Best-effort —
       // never fail the registration on an email hiccup.

@@ -31,6 +31,7 @@ export interface ImportedContact {
   tags: string[];
   attendeeId: string | null;
   registeredAt: string | null;
+  inviteSentAt: string | null;
   extraFields: Record<string, string>;
   emailStatus: ContactEmailStatus;
   emailError: string | null;
@@ -69,6 +70,7 @@ function mapContact(r: any): ImportedContact {
     tags: (r.tags as string[]) ?? [],
     attendeeId: r.attendee_id ?? null,
     registeredAt: r.registered_at ?? null,
+    inviteSentAt: r.invite_sent_at ?? null,
     extraFields: (r.extra_fields as Record<string, string>) ?? {},
     emailStatus: (r.email_status as ContactEmailStatus) ?? 'pending',
     emailError: r.email_error ?? null,

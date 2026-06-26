@@ -208,9 +208,11 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume,
   // Send queue + config.
   // Campaign/resume keeps each contact's persisted email_status so the queue
   // skips rows already sent. Invite is a DISTINCT action from a marketing send
-  // (it mints a registration link), and shares the same email_status column —
-  // so we reset the preset audience to 'pending' on open, otherwise a contact
-  // who got a prior campaign would be silently filtered out of the invite run.
+  // (it mints a registration link) and is FULLY DECOUPLED from email_status —
+  // invites track delivery on invite_sent_at, never touch email_status, and
+  // send to ALL selected contacts regardless of campaign state. We therefore
+  // seed invite items to 'pending' purely for the live UI badge (the queue does
+  // not filter on it in invite mode); campaign keeps the persisted status.
   const [items, setItems] = useState<SendItem[]>(
     presetAudience
       ? presetAudience.contacts.map(c => ({
@@ -480,7 +482,13 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume,
 
       const sentAt = new Date().toISOString();
       setItemsSafe(prev => prev.map(i => i.id === item.id ? { ...i, status: 'sent', error: null } : i));
-      await updateContactEmailStatus(item.id, { emailStatus: 'sent', emailSentAt: sentAt, emailSubject: subjectResolved, trackingId, emailError: null });
+      // Invites are decoupled from campaign email_status: the contact-invite-send
+      // edge fn already stamped invite_sent_at server-side. Writing 'sent' here
+      // would drop the contact from later marketing campaigns. Campaign sends
+      // persist email_status as before.
+      if (!isInvite) {
+        await updateContactEmailStatus(item.id, { emailStatus: 'sent', emailSentAt: sentAt, emailSubject: subjectResolved, trackingId, emailError: null });
+      }
       // Log to email_sends for unified analytics/history (best-effort).
       try {
         const { data: { user } } = await supabase.auth.getUser();
@@ -501,7 +509,11 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume,
     } catch (e: any) {
       const msg = e?.message || 'Send failed';
       setItemsSafe(prev => prev.map(i => i.id === item.id ? { ...i, status: 'failed', error: msg } : i));
-      await updateContactEmailStatus(item.id, { emailStatus: 'failed', emailError: msg });
+      // Leave email_status untouched for invites (decoupled from campaigns) —
+      // a failed invite must not mark the contact 'failed' for marketing sends.
+      if (!isInvite) {
+        await updateContactEmailStatus(item.id, { emailStatus: 'failed', emailError: msg });
+      }
     }
   };
 
@@ -529,6 +541,11 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume,
 
     // Recompute the queue from current state so retries pick up only the
     // unsent rows. `sent` is never re-sent; skipped (invalid) are not retried.
+    //
+    // Invite mode is decoupled from campaign email_status: items were seeded to
+    // 'pending' (never the persisted campaign status), so the same in-run filter
+    // sends to ALL selected contacts on the first pass — a contact with a prior
+    // campaign 'sent' is NOT skipped — and only failed/pending on retry.
     const queue = items.filter(i =>
       onlyFailedOrPending ? (i.status === 'pending' || i.status === 'failed') : (i.status !== 'sent'),
     );

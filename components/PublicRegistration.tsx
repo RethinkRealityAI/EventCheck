@@ -140,6 +140,9 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   const inviteToken = searchParams.get('invite');
   const [inviteMode, setInviteMode] = useState(false);
   const [inviteResolved, setInviteResolved] = useState<{ name: string; email: string } | null>(null);
+  // True when `resolve` reports the invited contact has already registered —
+  // render a friendly panel instead of the form (avoids a wasted 409 on submit).
+  const [inviteAlreadyRegistered, setInviteAlreadyRegistered] = useState(false);
   const [mode, setMode] = useState<'purchaser' | 'guest'>((guestRef ? 'guest' : 'purchaser') as 'purchaser' | 'guest');
   const [fetchedPrimaryAttendee, setFetchedPrimaryAttendee] = useState<Attendee | null>(null);
   const [remainingSeats, setRemainingSeats] = useState<number>(0);
@@ -312,7 +315,10 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   const bogoFeatureOn = !!(form?.settings?.bogoEnabled && pricingTemplate);
 
   // Sync bogoSlots length to match paid-attendee count (buyer + group members).
-  const bogoSlotCount = bogoFeatureOn
+  // Never offer a BOGO free guest on an invited FREE registration: the invite
+  // path forces a no-payment submit, so a paired free guest would be silently
+  // dropped (the server never inserts bogoClaims for the free invite branch).
+  const bogoSlotCount = (!inviteMode && bogoFeatureOn)
     ? (registrationMode === 'group' ? 1 + groupMembers.length : 1)
     : 0;
   useEffect(() => {
@@ -495,6 +501,12 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
       const contactEmail = String((data as any).contactEmail || '');
       setInviteMode(true);
       setInviteResolved({ name: contactName, email: contactEmail });
+      // Already registered → show the done panel instead of the blank form so
+      // the user isn't allowed to fill it out and hit a 409 on submit.
+      if ((data as any).alreadyRegistered) {
+        setInviteAlreadyRegistered(true);
+        return;
+      }
 
       // SAME field detection as the profile-prefill effect (split first/last + email).
       const nameParts = contactName.trim().split(/\s+/);
@@ -1768,6 +1780,23 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
       <div className="bg-white p-8 rounded-lg shadow-lg text-center">
         <h1 className="text-xl font-bold mb-2">{form.title}</h1>
         <p className="text-red-500">This form is currently closed for new registrations.</p>
+      </div>
+    </div>
+  );
+
+  // Invited contact already registered (detected at resolve time). Show a
+  // friendly done panel instead of the blank form so they don't fill it out
+  // and hit a 409 on submit. Skip if a ticket was just generated this session.
+  if (inviteAlreadyRegistered && !generatedTicket) return (
+    <div className="min-h-screen flex items-center justify-center bg-gansid-surface-container-lowest p-4">
+      <div className="bg-white p-8 rounded-gansid-xl shadow-md text-center max-w-md">
+        <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-3">
+          <Check className="w-7 h-7" />
+        </div>
+        <h1 className="font-display text-xl font-bold text-gansid-on-surface mb-2">You're already registered</h1>
+        <p className="font-body text-sm text-gansid-on-surface/70">
+          You're already registered for this event{inviteResolved?.email ? <> as <strong>{inviteResolved.email}</strong></> : null}. Check your email for your ticket — search for a message with your QR code, or reply to it if you can't find it.
+        </p>
       </div>
     </div>
   );
