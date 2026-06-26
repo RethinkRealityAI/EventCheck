@@ -41,3 +41,15 @@ verify_jwt = false
 # Must be gateway-open so the token-bearing link works without a session.
 [functions.registration-download]
 verify_jwt = false
+
+# Admin-only. Mints a signed free-registration invite token for an imported
+# contact and emails the link. Gateway requires a JWT; the function additionally
+# asserts the caller is an admin/super_admin before signing anything.
+[functions.contact-invite-send]
+verify_jwt = true
+
+# Public, token-gated. Resolves an invite token to a contact's name/email for
+# prefill, and registers them FREE on completion. The HMAC token is the
+# credential; the function trusts NOTHING from the client for the free grant.
+[functions.contact-invite-claim]
+verify_jwt = false
