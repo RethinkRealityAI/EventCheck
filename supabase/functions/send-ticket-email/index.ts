@@ -209,6 +209,21 @@ serve(async (req: Request) => {
             return jsonResponse({ ok: true });
         }
 
+        // ── CONTACT REGISTER INVITE: emails an imported contact a FREE registration link ──
+        // Body: { mode: 'contact-register-invite', to, subject, html }  (html pre-rendered by caller)
+        if (body.mode === 'contact-register-invite') {
+            const { to, subject, html } = body;
+            if (!to || !subject || !html) return jsonResponse({ error: 'Missing to/subject/html' }, 400);
+            const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+            const { data: appSettings } = await supabase.from('app_settings').select('*').eq('id', 1).maybeSingle();
+            const s = (appSettings as any) || {};
+            const smtpConfig = appSettings
+                ? { host: s.smtp_host, port: Number(s.smtp_port || 587), user: s.smtp_user, pass: s.smtp_pass, fromName: s.email_from_name || 'SCAGO' }
+                : undefined;
+            await sendSimpleEmail({ to, subject, html, smtpConfig });
+            return jsonResponse({ ok: true });
+        }
+
         // ── REGISTRATION CONFIRMED: server-guaranteed purchaser confirmation + download link ──
         // No attachments. Reuses the admin purchaser template (table-purchaser variant
         // when linked guests exist, otherwise the standard ticket template) and appends a
