@@ -12,7 +12,8 @@ export type DashboardTabId =
   | 'speakers'
   | 'test'
   | 'exhibitors'
-  | 'signups';
+  | 'signups'
+  | 'contacts';
 
 export interface DashboardTabMeta {
   id: DashboardTabId;
@@ -40,6 +41,7 @@ export const DASHBOARD_TAB_META: readonly DashboardTabMeta[] = [
   { id: 'test', label: 'Test', description: 'Form-preview submissions' },
   { id: 'exhibitors', label: 'Exhibitors', description: 'Exhibitor org + staff rows', requiresExhibitorForms: true },
   { id: 'signups', label: 'Signups', description: 'Portal users + registration progress', requiresPortal: true },
+  { id: 'contacts', label: 'Contacts', description: 'Bulk-imported contacts + email campaigns' },
 ];
 
 /** Resolve the ordered list of tabs to render, honoring both site-availability
