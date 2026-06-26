@@ -99,13 +99,11 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [previewPdfUrl, setPreviewPdfUrl] = useState<string | null>(null);
   const [guestTicketsData, setGuestTicketsData] = useState<Array<{ name: string, attendee: Attendee, registrationUrl?: string }>>([]);
-  // Tracks whether the buyer's confirmation email actually went out. false =
-  // either SMTP isn't configured or the send threw (errors are swallowed below
-  // so registration still completes). Drives a "download your tickets now"
-  // notice on the success screen so a failed email never leaves a buyer empty-
-  // handed — especially important for tables, where the email is the only
-  // durable copy of every guest's ticket + claim links on no-portal tenants.
-  const [emailDispatched, setEmailDispatched] = useState(false);
+  // NOTE: The purchaser's confirmation email is now guaranteed server-side by
+  // verify-payment (it survives a tab close after PayPal) and carries a secure
+  // link to the public /#/tickets download page. The success screen therefore
+  // always tells the buyer the email was sent AND still offers an immediate
+  // in-browser download of the already-generated PDFs.
   const { showNotification } = useNotifications();
 
   // Ticket / Payment State
@@ -1392,40 +1390,13 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
 
     setGeneratedTicket(newAttendee);
 
-    // Reset per-submission; flipped to true only once the purchaser email send
-    // resolves successfully below.
-    setEmailDispatched(false);
-
     // --- SMTP Email Integration (runs for ALL registration types) ---
     if (settings && settings.smtpUser && settings.smtpPass) {
       try {
-        const attachments = [];
-
-        // Primary Ticket PDF
-        const primaryDoc = await generateTicketPDF(newAttendee, settings, form);
-        attachments.push({
-          filename: `${purchaserName}_Ticket.pdf`,
-          content: arrayBufferToBase64(primaryDoc.output('arraybuffer')),
-          contentType: 'application/pdf'
-        });
-
-        // Guest Ticket PDFs (will be empty for single-ticket or free forms)
-        for (const [idx, gt] of guestTickets.entries()) {
-          const guestDoc = await generateTicketPDF(gt.attendee, settings, form, gt.registrationUrl);
-          const isPlaceholder = gt.attendee.name.includes('Guest Ticket #');
-          const safeName = isPlaceholder
-            ? `Guest_${idx + 2}`
-            : gt.attendee.name.replace(/[^a-zA-Z0-9 ]/g, '_');
-          attachments.push({
-            filename: `${safeName}_Ticket.pdf`,
-            content: arrayBufferToBase64(guestDoc.output('arraybuffer')),
-            contentType: 'application/pdf'
-          });
-        }
-
-        // Group mode: attach PDFs for every additional registrant so the purchaser
-        // gets the whole stack as a backup (matches the "main group registrant will
-        // always receive every ticket as a backup" promise on the landing page).
+        // Group mode: build a PDF for every additional registrant so each
+        // inline guest can be emailed their own ticket below. (The purchaser
+        // no longer receives a backup bundle from the client — verify-payment
+        // sends them a server-side confirmation with a secure download link.)
         // Per-guest emails (with their individual PDF) are sent further below.
         const groupGuestPdfs: Array<{ guestId: string; email: string; name: string; pdfBase64: string; isInline: boolean }> = [];
         if (registrationMode === 'group' && groupGuestRows.length > 0) {
@@ -1451,74 +1422,17 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
             const claimUrl = g.isInline ? undefined : `${window.location.origin}/#/form/${form.id}?ref=${g.id}`;
             const doc = await generateTicketPDF(guestAttendee, settings, form, claimUrl);
             const pdfBase64 = arrayBufferToBase64(doc.output('arraybuffer'));
-            const safeName = g.name.replace(/[^a-zA-Z0-9 ]/g, '_') || 'Guest';
-            attachments.push({
-              filename: `${safeName}_Ticket.pdf`,
-              content: pdfBase64,
-              contentType: 'application/pdf',
-            });
             groupGuestPdfs.push({ guestId: g.id, email: g.email, name: g.name, pdfBase64, isInline: g.isInline });
           }
         }
 
-        // Send all tickets to the purchaser (their own + every group guest's PDF as backup)
-        const hasGroupGuests = groupGuestPdfs.length > 0;
-        // Build a per-guest claim-link block for unclaimed placeholder seats so
-        // the purchaser can forward an individual link to each guest without
-        // digging into the attached PDFs.
-        const placeholderGuestTickets = guestTickets.filter(g => !!g.registrationUrl);
-        const claimLinksBlock = placeholderGuestTickets.length > 0
-          ? `<div style="margin-top:16px;padding:12px 16px;background:#f8fafc;border-left:3px solid #4f46e5;border-radius:4px;">
-               <p style="margin:0 0 8px;font-weight:600;">Registration links for your guests</p>
-               <p style="margin:0 0 10px;font-size:13px;color:#475569;">Forward a link below to each guest so they can complete their own details. Each link claims one seat.</p>
-               <ol style="margin:0;padding-left:20px;line-height:1.8;font-size:13px;">
-                 ${placeholderGuestTickets.map(g => `<li><strong>${g.name}</strong> — <a href="${g.registrationUrl}">Claim / register</a><br><span style="color:#64748b;font-size:12px;">${g.registrationUrl}</span></li>`).join('')}
-               </ol>
-             </div>`
-          : '';
-        // Table-or-group purchasers get the dedicated `emailTablePurchaser*`
-        // template (with its own subject + body — admins can edit it
-        // independently from the solo ticket template in Settings).
-        // Solo purchasers get the standard `emailSubject`/`emailBodyTemplate`.
-        // Both templates support {{name}}, {{event}}, {{id}}, {{invoiceId}},
-        // {{amount}} — substituted here so admins can move event-name
-        // references around freely. The dynamic claim-links block is
-        // appended after the rendered body so admin edits never lose the
-        // per-guest URLs.
-        const isTableOrGroup = guestTickets.length > 0 || hasGroupGuests;
-        const subjectTpl = isTableOrGroup
-          ? (settings.emailTablePurchaserSubject || settings.emailSubject || 'Your ticket for {{event}}')
-          : (settings.emailSubject || 'Your ticket for {{event}}');
-        const bodyTpl = isTableOrGroup
-          ? (settings.emailTablePurchaserBody || settings.emailBodyTemplate || '<p>Thank you for registering for <strong>{{event}}</strong>.</p>')
-          : (settings.emailBodyTemplate || '<p>Thank you for registering for <strong>{{event}}</strong>.</p>');
-        const renderPlaceholders = (s: string) => s
-          .replace(/\{\{event\}\}/g, form.title || '')
-          .replace(/\{\{name\}\}/g, purchaserName || '')
-          .replace(/\{\{id\}\}/g, submissionId || '')
-          .replace(/\{\{invoiceId\}\}/g, invoiceId || '')
-          .replace(/\{\{amount\}\}/g, paymentAmount || (paymentTotal > 0 ? String(paymentTotal) : ''));
-        const purchaserSubject = renderPlaceholders(subjectTpl);
-        const purchaserMessage = renderPlaceholders(bodyTpl) + claimLinksBlock;
-        await sendTicketEmail(settings, {
-          to: purchaserEmail,
-          subject: purchaserSubject,
-          name: purchaserName,
-          title: form.title || undefined,
-          message: purchaserMessage,
-          attachments
-        });
-        // The buyer's email is out the door — drive the success-screen copy.
-        // (Later per-guest sends may still fail without affecting this.)
-        setEmailDispatched(true);
-        // Stamp ticket-send timestamp so the dashboard reflects "Sent" for
-        // this primary. Best-effort — log + continue on error so a
-        // post-purchase confirmation never blocks on a metadata update.
-        try {
-          await updateAttendee(submissionId, { lastTicketEmailAt: new Date().toISOString() });
-        } catch (err) {
-          console.warn('Failed to stamp lastTicketEmailAt for purchaser', err);
-        }
+        // NOTE: The purchaser's confirmation email is now sent SERVER-SIDE by
+        // verify-payment (mode 'registration-confirmed') so it survives a tab
+        // close after PayPal. It contains a secure link to the public
+        // /#/tickets download page (which rebuilds the same ticket PDFs).
+        // The client therefore no longer sends the purchaser email or its
+        // table-purchaser template + claim-links block — only the per-guest
+        // sends below remain as best-effort client enhancements.
 
         // Group-mode: send each inline registrant their own ticket directly.
         // Pending-claim registrants get a claim-link email from the server instead —
@@ -2438,27 +2352,23 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
             ) : (
               <>
                 <h2 className="text-2xl font-bold text-gray-900 mb-2">You're going!</h2>
-                {emailDispatched ? (
-                  <p className="text-gray-500 mb-6">A confirmation email with your ticket{guestTicketsData.length > 0 ? 's' : ''} has been sent to <span className="font-semibold">{generatedTicket.email}</span>.</p>
-                ) : (
-                  <p className="text-gray-500 mb-6">Your registration is confirmed. Please download your ticket{guestTicketsData.length > 0 ? 's' : ''} below.</p>
-                )}
+                <p className="text-gray-500 mb-6">We've emailed your confirmation with a secure link to download your ticket{guestTicketsData.length > 0 ? 's' : ''}. You can also download {guestTicketsData.length > 0 ? 'them' : 'it'} right now below.</p>
               </>
             )}
 
-            {/* Email didn't go out (SMTP off or the send failed) — make sure the
-                buyer saves their tickets now rather than relying on an email
-                that never arrived. Shows regardless of the thank-you variant. */}
-            {!emailDispatched && (
-              <div className="mb-6 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 text-left">
-                <p className="font-semibold mb-1">Save your ticket{guestTicketsData.length > 0 ? 's' : ''} now</p>
-                <p>
-                  We couldn't send your confirmation email automatically. Please download your
-                  ticket{guestTicketsData.length > 0 ? 's' : ''} below and keep {guestTicketsData.length > 0 ? 'them' : 'it'} safe —
-                  the QR code is required for entry. The event organizer can also re-send your email if needed.
-                </p>
-              </div>
-            )}
+            {/* The purchaser's confirmation email (with a secure /#/tickets
+                download link) is now sent server-side by verify-payment, so it
+                survives a tab close after PayPal. We still surface an immediate
+                in-browser download here so the buyer never has to wait on email
+                — the QR code is required for entry. */}
+            <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900 text-left">
+              <p className="font-semibold mb-1">Your ticket{guestTicketsData.length > 0 ? 's are' : ' is'} on the way</p>
+              <p>
+                We've sent a confirmation email with a secure link to download your
+                ticket{guestTicketsData.length > 0 ? 's' : ''} — keep that email so you can re-download {guestTicketsData.length > 0 ? 'them' : 'it'} anytime
+                through the event. You can also download {guestTicketsData.length > 0 ? 'them' : 'it'} right now below.
+              </p>
+            </div>
 
             {bogoSuccessNotice && (
               <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 text-left">

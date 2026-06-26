@@ -426,7 +426,7 @@ export const clearData = async (): Promise<void> => {
 };
 
 // --- Mapping Helpers ---
-function mapAttendeeFromDb(db: AttendeeRow): Attendee {
+export function mapAttendeeFromDb(db: AttendeeRow): Attendee {
   const donationDetails = (db.donation_details as any) || {};
   return {
     id: db.id,
@@ -523,7 +523,7 @@ export function mapAttendeeToDb(a: Attendee): AttendeeInsert {
   } as AttendeeInsert;
 }
 
-function mapFormFromDb(db: FormRow): Form {
+export function mapFormFromDb(db: FormRow): Form {
   return {
     id: db.id,
     title: db.title,

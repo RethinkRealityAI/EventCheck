@@ -5,6 +5,7 @@ import {
   buildBogoRow,
   isCategoryAtOrBelowCeiling,
 } from '../_shared/bogoRowBuilder.ts';
+import { signRegistrationToken } from '../_shared/registrationToken.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -96,6 +97,54 @@ async function processBogoClaims(args: {
   }
 
   return { partialBogoFailure: false };
+}
+
+// ── Server-guaranteed purchaser confirmation email + tokenized download link ──
+// Signs a stateless 180-day HMAC token (primary attendee id + form id) and POSTs
+// to send-ticket-email's `registration-confirmed` mode so the buyer always gets a
+// confirmation with a secure ticket-download link — even if they close the tab
+// after PayPal. Best-effort: logs and swallows ALL errors so a registration is
+// NEVER failed by an email hiccup. Call after a successful event-path insert.
+async function sendRegistrationConfirmedEmail(
+  primaryAttendeeId: string,
+  formId: string,
+  origin: string,
+): Promise<void> {
+  try {
+    // Never sign a token with a missing id/formId — verifyRegistrationToken
+    // would reject it (malformed) and the emailed link would be dead. Skip
+    // cleanly instead (legacy callers may omit formId).
+    if (!primaryAttendeeId || !formId) {
+      console.warn('[verify-payment] registration-confirmed skipped: missing id/formId', { primaryAttendeeId, formId });
+      return;
+    }
+    const secret = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const TTL_MS = 180 * 24 * 60 * 60 * 1000; // 180 days
+    const token = await signRegistrationToken(primaryAttendeeId, formId, secret, Date.now(), TTL_MS);
+    // The Origin header is stripped by some privacy browsers/extensions (see
+    // the PayPal-capture note below). Fall back to the per-project PUBLIC_SITE_URL
+    // env so the emailed link is never host-relative (which is unclickable from
+    // an inbox). If both are absent we still send — the link works in-app.
+    const base = origin || Deno.env.get('PUBLIC_SITE_URL') || '';
+    if (!base) {
+      console.warn('[verify-payment] registration-confirmed: no origin and no PUBLIC_SITE_URL — link will be host-relative');
+    }
+    const downloadUrl = `${base}/#/tickets?token=${encodeURIComponent(token)}`;
+    const emailFnUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/send-ticket-email`;
+    const resp = await fetch(emailFnUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+      },
+      body: JSON.stringify({ mode: 'registration-confirmed', primaryAttendeeId, downloadUrl }),
+    });
+    if (!resp.ok) {
+      console.error('[verify-payment] registration-confirmed email failed', resp.status, await resp.text());
+    }
+  } catch (e) {
+    console.error('[verify-payment] registration-confirmed email threw', String(e));
+  }
 }
 
 // ── Promo code resolution + discount (dynamic-pricing branches) ──────────
@@ -1498,6 +1547,10 @@ serve(async (req: Request) => {
           origin: req.headers.get('origin') ?? '',
         });
 
+        // Server-guaranteed purchaser confirmation + tokenized download link.
+        // One email per registration → the GROUP PRIMARY only (not per guest).
+        await sendRegistrationConfirmedEmail(primaryId, formId, req.headers.get('origin') ?? '');
+
         return jsonResponse({
           ok: true,
           total: groupDiscountedCents,
@@ -1760,6 +1813,9 @@ serve(async (req: Request) => {
           origin: req.headers.get('origin') ?? '',
         });
 
+        // Server-guaranteed purchaser confirmation + tokenized download link.
+        await sendRegistrationConfirmedEmail(primary.id, formId, req.headers.get('origin') ?? '');
+
         // 12. Return success
         return jsonResponse({
           ok: true,
@@ -1913,6 +1969,12 @@ serve(async (req: Request) => {
       if (insertError) {
         console.error('Failed to save attendees:', insertError);
         return jsonResponse({ error: `Database error: ${insertError.message}` }, 500);
+      }
+
+      // Server-guaranteed purchaser confirmation + tokenized download link (primary only).
+      const freePrimaryId = stampedAttendees[0]?.id;
+      if (freePrimaryId) {
+        await sendRegistrationConfirmedEmail(freePrimaryId, formId, req.headers.get('origin') ?? '');
       }
 
       return jsonResponse({
@@ -2081,6 +2143,12 @@ serve(async (req: Request) => {
       return jsonResponse({
         error: `Your payment was processed but we encountered a database error saving your registration. Please contact the event organizer with this reference: ${transactionId}`,
       }, 500);
+    }
+
+    // Server-guaranteed purchaser confirmation + tokenized download link (primary only).
+    const staticPrimaryId = stampedAttendees[0]?.id;
+    if (staticPrimaryId) {
+      await sendRegistrationConfirmedEmail(staticPrimaryId, formId, req.headers.get('origin') ?? '');
     }
 
     return jsonResponse({

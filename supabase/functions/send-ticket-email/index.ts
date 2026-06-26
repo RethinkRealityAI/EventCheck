@@ -209,6 +209,85 @@ serve(async (req: Request) => {
             return jsonResponse({ ok: true });
         }
 
+        // ── REGISTRATION CONFIRMED: server-guaranteed purchaser confirmation + download link ──
+        // No attachments. Reuses the admin purchaser template (table-purchaser variant
+        // when linked guests exist, otherwise the standard ticket template) and appends a
+        // download-link block. Fired by verify-payment after every event-path insert so
+        // the buyer's confirmation survives a tab-close after PayPal.
+        // Body shape: { mode: 'registration-confirmed', primaryAttendeeId, downloadUrl }
+        if (body.mode === 'registration-confirmed') {
+            const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+            const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+            const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+            const { data: primary, error: pErr } = await supabase
+                .from('attendees').select('*').eq('id', body.primaryAttendeeId).maybeSingle();
+            if (pErr || !primary) return jsonResponse({ error: 'Primary not found' }, 404);
+            if (!primary.email) return jsonResponse({ ok: true, skipped: 'no-email' });
+            // Don't email a confirmation for test registrations.
+            if (primary.is_test === true) return jsonResponse({ ok: true, skipped: 'test' });
+
+            const { data: form } = await supabase
+                .from('forms').select('title').eq('id', primary.form_id).maybeSingle();
+            const eventName = form?.title || 'the event';
+
+            // Table/group purchaser? Pick the table-purchaser template if linked guests exist.
+            const { count: guestCount } = await supabase
+                .from('attendees').select('id', { count: 'exact', head: true })
+                .eq('primary_attendee_id', primary.id);
+            const isTableOrGroup = (guestCount ?? 0) > 0;
+
+            const { data: appSettings } = await supabase
+                .from('app_settings').select('*').eq('id', 1).maybeSingle();
+            const s = (appSettings as any) || {};
+            const smtpConfig = appSettings
+                ? { host: s.smtp_host, port: Number(s.smtp_port || 587), user: s.smtp_user, pass: s.smtp_pass, fromName: s.email_from_name || 'SCAGO' }
+                : undefined;
+
+            // Column names reconciled against storageService AppSettings mapper:
+            //   email_subject / email_body_template (standard purchaser),
+            //   email_table_purchaser_subject / email_table_purchaser_body (table/group).
+            const rawSubject = (isTableOrGroup ? s.email_table_purchaser_subject : s.email_subject)
+                || s.email_subject || 'Your registration for {{event}} is confirmed';
+            const rawBody = (isTableOrGroup ? s.email_table_purchaser_body : s.email_body_template)
+                || s.email_body_template || '<p>Thank you for registering for <strong>{{event}}</strong>.</p>';
+
+            const downloadUrl = body.downloadUrl || '';
+            const downloadBlock = downloadUrl
+                ? `<div style="margin-top:20px;padding:16px 18px;background:#f0f7ff;border-left:3px solid #1E4A8C;border-radius:6px;">
+                     <p style="margin:0 0 10px;font-weight:600;">Your tickets</p>
+                     <p style="margin:0 0 12px;font-size:14px;color:#475569;">Download your ticket(s) — including any guests — using the button below. Keep this email; the link stays valid through the event.</p>
+                     <p style="text-align:center;margin:8px 0;"><a href="${downloadUrl}" style="display:inline-block;padding:12px 24px;background:#1E4A8C;color:#fff;text-decoration:none;border-radius:6px;font-weight:600;">Download your tickets</a></p>
+                   </div>`
+                : '';
+
+            const replace = (str: string) => str
+                .replace(/\{\{event\}\}/g, eventName)
+                .replace(/\{\{name\}\}/g, primary.name || '')
+                .replace(/\{\{id\}\}/g, primary.id || '')
+                .replace(/\{\{invoiceId\}\}/g, primary.invoice_id || '')
+                .replace(/\{\{amount\}\}/g, primary.payment_amount || '')
+                .replace(/\{\{download_url\}\}/g, downloadUrl);
+
+            const subject = replace(rawSubject);
+            const contentHtml = replace(rawBody) + downloadBlock;
+            const html = generateEmailTemplate({
+                title: eventName,
+                greeting: `Hi ${primary.name || 'there'}`,
+                content: contentHtml,
+                fromName: smtpConfig?.fromName,
+            });
+
+            await sendSimpleEmail({ to: primary.email, subject, html, smtpConfig });
+
+            // Stamp send time (best-effort; rowcount not critical for a metadata stamp).
+            await supabase.from('attendees')
+                .update({ last_ticket_email_at: new Date().toISOString() })
+                .eq('id', primary.id);
+
+            return jsonResponse({ ok: true });
+        }
+
         // ── GUEST CLAIM COMPLETED: send ticket to the now-claimed guest + notify primary ──
         // Reads admin-configurable templates from app_settings.email_guest_confirmed_*
         // with placeholders {{name}} {{event}} {{purchaser}} {{registration_id}} {{qr_image_url}}.

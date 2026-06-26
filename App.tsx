@@ -8,6 +8,7 @@ import FormsManager from './components/FormsManager';
 import FormBuilder from './components/FormBuilder';
 import Settings from './components/Settings';
 import PublicRegistration from './components/PublicRegistration';
+import { TicketDownloadPage } from './components/TicketDownload/TicketDownloadPage';
 import SeatingConfigurator from './components/Seating/SeatingConfigurator';
 import SponsorsDashboard from './components/Sponsors/SponsorsDashboard';
 import { NotificationProvider } from './components/NotificationSystem';
@@ -729,6 +730,11 @@ export default function App() {
 
             {/* Public Form Route */}
             <Route path="/form/:formId" element={<PublicRegistration />} />
+
+            {/* Public ticket-download page — opened from the server-sent
+                confirmation email's secure token link. No auth required:
+                the HMAC token in the URL is the credential. */}
+            <Route path="/tickets" element={<TicketDownloadPage />} />
 
             {/* Change password — any signed-in user can reach this. Primarily
                 used by SCAGO admins (no portal surface) + as a fallback link
