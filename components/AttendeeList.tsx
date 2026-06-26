@@ -11,6 +11,7 @@ import ColumnVisibilityDropdown, { ColumnDef } from './ColumnVisibilityDropdown'
 import { CATEGORY_META, resolveAttendeeCategory } from '../utils/attendeeCategories';
 import ExhibitorsTab from './Exhibitor/ExhibitorsTab';
 import SignupsTab from './Signups/SignupsTab';
+import ImportedContactsTab from './Contacts/ImportedContactsTab';
 import { CURRENT_SITE } from '../config/sites';
 import DashboardTabsConfig, { resolveVisibleTabs, type DashboardTabId } from './DashboardTabsConfig';
 import { Settings as SettingsIcon } from 'lucide-react';
@@ -129,7 +130,7 @@ const STANDARD_COLUMNS: ColumnDef[] = [
 
 const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading = false, onRefresh }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState<'live' | 'test' | 'donated' | 'tables' | 'sponsor-tickets' | 'exhibitors' | 'groups' | 'signups' | 'speakers'>('live');
+  const [activeTab, setActiveTab] = useState<'live' | 'test' | 'donated' | 'tables' | 'sponsor-tickets' | 'exhibitors' | 'groups' | 'signups' | 'speakers' | 'contacts'>('live');
   const [tabsConfigOpen, setTabsConfigOpen] = useState(false);
   const [selectedAttendee, setSelectedAttendee] = useState<Attendee | null>(null);
   const { showNotification } = useNotifications();
@@ -772,9 +773,9 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
             </div>
           </div>
 
-          {/* Attendee-table controls — hidden on the Signups tab since that view
-              has its own filter + search bar. */}
-          {activeTab !== 'signups' && (
+          {/* Attendee-table controls — hidden on the Signups + Contacts tabs since
+              those views have their own filter + search bars. */}
+          {activeTab !== 'signups' && activeTab !== 'contacts' && (
             <div className="flex flex-wrap items-center gap-2">
               <div className="relative flex-1 min-w-[200px]">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -829,7 +830,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
         </div>
 
         {/* Filters Row */}
-        {activeTab === 'signups' ? null : activeTab === 'tables' ? (
+        {activeTab === 'signups' || activeTab === 'contacts' ? null : activeTab === 'tables' ? (
           <div className="flex flex-wrap items-center gap-2 text-sm bg-white/50 backdrop-blur-sm p-3 rounded-lg border border-white/40">
             <button
               onClick={handleExpandAll}
@@ -1013,6 +1014,10 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                 <p>Loading…</p>
               </div>
             )}
+          </div>
+        ) : activeTab === 'contacts' ? (
+          <div className="p-4">
+            <ImportedContactsTab settings={settings} />
           </div>
         ) : activeTab === 'exhibitors' ? (
           <div className="p-4">
