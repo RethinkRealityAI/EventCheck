@@ -28,6 +28,9 @@ export interface ImportedContact {
   name: string;
   email: string;
   tag: string | null;
+  tags: string[];
+  attendeeId: string | null;
+  registeredAt: string | null;
   extraFields: Record<string, string>;
   emailStatus: ContactEmailStatus;
   emailError: string | null;
@@ -41,6 +44,7 @@ export interface NewContactInput {
   name: string;
   email: string;
   extraFields?: Record<string, string>;
+  tags?: string[];
 }
 
 function mapBatch(r: any): ImportBatch {
@@ -62,6 +66,9 @@ function mapContact(r: any): ImportedContact {
     name: r.name ?? '',
     email: r.email,
     tag: r.tag ?? null,
+    tags: (r.tags as string[]) ?? [],
+    attendeeId: r.attendee_id ?? null,
+    registeredAt: r.registered_at ?? null,
     extraFields: (r.extra_fields as Record<string, string>) ?? {},
     emailStatus: (r.email_status as ContactEmailStatus) ?? 'pending',
     emailError: r.email_error ?? null,
@@ -112,6 +119,7 @@ export async function createImportBatch(params: {
         name: c.name || '',
         email: c.email,
         tag: params.tag,
+        tags: c.tags ?? [],
         extra_fields: c.extraFields ?? {},
         created_by: createdBy,
       }));
@@ -236,4 +244,48 @@ export async function deleteImportedContact(id: string): Promise<void> {
     .delete()
     .eq('id', id);
   if (error) throw new Error(error.message || 'Failed to delete contact');
+}
+
+// ---------------------------------------------------------------------------
+// Tag utilities
+// ---------------------------------------------------------------------------
+
+/** OR-semantics: a contact matches when it carries at least one of the selected tags (empty filter = match all). */
+export function contactMatchesTags(c: { tags?: string[] }, selected: string[]): boolean {
+  if (!selected || selected.length === 0) return true;
+  const own = c.tags ?? [];
+  return selected.some(t => own.includes(t));
+}
+
+export async function listDistinctTags(): Promise<string[]> {
+  const { data, error } = await supabase.from('imported_contacts').select('tags');
+  if (error) { console.error('listDistinctTags failed', error); return []; }
+  const set = new Set<string>();
+  for (const row of data ?? []) for (const t of ((row as any).tags ?? [])) set.add(t);
+  return Array.from(set).sort((a, b) => a.localeCompare(b));
+}
+
+/** Add tags to many contacts (union, no dupes). Returns affected count. */
+export async function addTagsToContacts(ids: string[], tags: string[]): Promise<number> {
+  if (ids.length === 0 || tags.length === 0) return 0;
+  let affected = 0;
+  for (const id of ids) {
+    const { data: row } = await supabase.from('imported_contacts').select('tags').eq('id', id).maybeSingle();
+    const next = Array.from(new Set([...(((row as any)?.tags) ?? []), ...tags]));
+    const { data, error } = await supabase.from('imported_contacts').update({ tags: next }).eq('id', id).select('id');
+    if (!error && (data?.length ?? 0) > 0) affected++;
+  }
+  return affected;
+}
+
+export async function removeTagFromContacts(ids: string[], tag: string): Promise<number> {
+  if (ids.length === 0) return 0;
+  let affected = 0;
+  for (const id of ids) {
+    const { data: row } = await supabase.from('imported_contacts').select('tags').eq('id', id).maybeSingle();
+    const next = (((row as any)?.tags) ?? []).filter((t: string) => t !== tag);
+    const { data, error } = await supabase.from('imported_contacts').update({ tags: next }).eq('id', id).select('id');
+    if (!error && (data?.length ?? 0) > 0) affected++;
+  }
+  return affected;
 }
