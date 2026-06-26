@@ -132,6 +132,17 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   const location = useLocation();
   const searchParams = new URLSearchParams(location.search);
   const guestRef = searchParams.get('ref');
+  // Free invite-to-register link (`?invite=<token>`). PARALLELS the `?ref=` guest
+  // claim path but resolves against the contact-invite-claim edge fn and forces a
+  // free (no-payment) submission. inviteMode flips true only after a successful
+  // `resolve`; any error leaves it false so the form renders normally (graceful
+  // fallback on a bad/expired token).
+  const inviteToken = searchParams.get('invite');
+  const [inviteMode, setInviteMode] = useState(false);
+  const [inviteResolved, setInviteResolved] = useState<{ name: string; email: string } | null>(null);
+  // True when `resolve` reports the invited contact has already registered —
+  // render a friendly panel instead of the form (avoids a wasted 409 on submit).
+  const [inviteAlreadyRegistered, setInviteAlreadyRegistered] = useState(false);
   const [mode, setMode] = useState<'purchaser' | 'guest'>((guestRef ? 'guest' : 'purchaser') as 'purchaser' | 'guest');
   const [fetchedPrimaryAttendee, setFetchedPrimaryAttendee] = useState<Attendee | null>(null);
   const [remainingSeats, setRemainingSeats] = useState<number>(0);
@@ -304,7 +315,10 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   const bogoFeatureOn = !!(form?.settings?.bogoEnabled && pricingTemplate);
 
   // Sync bogoSlots length to match paid-attendee count (buyer + group members).
-  const bogoSlotCount = bogoFeatureOn
+  // Never offer a BOGO free guest on an invited FREE registration: the invite
+  // path forces a no-payment submit, so a paired free guest would be silently
+  // dropped (the server never inserts bogoClaims for the free invite branch).
+  const bogoSlotCount = (!inviteMode && bogoFeatureOn)
     ? (registrationMode === 'group' ? 1 + groupMembers.length : 1)
     : 0;
   useEffect(() => {
@@ -459,6 +473,69 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
     prefilledRef.current = true;
   }, [profile, form, mode]);
 
+  // ── Free invite (`?invite=<token>`) resolve + prefill ──
+  // Mirrors the `?ref=` effect: when an invite token is present, resolve it via
+  // the public contact-invite-claim edge fn. On success, flip inviteMode and
+  // prefill the contact's name/email into `answers` using the EXACT SAME
+  // name/email field detection the profile-prefill effect above uses
+  // (case-insensitive id/label scan for first/last + the email-typed field).
+  // Any error (bad/expired/already-resolved-error) leaves inviteMode false so
+  // the form renders as a normal (paid/free) registration — graceful fallback.
+  const inviteResolvedRef = useRef(false);
+  useEffect(() => {
+    if (inviteResolvedRef.current) return;
+    if (!inviteToken || !form) return;
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase.functions.invoke('contact-invite-claim', {
+        body: { action: 'resolve', token: inviteToken },
+      });
+      if (cancelled) return;
+      inviteResolvedRef.current = true;
+      if (error || !data || (data as any).error) {
+        // Bad/expired token (400) or contact-not-found (404) → fall back silently.
+        setInviteMode(false);
+        return;
+      }
+      const contactName = String((data as any).contactName || '');
+      const contactEmail = String((data as any).contactEmail || '');
+      setInviteMode(true);
+      setInviteResolved({ name: contactName, email: contactEmail });
+      // Already registered → show the done panel instead of the blank form so
+      // the user isn't allowed to fill it out and hit a 409 on submit.
+      if ((data as any).alreadyRegistered) {
+        setInviteAlreadyRegistered(true);
+        return;
+      }
+
+      // SAME field detection as the profile-prefill effect (split first/last + email).
+      const nameParts = contactName.trim().split(/\s+/);
+      const firstName = nameParts.slice(0, 1).join(' ');
+      const lastName = nameParts.slice(1).join(' ');
+      const patch: Record<string, any> = {};
+      for (const field of form.fields) {
+        const id = field.id.toLowerCase();
+        const label = (field.label ?? '').toLowerCase();
+        if ((id.includes('fname') || label.includes('first name')) && firstName) patch[field.id] = firstName;
+        else if ((id.includes('lname') || label.includes('last name')) && lastName) patch[field.id] = lastName;
+        else if (field.type === 'email' && contactEmail) patch[field.id] = contactEmail;
+        else if (
+          // Forms without split first/last fields: put the whole name into a
+          // generic text "name" field (mirrors the claim flow's name detection).
+          !firstName.includes(' ') && lastName === '' && (id.includes('name') || label.includes('name'))
+          && field.type !== 'email' && contactName
+        ) {
+          if (patch[field.id] === undefined) patch[field.id] = contactName;
+        }
+      }
+      if (Object.keys(patch).length > 0) {
+        // Existing answers (e.g. restored draft) win, same precedence as profile-prefill.
+        setAnswers((prev) => ({ ...patch, ...prev }));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [inviteToken, form]);
+
   useEffect(() => {
     const fetch = async () => {
       setLoading(true);
@@ -583,7 +660,9 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   const prePromoCheckoutCents = registrationMode === 'group'
     ? (groupTotal ?? 0)
     : (dynamicTotal ?? 0);
-  const needsPaymentStep = postPromoCheckoutCents > 0;
+  // Invite-mode registrations are always FREE (server grants the free ticket via
+  // the signed token) — never route through the payment step regardless of price.
+  const needsPaymentStep = !inviteMode && postPromoCheckoutCents > 0;
 
   // Compute ticket subtotal separately for display on payment page
   const ticketSubtotal = (() => {
@@ -782,7 +861,9 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
     }
 
     if (mode === 'purchaser') {
-      if (ticketField && ticketField.required) {
+      // Invited (free) registrants don't buy tickets — skip the paid-ticket
+      // selection requirement (the server grants the free ticket via the token).
+      if (!inviteMode && ticketField && ticketField.required) {
         const totalQty = Object.values(ticketQuantities).reduce((a: number, b: number) => a + b, 0);
         if (totalQty === 0) {
           setError('Please select at least one ticket.');
@@ -812,6 +893,14 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
 
   const doSubmit = async () => {
     if (!validate()) return;
+
+    // Free invite path — server grants the ticket against the signed token.
+    // Parallels the pending-claim branch below but routes to the claim edge fn
+    // instead of verify-payment / finalizeRegistration.
+    if (inviteMode && inviteToken) {
+      await finalizeInviteRegistration();
+      return;
+    }
 
     // Pending-claim: update attendee row in-place, flip guest_type to 'claimed'
     // (group), 'exhibitor-staff-claimed', or 'staff-claimed' (sponsor-exhibitor combined)
@@ -993,6 +1082,93 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   const submitForm = async (e: React.FormEvent) => {
     e.preventDefault();
     await doSubmit();
+  };
+
+  // ── Free invite submit ──
+  // Posts { action:'register', token, answers, name, email, origin } to the
+  // public contact-invite-claim edge fn (the token is the credential; the server
+  // grants the FREE ticket). On success we synthesize a minimal generatedTicket
+  // (qrPayload matches the server's JSON.stringify({ id }) shape) so the existing
+  // success screen — QR + in-browser PDF download — renders unchanged.
+  const finalizeInviteRegistration = async () => {
+    if (!form || !inviteToken) return;
+    setLoading(true);
+    setError('');
+    try {
+      const resolvedName = resolveDisplayName(form.fields, answers);
+      const name = (resolvedName && resolvedName !== 'Guest' ? resolvedName : inviteResolved?.name) || '';
+      const emailField = form.fields.find(f => f.type === 'email' || (f.label ?? '').toLowerCase().includes('email'));
+      const email = (emailField ? String(answers[emailField.id] || '').trim() : '') || inviteResolved?.email || '';
+
+      const { data, error } = await supabase.functions.invoke('contact-invite-claim', {
+        body: { action: 'register', token: inviteToken, answers, name, email, origin: window.location.origin },
+      });
+
+      if (error || !data || !(data as any).ok) {
+        // supabase-js v2 sets data=null on non-2xx; the structured error body
+        // (e.g. { error:'already-registered' }) lives in error.context.
+        let errCode = '';
+        if (error) {
+          errCode = error.message;
+          try {
+            const eb = await (error as any).context?.json?.();
+            if (eb?.error) errCode = eb.error;
+          } catch { /* ignore parse failure */ }
+        } else {
+          errCode = (data as any)?.error || '';
+        }
+        if (errCode === 'already-registered') {
+          setError("You're already registered for this event — check your email for your ticket, or contact the organizer if you need it resent.");
+        } else if (errCode === 'email-required') {
+          setError('Please provide your email address to complete your free registration.');
+        } else {
+          setError("We couldn't complete your free registration. Please try again, or contact the organizer if this keeps happening.");
+        }
+        return;
+      }
+
+      const attendeeId = (data as any).attendeeId as string;
+
+      // Optional portal signup — mirrors the pending-claim opt-in. Uses the
+      // invited contact's email so the trigger link_attendees_to_new_user
+      // backfills user_id on their new free attendee row after they verify.
+      if (claimSignupOptIn && !user && email && claimSignupPassword.length >= 8) {
+        try {
+          await supabase.auth.signUp({
+            email,
+            password: claimSignupPassword,
+            options: {
+              data: { full_name: name, role: 'attendee' },
+              emailRedirectTo: portalEmailRedirectTo(),
+            },
+          });
+        } catch (signupErr) {
+          console.warn('Optional portal signup during invite registration failed (continuing):', signupErr);
+        }
+      }
+
+      // Synthesize the ticket for the success screen (server already persisted it).
+      const inviteTicket: Attendee = {
+        id: attendeeId,
+        formId: form.id,
+        formTitle: form.title,
+        name,
+        email,
+        ticketType: 'Invited (free)',
+        registeredAt: new Date().toISOString(),
+        qrPayload: JSON.stringify({ id: attendeeId }),
+        paymentStatus: 'free',
+        answers,
+        isPrimary: true,
+      };
+      setGeneratedTicket(inviteTicket);
+      clearAllProgress(form.id, user?.id ?? null);
+      setStep('success');
+    } catch (err: any) {
+      setError(err?.message || 'An unexpected error occurred. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const finalizeRegistration = async (paymentStatus: 'paid' | 'free', transactionId?: string, paymentAmount?: string) => {
@@ -1608,6 +1784,23 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
     </div>
   );
 
+  // Invited contact already registered (detected at resolve time). Show a
+  // friendly done panel instead of the blank form so they don't fill it out
+  // and hit a 409 on submit. Skip if a ticket was just generated this session.
+  if (inviteAlreadyRegistered && !generatedTicket) return (
+    <div className="min-h-screen flex items-center justify-center bg-gansid-surface-container-lowest p-4">
+      <div className="bg-white p-8 rounded-gansid-xl shadow-md text-center max-w-md">
+        <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-3">
+          <Check className="w-7 h-7" />
+        </div>
+        <h1 className="font-display text-xl font-bold text-gansid-on-surface mb-2">You're already registered</h1>
+        <p className="font-body text-sm text-gansid-on-surface/70">
+          You're already registered for this event{inviteResolved?.email ? <> as <strong>{inviteResolved.email}</strong></> : null}. Check your email for your ticket — search for a message with your QR code, or reply to it if you can't find it.
+        </p>
+      </div>
+    </div>
+  );
+
   if (form.formType === 'sponsor' && !guestRef) {
     return <PublicSponsorForm form={form} settings={settings} />;
   }
@@ -2071,16 +2264,53 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
               </div>
             )}
 
+            {/* Invited (free) registrants get the same optional portal-account
+                opt-in (set-password → portal login). Reuses claimSignupOptIn /
+                claimSignupPassword; the email comes from the resolved invite. */}
+            {inviteMode && !user && (inviteResolved?.email) && (
+              <div className="mb-4 p-4 rounded-xl bg-indigo-50 border border-indigo-200 space-y-3">
+                <label className="flex items-start gap-2 text-sm text-indigo-900">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={claimSignupOptIn}
+                    onChange={(e) => setClaimSignupOptIn(e.target.checked)}
+                  />
+                  <span>
+                    <strong>Create a portal account</strong> so you can view your ticket and event updates anytime.
+                    <br />
+                    <span className="text-xs text-indigo-700">Uses your ticket email ({inviteResolved.email}). Recommended.</span>
+                  </span>
+                </label>
+                {claimSignupOptIn && (
+                  <div>
+                    <label className="block text-xs font-semibold text-indigo-900 mb-1">Choose a password (min. 8 characters)</label>
+                    <input
+                      type="password"
+                      minLength={8}
+                      value={claimSignupPassword}
+                      onChange={(e) => setClaimSignupPassword(e.target.value)}
+                      placeholder="••••••••"
+                      className="w-full px-3 py-2 border border-indigo-200 rounded-lg text-sm bg-white"
+                    />
+                    <p className="text-[11px] text-indigo-700 mt-1">You'll receive a verification email to activate your account.</p>
+                  </div>
+                )}
+              </div>
+            )}
+
             {form.settings?.renderMode !== 'stepped' && (
               <div className="pt-4">
                 <button
                   type="submit"
-                  disabled={loading || (!isAnyPendingClaim && pricingTemplate != null && (!selectedCategoryId || !activeTier || !activeBracket || dynamicTotal == null)) || (!isAnyPendingClaim && registrationMode === 'group' && (!groupPricingResult?.ok || groupMembers.some(m => !m.name.trim() || !m.email.trim() || !m.countryCode || !m.categoryId))) || (isAnyPendingClaim && claimSignupOptIn && !user && !isExhibitorStaffPending && claimSignupPassword.length > 0 && claimSignupPassword.length < 8)}
+                  disabled={loading || (!inviteMode && !isAnyPendingClaim && pricingTemplate != null && (!selectedCategoryId || !activeTier || !activeBracket || dynamicTotal == null)) || (!isAnyPendingClaim && registrationMode === 'group' && (!groupPricingResult?.ok || groupMembers.some(m => !m.name.trim() || !m.email.trim() || !m.countryCode || !m.categoryId))) || (isAnyPendingClaim && claimSignupOptIn && !user && !isExhibitorStaffPending && claimSignupPassword.length > 0 && claimSignupPassword.length < 8) || (inviteMode && claimSignupOptIn && !user && claimSignupPassword.length > 0 && claimSignupPassword.length < 8)}
                   className="w-full py-4 text-white rounded-xl font-black uppercase tracking-widest transition shadow-lg flex justify-center items-center gap-2 transform hover:scale-[1.02] active:scale-95 disabled:opacity-70 disabled:grayscale disabled:cursor-not-allowed"
                   style={{ backgroundColor: form.settings?.formAccentColor || '#4F46E5' }}
                 >
                   {loading ? (
                     <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : inviteMode ? (
+                    <>Complete Free Registration <ArrowRight className="w-5 h-5" /></>
                   ) : isAnyPendingClaim ? (
                     <>Complete Registration <ArrowRight className="w-5 h-5" /></>
                   ) : mode === 'guest' ? (

@@ -3,13 +3,15 @@ import { createPortal } from 'react-dom';
 import {
   X, Upload, FileSpreadsheet, ArrowRight, ArrowLeft, CheckCircle2, AlertTriangle,
   Loader2, Send as SendIcon, Tag, RefreshCw, ChevronDown, XCircle, Circle, Users,
+  Ticket, Link2,
 } from 'lucide-react';
-import type { AppSettings } from '../../types';
+import type { AppSettings, Form } from '../../types';
 import { parseCsv, isValidEmail } from '../../utils/csv';
 import { renderEmailShell, mergePlaceholders, plainTextToHtml } from '../../utils/emailShell';
 import { buildOpenPixelUrl, wrapClickUrl } from '../../utils/emailTracking';
 import { CURRENT_SITE } from '../../config/sites';
 import { supabase } from '../../services/supabaseClient';
+import { getForms } from '../../services/storageService';
 import { generateTrackingId, logEmailSend } from '../../services/emailSendsService';
 import {
   createImportBatch,
@@ -66,6 +68,19 @@ const DEFAULT_FIELDS: EmailFields = {
   footerNote: "You're receiving this because your details were shared with us. Reply to this email with any questions.",
 };
 
+// Invite-mode defaults — the CTA links to the personalised registration link
+// that contact-invite-send substitutes per recipient via {{registration_link}}.
+const DEFAULT_INVITE_FIELDS: EmailFields = {
+  heading: "You're invited, {{first_name}}",
+  message:
+    "Hi {{name}},\n\n" +
+    "You've been personally invited to register for our upcoming event — at no cost to you.\n\n" +
+    "Your details are already prefilled. Just click the button below to confirm your free registration and receive your ticket.",
+  ctaLabel: 'Complete my free registration',
+  ctaUrl: '{{registration_link}}',
+  footerNote: "This invitation link is unique to you — please don't forward it. Reply to this email with any questions.",
+};
+
 // A recipient in the send queue. `id` is the DB row id in imported_contacts.
 interface SendItem {
   id: string;
@@ -80,8 +95,20 @@ interface Props {
   settings: AppSettings;
   onClose: () => void;
   onComplete?: () => void;
-  /** Resume mode — skip import and send to these existing contacts. */
+  /**
+   * Campaign (default) sends a free-form marketing email via `raw-html`.
+   * Invite mints a signed free-registration link per contact via the
+   * `contact-invite-send` edge function and requires a target form.
+   */
+  purpose?: 'campaign' | 'invite';
+  /** Resume mode — skip import and send a campaign to these existing contacts. */
   resume?: { label: string; contacts: ImportedContact[] };
+  /**
+   * Audience pre-targeted from the Contacts tab (multi-select). When provided,
+   * the modal skips import and composes for exactly these contacts. Used for
+   * both invite mode and resume-style campaign sends to a hand-picked set.
+   */
+  selectedContacts?: { label: string; contacts: ImportedContact[] };
 }
 
 // ── placeholder helpers ────────────────────────────────────────────────────
@@ -143,8 +170,12 @@ const sleep = (ms: number) => new Promise<void>(res => setTimeout(res, ms));
 
 // ── component ───────────────────────────────────────────────────────────────
 
-export default function BulkImportModal({ settings, onClose, onComplete, resume }: Props) {
-  const isResume = !!resume;
+export default function BulkImportModal({ settings, onClose, onComplete, resume, selectedContacts, purpose = 'campaign' }: Props) {
+  const isInvite = purpose === 'invite';
+  // A pre-targeted audience can arrive via `resume` (campaign retry) or
+  // `selectedContacts` (multi-select from the Contacts tab, campaign or invite).
+  const presetAudience = selectedContacts ?? resume ?? null;
+  const isResume = !!presetAudience;
   const [step, setStep] = useState<Step>(isResume ? 'compose' : 'upload');
 
   // Upload / parse
@@ -156,17 +187,42 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume 
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Tag / label for the batch
-  const [tag, setTag] = useState<string>(resume?.label || '');
+  // Tag / label for the batch (batch tag + import-time tags applied to rows)
+  const [tag, setTag] = useState<string>(presetAudience?.label || '');
+  const [importTags, setImportTags] = useState<string[]>([]);
+  const [importTagDraft, setImportTagDraft] = useState<string>('');
 
   // Compose
-  const [subject, setSubject] = useState<string>("An update from " + (CURRENT_SITE.displayName || 'us'));
-  const [fields, setFields] = useState<EmailFields>({ ...DEFAULT_FIELDS });
+  const [subject, setSubject] = useState<string>(
+    isInvite
+      ? "You're invited to register — " + (CURRENT_SITE.displayName || 'our event')
+      : "An update from " + (CURRENT_SITE.displayName || 'us'),
+  );
+  const [fields, setFields] = useState<EmailFields>({ ...(isInvite ? DEFAULT_INVITE_FIELDS : DEFAULT_FIELDS) });
 
-  // Send queue + config
+  // Invite mode — target form picker
+  const [forms, setForms] = useState<Form[]>([]);
+  const [formsLoading, setFormsLoading] = useState(false);
+  const [formId, setFormId] = useState<string>('');
+
+  // Send queue + config.
+  // Campaign/resume keeps each contact's persisted email_status so the queue
+  // skips rows already sent. Invite is a DISTINCT action from a marketing send
+  // (it mints a registration link) and is FULLY DECOUPLED from email_status —
+  // invites track delivery on invite_sent_at, never touch email_status, and
+  // send to ALL selected contacts regardless of campaign state. We therefore
+  // seed invite items to 'pending' purely for the live UI badge (the queue does
+  // not filter on it in invite mode); campaign keeps the persisted status.
   const [items, setItems] = useState<SendItem[]>(
-    resume
-      ? resume.contacts.map(c => ({ id: c.id, name: c.name, email: c.email, extraFields: c.extraFields, status: c.emailStatus, error: c.emailError }))
+    presetAudience
+      ? presetAudience.contacts.map(c => ({
+          id: c.id,
+          name: c.name,
+          email: c.email,
+          extraFields: c.extraFields,
+          status: isInvite ? 'pending' : c.emailStatus,
+          error: isInvite ? null : c.emailError,
+        }))
       : [],
   );
   const [batchSize, setBatchSize] = useState<number>(50);
@@ -192,6 +248,29 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume 
   const setItemsSafe = (updater: (prev: SendItem[]) => SendItem[]) => {
     if (mountedRef.current) setItems(updater);
   };
+
+  // Invite mode needs a target form to mint the registration link against.
+  // Load the active/draft forms once and default to the first usable one.
+  useEffect(() => {
+    if (!isInvite) return;
+    let cancelled = false;
+    setFormsLoading(true);
+    (async () => {
+      try {
+        const all = await getForms();
+        if (cancelled) return;
+        // Closed forms can't accept registrations — hide them from the picker.
+        const usable = all.filter(f => f.status !== 'closed');
+        setForms(usable);
+        setFormId(prev => prev || usable[0]?.id || '');
+      } finally {
+        if (!cancelled) setFormsLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isInvite]);
+
+  const selectedForm = useMemo(() => forms.find(f => f.id === formId) || null, [forms, formId]);
 
   // ── parsing helpers ──
   const autoAssignRoles = (hdrs: string[]): ColumnRole[] => {
@@ -288,17 +367,23 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume 
   // Available placeholders for the compose step.
   const placeholderKeys = useMemo(() => {
     const base = ['name', 'email', 'first_name', 'last_name'];
+    if (isInvite) base.push('registration_link');
     const extra = new Set<string>();
     const sample = items[0]?.extraFields || parsedContacts.valid[0]?.extraFields || {};
     for (const k of Object.keys(sample)) extra.add(placeholderKey(k));
     return [...base, ...Array.from(extra)];
-  }, [items, parsedContacts]);
+  }, [items, parsedContacts, isInvite]);
 
   const previewVars = useMemo(() => {
     const sample = items[0] || parsedContacts.valid.find(c => c.valid);
-    if (sample) return contactVars(sample);
-    return { name: 'Jane Doe', email: 'jane@example.com', first_name: 'Jane', last_name: 'Doe' };
-  }, [items, parsedContacts]);
+    const base = sample
+      ? contactVars(sample)
+      : { name: 'Jane Doe', email: 'jane@example.com', first_name: 'Jane', last_name: 'Doe' };
+    // Show a representative link in the preview so the CTA isn't blank; the real
+    // per-contact link is substituted server-side at send time.
+    if (isInvite) base.registration_link = formId ? `${window.location.origin}/#/form/${formId}?invite=…` : '(select a form)';
+    return base;
+  }, [items, parsedContacts, isInvite, formId]);
 
   const renderedPreview = useMemo(() => renderHtml(fields, previewVars, { previewMode: true }), [fields, previewVars]);
   const renderedSubject = useMemo(() => mergePlaceholders(subject, previewVars), [subject, previewVars]);
@@ -312,12 +397,16 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume 
       // email can never be emailed and there's no in-app way to edit them, so
       // importing them would just be un-actionable clutter. The review screen
       // counts them as excluded.
+      // Import-time tags: the typed chips plus the batch tag/label, so every
+      // imported row is filterable by its list name out of the box.
+      const batchTag = tag.trim();
+      const rowTags = Array.from(new Set([...importTags, ...(batchTag ? [batchTag] : [])]));
       const toImport = parsedContacts.valid
         .filter(c => c.valid)
-        .map(c => ({ name: c.name, email: c.email, extraFields: c.extraFields }));
+        .map(c => ({ name: c.name, email: c.email, extraFields: c.extraFields, tags: rowTags }));
       const { contacts } = await createImportBatch({
-        label: tag.trim() || 'Imported contacts',
-        tag: tag.trim() || 'imported',
+        label: batchTag || 'Imported contacts',
+        tag: batchTag || 'imported',
         sourceFilename: fileName || null,
         contacts: toImport,
       });
@@ -337,41 +426,69 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume 
       await updateContactEmailStatus(item.id, { emailStatus: 'skipped', emailError: 'Invalid email address' });
       return;
     }
-    // Atomically claim the row (pending|failed → sending) so a concurrent or
-    // cross-session run can't email the same contact twice. If we don't win
-    // the claim, someone else already sent it (or is sending now) — skip.
-    const claimed = await claimContactForSend(item.id);
-    if (!claimed) {
-      setItemsSafe(prev => prev.map(i => i.id === item.id ? { ...i, status: 'skipped', error: 'Already sent or in progress' } : i));
-      return;
+    // Campaign sends are claimed atomically (pending|failed → sending) so a
+    // concurrent or cross-session run can't email the same contact twice.
+    // Invite sends DON'T use this claim: the shared email_status column may
+    // already read 'sent' from a prior campaign, which would wrongly skip the
+    // invite. Invite idempotency lives server-side instead — contact-invite-
+    // claim returns 409 once a contact has registered, and re-sending the same
+    // valid link to an un-registered contact is a harmless reminder.
+    if (!isInvite) {
+      const claimed = await claimContactForSend(item.id);
+      if (!claimed) {
+        setItemsSafe(prev => prev.map(i => i.id === item.id ? { ...i, status: 'skipped', error: 'Already sent or in progress' } : i));
+        return;
+      }
     }
     setItemsSafe(prev => prev.map(i => i.id === item.id ? { ...i, status: 'sending', error: null } : i));
     const trackingId = generateTrackingId();
     const vars = contactVars(item);
     const subjectResolved = mergePlaceholders(subject, vars);
-    const html = renderHtml(fields, vars, { trackingId });
+    // In invite mode the {{registration_link}} placeholder is substituted
+    // per-contact by the edge function, so we render the HTML with the
+    // placeholder INTACT (previewMode keeps the CTA URL un-tracking-wrapped so
+    // the raw {{registration_link}} survives to the server).
+    const html = isInvite
+      ? renderHtml(fields, vars, { previewMode: true })
+      : renderHtml(fields, vars, { trackingId });
     try {
-      const { data, error } = await supabase.functions.invoke('send-ticket-email', {
-        body: {
-          mode: 'raw-html',
-          to: item.email,
-          subject: subjectResolved,
-          html,
-          smtpConfig: {
-            host: settings.smtpHost || 'smtp.ionos.com',
-            port: Number(settings.smtpPort || 587),
-            user: settings.smtpUser,
-            pass: settings.smtpPass,
-            fromName: settings.emailFromName || '',
-          },
-        },
-      });
+      const { data, error } = isInvite
+        ? await supabase.functions.invoke('contact-invite-send', {
+            body: {
+              contactId: item.id,
+              formId,
+              origin: window.location.origin,
+              subject: subjectResolved,
+              html,
+            },
+          })
+        : await supabase.functions.invoke('send-ticket-email', {
+            body: {
+              mode: 'raw-html',
+              to: item.email,
+              subject: subjectResolved,
+              html,
+              smtpConfig: {
+                host: settings.smtpHost || 'smtp.ionos.com',
+                port: Number(settings.smtpPort || 587),
+                user: settings.smtpUser,
+                pass: settings.smtpPass,
+                fromName: settings.emailFromName || '',
+              },
+            },
+          });
       if (error) throw new Error(error.message || 'Send failed');
       if ((data as any)?.error) throw new Error((data as any).error);
 
       const sentAt = new Date().toISOString();
       setItemsSafe(prev => prev.map(i => i.id === item.id ? { ...i, status: 'sent', error: null } : i));
-      await updateContactEmailStatus(item.id, { emailStatus: 'sent', emailSentAt: sentAt, emailSubject: subjectResolved, trackingId, emailError: null });
+      // Invites are decoupled from campaign email_status: the contact-invite-send
+      // edge fn already stamped invite_sent_at server-side. Writing 'sent' here
+      // would drop the contact from later marketing campaigns. Campaign sends
+      // persist email_status as before.
+      if (!isInvite) {
+        await updateContactEmailStatus(item.id, { emailStatus: 'sent', emailSentAt: sentAt, emailSubject: subjectResolved, trackingId, emailError: null });
+      }
       // Log to email_sends for unified analytics/history (best-effort).
       try {
         const { data: { user } } = await supabase.auth.getUser();
@@ -379,16 +496,24 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume 
           trackingId,
           recipientEmail: item.email,
           subject: subjectResolved,
-          templateKey: 'bulk',
-          eventName: tag || resume?.label || null,
+          templateKey: isInvite ? 'contact-invite' : 'bulk',
+          eventName: tag || presetAudience?.label || null,
           sentBy: user?.id ?? null,
-          metadata: { source: 'bulk-import', tag: tag || resume?.label || '' },
+          metadata: {
+            source: isInvite ? 'contact-invite' : 'bulk-import',
+            tag: tag || presetAudience?.label || '',
+            ...(isInvite ? { formId } : {}),
+          },
         });
       } catch { /* analytics logging is best-effort */ }
     } catch (e: any) {
       const msg = e?.message || 'Send failed';
       setItemsSafe(prev => prev.map(i => i.id === item.id ? { ...i, status: 'failed', error: msg } : i));
-      await updateContactEmailStatus(item.id, { emailStatus: 'failed', emailError: msg });
+      // Leave email_status untouched for invites (decoupled from campaigns) —
+      // a failed invite must not mark the contact 'failed' for marketing sends.
+      if (!isInvite) {
+        await updateContactEmailStatus(item.id, { emailStatus: 'failed', emailError: msg });
+      }
     }
   };
 
@@ -416,6 +541,11 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume 
 
     // Recompute the queue from current state so retries pick up only the
     // unsent rows. `sent` is never re-sent; skipped (invalid) are not retried.
+    //
+    // Invite mode is decoupled from campaign email_status: items were seeded to
+    // 'pending' (never the persisted campaign status), so the same in-run filter
+    // sends to ALL selected contacts on the first pass — a contact with a prior
+    // campaign 'sent' is NOT skipped — and only failed/pending on retry.
     const queue = items.filter(i =>
       onlyFailedOrPending ? (i.status === 'pending' || i.status === 'failed') : (i.status !== 'sent'),
     );
@@ -463,6 +593,24 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume 
 
   const sendableRemaining = counts.pending + counts.failed;
 
+  // Invite mode requires a target form and a {{registration_link}} somewhere in
+  // the email, otherwise the recipient has no way to reach the registration.
+  const inviteLinkPresent = /\{\{\s*registration_link\s*\}\}/.test(`${fields.ctaUrl} ${fields.message} ${fields.heading} ${fields.footerNote}`);
+  const composeDisabledReason: string | null = !smtpReady
+    ? 'Configure SMTP in Settings to enable sending'
+    : !subject.trim()
+      ? 'Add a subject line'
+      : !fields.message.trim()
+        ? 'Add a message'
+        : items.length === 0
+          ? 'No recipients'
+          : isInvite && !formId
+            ? 'Choose a form to register for'
+            : isInvite && !inviteLinkPresent
+              ? 'Add the {{registration_link}} placeholder (e.g. as the CTA URL)'
+              : null;
+  const canSend = composeDisabledReason === null;
+
   // Guard against closing mid-send.
   const requestClose = () => {
     if (running) {
@@ -478,15 +626,27 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume 
   const inputCls = 'w-full px-3 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 text-sm transition';
 
   const STEP_LABELS: Array<{ key: Step; label: string }> = isResume
-    ? [{ key: 'compose', label: 'Compose' }, { key: 'send', label: 'Send' }]
+    ? [{ key: 'compose', label: 'Compose' }, { key: 'send', label: 'Review & send' }]
     : [
-        { key: 'upload', label: 'Upload' },
+        { key: 'upload', label: 'Audience' },
         { key: 'map', label: 'Map columns' },
-        { key: 'review', label: 'Review' },
+        { key: 'review', label: 'Review import' },
         { key: 'compose', label: 'Compose' },
-        { key: 'send', label: 'Send' },
+        { key: 'send', label: 'Review & send' },
       ];
   const stepIndex = STEP_LABELS.findIndex(s => s.key === step);
+
+  const modalTitle = isInvite
+    ? 'Invite contacts to register'
+    : isResume
+      ? 'Send campaign'
+      : 'Bulk import contacts';
+  const modalSubtitle = isInvite
+    ? `Email a free-registration link to ${items.length} contact${items.length !== 1 ? 's' : ''}`
+    : isResume
+      ? presetAudience?.label || 'Selected contacts'
+      : 'Upload a CSV, map columns, then email everyone';
+  const HeaderIcon = isInvite ? Ticket : FileSpreadsheet;
 
   return createPortal(
     <div className="fixed inset-0 z-[80] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={requestClose}>
@@ -495,10 +655,10 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume 
         <div className="text-white" style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #6366f1 55%, #2260a1 100%)' }}>
           <div className="px-6 pt-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-white/15 rounded-lg"><FileSpreadsheet className="w-5 h-5" /></div>
+              <div className="p-2 bg-white/15 rounded-lg"><HeaderIcon className="w-5 h-5" /></div>
               <div>
-                <h2 className="text-lg font-bold tracking-tight">{isResume ? 'Send campaign' : 'Bulk import contacts'}</h2>
-                <p className="text-xs text-white/85 mt-0.5">{isResume ? resume?.label : 'Upload a CSV, map columns, then email everyone'}</p>
+                <h2 className="text-lg font-bold tracking-tight">{modalTitle}</h2>
+                <p className="text-xs text-white/85 mt-0.5">{modalSubtitle}</p>
               </div>
             </div>
             <button onClick={requestClose} className="p-1.5 rounded-full hover:bg-white/20 transition" aria-label="Close"><X className="w-5 h-5 text-white" /></button>
@@ -610,9 +770,43 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume 
                 <ReviewStat label="No email (skipped)" value={parsedContacts.noEmail} tint="slate" icon={<XCircle className="w-4 h-4" />} />
               </div>
 
-              <div>
-                <label className={labelCls}><Tag className="w-3 h-3 inline mr-1 -mt-0.5" /> Tag / list name <span className="normal-case tracking-normal text-gray-400 font-normal">— used to filter these contacts in the dashboard</span></label>
-                <input value={tag} onChange={e => setTag(e.target.value)} className={inputCls} placeholder="e.g. Newsletter June 2026" />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className={labelCls}><Tag className="w-3 h-3 inline mr-1 -mt-0.5" /> Tag / list name <span className="normal-case tracking-normal text-gray-400 font-normal">— used to filter these contacts</span></label>
+                  <input value={tag} onChange={e => setTag(e.target.value)} className={inputCls} placeholder="e.g. Newsletter June 2026" />
+                </div>
+                <div>
+                  <label className={labelCls} htmlFor="import-tags-input">Tags <span className="normal-case tracking-normal text-gray-400 font-normal">— extra labels applied to every row</span></label>
+                  <div className="flex flex-wrap items-center gap-1.5 px-2 py-1.5 border border-gray-300 rounded-lg focus-within:ring-2 focus-within:ring-indigo-500/30 focus-within:border-indigo-500 transition min-h-[42px]">
+                    {importTags.map(t => (
+                      <span key={t} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-medium">
+                        {t}
+                        <button type="button" onClick={() => setImportTags(prev => prev.filter(x => x !== t))} className="hover:text-indigo-900" aria-label={`Remove tag ${t}`}><X className="w-3 h-3" /></button>
+                      </span>
+                    ))}
+                    <input
+                      id="import-tags-input"
+                      value={importTagDraft}
+                      onChange={e => setImportTagDraft(e.target.value)}
+                      onKeyDown={e => {
+                        if ((e.key === 'Enter' || e.key === ',') && importTagDraft.trim()) {
+                          e.preventDefault();
+                          const v = importTagDraft.trim();
+                          setImportTags(prev => prev.includes(v) ? prev : [...prev, v]);
+                          setImportTagDraft('');
+                        } else if (e.key === 'Backspace' && !importTagDraft && importTags.length) {
+                          setImportTags(prev => prev.slice(0, -1));
+                        }
+                      }}
+                      onBlur={() => {
+                        const v = importTagDraft.trim();
+                        if (v) { setImportTags(prev => prev.includes(v) ? prev : [...prev, v]); setImportTagDraft(''); }
+                      }}
+                      className="flex-1 min-w-[100px] outline-none text-sm bg-transparent"
+                      placeholder={importTags.length ? 'Add another…' : 'Type a tag, press Enter'}
+                    />
+                  </div>
+                </div>
               </div>
 
               <div className="border border-gray-200 rounded-xl overflow-hidden">
@@ -652,9 +846,38 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume 
           {step === 'compose' && (
             <div className="flex-1 grid grid-cols-1 lg:grid-cols-5 overflow-hidden min-h-0">
               <div className="lg:col-span-2 overflow-y-auto px-6 py-5 space-y-4 border-r border-gray-100">
+                {/* Audience summary */}
                 <div className="rounded-lg bg-indigo-50 border border-indigo-100 px-3 py-2 text-xs text-indigo-700 flex items-center gap-2">
-                  <Users className="w-4 h-4" /> {items.length} recipient{items.length !== 1 ? 's' : ''} in <strong>{tag || resume?.label}</strong>
+                  <Users className="w-4 h-4 shrink-0" />
+                  <span><strong>{items.length}</strong> recipient{items.length !== 1 ? 's' : ''}{(tag || presetAudience?.label) ? <> in <strong>{tag || presetAudience?.label}</strong></> : null}</span>
                 </div>
+
+                {/* Invite mode — target form picker */}
+                {isInvite && (
+                  <div>
+                    <label className={labelCls} htmlFor="invite-form-picker"><Ticket className="w-3 h-3 inline mr-1 -mt-0.5" /> Register for</label>
+                    <div className="relative">
+                      <select
+                        id="invite-form-picker"
+                        value={formId}
+                        onChange={e => setFormId(e.target.value)}
+                        disabled={formsLoading}
+                        className={`${inputCls} appearance-none pr-9 disabled:opacity-60`}
+                      >
+                        {formsLoading && <option>Loading forms…</option>}
+                        {!formsLoading && forms.length === 0 && <option value="">No forms available</option>}
+                        {!formsLoading && forms.map(f => (
+                          <option key={f.id} value={f.id}>{f.title}{f.status !== 'active' ? ` (${f.status})` : ''}</option>
+                        ))}
+                      </select>
+                      <ChevronDown className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400" />
+                    </div>
+                    <p className="mt-1.5 text-[11px] text-gray-500 flex items-start gap-1">
+                      <Link2 className="w-3 h-3 mt-0.5 shrink-0" />
+                      Each contact gets a unique <code className="bg-gray-100 px-1 rounded">{'{{registration_link}}'}</code> to <strong>{selectedForm?.title || 'this form'}</strong> — prefilled, free, no payment.
+                    </p>
+                  </div>
+                )}
                 {!smtpReady && (
                   <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800 flex items-center gap-2">
                     <AlertTriangle className="w-4 h-4 shrink-0" /> SMTP isn't configured in Settings — sending is disabled. Your contacts are already saved; you can send later from the Contacts tab.
@@ -771,7 +994,10 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume 
         <div className="px-6 py-3 border-t border-gray-200 flex items-center justify-between gap-2 bg-gray-50">
           <div className="text-[11px] text-gray-500">
             {step === 'send' && !isResume && <>Tag: <span className="font-medium text-gray-700">{tag}</span> · available later under the Contacts tab</>}
-            {step === 'compose' && <>Emails send in batches of {batchSize} with a {pauseSeconds}s pause — gentle on your mail server.</>}
+            {step === 'compose' && composeDisabledReason && (
+              <span className="inline-flex items-center gap-1 text-amber-700"><AlertTriangle className="w-3.5 h-3.5" /> {composeDisabledReason}</span>
+            )}
+            {step === 'compose' && !composeDisabledReason && <>Emails send in batches of {batchSize} with a {pauseSeconds}s pause — gentle on your mail server.</>}
           </div>
           <div className="flex items-center gap-2">
             {/* Back */}
@@ -805,11 +1031,12 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume 
                 </div>
                 <button
                   onClick={() => startSend(false)}
-                  disabled={!subject.trim() || !fields.message.trim() || items.length === 0 || !smtpReady}
-                  title={!smtpReady ? 'Configure SMTP in Settings to enable sending' : undefined}
+                  disabled={!canSend}
+                  title={composeDisabledReason ?? undefined}
                   className="flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition shadow-sm"
                 >
-                  <SendIcon className="w-4 h-4" /> Send to {items.length}
+                  {isInvite ? <Ticket className="w-4 h-4" /> : <SendIcon className="w-4 h-4" />}
+                  {isInvite ? `Send ${items.length} invite${items.length !== 1 ? 's' : ''}` : `Send to ${items.length}`}
                 </button>
               </div>
             )}
