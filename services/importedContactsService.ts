@@ -104,22 +104,30 @@ export async function createImportBatch(params: {
 
   const inserted: ImportedContact[] = [];
   const CHUNK = 500;
-  for (let i = 0; i < params.contacts.length; i += CHUNK) {
-    const slice = params.contacts.slice(i, i + CHUNK);
-    const payload = slice.map(c => ({
-      batch_id: batch.id,
-      name: c.name || '',
-      email: c.email,
-      tag: params.tag,
-      extra_fields: c.extraFields ?? {},
-      created_by: createdBy,
-    }));
-    const { data, error } = await supabase
-      .from('imported_contacts')
-      .insert(payload)
-      .select('*');
-    if (error) throw new Error(error.message || 'Failed to insert contacts');
-    inserted.push(...(data ?? []).map(mapContact));
+  try {
+    for (let i = 0; i < params.contacts.length; i += CHUNK) {
+      const slice = params.contacts.slice(i, i + CHUNK);
+      const payload = slice.map(c => ({
+        batch_id: batch.id,
+        name: c.name || '',
+        email: c.email,
+        tag: params.tag,
+        extra_fields: c.extraFields ?? {},
+        created_by: createdBy,
+      }));
+      const { data, error } = await supabase
+        .from('imported_contacts')
+        .insert(payload)
+        .select('*');
+      if (error) throw new Error(error.message || 'Failed to insert contacts');
+      inserted.push(...(data ?? []).map(mapContact));
+    }
+  } catch (e) {
+    // Don't leave a half-populated, mislabeled batch behind (its total_count
+    // would overstate the rows that actually landed). Roll it back — the FK
+    // cascade removes any rows that did insert — then surface the error.
+    await supabase.from('contact_import_batches').delete().eq('id', batch.id);
+    throw e instanceof Error ? e : new Error('Failed to insert contacts');
   }
   return { batch, contacts: inserted };
 }
@@ -183,6 +191,34 @@ export async function updateContactEmailStatus(
     // transient update failure doesn't abort the rest of the campaign.
     console.error('updateContactEmailStatus failed', error);
   }
+}
+
+/**
+ * Atomically claim a contact for sending: flip 'pending'|'failed' → 'sending'.
+ * Returns true only if THIS call won the row (the conditional UPDATE matched).
+ *
+ * This is the idempotency guard for the email campaign. Sending is driven from
+ * the client, so two overlapping runs (two admins, two tabs, a retry that
+ * races an in-flight run) could otherwise both pick the same 'pending' row and
+ * email it twice. By claiming first — and never auto-retrying a 'sending' or
+ * 'sent' row — we get at-most-once delivery. A row stuck on 'sending' (process
+ * died after send, before the 'sent' write) is intentionally NOT re-sent.
+ */
+export async function claimContactForSend(id: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('imported_contacts')
+    .update({ email_status: 'sending', email_error: null })
+    .eq('id', id)
+    .in('email_status', ['pending', 'failed'])
+    .select('id');
+  if (error) {
+    // On a transient error, refuse the claim rather than risk a double-send.
+    // The DB status is unchanged (still pending/failed) so a later retry can
+    // pick it up cleanly.
+    console.error('claimContactForSend failed', error);
+    return false;
+  }
+  return (data?.length ?? 0) > 0;
 }
 
 export async function deleteImportBatch(batchId: string): Promise<void> {

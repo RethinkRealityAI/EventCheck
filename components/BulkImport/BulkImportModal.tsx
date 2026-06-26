@@ -1,8 +1,8 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   X, Upload, FileSpreadsheet, ArrowRight, ArrowLeft, CheckCircle2, AlertTriangle,
-  Loader2, Send as SendIcon, Tag, RefreshCw, ChevronDown, XCircle, Circle, Clock, Users,
+  Loader2, Send as SendIcon, Tag, RefreshCw, ChevronDown, XCircle, Circle, Users,
 } from 'lucide-react';
 import type { AppSettings } from '../../types';
 import { parseCsv, isValidEmail } from '../../utils/csv';
@@ -13,6 +13,7 @@ import { supabase } from '../../services/supabaseClient';
 import { generateTrackingId, logEmailSend } from '../../services/emailSendsService';
 import {
   createImportBatch,
+  claimContactForSend,
   updateContactEmailStatus,
   type ImportedContact,
   type ContactEmailStatus,
@@ -175,6 +176,22 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume 
   const [countdown, setCountdown] = useState(0);
   const [importing, setImporting] = useState(false);
   const cancelRef = useRef(false);
+  const mountedRef = useRef(true);
+
+  const smtpReady = !!(settings.smtpUser && settings.smtpPass);
+
+  // On unmount, stop the send loop and suppress any further React state writes
+  // from in-flight sends. The DB writes inside sendOne still complete so status
+  // is persisted even if the operator closes the modal mid-run.
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; cancelRef.current = true; };
+  }, []);
+
+  // Guarded state setter — no-ops after unmount.
+  const setItemsSafe = (updater: (prev: SendItem[]) => SendItem[]) => {
+    if (mountedRef.current) setItems(updater);
+  };
 
   // ── parsing helpers ──
   const autoAssignRoles = (hdrs: string[]): ColumnRole[] => {
@@ -291,7 +308,13 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume 
     setImporting(true);
     setParseError('');
     try {
-      const toImport = parsedContacts.valid.map(c => ({ name: c.name, email: c.email, extraFields: c.extraFields }));
+      // Import only rows with a valid email — rows with a malformed/missing
+      // email can never be emailed and there's no in-app way to edit them, so
+      // importing them would just be un-actionable clutter. The review screen
+      // counts them as excluded.
+      const toImport = parsedContacts.valid
+        .filter(c => c.valid)
+        .map(c => ({ name: c.name, email: c.email, extraFields: c.extraFields }));
       const { contacts } = await createImportBatch({
         label: tag.trim() || 'Imported contacts',
         tag: tag.trim() || 'imported',
@@ -310,11 +333,19 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume 
   // ── send one ──
   const sendOne = async (item: SendItem): Promise<void> => {
     if (!isValidEmail(item.email)) {
-      setItems(prev => prev.map(i => i.id === item.id ? { ...i, status: 'skipped', error: 'Invalid email address' } : i));
+      setItemsSafe(prev => prev.map(i => i.id === item.id ? { ...i, status: 'skipped', error: 'Invalid email address' } : i));
       await updateContactEmailStatus(item.id, { emailStatus: 'skipped', emailError: 'Invalid email address' });
       return;
     }
-    setItems(prev => prev.map(i => i.id === item.id ? { ...i, status: 'sending', error: null } : i));
+    // Atomically claim the row (pending|failed → sending) so a concurrent or
+    // cross-session run can't email the same contact twice. If we don't win
+    // the claim, someone else already sent it (or is sending now) — skip.
+    const claimed = await claimContactForSend(item.id);
+    if (!claimed) {
+      setItemsSafe(prev => prev.map(i => i.id === item.id ? { ...i, status: 'skipped', error: 'Already sent or in progress' } : i));
+      return;
+    }
+    setItemsSafe(prev => prev.map(i => i.id === item.id ? { ...i, status: 'sending', error: null } : i));
     const trackingId = generateTrackingId();
     const vars = contactVars(item);
     const subjectResolved = mergePlaceholders(subject, vars);
@@ -339,7 +370,7 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume 
       if ((data as any)?.error) throw new Error((data as any).error);
 
       const sentAt = new Date().toISOString();
-      setItems(prev => prev.map(i => i.id === item.id ? { ...i, status: 'sent', error: null } : i));
+      setItemsSafe(prev => prev.map(i => i.id === item.id ? { ...i, status: 'sent', error: null } : i));
       await updateContactEmailStatus(item.id, { emailStatus: 'sent', emailSentAt: sentAt, emailSubject: subjectResolved, trackingId, emailError: null });
       // Log to email_sends for unified analytics/history (best-effort).
       try {
@@ -356,7 +387,7 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume 
       } catch { /* analytics logging is best-effort */ }
     } catch (e: any) {
       const msg = e?.message || 'Send failed';
-      setItems(prev => prev.map(i => i.id === item.id ? { ...i, status: 'failed', error: msg } : i));
+      setItemsSafe(prev => prev.map(i => i.id === item.id ? { ...i, status: 'failed', error: msg } : i));
       await updateContactEmailStatus(item.id, { emailStatus: 'failed', emailError: msg });
     }
   };
@@ -365,10 +396,13 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume 
   const runChunk = async (chunk: SendItem[], concurrency: number) => {
     let cursor = 0;
     const workers = Array.from({ length: Math.min(concurrency, chunk.length) }, async () => {
-      while (cursor < chunk.length) {
+      while (true) {
         if (cancelRef.current) return;
-        const item = chunk[cursor++];
-        await sendOne(item);
+        // Claim an index synchronously (no await between read and increment) so
+        // two workers never grab the same item.
+        const idx = cursor++;
+        if (idx >= chunk.length) return;
+        await sendOne(chunk[idx]);
       }
     });
     await Promise.all(workers);
@@ -387,7 +421,9 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume 
     );
     const size = Math.max(1, Math.min(batchSize, 500));
     const pauseMs = Math.max(0, pauseSeconds) * 1000;
-    const concurrency = Math.min(5, size);
+    // Modest in-batch concurrency — the batch + pause is the primary throttle;
+    // this just keeps a handful of connections open at once, not a flood.
+    const concurrency = Math.min(3, size);
 
     for (let i = 0; i < queue.length; i += size) {
       if (cancelRef.current) break;
@@ -404,6 +440,7 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume 
         setCountdown(0);
       }
     }
+    if (!mountedRef.current) { onComplete?.(); return; }
     setRunning(false);
     setFinished(true);
     setCountdown(0);
@@ -568,7 +605,7 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume 
             <div className="flex-1 overflow-y-auto p-6 space-y-4">
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <ReviewStat label="Ready to import" value={validCount} tint="emerald" icon={<CheckCircle2 className="w-4 h-4" />} />
-                <ReviewStat label="Invalid email" value={invalidCount} tint="amber" icon={<AlertTriangle className="w-4 h-4" />} />
+                <ReviewStat label="Invalid (excluded)" value={invalidCount} tint="amber" icon={<AlertTriangle className="w-4 h-4" />} />
                 <ReviewStat label="Duplicates removed" value={parsedContacts.duplicates} tint="slate" icon={<Users className="w-4 h-4" />} />
                 <ReviewStat label="No email (skipped)" value={parsedContacts.noEmail} tint="slate" icon={<XCircle className="w-4 h-4" />} />
               </div>
@@ -593,7 +630,7 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume 
                         <td className="px-4 py-2 text-gray-800">{c.name || <span className="text-gray-300">—</span>}</td>
                         <td className="px-4 py-2 text-gray-700">
                           {c.email}
-                          {!c.valid && <span className="ml-2 text-[10px] font-semibold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">invalid</span>}
+                          {!c.valid && <span className="ml-2 text-[10px] font-semibold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">excluded</span>}
                         </td>
                         <td className="px-4 py-2 text-gray-500 text-xs truncate max-w-[280px]" title={Object.entries(c.extraFields).map(([k, v]) => `${k}: ${v}`).join(' · ')}>
                           {Object.keys(c.extraFields).length ? Object.entries(c.extraFields).map(([k, v]) => `${k}: ${v}`).join(' · ') : <span className="text-gray-300">—</span>}
@@ -607,7 +644,7 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume 
                 )}
               </div>
               {parseError && <div className="px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">{parseError}</div>}
-              <p className="text-xs text-gray-500">Invalid emails are imported too (so you can fix them later) but are skipped when sending.</p>
+              <p className="text-xs text-gray-500">Rows with an invalid or missing email are excluded from the import and won't be sent.</p>
             </div>
           )}
 
@@ -618,6 +655,11 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume 
                 <div className="rounded-lg bg-indigo-50 border border-indigo-100 px-3 py-2 text-xs text-indigo-700 flex items-center gap-2">
                   <Users className="w-4 h-4" /> {items.length} recipient{items.length !== 1 ? 's' : ''} in <strong>{tag || resume?.label}</strong>
                 </div>
+                {!smtpReady && (
+                  <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800 flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 shrink-0" /> SMTP isn't configured in Settings — sending is disabled. Your contacts are already saved; you can send later from the Contacts tab.
+                  </div>
+                )}
                 <div>
                   <label className={labelCls}>Subject</label>
                   <input value={subject} onChange={e => setSubject(e.target.value)} className={inputCls} placeholder="Subject line" />
@@ -763,7 +805,8 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume 
                 </div>
                 <button
                   onClick={() => startSend(false)}
-                  disabled={!subject.trim() || !fields.message.trim() || items.length === 0}
+                  disabled={!subject.trim() || !fields.message.trim() || items.length === 0 || !smtpReady}
+                  title={!smtpReady ? 'Configure SMTP in Settings to enable sending' : undefined}
                   className="flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition shadow-sm"
                 >
                   <SendIcon className="w-4 h-4" /> Send to {items.length}
@@ -774,7 +817,7 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume 
             {step === 'send' && (
               <div className="flex items-center gap-2">
                 {running ? (
-                  <button onClick={cancelSend} className="px-4 py-2 rounded-lg text-sm font-medium text-red-700 bg-red-50 border border-red-200 hover:bg-red-100 transition">Stop after batch</button>
+                  <button onClick={cancelSend} className="px-4 py-2 rounded-lg text-sm font-medium text-red-700 bg-red-50 border border-red-200 hover:bg-red-100 transition">Stop sending</button>
                 ) : (
                   <>
                     {sendableRemaining > 0 && (
