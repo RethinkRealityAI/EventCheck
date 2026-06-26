@@ -830,8 +830,9 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
 
               <button
                 onClick={() => setShowBulkImport(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700 transition shadow-sm"
-                title="Bulk-import contacts from a CSV + send a campaign"
+                disabled={!settings}
+                className="flex items-center gap-2 px-4 py-2 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700 transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                title={settings ? 'Bulk-import contacts from a CSV + send a campaign' : 'Loading settings…'}
               >
                 <Upload className="w-4 h-4" />
                 <span className="hidden sm:inline">Import</span>
@@ -1642,8 +1643,10 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
         />
       )}
 
-      {/* Bulk Import modal — quick-access from the toolbar (also reachable via the Contacts tab) */}
-      {showBulkImport && (
+      {/* Bulk Import modal — quick-access from the toolbar (also reachable via the Contacts tab).
+          Gate on `settings` being loaded: the modal reads settings.smtpUser at render, so
+          opening it before the async getSettings() resolves would crash. */}
+      {showBulkImport && settings && (
         <BulkImportModal
           settings={settings}
           onClose={() => setShowBulkImport(false)}
