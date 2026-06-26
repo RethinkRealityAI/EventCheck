@@ -111,10 +111,25 @@ async function sendRegistrationConfirmedEmail(
   origin: string,
 ): Promise<void> {
   try {
+    // Never sign a token with a missing id/formId — verifyRegistrationToken
+    // would reject it (malformed) and the emailed link would be dead. Skip
+    // cleanly instead (legacy callers may omit formId).
+    if (!primaryAttendeeId || !formId) {
+      console.warn('[verify-payment] registration-confirmed skipped: missing id/formId', { primaryAttendeeId, formId });
+      return;
+    }
     const secret = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const TTL_MS = 180 * 24 * 60 * 60 * 1000; // 180 days
     const token = await signRegistrationToken(primaryAttendeeId, formId, secret, Date.now(), TTL_MS);
-    const downloadUrl = `${origin}/#/tickets?token=${encodeURIComponent(token)}`;
+    // The Origin header is stripped by some privacy browsers/extensions (see
+    // the PayPal-capture note below). Fall back to the per-project PUBLIC_SITE_URL
+    // env so the emailed link is never host-relative (which is unclickable from
+    // an inbox). If both are absent we still send — the link works in-app.
+    const base = origin || Deno.env.get('PUBLIC_SITE_URL') || '';
+    if (!base) {
+      console.warn('[verify-payment] registration-confirmed: no origin and no PUBLIC_SITE_URL — link will be host-relative');
+    }
+    const downloadUrl = `${base}/#/tickets?token=${encodeURIComponent(token)}`;
     const emailFnUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/send-ticket-email`;
     const resp = await fetch(emailFnUrl, {
       method: 'POST',

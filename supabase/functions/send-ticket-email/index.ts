@@ -224,6 +224,8 @@ serve(async (req: Request) => {
                 .from('attendees').select('*').eq('id', body.primaryAttendeeId).maybeSingle();
             if (pErr || !primary) return jsonResponse({ error: 'Primary not found' }, 404);
             if (!primary.email) return jsonResponse({ ok: true, skipped: 'no-email' });
+            // Don't email a confirmation for test registrations.
+            if (primary.is_test === true) return jsonResponse({ ok: true, skipped: 'test' });
 
             const { data: form } = await supabase
                 .from('forms').select('title').eq('id', primary.form_id).maybeSingle();

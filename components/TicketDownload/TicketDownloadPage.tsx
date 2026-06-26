@@ -59,9 +59,23 @@ export function TicketDownloadPage() {
       });
       if (cancelled) return;
       if (error || !data || data.error) {
-        // The edge function returns { error, reason } on a bad/expired token.
-        const reason = (data && data.reason) || (error ? 'server' : 'invalid');
-        setState({ phase: 'error', reason });
+        // The edge function returns { error, reason } in a NON-2xx body on a
+        // bad/expired token. supabase-js v2 sets `data = null` on non-2xx and
+        // stashes the Response in `error.context` (same gotcha handled in
+        // MyTicketsPage) — so the reason must be read from there, not `data`.
+        let reason = 'invalid';
+        const ctx = (error as any)?.context;
+        if (ctx && typeof ctx.json === 'function') {
+          try {
+            const body = await ctx.json();
+            reason = body?.reason || body?.error || (error ? 'server' : 'invalid');
+          } catch {
+            reason = error ? 'server' : 'invalid';
+          }
+        } else if (data && (data as any).reason) {
+          reason = (data as any).reason;
+        }
+        if (!cancelled) setState({ phase: 'error', reason });
         return;
       }
 

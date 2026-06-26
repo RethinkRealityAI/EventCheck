@@ -33,3 +33,11 @@ verify_jwt = true
 # clients. Must be gateway-open.
 [functions.track-email]
 verify_jwt = false
+
+# Called anonymously from the public ticket-download page (/#/tickets) and
+# directly via a GET ?token= link from an email. The HMAC token IS the
+# credential — the function verifies it with the service-role key and returns
+# only an allow-listed subset of registration data (never SMTP/PayPal secrets).
+# Must be gateway-open so the token-bearing link works without a session.
+[functions.registration-download]
+verify_jwt = false
