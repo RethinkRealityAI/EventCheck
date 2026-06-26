@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Attendee, Form, AppSettings, SeatingTable } from '../types';
-import { LayoutDashboard, Users, ChevronDown, ChevronRight, UserPlus, CheckCircle, Clock, Search, Calendar, Eye, X, Mail, User, Download, FileSpreadsheet, Check, ChevronLeft, Filter, Loader2, Copy, ChevronsDown, ChevronsRight, Star, Pin, Plus, SlidersHorizontal, Heart } from 'lucide-react';
+import { LayoutDashboard, Users, ChevronDown, ChevronRight, UserPlus, CheckCircle, Clock, Search, Calendar, Eye, X, Mail, User, Download, FileSpreadsheet, Check, ChevronLeft, Filter, Loader2, Copy, ChevronsDown, ChevronsRight, Star, Pin, Plus, SlidersHorizontal, Heart, Upload } from 'lucide-react';
 import { format } from 'date-fns';
 import { updateAttendee, getSettings, saveSettings, getAllSeatingTablesForForm, createGuestForPrimary, syncAttendeeSeatingToChart } from '../services/storageService';
 import { supabase } from '../services/supabaseClient';
@@ -12,6 +12,7 @@ import { CATEGORY_META, resolveAttendeeCategory } from '../utils/attendeeCategor
 import ExhibitorsTab from './Exhibitor/ExhibitorsTab';
 import SignupsTab from './Signups/SignupsTab';
 import ImportedContactsTab from './Contacts/ImportedContactsTab';
+import BulkImportModal from './BulkImport/BulkImportModal';
 import { CURRENT_SITE } from '../config/sites';
 import DashboardTabsConfig, { resolveVisibleTabs, type DashboardTabId } from './DashboardTabsConfig';
 import { Settings as SettingsIcon } from 'lucide-react';
@@ -135,6 +136,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
   const [selectedAttendee, setSelectedAttendee] = useState<Attendee | null>(null);
   const { showNotification } = useNotifications();
   const [showExportModal, setShowExportModal] = useState(false);
+  const [showBulkImport, setShowBulkImport] = useState(false);
 
   // Pagination State. Default page size is 20 (a comfortable scroll on a
   // dashboard) and the user's choice persists per-browser in localStorage so
@@ -824,6 +826,15 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
               >
                 <Download className="w-4 h-4" />
                 <span className="hidden sm:inline">Export</span>
+              </button>
+
+              <button
+                onClick={() => setShowBulkImport(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700 transition shadow-sm"
+                title="Bulk-import contacts from a CSV + send a campaign"
+              >
+                <Upload className="w-4 h-4" />
+                <span className="hidden sm:inline">Import</span>
               </button>
             </div>
           )}
@@ -1628,6 +1639,15 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
             setSettings(updated);
           }}
           onClose={() => setTabsConfigOpen(false)}
+        />
+      )}
+
+      {/* Bulk Import modal — quick-access from the toolbar (also reachable via the Contacts tab) */}
+      {showBulkImport && (
+        <BulkImportModal
+          settings={settings}
+          onClose={() => setShowBulkImport(false)}
+          onComplete={() => setActiveTab('contacts')}
         />
       )}
 
