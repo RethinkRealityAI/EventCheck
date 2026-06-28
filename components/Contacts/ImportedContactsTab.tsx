@@ -4,6 +4,7 @@ import {
   Send as SendIcon, Trash2, Tag, Users, ChevronDown, Ticket, Plus, Minus, X, TicketCheck,
 } from 'lucide-react';
 import type { AppSettings } from '../../types';
+import { supabase } from '../../services/supabaseClient';
 import {
   getImportBatches, getImportedContacts, deleteImportBatch, deleteImportedContact,
   listDistinctTags, addTagsToContacts, removeTagFromContacts, contactMatchesTags,
@@ -94,6 +95,35 @@ export default function ImportedContactsTab({ settings }: Props) {
   };
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [batchFilter]);
+
+  // Keep a ref to the latest `load` so the realtime subscription (set up once)
+  // always calls the current closure (which reads the active batchFilter) without
+  // re-subscribing on every render.
+  const loadRef = useRef(load);
+  useEffect(() => { loadRef.current = load; });
+
+  // Realtime: a contact who completes registration flips imported_contacts
+  // (attendee_id / registered_at). Without this the "Invited" pill stays stale
+  // until a manual refresh. Mirror App.tsx's postgres_changes channel; debounce
+  // to coalesce bursts (e.g. a CSV import touching many rows at once).
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const channel = supabase
+      .channel('imported-contacts-live')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'imported_contacts' },
+        () => {
+          if (timer) clearTimeout(timer);
+          timer = setTimeout(() => { loadRef.current(); }, 400);
+        },
+      )
+      .subscribe();
+    return () => {
+      if (timer) clearTimeout(timer);
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   // Close the tag dropdown on outside click.
   useEffect(() => {

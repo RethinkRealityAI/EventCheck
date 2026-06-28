@@ -143,6 +143,11 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   // True when `resolve` reports the invited contact has already registered —
   // render a friendly panel instead of the form (avoids a wasted 409 on submit).
   const [inviteAlreadyRegistered, setInviteAlreadyRegistered] = useState(false);
+  // Non-null when an `?invite=` token was present but FAILED to resolve (expired
+  // / bad-signature / malformed / etc). Holds the server's `reason` so the UI can
+  // show a friendly "this link is expired/invalid" panel INSTEAD of silently
+  // dropping the user into the normal PAID form (which had no explanation).
+  const [inviteError, setInviteError] = useState<string | null>(null);
   const [mode, setMode] = useState<'purchaser' | 'guest'>((guestRef ? 'guest' : 'purchaser') as 'purchaser' | 'guest');
   const [fetchedPrimaryAttendee, setFetchedPrimaryAttendee] = useState<Attendee | null>(null);
   const [remainingSeats, setRemainingSeats] = useState<number>(0);
@@ -493,8 +498,24 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
       if (cancelled) return;
       inviteResolvedRef.current = true;
       if (error || !data || (data as any).error) {
-        // Bad/expired token (400) or contact-not-found (404) → fall back silently.
+        // Bad/expired token (400) or contact-not-found (404). Surface a friendly
+        // panel instead of silently dropping into the PAID form. supabase-js v2
+        // sets data=null on non-2xx and stashes the Response in error.context, so
+        // read the structured `reason` from there (same gotcha as TicketDownloadPage).
+        let reason = 'invalid';
+        const ctx = (error as any)?.context;
+        if (ctx && typeof ctx.json === 'function') {
+          try {
+            const eb = await ctx.json();
+            reason = eb?.reason || eb?.error || 'invalid';
+          } catch { reason = 'invalid'; }
+        } else if (data && (data as any).reason) {
+          reason = (data as any).reason;
+        } else if (data && (data as any).error) {
+          reason = (data as any).error;
+        }
         setInviteMode(false);
+        setInviteError(reason);
         return;
       }
       const contactName = String((data as any).contactName || '');
@@ -963,9 +984,13 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
         // signed in, create an auth user with their attendee email. The DB trigger
         // `link_attendees_to_new_user` backfills user_id on every matching
         // attendee row automatically — no client-side linking needed.
+        // We INSPECT the result so the success screen only claims "verification
+        // email sent" for a genuinely-new account: Supabase anti-enumeration
+        // returns success with identities=[] for an already-existing email, and
+        // signUp can error. The claim already succeeded — never block on signup.
         if (claimSignupOptIn && !user && loadedRefAttendee.email && claimSignupPassword.length >= 8) {
           try {
-            await supabase.auth.signUp({
+            const { data: suData, error: suErr } = await supabase.auth.signUp({
               email: loadedRefAttendee.email,
               password: claimSignupPassword,
               options: {
@@ -976,10 +1001,18 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                 emailRedirectTo: portalEmailRedirectTo(),
               },
             });
-            // Verification email goes out automatically. The trigger already ran
-            // on auth.users INSERT — their attendee row now has user_id set.
-          } catch (signupErr) {
+            if (suErr) {
+              setBogoSuccessNotice(`Your free registration is confirmed. We couldn't set up your login (${suErr.message}) — you can set a password later from the Sign In page.`);
+            } else if (suData?.user && Array.isArray(suData.user.identities) && suData.user.identities.length === 0) {
+              // Duplicate email → no new account created (anti-enumeration).
+              setBogoSuccessNotice("You're registered! This email already has a portal account — use Sign In to log in (no new password was set).");
+            } else {
+              // Genuinely-new account — the ONLY case where a verification email was sent.
+              setBogoSuccessNotice("You're registered! Check your email to verify your account, then you can log in.");
+            }
+          } catch (signupErr: any) {
             console.warn('Optional portal signup during claim failed (continuing):', signupErr);
+            setBogoSuccessNotice(`Your free registration is confirmed. We couldn't set up your login (${signupErr?.message || 'unknown error'}) — you can set a password later from the Sign In page.`);
           }
         }
 
@@ -1132,9 +1165,13 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
       // Optional portal signup — mirrors the pending-claim opt-in. Uses the
       // invited contact's email so the trigger link_attendees_to_new_user
       // backfills user_id on their new free attendee row after they verify.
+      // We INSPECT the result so the success screen doesn't claim "verification
+      // email sent" when the account already exists (Supabase anti-enumeration
+      // returns success with identities=[]) or signUp errored. Registration has
+      // already succeeded — never block the success screen on the signup outcome.
       if (claimSignupOptIn && !user && email && claimSignupPassword.length >= 8) {
         try {
-          await supabase.auth.signUp({
+          const { data: suData, error: suErr } = await supabase.auth.signUp({
             email,
             password: claimSignupPassword,
             options: {
@@ -1142,8 +1179,18 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
               emailRedirectTo: portalEmailRedirectTo(),
             },
           });
-        } catch (signupErr) {
+          if (suErr) {
+            setBogoSuccessNotice(`Your free registration is confirmed. We couldn't set up your login (${suErr.message}) — you can set a password later from the Sign In page.`);
+          } else if (suData?.user && Array.isArray(suData.user.identities) && suData.user.identities.length === 0) {
+            // Duplicate email → no new account created (anti-enumeration).
+            setBogoSuccessNotice("You're registered! This email already has a portal account — use Sign In to log in (no new password was set).");
+          } else {
+            // Genuinely-new account — the ONLY case where a verification email was sent.
+            setBogoSuccessNotice("You're registered! Check your email to verify your account, then you can log in.");
+          }
+        } catch (signupErr: any) {
           console.warn('Optional portal signup during invite registration failed (continuing):', signupErr);
+          setBogoSuccessNotice(`Your free registration is confirmed. We couldn't set up your login (${signupErr?.message || 'unknown error'}) — you can set a password later from the Sign In page.`);
         }
       }
 
@@ -1796,6 +1843,29 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
         <h1 className="font-display text-xl font-bold text-gansid-on-surface mb-2">You're already registered</h1>
         <p className="font-body text-sm text-gansid-on-surface/70">
           You're already registered for this event{inviteResolved?.email ? <> as <strong>{inviteResolved.email}</strong></> : null}. Check your email for your ticket — search for a message with your QR code, or reply to it if you can't find it.
+        </p>
+      </div>
+    </div>
+  );
+
+  // Invite link was present in the URL but FAILED to resolve (expired / bad
+  // signature / malformed). Show a friendly panel INSTEAD of silently rendering
+  // the normal PAID form. Gated on `inviteToken` so a normal /#/form/:id with no
+  // ?invite= param still renders the regular form. Skip once a ticket exists.
+  if (inviteToken && inviteError && !inviteMode && !generatedTicket && !inviteAlreadyRegistered) return (
+    <div className="min-h-screen flex items-center justify-center bg-gansid-surface-container-lowest p-4">
+      <div className="bg-white p-8 rounded-gansid-xl shadow-md text-center max-w-md">
+        <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto mb-3">
+          <AlertCircle className="w-7 h-7" />
+        </div>
+        <h1 className="font-display text-xl font-bold text-gansid-on-surface mb-2">Invitation link problem</h1>
+        <p className="font-body text-sm text-gansid-on-surface/70">
+          {inviteError === 'expired'
+            ? 'This invitation link has expired. Please contact the organizer for a new one.'
+            : 'This invitation link is invalid. Please check the link or contact the organizer.'}
+        </p>
+        <p className="font-body text-sm text-gansid-on-surface/60 mt-3">
+          <a className="underline" href={`mailto:${BOGO_ADMIN_CONTACT}`}>{BOGO_ADMIN_CONTACT}</a>
         </p>
       </div>
     </div>
