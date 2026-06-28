@@ -72,6 +72,21 @@ serve(async (req: Request) => {
       const answers = body.answers && typeof body.answers === 'object' ? body.answers : {};
       if (!email) return json({ error: 'email-required' }, 400);
 
+      // Dedup guard: if an attendee already exists for this email+form (e.g. they
+      // registered through the normal public form, or a different invite for the
+      // same address), do NOT mint a second free ticket. Atomically link THIS
+      // contact to the existing attendee and return it. Case-insensitive match.
+      const { data: existing } = await svc.from('attendees')
+        .select('id').eq('form_id', v.formId).ilike('email', email).limit(1);
+      if (existing && existing.length) {
+        const existingId = (existing[0] as any).id as string;
+        // Only claim if the contact is still unlinked (idempotent / race-safe).
+        await svc.from('imported_contacts')
+          .update({ attendee_id: existingId, registered_at: new Date().toISOString() })
+          .eq('id', v.contactId).is('attendee_id', null);
+        return json({ ok: true, attendeeId: existingId, deduped: true });
+      }
+
       const id = crypto.randomUUID();
       const row = {
         id,

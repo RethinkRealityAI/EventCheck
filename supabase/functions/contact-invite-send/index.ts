@@ -26,7 +26,7 @@ const corsHeaders = {
 const json = (b: unknown, status = 200) =>
   new Response(JSON.stringify(b), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
-const TTL_MS = 60 * 24 * 60 * 60 * 1000; // 60 days
+const TTL_MS = 180 * 24 * 60 * 60 * 1000; // 180 days (must outlast the event)
 
 serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
