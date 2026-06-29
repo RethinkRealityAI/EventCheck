@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import {
   X, Upload, FileSpreadsheet, ArrowRight, ArrowLeft, CheckCircle2, AlertTriangle,
   Loader2, Send as SendIcon, Tag, RefreshCw, ChevronDown, XCircle, Circle, Users,
-  Ticket, Link2,
+  Ticket, Link2, Mail,
 } from 'lucide-react';
 import type { AppSettings, Form } from '../../types';
 import { parseCsv, isValidEmail } from '../../utils/csv';
@@ -195,10 +195,18 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume,
   // Compose
   const [subject, setSubject] = useState<string>(
     isInvite
-      ? "You're invited to register — " + (CURRENT_SITE.displayName || 'our event')
+      ? (settings.emailContactInviteSubject || "You're invited to register — " + (CURRENT_SITE.displayName || 'our event'))
       : "An update from " + (CURRENT_SITE.displayName || 'us'),
   );
   const [fields, setFields] = useState<EmailFields>({ ...(isInvite ? DEFAULT_INVITE_FIELDS : DEFAULT_FIELDS) });
+  // Invite mode renders from the admin-managed Contact Invitation template
+  // (Settings → Email Templates), not the structured campaign fields. Body is
+  // inner HTML; {{registration_link}} stays intact for per-recipient server
+  // substitution, while {{event}}/{{name}}/etc. resolve client-side at send.
+  const [inviteBody, setInviteBody] = useState<string>(
+    settings.emailContactInviteBody
+    || '<p>You\'ve been invited to register for {{event}}.</p><p style="text-align:center;margin:28px 0;"><a href="{{registration_link}}" class="button">Confirm my free registration</a></p>',
+  );
 
   // Invite mode — target form picker
   const [forms, setForms] = useState<Form[]>([]);
@@ -367,7 +375,7 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume,
   // Available placeholders for the compose step.
   const placeholderKeys = useMemo(() => {
     const base = ['name', 'email', 'first_name', 'last_name'];
-    if (isInvite) base.push('registration_link');
+    if (isInvite) base.push('event', 'registration_link');
     const extra = new Set<string>();
     const sample = items[0]?.extraFields || parsedContacts.valid[0]?.extraFields || {};
     for (const k of Object.keys(sample)) extra.add(placeholderKey(k));
@@ -381,11 +389,21 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume,
       : { name: 'Jane Doe', email: 'jane@example.com', first_name: 'Jane', last_name: 'Doe' };
     // Show a representative link in the preview so the CTA isn't blank; the real
     // per-contact link is substituted server-side at send time.
-    if (isInvite) base.registration_link = formId ? `${window.location.origin}/#/form/${formId}?invite=…` : '(select a form)';
+    if (isInvite) {
+      base.registration_link = formId ? `${window.location.origin}/#/form/${formId}?invite=…` : '(select a form)';
+      base.event = selectedForm?.title || 'the event';
+    }
     return base;
-  }, [items, parsedContacts, isInvite, formId]);
+  }, [items, parsedContacts, isInvite, formId, selectedForm]);
 
-  const renderedPreview = useMemo(() => renderHtml(fields, previewVars, { previewMode: true }), [fields, previewVars]);
+  // Invite previews/sends render from the settings template (inviteBody HTML);
+  // campaigns render from the structured compose fields.
+  const renderedPreview = useMemo(
+    () => isInvite
+      ? renderEmailShell({ content: mergePlaceholders(inviteBody, previewVars), site: CURRENT_SITE.key, previewMode: true })
+      : renderHtml(fields, previewVars, { previewMode: true }),
+    [isInvite, inviteBody, fields, previewVars],
+  );
   const renderedSubject = useMemo(() => mergePlaceholders(subject, previewVars), [subject, previewVars]);
 
   // ── import (create batch + rows) ──
@@ -442,14 +460,16 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume,
     }
     setItemsSafe(prev => prev.map(i => i.id === item.id ? { ...i, status: 'sending', error: null } : i));
     const trackingId = generateTrackingId();
-    const vars = contactVars(item);
+    // Resolve {{event}} client-side for invites; {{registration_link}} is left
+    // INTACT so contact-invite-send can substitute the per-recipient link.
+    const vars = isInvite
+      ? { ...contactVars(item), event: selectedForm?.title || 'the event' }
+      : contactVars(item);
     const subjectResolved = mergePlaceholders(subject, vars);
-    // In invite mode the {{registration_link}} placeholder is substituted
-    // per-contact by the edge function, so we render the HTML with the
-    // placeholder INTACT (previewMode keeps the CTA URL un-tracking-wrapped so
-    // the raw {{registration_link}} survives to the server).
+    // Invite: render the admin-managed template body (registration_link survives
+    // to the server). Campaign: render the structured compose fields.
     const html = isInvite
-      ? renderHtml(fields, vars, { previewMode: true })
+      ? renderEmailShell({ content: mergePlaceholders(inviteBody, vars), site: CURRENT_SITE.key })
       : renderHtml(fields, vars, { trackingId });
     try {
       const { data, error } = isInvite
@@ -595,7 +615,7 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume,
 
   // Invite mode requires a target form and a {{registration_link}} somewhere in
   // the email, otherwise the recipient has no way to reach the registration.
-  const inviteLinkPresent = /\{\{\s*registration_link\s*\}\}/.test(`${fields.ctaUrl} ${fields.message} ${fields.heading} ${fields.footerNote}`);
+  const inviteLinkPresent = /\{\{\s*registration_link\s*\}\}/.test(inviteBody);
   const composeDisabledReason: string | null = !smtpReady
     ? 'Configure SMTP in Settings to enable sending'
     : !subject.trim()
@@ -887,28 +907,40 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume,
                   <label className={labelCls}>Subject</label>
                   <input value={subject} onChange={e => setSubject(e.target.value)} className={inputCls} placeholder="Subject line" />
                 </div>
-                <div>
-                  <label className={labelCls}>Heading</label>
-                  <input value={fields.heading} onChange={e => setFields(f => ({ ...f, heading: e.target.value }))} className={inputCls} placeholder="Large heading" />
-                </div>
-                <div>
-                  <label className={labelCls}>Message</label>
-                  <textarea value={fields.message} onChange={e => setFields(f => ({ ...f, message: e.target.value }))} rows={7} className={`${inputCls} leading-relaxed`} placeholder="Plain text. Blank lines = paragraph breaks." />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className={labelCls}>CTA label</label>
-                    <input value={fields.ctaLabel} onChange={e => setFields(f => ({ ...f, ctaLabel: e.target.value }))} className={inputCls} placeholder="(optional)" />
+                {isInvite ? (
+                  <div className="rounded-lg bg-gray-50 border border-gray-200 px-3 py-2.5 text-xs text-gray-600 flex items-start gap-2">
+                    <Mail className="w-4 h-4 shrink-0 mt-0.5 text-indigo-500" />
+                    <span>
+                      The email body comes from your <strong>Contact Invitation</strong> template — edit the wording, heading and button in
+                      {' '}<strong>Settings → Email Templates</strong>. The preview on the right shows exactly what each contact receives.
+                    </span>
                   </div>
-                  <div>
-                    <label className={labelCls}>CTA URL</label>
-                    <input value={fields.ctaUrl} onChange={e => setFields(f => ({ ...f, ctaUrl: e.target.value }))} className={inputCls} placeholder="https://…" />
-                  </div>
-                </div>
-                <div>
-                  <label className={labelCls}>Footer note</label>
-                  <textarea value={fields.footerNote} onChange={e => setFields(f => ({ ...f, footerNote: e.target.value }))} rows={2} className={inputCls} />
-                </div>
+                ) : (
+                  <>
+                    <div>
+                      <label className={labelCls}>Heading</label>
+                      <input value={fields.heading} onChange={e => setFields(f => ({ ...f, heading: e.target.value }))} className={inputCls} placeholder="Large heading" />
+                    </div>
+                    <div>
+                      <label className={labelCls}>Message</label>
+                      <textarea value={fields.message} onChange={e => setFields(f => ({ ...f, message: e.target.value }))} rows={7} className={`${inputCls} leading-relaxed`} placeholder="Plain text. Blank lines = paragraph breaks." />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className={labelCls}>CTA label</label>
+                        <input value={fields.ctaLabel} onChange={e => setFields(f => ({ ...f, ctaLabel: e.target.value }))} className={inputCls} placeholder="(optional)" />
+                      </div>
+                      <div>
+                        <label className={labelCls}>CTA URL</label>
+                        <input value={fields.ctaUrl} onChange={e => setFields(f => ({ ...f, ctaUrl: e.target.value }))} className={inputCls} placeholder="https://…" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className={labelCls}>Footer note</label>
+                      <textarea value={fields.footerNote} onChange={e => setFields(f => ({ ...f, footerNote: e.target.value }))} rows={2} className={inputCls} />
+                    </div>
+                  </>
+                )}
                 <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
                   <div className="text-[11px] font-semibold text-gray-600 uppercase tracking-wider mb-2">Available placeholders</div>
                   <div className="flex flex-wrap gap-1.5">
