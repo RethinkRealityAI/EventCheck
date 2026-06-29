@@ -313,6 +313,7 @@ export interface PdfSettings {
 
 export interface AppSettings {
   paypalClientId: string;
+  flutterwavePublicKey?: string;
   currency: string;
   ticketPrice: number; // Legacy global backup
   smtpHost: string;
@@ -425,6 +426,7 @@ export interface AppSettings {
 
 export const DEFAULT_SETTINGS: AppSettings = {
   paypalClientId: '',
+  flutterwavePublicKey: '',
   currency: 'CAD',
   ticketPrice: 0,
   smtpHost: 'smtp.example.com',
@@ -503,7 +505,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
 
 export type SponsorTier = 'signature' | 'gold' | 'silver' | 'award' | 'scholarship';
 export type SponsorItemCategory = 'package' | 'scholarship' | 'ad' | 'booth';
-export type PaymentMethod = 'card' | 'paypal' | 'cheque' | 'external';
+export type PaymentMethod = 'card' | 'paypal' | 'flutterwave' | 'cheque' | 'external';
 export type SponsorProspectStatus = 'prospect' | 'invited' | 'responded' | 'confirmed' | 'declined';
 
 export interface SponsorItem {

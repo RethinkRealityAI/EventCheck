@@ -223,6 +223,13 @@ const Settings: React.FC = () => {
                       value={settings.paypalClientId} onChange={e => handleChange('paypalClientId', e.target.value)} />
                   </div>
                   <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Flutterwave Public Key</label>
+                    <input type="text" className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
+                      placeholder="FLWPUBK-…"
+                      value={settings.flutterwavePublicKey ?? ''} onChange={e => handleChange('flutterwavePublicKey', e.target.value)} />
+                    <p className="text-xs text-gray-400 mt-1">Public key only. The secret key is set as a server-side Supabase secret, never here.</p>
+                  </div>
+                  <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Currency</label>
                     <input type="text" className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
                       value={settings.currency} onChange={e => handleChange('currency', e.target.value)} />

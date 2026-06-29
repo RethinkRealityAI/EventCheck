@@ -37,6 +37,7 @@ import { useNotifications } from './NotificationSystem';
 import { useParams, useLocation } from 'react-router-dom';
 import { generateTicketPDF } from '../utils/pdfGenerator';
 import { PayPalScriptProvider, PayPalButtons } from "@paypal/react-paypal-js";
+import { FlutterwavePay } from "./payments/FlutterwavePay";
 import { sendTicketEmail, arrayBufferToBase64 } from '../services/smtpService';
 import QRCode from 'react-qr-code';
 import PublicSponsorForm from './Sponsors/PublicSponsorForm';
@@ -113,6 +114,10 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   const [appliedPromo, setAppliedPromo] = useState<PromoCode | null>(null);
 
   const [paymentTotal, setPaymentTotal] = useState(0);
+  // Selected online payment provider. Defaults to PayPal; the user can switch
+  // to Flutterwave (card / mobile money — works for African cards that PayPal
+  // rejects) when both providers are configured.
+  const [paymentProvider, setPaymentProvider] = useState<'paypal' | 'flutterwave'>('paypal');
 
   // Donation State (seat-based — donating extra tickets for others)
   const [donateOption, setDonateOption] = useState<'no' | 'table' | 'seats'>('no');
@@ -1218,7 +1223,12 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
     }
   };
 
-  const finalizeRegistration = async (paymentStatus: 'paid' | 'free', transactionId?: string, paymentAmount?: string) => {
+  const finalizeRegistration = async (
+    paymentStatus: 'paid' | 'free',
+    transactionId?: string,
+    paymentAmount?: string,
+    paymentMeta?: { provider: 'flutterwave'; txRef: string },
+  ) => {
     if (!form) return;
     setLoading(true);
     setError('');
@@ -1462,7 +1472,14 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
     };
 
     if (paymentStatus === 'paid') {
-      verifyBody.paypalOrderId = transactionId;
+      if (paymentMeta?.provider === 'flutterwave') {
+        // Flutterwave: server re-queries this transaction id to confirm.
+        verifyBody.provider = 'flutterwave';
+        verifyBody.flwTransactionId = transactionId;
+        verifyBody.flwTxRef = paymentMeta.txRef;
+      } else {
+        verifyBody.paypalOrderId = transactionId;
+      }
     }
 
     // Include dynamic pricing selection when a pricing template is attached
@@ -1776,6 +1793,21 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
     finalizeRegistration('paid', paypalOrderId, `${paidDollars.toFixed(2)} ${expectedCurrency}`);
   };
 
+  // Flutterwave success — the charge already completed in the modal; hand the
+  // transaction id to verify-payment for server-side re-query + capture of value.
+  const onFlutterwaveSuccess = async (transactionId: string, txRef: string) => {
+    setError('');
+    const expectedCurrency = pricingTemplate?.currency
+      || ticketField?.ticketConfig?.currency
+      || 'USD';
+    const paidDollars = pricingTemplate && registrationMode === 'group' && displayGroupTotal != null
+      ? (displayGroupTotal / 100)
+      : pricingTemplate && displayDynamicTotal != null
+        ? (displayDynamicTotal / 100)
+        : paymentTotal;
+    finalizeRegistration('paid', transactionId, `${paidDollars.toFixed(2)} ${expectedCurrency}`, { provider: 'flutterwave', txRef });
+  };
+
   // Safely access env with fallback
   const getEnvVar = (name: string): string => {
     try {
@@ -1792,6 +1824,14 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   const paypalClientId = (paypalEnv === 'sandbox'
     ? (getEnvVar('VITE_PAYPAL_SANDBOX_CLIENT_ID') || getEnvVar('VITE_PAYPAL_CLIENT_ID'))
     : getEnvVar('VITE_PAYPAL_CLIENT_ID')) || settings?.paypalClientId || "";
+
+  // Flutterwave public key — mirrors the PayPal env/settings resolution. When
+  // VITE_FLW_ENV=test the test public key (FLWPUBK_TEST…) is preferred so both
+  // keys can live in Netlify and the site flips mode via a single env var.
+  const flwEnv = (getEnvVar('VITE_FLW_ENV') || 'live').toLowerCase();
+  const flwPublicKey = (flwEnv === 'test'
+    ? (getEnvVar('VITE_FLW_TEST_PUBLIC_KEY') || getEnvVar('VITE_FLW_PUBLIC_KEY'))
+    : getEnvVar('VITE_FLW_PUBLIC_KEY')) || settings?.flutterwavePublicKey || "";
 
   const downloadPdf = async () => {
     if (generatedTicket && settings) {
@@ -2455,7 +2495,56 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
             </div>
           </div>
 
-          {paypalClientId ? (
+          {/* Payment-method selector — only when both providers are configured.
+              Card collection via Flutterwave is currency-agnostic, so no
+              currency gating is needed; African payers simply pick Flutterwave. */}
+          {paypalClientId && flwPublicKey && (
+            <div className="flex gap-2 mb-3" role="group" aria-label="Choose a payment method">
+              <button
+                type="button"
+                onClick={() => setPaymentProvider('paypal')}
+                className={`flex-1 rounded-lg border px-3 py-2 text-sm font-semibold transition ${paymentProvider === 'paypal' ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'}`}
+              >
+                PayPal
+              </button>
+              <button
+                type="button"
+                onClick={() => setPaymentProvider('flutterwave')}
+                className={`flex-1 rounded-lg border px-3 py-2 text-sm font-semibold transition ${paymentProvider === 'flutterwave' ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'}`}
+              >
+                Card / Mobile Money
+              </button>
+            </div>
+          )}
+
+          {/* Flutterwave — card, bank transfer, mobile money, USSD. Shown when it
+              is the selected provider, or as the sole option when PayPal is absent. */}
+          {flwPublicKey && (paymentProvider === 'flutterwave' || !paypalClientId) && (() => {
+            const _emailF = form.fields.find(f => f.type === 'email' || f.label.toLowerCase().includes('email'));
+            const _payerEmail = _emailF ? (answers[_emailF.id] || '') : '';
+            const _payerName = resolveDisplayName(form.fields, answers);
+            return (
+              <div className="min-h-[80px] flex flex-col gap-2">
+                <FlutterwavePay
+                  publicKey={flwPublicKey}
+                  amount={Number(displayTotal.toFixed(2))}
+                  currency={displayCurrency}
+                  txRefPrefix={`${CURRENT_SITE.key}-${form.id.slice(0, 8)}`}
+                  customerEmail={_payerEmail}
+                  customerName={_payerName}
+                  title={form.title}
+                  description="Event Registration"
+                  disabled={loading}
+                  onSuccess={onFlutterwaveSuccess}
+                  onError={(msg) => setError(msg)}
+                  onClose={() => { /* user dismissed the modal — no-op */ }}
+                />
+                <p className="text-[11px] text-gray-400 italic">Cards, bank transfer, mobile money & USSD — works across Africa.</p>
+              </div>
+            );
+          })()}
+
+          {paypalClientId && (paymentProvider === 'paypal' || !flwPublicKey) ? (
             <div key={`${paypalClientId}-${displayTotal}`} className="min-h-[150px] flex flex-col gap-2">
               <PayPalScriptProvider options={{
                 clientId: paypalClientId,
@@ -2606,13 +2695,13 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                 Payment Instance ID: {paypalClientId.substring(0, 8)}…{paypalClientId.slice(-6)}
               </div>
             </div>
-          ) : (
+          ) : (!paypalClientId && !flwPublicKey) ? (
             <div className="p-4 bg-amber-50 text-amber-700 rounded-lg text-sm flex flex-col gap-2">
               <AlertCircle className="w-5 h-5" />
-              <p className="font-bold">PayPal Configuration Missing</p>
-              <p>Please ensure VITE_PAYPAL_CLIENT_ID is set in your .env.local file or provided in the Admin Settings.</p>
+              <p className="font-bold">Payment Configuration Missing</p>
+              <p>Please configure PayPal (VITE_PAYPAL_CLIENT_ID) and/or Flutterwave (VITE_FLW_PUBLIC_KEY) in your environment or the Admin Settings.</p>
             </div>
-          )}
+          ) : null}
 
           <p className="text-xs text-gray-400 mt-4">Safe and secure payments.</p>
         </div>
