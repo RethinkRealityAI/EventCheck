@@ -366,6 +366,14 @@ export interface AppSettings {
   emailReminderSubject: string;
   emailReminderBody: string; // HTML supported
 
+  // Contact Invitation (bulk-import "invite to register" free-registration email).
+  // Body is inner HTML placed in the branded shell and MUST contain the
+  // {{registration_link}} button (substituted per-recipient by the
+  // contact-invite-send edge fn). {{event}} = target form title; {{name}}
+  // {{first_name}} {{email}} resolve per recipient. NULL = use the app default.
+  emailContactInviteSubject?: string;
+  emailContactInviteBody?: string;
+
   // Staff Email Templates (sponsor_exhibitor form staff invitations/confirmations)
   emailStaffInviteSubject?: string;
   emailStaffInviteBody?: string;
@@ -468,6 +476,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
 
   emailReminderSubject: 'Complete your registration for {{event}}',
   emailReminderBody: '<p>Hi {{name}},</p><p>Just a friendly reminder — your registration for <strong>{{event}}</strong> isn\u2019t complete yet. You left off at step {{step}} of {{total_steps}}.</p><p style="text-align:center;margin:24px 0;"><a href="{{resume_url}}" style="display:inline-block;padding:12px 24px;background:#ba0028;color:#fff;text-decoration:none;border-radius:6px;font-weight:600;">Resume my registration</a></p><p>Prefer to start fresh? Sign in here: <a href="{{signup_url}}">{{signup_url}}</a></p><p>We look forward to seeing you at the Congress.</p>',
+
+  // Contact Invitation — free invite-to-register email for bulk-imported contacts.
+  // {{registration_link}} is the per-recipient button URL (kept intact through the
+  // client; substituted server-side). {{event}} = target form title.
+  emailContactInviteSubject: "You're registered for {{event}} — confirm to claim your ticket",
+  emailContactInviteBody: '<h2>You’re registered for {{event}}</h2><p>You’ve been registered for <strong>{{event}}</strong>. To claim your ticket, just confirm your registration and accept the terms and conditions — your details are already pre-filled.</p><p>Click the button below to confirm your free registration and receive your ticket.</p><p style="text-align:center;margin:28px 0;"><a href="{{registration_link}}" class="button">Confirm &amp; claim my ticket</a></p><p style="font-size:13px;opacity:0.6;">This invitation link is unique to you — please don’t forward it.</p>',
 
   defaultDashboardFormId: undefined,
   dashboardColumnPrefs: {},
