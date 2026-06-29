@@ -40,7 +40,7 @@ async function resolvePaidTransaction(opts: {
   provider: 'paypal' | 'flutterwave';
   paypalOrderId?: string | null;
   flwTransactionId?: string | null;
-  flwTxRef?: string | null;
+  formId?: string | null; // used to bind a Flutterwave tx_ref to this form
   origin: string; // already-lowercased origin header
   allAreTest: boolean;
   logTag: string;
@@ -51,9 +51,12 @@ async function resolvePaidTransaction(opts: {
   if (opts.provider === 'flutterwave') {
     const flwMode = (Deno.env.get('FLW_MODE') || '').toLowerCase();
     const useTestMode = isLocalhost || flwMode === 'test' || (flwMode !== 'live' && allAreTest);
+    // The client tx_ref is built as `${site}-${formId.slice(0,8)}-…`, so the
+    // first 8 chars of formId must appear in the AUTHENTICATED data.tx_ref.
+    const txRefToken = opts.formId ? String(opts.formId).slice(0, 8) : undefined;
     const result = await verifyFlutterwaveTransaction({
       flwTransactionId: String(opts.flwTransactionId ?? ''),
-      expectedTxRef: opts.flwTxRef ? String(opts.flwTxRef) : undefined,
+      requireTxRefContains: txRefToken,
       useTestMode,
     });
     if (!result.ok) {
@@ -1525,7 +1528,7 @@ serve(async (req: Request) => {
         if (!groupIsFreeViaPromo) {
         if (provider === 'paypal' && !paypalOrderId) return jsonResponse({ error: 'paypalOrderId required for group payment' }, 400);
         const groupResolved = await resolvePaidTransaction({
-          provider, paypalOrderId, flwTransactionId, flwTxRef,
+          provider, paypalOrderId, flwTransactionId, formId,
           origin: (req.headers.get('origin') || '').toLowerCase(),
           allAreTest: attendees.every((a: any) => a.is_test === true),
           logTag: 'dyn-group',
@@ -1759,7 +1762,7 @@ serve(async (req: Request) => {
         if (provider === 'paypal' && !paypalOrderId) return jsonResponse({ error: 'paypalOrderId required for dynamic pricing payment' }, 400);
 
         const soloResolved = await resolvePaidTransaction({
-          provider, paypalOrderId, flwTransactionId, flwTxRef,
+          provider, paypalOrderId, flwTransactionId, formId,
           origin: (req.headers.get('origin') || '').toLowerCase(),
           allAreTest: attendees.every((a: any) => a.is_test === true),
           logTag: 'dyn-single',
@@ -2049,7 +2052,7 @@ serve(async (req: Request) => {
       provider,
       paypalOrderId,
       flwTransactionId,
-      flwTxRef,
+      formId,
       origin: originHeader,
       allAreTest,
       logTag: 'static',

@@ -29,9 +29,15 @@ function loadFlutterwaveScript(): Promise<void> {
   scriptPromise = new Promise<void>((resolve, reject) => {
     const existing = document.querySelector(`script[src="${FLW_SCRIPT_SRC}"]`) as HTMLScriptElement | null;
     if (existing) {
+      if (window.FlutterwaveCheckout) { resolve(); return; }
       existing.addEventListener('load', () => resolve());
-      existing.addEventListener('error', () => reject(new Error('Failed to load Flutterwave checkout')));
-      if (window.FlutterwaveCheckout) resolve();
+      existing.addEventListener('error', () => {
+        // A previously-failed tag never fires load again — drop it and reset so
+        // the next call appends a fresh script rather than wedging forever.
+        existing.remove();
+        scriptPromise = null;
+        reject(new Error('Failed to load Flutterwave checkout'));
+      });
       return;
     }
     const script = document.createElement('script');
@@ -39,6 +45,7 @@ function loadFlutterwaveScript(): Promise<void> {
     script.async = true;
     script.onload = () => resolve();
     script.onerror = () => {
+      script.remove();
       scriptPromise = null; // allow a retry on the next click
       reject(new Error('Failed to load Flutterwave checkout'));
     };
@@ -120,21 +127,30 @@ export const FlutterwavePay: React.FC<FlutterwavePayProps> = ({
           }
           const status = String(response?.status || '').toLowerCase();
           const transactionId = response?.transaction_id ?? response?.transactionId;
-          if ((status === 'successful' || status === 'completed') && transactionId) {
+          const succeeded = status === 'successful' || status === 'completed' || status === 'success';
+          if (succeeded && transactionId) {
             onSuccess(String(transactionId), String(response?.tx_ref ?? txRef));
+          } else if (succeeded && !transactionId) {
+            // Charge looks successful but we got no id to verify with — the money
+            // may have moved, so do NOT tell them to simply retry.
+            onError('Your payment may have gone through but we could not confirm it. Please contact the event organizer before trying again.');
           } else {
             onError('Payment was not completed. Please try again.');
           }
         },
         onclose: () => {
+          // Fires after the callback (on success) or when the user dismisses
+          // the modal — the only correct place to re-enable the button, since
+          // FlutterwaveCheckout() returns synchronously while the modal is open.
           setLoading(false);
           onClose?.();
         },
       });
     } catch (e) {
-      onError((e as Error).message || 'Could not start the payment. Please try again.');
-    } finally {
+      // Only reset here: a synchronous failure to OPEN the modal. On the happy
+      // path the button stays disabled until onclose, preventing a second modal.
       setLoading(false);
+      onError((e as Error).message || 'Could not start the payment. Please try again.');
     }
   };
 

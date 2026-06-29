@@ -33,7 +33,11 @@ export interface FlwVerifyError {
 
 export async function verifyFlutterwaveTransaction(args: {
   flwTransactionId: string; // from the client callback (resp.transaction_id)
-  expectedTxRef?: string; // optional cross-check against the tx_ref we generated
+  // Server-derived token (e.g. a formId fragment) that the AUTHENTICATED
+  // data.tx_ref must contain. Unlike trusting the client's echoed tx_ref, this
+  // binds the verified transaction to the registration's form: a replayed
+  // transaction id from a different form (hence different tx_ref) is rejected.
+  requireTxRefContains?: string;
   useTestMode: boolean;
 }): Promise<FlwVerifyResult | FlwVerifyError> {
   const flwTransactionId = String(args.flwTransactionId || '').trim();
@@ -80,9 +84,16 @@ export async function verifyFlutterwaveTransaction(args: {
     return { ok: false, status: 402, error: `Payment not successful (status=${d.status ?? 'unknown'})` };
   }
 
-  // Optional tx_ref cross-check — catches a verify-id pointed at someone else's tx.
-  if (args.expectedTxRef && d.tx_ref !== args.expectedTxRef) {
-    return { ok: false, status: 422, error: 'Transaction reference mismatch' };
+  // Defensive: a successful transaction must carry an id (our dedupe key).
+  if (d.id === undefined || d.id === null || d.id === '') {
+    return { ok: false, status: 502, error: 'Flutterwave verify returned no transaction id' };
+  }
+
+  // Bind the authenticated transaction to this registration's form. We check
+  // the tx_ref FROM THE VERIFY RESPONSE (not the client's echo), so a replayed
+  // id created for a different form is rejected.
+  if (args.requireTxRefContains && !String(d.tx_ref ?? '').includes(args.requireTxRefContains)) {
+    return { ok: false, status: 422, error: 'Transaction does not belong to this registration' };
   }
 
   return {
