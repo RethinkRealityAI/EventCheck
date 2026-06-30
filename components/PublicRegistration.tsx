@@ -132,6 +132,9 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   // Claim-time portal signup (offered to pending-claim guests when they complete their details)
   const [claimSignupOptIn, setClaimSignupOptIn] = useState(true);
   const [claimSignupPassword, setClaimSignupPassword] = useState('');
+  // Post-registration (ticket-first) account creation, offered on the invite success screen.
+  const [accountState, setAccountState] = useState<'idle' | 'creating' | 'created' | 'error'>('idle');
+  const [accountError, setAccountError] = useState<string>('');
 
   // Guest Mode State (when registering from a link)
   const location = useLocation();
@@ -1144,6 +1147,42 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   // grants the FREE ticket). On success we synthesize a minimal generatedTicket
   // (qrPayload matches the server's JSON.stringify({ id }) shape) so the existing
   // success screen — QR + in-browser PDF download — renders unchanged.
+  // Ticket-first account creation: offered on the success screen AFTER the free
+  // registration + ticket are delivered. Mints a PRE-VERIFIED account via the
+  // service-role contact-invite-account edge fn (no Supabase verification email,
+  // since the invite link already proved the address), then signs them in.
+  const handleCreateInviteAccount = async () => {
+    if (!form || !inviteToken || !inviteResolved?.email || claimSignupPassword.length < 8) return;
+    setAccountState('creating');
+    setAccountError('');
+    try {
+      const fullName = resolveDisplayName(form.fields, answers) || inviteResolved.name || '';
+      const { data, error } = await supabase.functions.invoke('contact-invite-account', {
+        body: { token: inviteToken, password: claimSignupPassword, fullName },
+      });
+      let code = '';
+      if (error) {
+        code = error.message;
+        try { const eb = await (error as any).context?.json?.(); if (eb?.error) code = eb.error; } catch { /* ignore parse failure */ }
+      } else {
+        code = (data as any)?.error || '';
+      }
+      if (data && (data as any).ok) {
+        const { error: siErr } = await supabase.auth.signInWithPassword({ email: inviteResolved.email, password: claimSignupPassword });
+        if (siErr) { setAccountState('error'); setAccountError('Account created — sign in with your email and the password you just set.'); }
+        else { setAccountState('created'); }
+      } else if (code === 'already-exists') {
+        setAccountState('error'); setAccountError('This email already has an account — use Sign In to log in.');
+      } else if (code === 'weak-password') {
+        setAccountState('error'); setAccountError('That password is too short (minimum 8 characters).');
+      } else {
+        setAccountState('error'); setAccountError("We couldn't create your account just now — you can set a password later from the Sign In page.");
+      }
+    } catch (e: any) {
+      setAccountState('error'); setAccountError(e?.message || "We couldn't create your account.");
+    }
+  };
+
   const finalizeInviteRegistration = async () => {
     if (!form || !inviteToken) return;
     setLoading(true);
@@ -1183,48 +1222,8 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
 
       const attendeeId = (data as any).attendeeId as string;
 
-      // Optional portal account — PRE-VERIFIED. The invite token already proves
-      // the contact owns this email, so rather than supabase.auth.signUp() (which
-      // sends a Supabase verification email when "Confirm email" is on), we mint
-      // the account email_confirm=true via the service-role contact-invite-account
-      // edge fn and sign them in immediately. The token — not the client —
-      // dictates which email the account is created for. The
-      // link_attendees_to_new_user trigger backfills user_id on their free
-      // attendee row. Never block the success screen on the account outcome.
-      if (claimSignupOptIn && !user && email && claimSignupPassword.length >= 8) {
-        try {
-          const { data: acctData, error: acctErr } = await supabase.functions.invoke('contact-invite-account', {
-            body: { token: inviteToken, password: claimSignupPassword, fullName: name },
-          });
-          let acctCode = '';
-          if (acctErr) {
-            acctCode = acctErr.message;
-            try { const eb = await (acctErr as any).context?.json?.(); if (eb?.error) acctCode = eb.error; } catch { /* ignore parse failure */ }
-          } else {
-            acctCode = (acctData as any)?.error || '';
-          }
-
-          if (acctData && (acctData as any).ok) {
-            // Confirmed account — sign in straight away so they're already in
-            // their portal, no verification step. Stay on this ticket screen.
-            const { error: siErr } = await supabase.auth.signInWithPassword({ email, password: claimSignupPassword });
-            if (siErr) {
-              setBogoSuccessNotice("Your portal account is ready — sign in with your email and the password you just set.");
-            } else {
-              setBogoSuccessNotice("You're registered and signed in — your portal account is ready and your email is already verified.");
-            }
-          } else if (acctCode === 'already-exists') {
-            setBogoSuccessNotice("You're registered! This email already has a portal account — use Sign In to log in (no new password was set).");
-          } else if (acctCode === 'weak-password') {
-            setBogoSuccessNotice("You're registered! That password was too short to create a login — you can set one later from the Sign In page.");
-          } else {
-            setBogoSuccessNotice(`Your free registration is confirmed. We couldn't set up your login${acctCode ? ` (${acctCode})` : ''} — you can set a password later from the Sign In page.`);
-          }
-        } catch (signupErr: any) {
-          console.warn('Optional pre-verified account during invite registration failed (continuing):', signupErr);
-          setBogoSuccessNotice(`Your free registration is confirmed. We couldn't set up your login (${signupErr?.message || 'unknown error'}) — you can set a password later from the Sign In page.`);
-        }
-      }
+      // Account creation is now offered ON THE SUCCESS SCREEN (ticket-first),
+      // not here — see handleCreateInviteAccount + the success-screen account card.
 
       // Synthesize the ticket for the success screen (server already persisted it).
       const inviteTicket: Attendee = {
@@ -2403,46 +2402,14 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
               </div>
             )}
 
-            {/* Invited (free) registrants get the same optional portal-account
-                opt-in (set-password → portal login). Reuses claimSignupOptIn /
-                claimSignupPassword; the email comes from the resolved invite. */}
-            {inviteMode && !user && (inviteResolved?.email) && (
-              <div className="mb-4 p-4 rounded-xl bg-indigo-50 border border-indigo-200 space-y-3">
-                <label className="flex items-start gap-2 text-sm text-indigo-900">
-                  <input
-                    type="checkbox"
-                    className="mt-0.5"
-                    checked={claimSignupOptIn}
-                    onChange={(e) => setClaimSignupOptIn(e.target.checked)}
-                  />
-                  <span>
-                    <strong>Create a portal account</strong> so you can view your ticket and event updates anytime.
-                    <br />
-                    <span className="text-xs text-indigo-700">Uses your ticket email ({inviteResolved.email}). Recommended.</span>
-                  </span>
-                </label>
-                {claimSignupOptIn && (
-                  <div>
-                    <label className="block text-xs font-semibold text-indigo-900 mb-1">Choose a password (min. 8 characters)</label>
-                    <input
-                      type="password"
-                      minLength={8}
-                      value={claimSignupPassword}
-                      onChange={(e) => setClaimSignupPassword(e.target.value)}
-                      placeholder="••••••••"
-                      className="w-full px-3 py-2 border border-indigo-200 rounded-lg text-sm bg-white"
-                    />
-                    <p className="text-[11px] text-indigo-700 mt-1">No verification email needed — your address is already confirmed, so you'll be signed in right away.</p>
-                  </div>
-                )}
-              </div>
-            )}
+            {/* Invite-path account creation is offered ON THE SUCCESS SCREEN
+                (ticket-first) — see the create-account card below the ticket. */}
 
             {form.settings?.renderMode !== 'stepped' && (
               <div className="pt-4">
                 <button
                   type="submit"
-                  disabled={loading || (!inviteMode && !isAnyPendingClaim && pricingTemplate != null && (!selectedCategoryId || !activeTier || !activeBracket || dynamicTotal == null)) || (!isAnyPendingClaim && registrationMode === 'group' && (!groupPricingResult?.ok || groupMembers.some(m => !m.name.trim() || !m.email.trim() || !m.countryCode || !m.categoryId))) || (isAnyPendingClaim && claimSignupOptIn && !user && !isExhibitorStaffPending && claimSignupPassword.length > 0 && claimSignupPassword.length < 8) || (inviteMode && claimSignupOptIn && !user && claimSignupPassword.length > 0 && claimSignupPassword.length < 8)}
+                  disabled={loading || (!inviteMode && !isAnyPendingClaim && pricingTemplate != null && (!selectedCategoryId || !activeTier || !activeBracket || dynamicTotal == null)) || (!isAnyPendingClaim && registrationMode === 'group' && (!groupPricingResult?.ok || groupMembers.some(m => !m.name.trim() || !m.email.trim() || !m.countryCode || !m.categoryId))) || (isAnyPendingClaim && claimSignupOptIn && !user && !isExhibitorStaffPending && claimSignupPassword.length > 0 && claimSignupPassword.length < 8)}
                   className="w-full py-4 text-white rounded-xl font-black uppercase tracking-widest transition shadow-lg flex justify-center items-center gap-2 transform hover:scale-[1.02] active:scale-95 disabled:opacity-70 disabled:grayscale disabled:cursor-not-allowed"
                   style={{ backgroundColor: form.settings?.formAccentColor || '#4F46E5' }}
                 >
@@ -2829,6 +2796,43 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                   >
                     <Download className="w-5 h-5 inline mr-2" /> Download Your Ticket
                   </button>
+                )}
+              </div>
+            )}
+
+            {/* ── Create-account (ticket-first): offered AFTER the ticket on the invite path ── */}
+            {inviteMode && !user && inviteResolved?.email && (
+              <div className="mt-2 mb-6 p-5 rounded-2xl bg-indigo-50 border border-indigo-200 max-w-sm mx-auto text-left">
+                {accountState === 'created' ? (
+                  <div>
+                    <p className="font-semibold text-indigo-900">✓ Account created — you're signed in.</p>
+                    <a href="#/portal/tickets" className="inline-block mt-2 text-indigo-700 font-semibold underline">View my tickets →</a>
+                  </div>
+                ) : (
+                  <>
+                    <p className="font-semibold text-indigo-900">Do you want to create a GANSID Congress account so you can easily access your tickets and more information about the Congress?</p>
+                    <label className="block text-xs font-semibold text-indigo-900 mt-3 mb-1">Choose a password (min. 8 characters)</label>
+                    <input
+                      type="password"
+                      minLength={8}
+                      value={claimSignupPassword}
+                      onChange={(e) => setClaimSignupPassword(e.target.value)}
+                      placeholder="••••••••"
+                      className="w-full px-3 py-2 rounded-lg border border-indigo-200 bg-white text-sm"
+                    />
+                    <div className="mt-3 flex items-center gap-3 flex-wrap">
+                      <button
+                        type="button"
+                        disabled={claimSignupPassword.length < 8 || accountState === 'creating'}
+                        onClick={handleCreateInviteAccount}
+                        className="px-4 py-2 rounded-lg bg-indigo-600 text-white font-semibold disabled:opacity-50"
+                      >
+                        {accountState === 'creating' ? 'Creating…' : 'Create my account'}
+                      </button>
+                      {accountState === 'error' && <span className="text-xs text-red-600">{accountError}</span>}
+                    </div>
+                    <p className="text-[11px] text-indigo-700 mt-2">No verification email needed — your invitation already confirmed your address.</p>
+                  </>
                 )}
               </div>
             )}
