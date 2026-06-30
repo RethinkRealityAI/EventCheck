@@ -33,7 +33,7 @@ import { getCountryName } from '../utils/countries';
 import GroupPersonRow from './Group/GroupPersonRow';
 import GroupShortcutsToggle from './Group/GroupShortcutsToggle';
 import { supabase } from '../services/supabaseClient';
-import { Loader2, Check, AlertCircle, Download, Calendar, Tag, CreditCard, ArrowRight, X, Eye, MapPin, UserPlus, Info, Copy } from 'lucide-react';
+import { Loader2, Check, AlertCircle, Download, Calendar, Tag, CreditCard, ArrowRight, X, Eye, EyeOff, MapPin, UserPlus, Info, Copy } from 'lucide-react';
 import { useNotifications } from './NotificationSystem';
 import { useParams, useLocation } from 'react-router-dom';
 import { generateTicketPDF } from '../utils/pdfGenerator';
@@ -136,6 +136,8 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   // Post-registration (ticket-first) account creation, offered on the invite success screen.
   const [accountState, setAccountState] = useState<'idle' | 'creating' | 'created' | 'error'>('idle');
   const [accountError, setAccountError] = useState<string>('');
+  const [showPw, setShowPw] = useState(false);
+  const [claimSignupConfirm, setClaimSignupConfirm] = useState('');
 
   // Guest Mode State (when registering from a link)
   const location = useLocation();
@@ -1156,7 +1158,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   // service-role contact-invite-account edge fn (no Supabase verification email,
   // since the invite link already proved the address), then signs them in.
   const handleCreateInviteAccount = async () => {
-    if (!form || !inviteToken || !inviteResolved?.email || claimSignupPassword.length < 8) return;
+    if (!form || !inviteToken || !inviteResolved?.email || claimSignupPassword.length < 8 || claimSignupPassword !== claimSignupConfirm) return;
     setAccountState('creating');
     setAccountError('');
     try {
@@ -2422,8 +2424,8 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                 <button
                   type="submit"
                   disabled={loading || (!inviteMode && !isAnyPendingClaim && pricingTemplate != null && (!selectedCategoryId || !activeTier || !activeBracket || dynamicTotal == null)) || (!isAnyPendingClaim && registrationMode === 'group' && (!groupPricingResult?.ok || groupMembers.some(m => !m.name.trim() || !m.email.trim() || !m.countryCode || !m.categoryId))) || (isAnyPendingClaim && claimSignupOptIn && !user && !isExhibitorStaffPending && claimSignupPassword.length > 0 && claimSignupPassword.length < 8)}
-                  className="w-full py-4 text-white rounded-xl font-black uppercase tracking-widest transition shadow-lg flex justify-center items-center gap-2 transform hover:scale-[1.02] active:scale-95 disabled:opacity-70 disabled:grayscale disabled:cursor-not-allowed"
-                  style={{ backgroundColor: form.settings?.formAccentColor || '#4F46E5' }}
+                  className={`w-full py-4 text-white rounded-xl font-black uppercase tracking-widest transition shadow-lg flex justify-center items-center gap-2 transform hover:scale-[1.02] active:scale-95 disabled:opacity-70 disabled:grayscale disabled:cursor-not-allowed ${form.settings?.formAccentColor ? '' : 'bg-gansid-primary-gradient'}`}
+                  style={form.settings?.formAccentColor ? { backgroundColor: form.settings.formAccentColor } : undefined}
                 >
                   {loading ? (
                     <Loader2 className="w-5 h-5 animate-spin" />
@@ -2724,16 +2726,16 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
         <div className="max-w-2xl w-full bg-white rounded-2xl shadow-xl overflow-hidden animate-fade-in-up relative z-10 mx-auto">
           {/* ── Success Header ── */}
           <div
-            className="w-full h-48 flex flex-col items-center justify-center text-white"
-            style={{ backgroundColor: form.settings?.successHeaderColor || '#4F46E5' }}
+            className={`w-full h-48 flex flex-col items-center justify-center text-white ${form.settings?.successHeaderColor ? '' : 'bg-gansid-primary-gradient'}`}
+            style={form.settings?.successHeaderColor ? { backgroundColor: form.settings.successHeaderColor } : undefined}
           >
             <div
               className="w-20 h-20 rounded-full flex items-center justify-center mb-4 shadow-lg animate-bounce-slow"
               style={{ backgroundColor: 'rgba(255,255,255,0.2)', backdropFilter: 'blur(8px)' }}
             >
-              <Check className="w-10 h-10 text-white" style={{ color: form.settings?.successIconColor || '#10B981' }} />
+              <Check className="w-10 h-10" style={{ color: form.settings?.successHeaderColor ? (form.settings?.successIconColor || '#10B981') : '#ffffff' }} />
             </div>
-            <h3 className="text-3xl font-black px-4" style={{ color: form.settings?.successIconColor || '#10B981' }}>
+            <h3 className="text-3xl font-black px-4" style={{ color: form.settings?.successHeaderColor ? (form.settings?.successIconColor || '#10B981') : '#ffffff' }}>
               {form.settings?.successTitle || 'Registration Confirmed!'}
             </h3>
           </div>
@@ -2775,75 +2777,97 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
 
             {/* ── Your Ticket Card ── */}
             {(form.settings?.showQrOnSuccess !== false) && (
-              <div
-                className="border border-gray-200 rounded-2xl p-8 shadow-md mb-8 max-w-sm mx-auto relative overflow-hidden transform transition hover:scale-[1.02] duration-300"
-                style={{ backgroundColor: form.settings?.successFooterColor || '#F9FAFB' }}
-              >
+              <div className="rounded-2xl shadow-lg mb-8 max-w-sm mx-auto overflow-hidden border border-gansid-outline-variant/30 transform transition hover:scale-[1.02] duration-300">
                 <div
-                  className="absolute top-0 left-0 w-full h-1"
-                  style={{ backgroundColor: form.settings?.successHeaderColor || '#4F46E5', opacity: 0.3 }}
-                ></div>
-                <h4 className="font-bold text-xl text-gray-900 mb-1">{form.title}</h4>
-                <p className="text-xs text-gray-500 mb-6 uppercase tracking-widest font-semibold">{new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
-
-                <div className="bg-white p-3 rounded-2xl inline-block mb-6 shadow-sm border border-gray-100">
-                  <QRCode value={generatedTicket.qrPayload} size={160} />
+                  className={`px-6 py-5 text-center text-white ${form.settings?.successHeaderColor ? '' : 'bg-gansid-primary-gradient'}`}
+                  style={form.settings?.successHeaderColor ? { backgroundColor: form.settings.successHeaderColor } : undefined}
+                >
+                  <h4 className="font-bold text-lg leading-tight">{form.title}</h4>
+                  <p className="text-[11px] text-white/80 mt-1 uppercase tracking-widest font-semibold">{new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
                 </div>
-
-                <div className="text-sm font-mono bg-white p-3 rounded-xl border border-gray-200 text-gray-700 mb-4 flex justify-between items-center">
-                  <span className="text-gray-400 text-[10px] uppercase font-bold">Ticket ID</span>
-                  <span className="font-bold">#{generatedTicket.id.slice(0, 8)}</span>
+                <div className="bg-white p-6">
+                  <div className="bg-white p-3 rounded-2xl inline-block mb-5 shadow-sm border border-gray-100">
+                    <QRCode value={generatedTicket.qrPayload} size={160} />
+                  </div>
+                  <div className="text-sm font-mono bg-gray-50 p-3 rounded-xl border border-gray-200 text-gray-700 mb-3 flex justify-between items-center">
+                    <span className="text-gray-400 text-[10px] uppercase font-bold">Ticket ID</span>
+                    <span className="font-bold">#{generatedTicket.id.slice(0, 8)}</span>
+                  </div>
+                  <div className="text-sm font-mono bg-gray-50 p-3 rounded-xl border border-gray-200 text-gray-700 mb-5 flex justify-between items-center">
+                    <span className="text-gray-400 text-[10px] uppercase font-bold">Attendee</span>
+                    <span className="font-semibold truncate ml-4">{generatedTicket.name}</span>
+                  </div>
+                  {(form.settings?.showTicketButtonOnSuccess !== false) && (
+                    <button
+                      onClick={downloadPdf}
+                      className={`w-full py-3.5 text-white rounded-xl text-sm font-black uppercase tracking-widest shadow-lg transition transform hover:scale-[1.02] ${form.settings?.successHeaderColor ? '' : 'bg-gansid-primary-gradient'}`}
+                      style={form.settings?.successHeaderColor ? { backgroundColor: form.settings.successHeaderColor } : undefined}
+                    >
+                      <Download className="w-5 h-5 inline mr-2" /> Download Your Ticket
+                    </button>
+                  )}
                 </div>
-
-                <div className="text-sm font-mono bg-white p-3 rounded-xl border border-gray-200 text-gray-700 mb-6 flex justify-between items-center">
-                  <span className="text-gray-400 text-[10px] uppercase font-bold">Attendee</span>
-                  <span className="font-semibold truncate ml-4">{generatedTicket.name}</span>
-                </div>
-
-                {(form.settings?.showTicketButtonOnSuccess !== false) && (
-                  <button
-                    onClick={downloadPdf}
-                    className="w-full py-4 text-white rounded-xl text-sm font-black uppercase tracking-widest shadow-lg transition transform hover:scale-[1.02]"
-                    style={{ backgroundColor: form.settings?.successHeaderColor || '#4F46E5' }}
-                  >
-                    <Download className="w-5 h-5 inline mr-2" /> Download Your Ticket
-                  </button>
-                )}
               </div>
             )}
 
             {/* ── Create-account (ticket-first): offered AFTER the ticket on the invite path ── */}
             {inviteMode && !user && inviteResolved?.email && (
-              <div className="mt-2 mb-6 p-5 rounded-2xl bg-indigo-50 border border-indigo-200 max-w-sm mx-auto text-left">
+              <div className="mt-2 mb-6 max-w-sm mx-auto text-left rounded-2xl overflow-hidden shadow-lg border border-gansid-outline-variant/30">
                 {accountState === 'created' ? (
-                  <div>
-                    <p className="font-semibold text-indigo-900">✓ Account created — you're signed in.</p>
-                    <a href="#/portal/tickets" className="inline-block mt-2 text-indigo-700 font-semibold underline">View my tickets →</a>
+                  <div className="bg-gansid-primary-gradient p-6 text-center text-white">
+                    <div className="text-3xl mb-1">🎉</div>
+                    <p className="font-bold text-lg">You're registered for the portal</p>
+                    <p className="text-white/85 text-sm mt-1">Your GANSID Congress account is ready — view your ticket and Congress info anytime.</p>
+                    <a href="#/portal/tickets" className="inline-block mt-4 px-6 py-2.5 rounded-xl bg-white text-gansid-primary font-bold text-sm shadow hover:scale-[1.03] transition">Go to portal →</a>
                   </div>
                 ) : (
                   <>
-                    <p className="font-semibold text-indigo-900">Do you want to create a GANSID Congress account so you can easily access your tickets and more information about the Congress?</p>
-                    <label className="block text-xs font-semibold text-indigo-900 mt-3 mb-1">Choose a password (min. 8 characters)</label>
-                    <input
-                      type="password"
-                      minLength={8}
-                      value={claimSignupPassword}
-                      onChange={(e) => setClaimSignupPassword(e.target.value)}
-                      placeholder="••••••••"
-                      className="w-full px-3 py-2 rounded-lg border border-indigo-200 bg-white text-sm"
-                    />
-                    <div className="mt-3 flex items-center gap-3 flex-wrap">
+                    <div className="bg-gansid-primary-gradient px-5 py-4 text-white">
+                      <p className="font-bold leading-snug">Create your GANSID Congress account</p>
+                      <p className="text-white/85 text-xs mt-1">Easily access your tickets and Congress updates anytime. We'll use <span className="font-semibold break-all">{inviteResolved.email}</span>.</p>
+                    </div>
+                    <div className="bg-white p-5 space-y-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-gansid-on-surface/70 mb-1">Choose a password</label>
+                        <div className="relative">
+                          <input
+                            type={showPw ? 'text' : 'password'}
+                            minLength={8}
+                            value={claimSignupPassword}
+                            onChange={(e) => setClaimSignupPassword(e.target.value)}
+                            placeholder="At least 8 characters"
+                            className="w-full px-3 py-2 pr-10 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-gansid-secondary/40"
+                          />
+                          <button type="button" onClick={() => setShowPw((s) => !s)} aria-label={showPw ? 'Hide password' : 'Show password'} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                            {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-gansid-on-surface/70 mb-1">Confirm password</label>
+                        <input
+                          type={showPw ? 'text' : 'password'}
+                          minLength={8}
+                          value={claimSignupConfirm}
+                          onChange={(e) => setClaimSignupConfirm(e.target.value)}
+                          placeholder="Re-enter your password"
+                          className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-gansid-secondary/40"
+                        />
+                        {claimSignupConfirm.length > 0 && claimSignupConfirm !== claimSignupPassword && (
+                          <p className="text-[11px] text-red-600 mt-1">Passwords don't match.</p>
+                        )}
+                      </div>
                       <button
                         type="button"
-                        disabled={claimSignupPassword.length < 8 || accountState === 'creating'}
+                        disabled={claimSignupPassword.length < 8 || claimSignupPassword !== claimSignupConfirm || accountState === 'creating'}
                         onClick={handleCreateInviteAccount}
-                        className="px-4 py-2 rounded-lg bg-indigo-600 text-white font-semibold disabled:opacity-50"
+                        className="w-full py-2.5 rounded-xl bg-gansid-primary-gradient text-white font-bold text-sm shadow disabled:opacity-50 disabled:cursor-not-allowed hover:scale-[1.01] transition"
                       >
                         {accountState === 'creating' ? 'Creating…' : 'Create my account'}
                       </button>
-                      {accountState === 'error' && <span className="text-xs text-red-600">{accountError}</span>}
+                      {accountState === 'error' && <p className="text-xs text-red-600">{accountError}</p>}
+                      <p className="text-[11px] text-gansid-on-surface/50 text-center">No verification email needed — your invitation already confirmed your address.</p>
                     </div>
-                    <p className="text-[11px] text-indigo-700 mt-2">No verification email needed — your invitation already confirmed your address.</p>
                   </>
                 )}
               </div>
@@ -2954,8 +2978,8 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                 {form.settings?.showTicketButtonOnSuccess !== false && (
                   <button
                     onClick={downloadPdf}
-                    className="w-full py-4 text-white rounded-xl text-sm font-black uppercase tracking-widest shadow-lg transition"
-                    style={{ backgroundColor: form.settings?.successHeaderColor || '#4F46E5' }}
+                    className={`w-full py-4 text-white rounded-xl text-sm font-black uppercase tracking-widest shadow-lg transition ${form.settings?.successHeaderColor ? '' : 'bg-gansid-primary-gradient'}`}
+                    style={form.settings?.successHeaderColor ? { backgroundColor: form.settings.successHeaderColor } : undefined}
                   >
                     <Download className="w-5 h-5 inline mr-2" /> Download PDF Ticket
                   </button>
@@ -2980,12 +3004,15 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                 Return to Portal Dashboard
               </button>
             )}
-            <button
-              onClick={() => onComplete ? onComplete() : window.location.reload()}
-              className="text-gray-500 text-sm font-medium hover:text-gray-900 underline"
-            >
-              {onComplete ? 'Close' : 'Start New Registration'}
-            </button>
+            {onComplete && (
+              <button
+                type="button"
+                onClick={onComplete}
+                className="text-gray-500 text-sm font-medium hover:text-gray-900 underline"
+              >
+                Close
+              </button>
+            )}
           </div>
         </div>
         </div>
