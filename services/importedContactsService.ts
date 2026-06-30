@@ -48,6 +48,35 @@ export interface NewContactInput {
   tags?: string[];
 }
 
+// Normalize a manual-add contact: trim name, lowercase+trim email, default arrays.
+export function normalizeContactInput(input: NewContactInput): { name: string; email: string; tags: string[]; extraFields: Record<string, string> } {
+  return {
+    name: (input.name || '').trim(),
+    email: (input.email || '').trim().toLowerCase(),
+    tags: input.tags ?? [],
+    extraFields: input.extraFields ?? {},
+  };
+}
+
+// Case-insensitive duplicate-email check against an existing list (client-side guard).
+export function isDuplicateEmail(email: string, rows: { email: string }[]): boolean {
+  const e = (email || '').trim().toLowerCase();
+  return rows.some((r) => ((r.email || '') as string).trim().toLowerCase() === e);
+}
+
+// Insert a single contact (manual add). Rowcount-checked per the project's
+// "writes need rowcount check" rule. Caller should dedup by email first.
+export async function createImportedContact(input: NewContactInput): Promise<string> {
+  const n = normalizeContactInput(input);
+  const { data, error } = await supabase
+    .from('imported_contacts')
+    .insert({ name: n.name, email: n.email, tags: n.tags, extra_fields: n.extraFields, email_status: 'pending' })
+    .select('id');
+  if (error) throw error;
+  if (!data || data.length === 0) throw new Error('Contact was not created (0 rows affected — check permissions).');
+  return (data[0] as any).id as string;
+}
+
 function mapBatch(r: any): ImportBatch {
   return {
     id: r.id,
