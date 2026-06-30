@@ -191,6 +191,13 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   // Detect RMS field on the form
   const rmsField = form?.fields?.find((f: any) => f.type === 'registration-mode-selector') ?? null;
 
+  // GANSID uses the Congress red→blue gradient as the DEFAULT brand background for
+  // the header/ticket/buttons (when a form sets no custom color). Other tenants
+  // (SCAGO) keep the original indigo default, so this never restyles SCAGO forms.
+  const isGansid = CURRENT_SITE.key === 'gansid';
+  const brandGradientClass = isGansid ? 'bg-gansid-primary-gradient' : '';
+  const brandDefaultStyle = isGansid ? undefined : { backgroundColor: '#4F46E5' };
+
   // In invite mode the registrant's name + email come prefilled from the invitation
   // and must not be editable. Lock the identity fields (same detection as the prefill).
   const lockedInviteFieldIds = inviteMode && form
@@ -2424,8 +2431,8 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                 <button
                   type="submit"
                   disabled={loading || (!inviteMode && !isAnyPendingClaim && pricingTemplate != null && (!selectedCategoryId || !activeTier || !activeBracket || dynamicTotal == null)) || (!isAnyPendingClaim && registrationMode === 'group' && (!groupPricingResult?.ok || groupMembers.some(m => !m.name.trim() || !m.email.trim() || !m.countryCode || !m.categoryId))) || (isAnyPendingClaim && claimSignupOptIn && !user && !isExhibitorStaffPending && claimSignupPassword.length > 0 && claimSignupPassword.length < 8)}
-                  className={`w-full py-4 text-white rounded-xl font-black uppercase tracking-widest transition shadow-lg flex justify-center items-center gap-2 transform hover:scale-[1.02] active:scale-95 disabled:opacity-70 disabled:grayscale disabled:cursor-not-allowed ${form.settings?.formAccentColor ? '' : 'bg-gansid-primary-gradient'}`}
-                  style={form.settings?.formAccentColor ? { backgroundColor: form.settings.formAccentColor } : undefined}
+                  className={`w-full py-4 text-white rounded-xl font-black uppercase tracking-widest transition shadow-lg flex justify-center items-center gap-2 transform hover:scale-[1.02] active:scale-95 disabled:opacity-70 disabled:grayscale disabled:cursor-not-allowed ${form.settings?.formAccentColor ? '' : brandGradientClass}`}
+                  style={form.settings?.formAccentColor ? { backgroundColor: form.settings.formAccentColor } : brandDefaultStyle}
                 >
                   {loading ? (
                     <Loader2 className="w-5 h-5 animate-spin" />
@@ -2726,16 +2733,16 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
         <div className="max-w-2xl w-full bg-white rounded-2xl shadow-xl overflow-hidden animate-fade-in-up relative z-10 mx-auto">
           {/* ── Success Header ── */}
           <div
-            className={`w-full h-48 flex flex-col items-center justify-center text-white ${form.settings?.successHeaderColor ? '' : 'bg-gansid-primary-gradient'}`}
-            style={form.settings?.successHeaderColor ? { backgroundColor: form.settings.successHeaderColor } : undefined}
+            className={`w-full h-48 flex flex-col items-center justify-center text-white ${form.settings?.successHeaderColor ? '' : brandGradientClass}`}
+            style={form.settings?.successHeaderColor ? { backgroundColor: form.settings.successHeaderColor } : brandDefaultStyle}
           >
             <div
               className="w-20 h-20 rounded-full flex items-center justify-center mb-4 shadow-lg animate-bounce-slow"
               style={{ backgroundColor: 'rgba(255,255,255,0.2)', backdropFilter: 'blur(8px)' }}
             >
-              <Check className="w-10 h-10" style={{ color: form.settings?.successHeaderColor ? (form.settings?.successIconColor || '#10B981') : '#ffffff' }} />
+              <Check className="w-10 h-10" style={{ color: form.settings?.successHeaderColor ? (form.settings?.successIconColor || '#10B981') : (isGansid ? '#ffffff' : (form.settings?.successIconColor || '#10B981')) }} />
             </div>
-            <h3 className="text-3xl font-black px-4" style={{ color: form.settings?.successHeaderColor ? (form.settings?.successIconColor || '#10B981') : '#ffffff' }}>
+            <h3 className="text-3xl font-black px-4" style={{ color: form.settings?.successHeaderColor ? (form.settings?.successIconColor || '#10B981') : (isGansid ? '#ffffff' : (form.settings?.successIconColor || '#10B981')) }}>
               {form.settings?.successTitle || 'Registration Confirmed!'}
             </h3>
           </div>
@@ -2779,8 +2786,8 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
             {(form.settings?.showQrOnSuccess !== false) && (
               <div className="rounded-2xl shadow-lg mb-8 max-w-sm mx-auto overflow-hidden border border-gansid-outline-variant/30 transform transition hover:scale-[1.02] duration-300">
                 <div
-                  className={`px-6 py-5 text-center text-white ${form.settings?.successHeaderColor ? '' : 'bg-gansid-primary-gradient'}`}
-                  style={form.settings?.successHeaderColor ? { backgroundColor: form.settings.successHeaderColor } : undefined}
+                  className={`px-6 py-5 text-center text-white ${form.settings?.successHeaderColor ? '' : brandGradientClass}`}
+                  style={form.settings?.successHeaderColor ? { backgroundColor: form.settings.successHeaderColor } : brandDefaultStyle}
                 >
                   <h4 className="font-bold text-lg leading-tight">{form.title}</h4>
                   <p className="text-[11px] text-white/80 mt-1 uppercase tracking-widest font-semibold">{new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
@@ -2800,8 +2807,8 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                   {(form.settings?.showTicketButtonOnSuccess !== false) && (
                     <button
                       onClick={downloadPdf}
-                      className={`w-full py-3.5 text-white rounded-xl text-sm font-black uppercase tracking-widest shadow-lg transition transform hover:scale-[1.02] ${form.settings?.successHeaderColor ? '' : 'bg-gansid-primary-gradient'}`}
-                      style={form.settings?.successHeaderColor ? { backgroundColor: form.settings.successHeaderColor } : undefined}
+                      className={`w-full py-3.5 text-white rounded-xl text-sm font-black uppercase tracking-widest shadow-lg transition transform hover:scale-[1.02] ${form.settings?.successHeaderColor ? '' : brandGradientClass}`}
+                      style={form.settings?.successHeaderColor ? { backgroundColor: form.settings.successHeaderColor } : brandDefaultStyle}
                     >
                       <Download className="w-5 h-5 inline mr-2" /> Download Your Ticket
                     </button>
@@ -2978,8 +2985,8 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                 {form.settings?.showTicketButtonOnSuccess !== false && (
                   <button
                     onClick={downloadPdf}
-                    className={`w-full py-4 text-white rounded-xl text-sm font-black uppercase tracking-widest shadow-lg transition ${form.settings?.successHeaderColor ? '' : 'bg-gansid-primary-gradient'}`}
-                    style={form.settings?.successHeaderColor ? { backgroundColor: form.settings.successHeaderColor } : undefined}
+                    className={`w-full py-4 text-white rounded-xl text-sm font-black uppercase tracking-widest shadow-lg transition ${form.settings?.successHeaderColor ? '' : brandGradientClass}`}
+                    style={form.settings?.successHeaderColor ? { backgroundColor: form.settings.successHeaderColor } : brandDefaultStyle}
                   >
                     <Download className="w-5 h-5 inline mr-2" /> Download PDF Ticket
                   </button>
