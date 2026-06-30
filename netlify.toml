@@ -21,6 +21,7 @@
     Referrer-Policy = "strict-origin-when-cross-origin"
     # Explicitly grant payment + WebAuthn capabilities to any embedding origin.
     # Chrome and Safari strip these features by default on cross-origin iframes,
-    # which would break PayPal Checkout + any future passkey signup inside the
-    # GANSID Congress embed on inheritedblooddisorders.world.
+    # which would break PayPal Checkout / Flutterwave checkout (incl. Apple/Google
+    # Pay) + any future passkey signup inside the GANSID Congress embed on
+    # inheritedblooddisorders.world.
     Permissions-Policy = "payment=*, publickey-credentials-get=*"

@@ -10,8 +10,9 @@
 verify_jwt = false
 
 # Called from unauthenticated public registration / sponsor / exhibitor
-# forms after a PayPal capture. Does its own PayPal order + amount
-# verification server-side.
+# forms after a PayPal capture or Flutterwave charge. Does its own
+# provider verification + amount/currency validation server-side
+# (PayPal order capture, or Flutterwave /transactions/{id}/verify).
 [functions.verify-payment]
 verify_jwt = false
 

@@ -150,3 +150,117 @@ should show a timestamp for the new attendee.
       aware but the form's `title` field is still the source of truth —
       a form called "Generic Events Registration" will still produce that
       string in emails.
+
+---
+
+## 4. Flutterwave payment provider (PR #17)
+
+Adds **Flutterwave** as a second online payment provider alongside PayPal on the
+registration checkout, so African payers (notably **Nigeria** and **Uganda**,
+whose cards PayPal rejects) can pay by card / bank transfer / mobile money / USSD.
+The provider is **opt-in**: if no Flutterwave key is configured, checkout behaves
+exactly as before (PayPal only). When both are configured, the registrant sees a
+**PayPal / "Card / Mobile Money"** selector.
+
+The receiving org (GANSID) registers a **Canadian** Flutterwave for Business
+account, enables international card payments, and settles to a CAD bank account —
+no African entity required. Charge attendees in **USD** for the broadest card
+acceptance.
+
+### 4a. SQL migrations (paste into Supabase → SQL Editor → Run, on **both** projects)
+
+Idempotent — safe to re-run.
+
+```sql
+-- 1) Allow payment_method = 'flutterwave' on attendees.
+--    Purely additive: the new allow-list is a superset of the old one.
+ALTER TABLE public.attendees DROP CONSTRAINT IF EXISTS attendees_payment_method_check;
+ALTER TABLE public.attendees ADD CONSTRAINT attendees_payment_method_check
+  CHECK (
+    payment_method IS NULL
+    OR payment_method = ANY (ARRAY['card','paypal','flutterwave','cheque','external','promo','bogo']::text[])
+  );
+
+-- 2) Flutterwave PUBLIC key fallback for the admin Settings UI.
+--    (The SECRET key is NEVER stored in the DB — see 4c.)
+ALTER TABLE public.app_settings
+  ADD COLUMN IF NOT EXISTS flutterwave_public_key text null;
+```
+
+Verify:
+
+```sql
+SELECT 1 FROM information_schema.columns
+WHERE table_schema='public' AND table_name='app_settings'
+  AND column_name='flutterwave_public_key';   -- 1 row
+```
+
+### 4b. Get your Flutterwave keys
+
+Flutterwave dashboard → **Settings → API Keys**. You need:
+- **Public key** — `FLWPUBK-…` (client-side, safe to expose). Test: `FLWPUBK_TEST-…`.
+- **Secret key** — `FLWSECK-…` (server-side ONLY). Test: `FLWSECK_TEST-…`.
+
+### 4c. Server secrets (Supabase function secrets — set on **both** project refs)
+
+These are read by the `verify-payment` edge function. The secret key never
+touches the client or the database.
+
+```bash
+# Run once per project ref (SCAGO + GANSID).
+supabase secrets set FLW_SECRET_KEY="FLWSECK-xxxxxxxx"      # live secret key
+supabase secrets set FLW_MODE="live"                        # PIN to live in production (see note)
+# Optional — only if you want test-mode verification on this deployment:
+supabase secrets set FLW_TEST_SECRET_KEY="FLWSECK_TEST-xxxxxxxx"
+```
+
+> **Important — pin `FLW_MODE=live` in production.** When `FLW_MODE` is unset,
+> the function may route to test-mode if a submission is flagged as test
+> (`is_test`). Pinning `live` prevents that. Use `FLW_MODE=test` only on a
+> staging deploy.
+
+### 4d. Client env vars (Netlify → Site configuration → Environment variables, **both** sites)
+
+```
+VITE_FLW_PUBLIC_KEY=FLWPUBK-xxxxxxxx
+# Optional, for a test/staging site:
+VITE_FLW_TEST_PUBLIC_KEY=FLWPUBK_TEST-xxxxxxxx
+VITE_FLW_ENV=live          # or "test" on a staging site
+```
+
+Alternatively, an admin can paste the **public** key into **Settings → Payment
+Configuration → Flutterwave Public Key** (the env var takes precedence).
+
+### 4e. Redeploy the edge function
+
+Only `verify-payment` changed (it now verifies both PayPal and Flutterwave).
+No `config.toml` change — it stays `verify_jwt = false`.
+
+```bash
+supabase functions deploy verify-payment   # run for both project refs
+```
+
+### 4f. Verify end-to-end
+
+1. With keys configured, open a public registration form → you should see a
+   **PayPal / "Card / Mobile Money"** selector.
+2. On a **test** deploy (`FLW_MODE=test`, `VITE_FLW_ENV=test`), pick Flutterwave
+   and pay with the Flutterwave **test card** `5531 8866 5214 2950`, CVV `564`,
+   exp `09/32`, PIN `3310`, OTP `12345`.
+3. Confirm the new attendee row has `payment_method = 'flutterwave'`, the
+   `transaction_id` is set, and the confirmation email fires.
+4. Tamper check: a payment whose amount/currency doesn't match the
+   server-recomputed total is rejected (422); a re-submitted transaction id is
+   rejected (409).
+
+### 4g. Known limitations / notes
+
+- **Currency:** charge in **USD** (cleanest for a Canadian account + global
+  payers). The pricing model stores amounts in cents, so **zero-decimal
+  currencies (UGX, RWF, JPY) are not yet supported** for dynamic-pricing
+  templates — this predates Flutterwave and applies to PayPal too.
+- **Scope:** Flutterwave is wired into the **registration** flows (static +
+  dynamic). Sponsor and booth-extras checkouts remain PayPal-only.
+- **Recommended follow-up:** a `flutterwave-webhook` function (validating the
+  `verif-hash` header, then re-querying `/verify`) to record payments whose
+  client callback was lost — same exposure PayPal has today.

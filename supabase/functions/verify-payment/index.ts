@@ -6,6 +6,7 @@ import {
   isCategoryAtOrBelowCeiling,
 } from '../_shared/bogoRowBuilder.ts';
 import { signRegistrationToken } from '../_shared/registrationToken.ts';
+import { verifyFlutterwaveTransaction } from '../_shared/flutterwaveVerify.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -19,6 +20,110 @@ function jsonResponse(body: Record<string, any>, status = 200) {
     status,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
+}
+
+// ── Provider-neutral paid-transaction resolution ──────────────────────────
+// Confirms a completed payment and returns it normalized so every paid branch
+// can keep its OWN amount/currency validation, dedupe, and insert logic
+// unchanged. PayPal: OAuth + capture (charges the user here). Flutterwave: the
+// charge already happened client-side, so this re-queries /verify to confirm.
+//
+// Returns the verified transaction OR an error Response to return verbatim.
+// Sandbox/test routing mirrors the existing PayPal logic: localhost is always
+// test (dev runs test credentials), then explicit *_MODE, then all-test
+// submissions, else production.
+type ResolvedTxn =
+  | { ok: true; transactionId: string; amountMajorUnits: number; currency: string; method: 'paypal' | 'flutterwave' }
+  | { ok: false; response: Response };
+
+async function resolvePaidTransaction(opts: {
+  provider: 'paypal' | 'flutterwave';
+  paypalOrderId?: string | null;
+  flwTransactionId?: string | null;
+  formId?: string | null; // used to bind a Flutterwave tx_ref to this form
+  origin: string; // already-lowercased origin header
+  allAreTest: boolean;
+  logTag: string;
+}): Promise<ResolvedTxn> {
+  const { origin, allAreTest, logTag } = opts;
+  const isLocalhost = origin !== '' && (origin.includes('localhost') || origin.includes('127.0.0.1'));
+
+  if (opts.provider === 'flutterwave') {
+    const flwMode = (Deno.env.get('FLW_MODE') || '').toLowerCase();
+    const useTestMode = isLocalhost || flwMode === 'test' || (flwMode !== 'live' && allAreTest);
+    // The client tx_ref is built as `${site}-${formId.slice(0,8)}-…`, so the
+    // first 8 chars of formId must appear in the AUTHENTICATED data.tx_ref.
+    const txRefToken = opts.formId ? String(opts.formId).slice(0, 8) : undefined;
+    const result = await verifyFlutterwaveTransaction({
+      flwTransactionId: String(opts.flwTransactionId ?? ''),
+      requireTxRefContains: txRefToken,
+      useTestMode,
+    });
+    if (!result.ok) {
+      console.error(`[verify-payment ${logTag}] Flutterwave verify failed`, JSON.stringify({ status: result.status, error: result.error, useTestMode }));
+      return { ok: false, response: jsonResponse({ error: result.error }, result.status) };
+    }
+    return {
+      ok: true,
+      transactionId: result.transactionId,
+      amountMajorUnits: result.amountMajorUnits,
+      currency: result.currency,
+      method: 'flutterwave',
+    };
+  }
+
+  // ── PayPal: OAuth client-credentials, then capture the order ──
+  if (!opts.paypalOrderId) {
+    return { ok: false, response: jsonResponse({ error: 'paypalOrderId required for PayPal payment' }, 400) };
+  }
+  const ppMode = (Deno.env.get('PAYPAL_MODE') || '').toLowerCase();
+  let useSandbox: boolean;
+  if (isLocalhost) useSandbox = true;
+  else if (ppMode === 'production') useSandbox = false;
+  else if (ppMode === 'sandbox') useSandbox = true;
+  else if (allAreTest) useSandbox = true;
+  else useSandbox = false;
+
+  const PP_CLIENT_ID = (useSandbox ? (Deno.env.get('PAYPAL_SANDBOX_CLIENT_ID') || Deno.env.get('PAYPAL_CLIENT_ID')) : Deno.env.get('PAYPAL_CLIENT_ID'))?.trim() || '';
+  const PP_CLIENT_SECRET = (useSandbox ? (Deno.env.get('PAYPAL_SANDBOX_CLIENT_SECRET') || Deno.env.get('PAYPAL_CLIENT_SECRET')) : Deno.env.get('PAYPAL_CLIENT_SECRET'))?.trim() || '';
+  const PP_API_BASE = Deno.env.get('PAYPAL_API_BASE') || (useSandbox ? 'https://api-m.sandbox.paypal.com' : 'https://api-m.paypal.com');
+  if (!PP_CLIENT_ID || !PP_CLIENT_SECRET) {
+    return { ok: false, response: jsonResponse({ error: 'PayPal credentials not configured on server' }, 500) };
+  }
+
+  const authResp = await fetch(`${PP_API_BASE}/v1/oauth2/token`, {
+    method: 'POST',
+    headers: { 'Authorization': `Basic ${btoa(`${PP_CLIENT_ID}:${PP_CLIENT_SECRET}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'grant_type=client_credentials',
+  });
+  if (!authResp.ok) {
+    console.error(`[verify-payment ${logTag}] PayPal auth failed`);
+    return { ok: false, response: jsonResponse({ error: 'Failed to authenticate with PayPal API' }, 502) };
+  }
+  const { access_token } = await authResp.json();
+
+  const capResp = await fetch(`${PP_API_BASE}/v2/checkout/orders/${opts.paypalOrderId}/capture`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${access_token}`, 'Content-Type': 'application/json' },
+  });
+  const capData = await capResp.json();
+  if (!capResp.ok || capData.status !== 'COMPLETED') {
+    const issue = capData?.details?.[0]?.issue || capData?.name || capData?.message || 'unknown';
+    const debugId = capData?.debug_id || '';
+    console.error(`[verify-payment ${logTag}] PayPal capture failed`, JSON.stringify({ issue, debugId, useSandbox, apiBase: PP_API_BASE, clientIdTail: PP_CLIENT_ID.slice(-6), orderId: opts.paypalOrderId }));
+    return { ok: false, response: jsonResponse({ error: `PayPal capture failed: ${issue}${debugId ? ` (debug_id: ${debugId})` : ''}`, details: capData, diagnostic: { useSandbox, clientIdTail: PP_CLIENT_ID.slice(-6) } }, 502) };
+  }
+  const capture = capData.purchase_units?.[0]?.payments?.captures?.[0];
+  if (!capture) {
+    return { ok: false, response: jsonResponse({ error: 'No capture data found in PayPal response' }, 502) };
+  }
+  return {
+    ok: true,
+    transactionId: capture.id,
+    amountMajorUnits: parseFloat(capture.amount.value),
+    currency: capture.amount.currency_code,
+    method: 'paypal',
+  };
 }
 
 // ── BOGO claim validation + insert helper ─────────────────────────────────
@@ -419,6 +524,11 @@ serve(async (req: Request) => {
     const body = await req.json();
     const {
       paypalOrderId,
+      // Flutterwave Standard — the client completes the charge and posts the
+      // transaction id back; the server re-queries it to confirm before saving.
+      flwTransactionId,
+      flwTxRef,
+      provider: clientProvider,
       attendees,
       // Secure server-validated parameters
       formId,
@@ -432,6 +542,10 @@ serve(async (req: Request) => {
       expectedAmount: legacyExpectedAmount,
       expectedCurrency: legacyExpectedCurrency,
     } = body;
+
+    // Payment provider discriminator. Defaults to PayPal so every existing
+    // caller is unchanged; Flutterwave is opt-in via provider:'flutterwave'.
+    const provider: 'paypal' | 'flutterwave' = clientProvider === 'flutterwave' ? 'flutterwave' : 'paypal';
 
     // ── JWT: derive user_id server-side from Authorization header ──
     // Anonymous submissions (no auth header) proceed normally with user_id = null.
@@ -1407,53 +1521,32 @@ serve(async (req: Request) => {
         const groupBogoClaims = groupBogoSanitized.claims;
         const groupBogoClaimsSkipped = groupBogoSanitized.skipped;
 
-        // 4. Capture PayPal order — replicate the inlined OAuth + capture logic.
+        // 4. Confirm the payment (PayPal capture or Flutterwave verify).
         //    Skipped entirely when a promo zeroes out the total.
         let groupTxId: string | null = null;
+        let groupTxMethod: 'paypal' | 'flutterwave' | null = null;
         if (!groupIsFreeViaPromo) {
-        if (!paypalOrderId) return jsonResponse({ error: 'paypalOrderId required for group payment' }, 400);
-        const ppMode = (Deno.env.get('PAYPAL_MODE') || '').toLowerCase();
-        const allTest = attendees.every((a: any) => a.is_test === true);
-        const ppOrigin = (req.headers.get('origin') || '').toLowerCase();
-        const ppIsLocal = ppOrigin !== '' && (ppOrigin.includes('localhost') || ppOrigin.includes('127.0.0.1'));
-        let ppSandbox: boolean;
-        if (ppIsLocal) ppSandbox = true;
-        else if (ppMode === 'production') ppSandbox = false;
-        else if (ppMode === 'sandbox') ppSandbox = true;
-        else if (allTest) ppSandbox = true;
-        else ppSandbox = false;
-        const PP_CLIENT_ID = (ppSandbox ? (Deno.env.get('PAYPAL_SANDBOX_CLIENT_ID') || Deno.env.get('PAYPAL_CLIENT_ID')) : Deno.env.get('PAYPAL_CLIENT_ID'))?.trim() || '';
-        const PP_CLIENT_SECRET = (ppSandbox ? (Deno.env.get('PAYPAL_SANDBOX_CLIENT_SECRET') || Deno.env.get('PAYPAL_CLIENT_SECRET')) : Deno.env.get('PAYPAL_CLIENT_SECRET'))?.trim() || '';
-        const PP_API_BASE = Deno.env.get('PAYPAL_API_BASE') || (ppSandbox ? 'https://api-m.sandbox.paypal.com' : 'https://api-m.paypal.com');
-        if (!PP_CLIENT_ID || !PP_CLIENT_SECRET) return jsonResponse({ error: 'PayPal credentials not configured' }, 500);
-
-        const ppAuthResp = await fetch(`${PP_API_BASE}/v1/oauth2/token`, {
-          method: 'POST',
-          headers: { 'Authorization': `Basic ${btoa(`${PP_CLIENT_ID}:${PP_CLIENT_SECRET}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: 'grant_type=client_credentials',
+        if (provider === 'paypal' && !paypalOrderId) return jsonResponse({ error: 'paypalOrderId required for group payment' }, 400);
+        const groupResolved = await resolvePaidTransaction({
+          provider, paypalOrderId, flwTransactionId, formId,
+          origin: (req.headers.get('origin') || '').toLowerCase(),
+          allAreTest: attendees.every((a: any) => a.is_test === true),
+          logTag: 'dyn-group',
         });
-        if (!ppAuthResp.ok) return jsonResponse({ error: 'PayPal auth failed' }, 502);
-        const { access_token: ppToken } = await ppAuthResp.json();
-
-        const ppCapResp = await fetch(`${PP_API_BASE}/v2/checkout/orders/${paypalOrderId}/capture`, {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${ppToken}`, 'Content-Type': 'application/json' },
-        });
-        const ppCapData = await ppCapResp.json();
-        if (!ppCapResp.ok || ppCapData.status !== 'COMPLETED') {
-          const issue = ppCapData?.details?.[0]?.issue || ppCapData?.name || ppCapData?.message || 'unknown';
-          const debugId = ppCapData?.debug_id || '';
-          console.error('[verify-payment] PayPal capture failed', JSON.stringify({ issue, debugId, useSandbox: ppSandbox, apiBase: PP_API_BASE, clientIdTail: PP_CLIENT_ID.slice(-6), orderId: paypalOrderId }));
-          return jsonResponse({ error: `PayPal capture failed: ${issue}${debugId ? ` (debug_id: ${debugId})` : ''}`, details: ppCapData, diagnostic: { useSandbox: ppSandbox, clientIdTail: PP_CLIENT_ID.slice(-6) } }, 502);
-        }
-        const ppCapture = ppCapData.purchase_units?.[0]?.payments?.captures?.[0];
-        if (!ppCapture) return jsonResponse({ error: 'No capture data in PayPal response' }, 502);
-        const capturedCents = Math.round(Number(ppCapture.amount?.value ?? 0) * 100);
+        if (!groupResolved.ok) return groupResolved.response;
+        const capturedCents = Math.round(groupResolved.amountMajorUnits * 100);
 
         if (Math.abs(capturedCents - groupDiscountedCents) > 1) {
           return jsonResponse({ error: 'Group price mismatch', expected: groupDiscountedCents, received: capturedCents }, 400);
         }
-        groupTxId = ppCapture.id;
+        // Flutterwave reports the charged currency — enforce it matches the
+        // template (a PayPal order's currency was already fixed client-side).
+        const groupExpectedCcy = tpl.currency ?? 'USD';
+        if (groupResolved.method === 'flutterwave' && groupResolved.currency !== groupExpectedCcy) {
+          return jsonResponse({ error: `Payment currency mismatch. Expected: ${groupExpectedCcy}, Received: ${groupResolved.currency}` }, 422);
+        }
+        groupTxId = groupResolved.transactionId;
+        groupTxMethod = groupResolved.method;
         } // end if (!groupIsFreeViaPromo)
 
         // 5. Duplicate tx guard — only relevant when an actual PayPal tx exists
@@ -1478,7 +1571,7 @@ serve(async (req: Request) => {
             primary_attendee_id: i === 0 ? null : primaryId,
             payment_status: groupIsFreeViaPromo ? 'free' : 'paid',
             transaction_id: groupTxId,
-            payment_method: groupIsFreeViaPromo ? 'promo' : (attendeeDraft.payment_method ?? null),
+            payment_method: groupIsFreeViaPromo ? 'promo' : (groupTxMethod ?? attendeeDraft.payment_method ?? null),
             payment_amount: groupIsFreeViaPromo
               ? `0.00 ${tpl.currency ?? 'USD'}`
               : `${(m.cents / 100).toFixed(2)} ${tpl.currency ?? 'USD'}`,
@@ -1661,66 +1754,21 @@ serve(async (req: Request) => {
         const soloBogoClaims = soloBogoSanitized.claims;
         const soloBogoClaimsSkipped = soloBogoSanitized.skipped;
 
-        // 8. Capture PayPal order and extract amount in cents.
+        // 8. Confirm the payment (PayPal capture or Flutterwave verify), in cents.
         //    Skipped entirely when a promo zeroes out the total.
         let soloTxId: string | null = null;
+        let soloTxMethod: 'paypal' | 'flutterwave' | null = null;
         if (!soloIsFreeViaPromo) {
-        if (!paypalOrderId) return jsonResponse({ error: 'paypalOrderId required for dynamic pricing payment' }, 400);
+        if (provider === 'paypal' && !paypalOrderId) return jsonResponse({ error: 'paypalOrderId required for dynamic pricing payment' }, 400);
 
-        const ppMode = (Deno.env.get('PAYPAL_MODE') || '').toLowerCase();
-        const allTest = attendees.every((a: any) => a.is_test === true);
-        const ppOrigin = (req.headers.get('origin') || '').toLowerCase();
-        const ppIsLocal = ppOrigin !== '' && (ppOrigin.includes('localhost') || ppOrigin.includes('127.0.0.1'));
-        let ppSandbox: boolean;
-        if (ppIsLocal) ppSandbox = true;
-        else if (ppMode === 'production') ppSandbox = false;
-        else if (ppMode === 'sandbox') ppSandbox = true;
-        else if (allTest) ppSandbox = true;
-        else ppSandbox = false;
-
-        const PP_CLIENT_ID = (
-          ppSandbox
-            ? (Deno.env.get('PAYPAL_SANDBOX_CLIENT_ID') || Deno.env.get('PAYPAL_CLIENT_ID'))
-            : Deno.env.get('PAYPAL_CLIENT_ID')
-        )?.trim() || '';
-        const PP_CLIENT_SECRET = (
-          ppSandbox
-            ? (Deno.env.get('PAYPAL_SANDBOX_CLIENT_SECRET') || Deno.env.get('PAYPAL_CLIENT_SECRET'))
-            : Deno.env.get('PAYPAL_CLIENT_SECRET')
-        )?.trim() || '';
-        const PP_API_BASE = Deno.env.get('PAYPAL_API_BASE')
-          || (ppSandbox ? 'https://api-m.sandbox.paypal.com' : 'https://api-m.paypal.com');
-
-        if (!PP_CLIENT_ID || !PP_CLIENT_SECRET) {
-          return jsonResponse({ error: 'PayPal credentials not configured' }, 500);
-        }
-
-        const ppAuthResp = await fetch(`${PP_API_BASE}/v1/oauth2/token`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Basic ${btoa(`${PP_CLIENT_ID}:${PP_CLIENT_SECRET}`)}`,
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-          body: 'grant_type=client_credentials',
+        const soloResolved = await resolvePaidTransaction({
+          provider, paypalOrderId, flwTransactionId, formId,
+          origin: (req.headers.get('origin') || '').toLowerCase(),
+          allAreTest: attendees.every((a: any) => a.is_test === true),
+          logTag: 'dyn-single',
         });
-        if (!ppAuthResp.ok) return jsonResponse({ error: 'PayPal auth failed' }, 502);
-        const { access_token: ppToken } = await ppAuthResp.json();
-
-        const ppCapResp = await fetch(`${PP_API_BASE}/v2/checkout/orders/${paypalOrderId}/capture`, {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${ppToken}`, 'Content-Type': 'application/json' },
-        });
-        const ppCapData = await ppCapResp.json();
-        if (!ppCapResp.ok || ppCapData.status !== 'COMPLETED') {
-          const issue = ppCapData?.details?.[0]?.issue || ppCapData?.name || ppCapData?.message || 'unknown';
-          const debugId = ppCapData?.debug_id || '';
-          console.error('[verify-payment dyn-single] PayPal capture failed', JSON.stringify({ issue, debugId, useSandbox: ppSandbox, apiBase: PP_API_BASE, clientIdTail: PP_CLIENT_ID.slice(-6), orderId: paypalOrderId }));
-          return jsonResponse({ error: `PayPal capture failed: ${issue}${debugId ? ` (debug_id: ${debugId})` : ''}`, details: ppCapData, diagnostic: { useSandbox: ppSandbox, clientIdTail: PP_CLIENT_ID.slice(-6) } }, 502);
-        }
-        const ppCapture = ppCapData.purchase_units?.[0]?.payments?.captures?.[0];
-        if (!ppCapture) return jsonResponse({ error: 'No capture data in PayPal response' }, 502);
-
-        const capturedCents = Math.round(Number(ppCapture.amount?.value ?? 0) * 100);
+        if (!soloResolved.ok) return soloResolved.response;
+        const capturedCents = Math.round(soloResolved.amountMajorUnits * 100);
 
         // 9. Reject if captured amount differs from expected by > 1 cent
         if (Math.abs(capturedCents - soloDiscountedCents) > 1) {
@@ -1730,7 +1778,14 @@ serve(async (req: Request) => {
             received: capturedCents,
           }, 400);
         }
-        soloTxId = ppCapture.id;
+        // Flutterwave reports the charged currency — enforce it matches the
+        // template (a PayPal order's currency was already fixed client-side).
+        const soloExpectedCcy = tpl.currency ?? 'CAD';
+        if (soloResolved.method === 'flutterwave' && soloResolved.currency !== soloExpectedCcy) {
+          return jsonResponse({ error: `Payment currency mismatch. Expected: ${soloExpectedCcy}, Received: ${soloResolved.currency}` }, 422);
+        }
+        soloTxId = soloResolved.transactionId;
+        soloTxMethod = soloResolved.method;
         } // end if (!soloIsFreeViaPromo)
 
         // Duplicate transaction protection — only when we have a real tx
@@ -1754,7 +1809,7 @@ serve(async (req: Request) => {
           ...primary,
           payment_status: soloIsFreeViaPromo ? 'free' : 'paid',
           transaction_id: soloTxId,
-          payment_method: soloIsFreeViaPromo ? 'promo' : (primary.payment_method ?? null),
+          payment_method: soloIsFreeViaPromo ? 'promo' : (soloTxMethod ?? primary.payment_method ?? null),
           payment_amount: soloIsFreeViaPromo
             ? `0.00 ${tpl.currency ?? 'CAD'}`
             : `${(soloDiscountedCents / 100).toFixed(2)} ${tpl.currency ?? 'CAD'}`,
@@ -1945,7 +2000,7 @@ serve(async (req: Request) => {
     }
 
     // --- Determine mode ---
-    const mode = clientMode || (paypalOrderId ? 'paid' : 'free');
+    const mode = clientMode || ((paypalOrderId || flwTransactionId) ? 'paid' : 'free');
 
     // ════════════════════════════════════════════
     //  FREE REGISTRATION
@@ -1986,105 +2041,27 @@ serve(async (req: Request) => {
     }
 
     // ════════════════════════════════════════════
-    //  PAID REGISTRATION — PayPal verification
+    //  PAID REGISTRATION — payment verification (PayPal or Flutterwave)
     // ════════════════════════════════════════════
-    if (!paypalOrderId) {
-      return jsonResponse({ error: 'Missing required field: paypalOrderId for paid registration' }, 400);
-    }
-
-    // Determine PayPal environment — localhost is ALWAYS sandbox (safety), then PAYPAL_MODE, then test-mode, then Origin auto-detect
-    const paypalMode = (Deno.env.get('PAYPAL_MODE') || '').toLowerCase();
     const allAreTest = attendees.every((a: any) => a.is_test === true);
     const originHeader = (req.headers.get('origin') || '').toLowerCase();
-    const isLocalhost = originHeader !== '' && (originHeader.includes('localhost') || originHeader.includes('127.0.0.1'));
-    let useSandbox: boolean;
-    if (isLocalhost) {
-      // Dev machines run the client with sandbox PayPal credentials; forcing production
-      // here would try to capture a sandbox order against production API and 502.
-      useSandbox = true;
-    } else if (paypalMode === 'production') {
-      useSandbox = false;
-    } else if (paypalMode === 'sandbox') {
-      useSandbox = true;
-    } else if (allAreTest) {
-      // FormPreview / admin test submissions always use sandbox (test records are worthless to attackers)
-      useSandbox = true;
-    } else {
-      // Auto-detect from Origin header — default to PRODUCTION if origin is missing or unknown.
-      // Privacy browsers/extensions can strip Origin headers, so missing origin must NOT
-      // fall back to sandbox (which would break real payments).
-      useSandbox = false;
-    }
 
-    console.log(`[verify-payment] mode=${mode}, useSandbox=${useSandbox}, origin=${(req.headers.get('origin') || '').toLowerCase()}, formId=${formId || 'legacy'}, attendees=${attendees.length}`);
+    console.log(`[verify-payment] mode=${mode}, provider=${provider}, origin=${originHeader}, formId=${formId || 'legacy'}, attendees=${attendees.length}`);
 
-    const PAYPAL_CLIENT_ID = (
-      useSandbox
-        ? (Deno.env.get('PAYPAL_SANDBOX_CLIENT_ID') || Deno.env.get('PAYPAL_CLIENT_ID'))
-        : Deno.env.get('PAYPAL_CLIENT_ID')
-    )?.trim() || '';
-
-    const PAYPAL_CLIENT_SECRET = (
-      useSandbox
-        ? (Deno.env.get('PAYPAL_SANDBOX_CLIENT_SECRET') || Deno.env.get('PAYPAL_CLIENT_SECRET'))
-        : Deno.env.get('PAYPAL_CLIENT_SECRET')
-    )?.trim() || '';
-
-    const PAYPAL_API_BASE = Deno.env.get('PAYPAL_API_BASE')
-      || (useSandbox ? 'https://api-m.sandbox.paypal.com' : 'https://api-m.paypal.com');
-
-    if (!PAYPAL_CLIENT_ID || !PAYPAL_CLIENT_SECRET) {
-      return jsonResponse({ error: 'PayPal credentials not configured on server' }, 500);
-    }
-
-    // Get PayPal access token
-    const authResponse = await fetch(`${PAYPAL_API_BASE}/v1/oauth2/token`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Basic ${btoa(`${PAYPAL_CLIENT_ID}:${PAYPAL_CLIENT_SECRET}`)}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: 'grant_type=client_credentials',
+    const resolvedTxn = await resolvePaidTransaction({
+      provider,
+      paypalOrderId,
+      flwTransactionId,
+      formId,
+      origin: originHeader,
+      allAreTest,
+      logTag: 'static',
     });
+    if (!resolvedTxn.ok) return resolvedTxn.response;
 
-    if (!authResponse.ok) {
-      const authError = await authResponse.text();
-      console.error('PayPal auth failed:', authError);
-      return jsonResponse({ error: 'Failed to authenticate with PayPal API' }, 502);
-    }
-
-    const { access_token } = await authResponse.json();
-
-    // Capture the order (this charges the user)
-    const captureResponse = await fetch(`${PAYPAL_API_BASE}/v2/checkout/orders/${paypalOrderId}/capture`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${access_token}`,
-        'Content-Type': 'application/json',
-      },
-    });
-
-    const captureData = await captureResponse.json();
-
-    if (!captureResponse.ok || captureData.status !== 'COMPLETED') {
-      const issue = captureData?.details?.[0]?.issue || captureData?.name || captureData?.message || 'unknown';
-      const debugId = captureData?.debug_id || '';
-      console.error('[verify-payment static] PayPal capture failed', JSON.stringify({ issue, debugId, useSandbox, apiBase: PAYPAL_API_BASE, clientIdTail: PAYPAL_CLIENT_ID.slice(-6), orderId: paypalOrderId }));
-      return jsonResponse({
-        error: `PayPal capture failed: ${issue}${debugId ? ` (debug_id: ${debugId})` : ''}`,
-        details: captureData,
-        diagnostic: { useSandbox, clientIdTail: PAYPAL_CLIENT_ID.slice(-6) },
-      }, 502);
-    }
-
-    const capture = captureData.purchase_units?.[0]?.payments?.captures?.[0];
-    if (!capture) {
-      return jsonResponse({ error: 'No capture data found in PayPal response' }, 502);
-    }
-
-    const transactionId = capture.id;
-    const capturedAmount = parseFloat(capture.amount.value);
-    const capturedCurrency = capture.amount.currency_code;
+    const transactionId = resolvedTxn.transactionId;
+    const capturedAmount = resolvedTxn.amountMajorUnits;
+    const capturedCurrency = resolvedTxn.currency;
 
     // ALWAYS validate amount — no more falsy bypass
     if (Math.abs(capturedAmount - expectedAmount) > 0.01) {
@@ -2119,6 +2096,8 @@ serve(async (req: Request) => {
       payment_status: 'paid',
       transaction_id: transactionId,
       payment_amount: `${capturedAmount} ${capturedCurrency}`,
+      // Stamp the server-confirmed provider so it can't be spoofed by the client.
+      payment_method: resolvedTxn.method,
       // Primary submitter (index 0) gets user_id; guest placeholder rows get null
       user_id: i === 0 ? authUserId : null,
     }));

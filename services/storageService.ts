@@ -278,6 +278,7 @@ export const getSettings = async (): Promise<AppSettings> => {
 
   const settings: AppSettings = {
     paypalClientId: data.paypal_client_id || '',
+    flutterwavePublicKey: (data as any).flutterwave_public_key || '',
     currency: data.currency || 'USD',
     ticketPrice: data.ticket_price || 0,
     smtpHost: data.smtp_host || '',
@@ -347,6 +348,7 @@ export const saveSettings = async (settings: AppSettings): Promise<void> => {
   const dbRecord = {
     id: 1,
     paypal_client_id: settings.paypalClientId,
+    flutterwave_public_key: settings.flutterwavePublicKey ?? '',
     currency: settings.currency,
     ticket_price: settings.ticketPrice,
     smtp_host: settings.smtpHost,
