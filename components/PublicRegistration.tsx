@@ -3001,8 +3001,8 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
             )}
           </div>
 
-          <div className="flex flex-col items-center gap-3 mb-6">
-            {onComplete && (
+          {onComplete && (
+            <div className="flex flex-col items-center gap-3 mb-6">
               <button
                 type="button"
                 onClick={onComplete}
@@ -3010,17 +3010,8 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
               >
                 Return to Portal Dashboard
               </button>
-            )}
-            {onComplete && (
-              <button
-                type="button"
-                onClick={onComplete}
-                className="text-gray-500 text-sm font-medium hover:text-gray-900 underline"
-              >
-                Close
-              </button>
-            )}
-          </div>
+            </div>
+          )}
         </div>
         </div>
       )}
