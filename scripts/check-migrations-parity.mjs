@@ -46,6 +46,10 @@ function readLinkedRef() {
 }
 
 function linkProject(projectRef) {
+  // Supabase CLI >= ~2.10x errors `AlreadyExists: FileSystem.makeDirectory`
+  // when `supabase/.temp` already exists (older CLIs re-linked idempotently).
+  // Clear it first so each link starts clean and `link` stays idempotent.
+  fs.rmSync(path.join(ROOT, 'supabase', '.temp'), { recursive: true, force: true });
   execSync(`npx --yes supabase link --project-ref ${projectRef} --yes`, {
     cwd: ROOT,
     stdio: ['ignore', 'pipe', 'pipe'],

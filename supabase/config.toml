@@ -54,3 +54,11 @@ verify_jwt = true
 # credential; the function trusts NOTHING from the client for the free grant.
 [functions.contact-invite-claim]
 verify_jwt = false
+
+# Public, token-gated. Creates a PRE-VERIFIED portal account (email_confirm=true)
+# for an invited contact who opts to set a password — no Supabase verification
+# email. The HMAC invite token IS the credential (the invited person isn't logged
+# in), and the account email is taken from the server-side contact row, never the
+# client. Must be gateway-open, exactly like contact-invite-claim.
+[functions.contact-invite-account]
+verify_jwt = false
