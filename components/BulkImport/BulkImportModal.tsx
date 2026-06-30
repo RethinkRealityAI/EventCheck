@@ -212,6 +212,9 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume,
   const [forms, setForms] = useState<Form[]>([]);
   const [formsLoading, setFormsLoading] = useState(false);
   const [formId, setFormId] = useState<string>('');
+  // Below lg the compose form + email preview can't sit side-by-side, so a
+  // segmented toggle switches between them (each gets the full modal width).
+  const [mobileView, setMobileView] = useState<'compose' | 'preview'>('compose');
 
   // Send queue + config.
   // Campaign/resume keeps each contact's persisted email_status so the queue
@@ -270,7 +273,12 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume,
         // Closed forms can't accept registrations — hide them from the picker.
         const usable = all.filter(f => f.status !== 'closed');
         setForms(usable);
-        setFormId(prev => prev || usable[0]?.id || '');
+        // Default to the dedicated free-registration form so contacts aren't
+        // accidentally invited to the paid/stepped congress form.
+        setFormId(prev => prev
+          || usable.find(f => f.id === 'gansid-congress-2026-invite')?.id
+          || usable[0]?.id
+          || '');
       } finally {
         if (!cancelled) setFormsLoading(false);
       }
@@ -864,8 +872,18 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume,
 
           {/* STEP: compose */}
           {step === 'compose' && (
-            <div className="flex-1 grid grid-cols-1 lg:grid-cols-5 overflow-hidden min-h-0">
-              <div className="lg:col-span-2 overflow-y-auto px-6 py-5 space-y-4 border-r border-gray-100">
+            <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+              {/* Mobile-only Compose | Preview toggle (side-by-side on lg+) */}
+              <div className="lg:hidden flex gap-1 p-1 mx-3 mt-3 bg-gray-100 rounded-lg shrink-0">
+                {(['compose', 'preview'] as const).map(v => (
+                  <button key={v} type="button" onClick={() => setMobileView(v)}
+                    className={`flex-1 py-1.5 text-sm font-semibold rounded-md transition ${mobileView === v ? 'bg-white shadow text-indigo-700' : 'text-gray-500'}`}>
+                    {v === 'compose' ? 'Compose' : 'Preview'}
+                  </button>
+                ))}
+              </div>
+              <div className="flex-1 grid grid-cols-1 lg:grid-cols-5 overflow-hidden min-h-0">
+              <div className={`${mobileView === 'compose' ? '' : 'hidden'} lg:block lg:col-span-2 overflow-y-auto px-6 py-5 space-y-4 border-r border-gray-100`}>
                 {/* Audience summary */}
                 <div className="rounded-lg bg-indigo-50 border border-indigo-100 px-3 py-2 text-xs text-indigo-700 flex items-center gap-2">
                   <Users className="w-4 h-4 shrink-0" />
@@ -951,15 +969,16 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume,
                 </div>
               </div>
               {/* Preview */}
-              <div className="lg:col-span-3 bg-gray-100 flex flex-col min-h-0">
+              <div className={`${mobileView === 'preview' ? 'flex' : 'hidden'} lg:flex lg:col-span-3 bg-gray-100 flex-col min-h-0`}>
                 <div className="px-4 py-2 border-b border-gray-200 bg-white flex items-center justify-between shrink-0">
                   <div className="text-xs font-semibold text-gray-600 uppercase tracking-wider">Preview</div>
                   <div className="text-[11px] text-gray-500 truncate max-w-[60%]" title={renderedSubject}>Subject: <span className="font-medium text-gray-700">{renderedSubject || <em className="text-gray-400">(empty)</em>}</span></div>
                 </div>
-                <div className="flex-1 min-h-0 overflow-hidden">
-                  <iframe title="Email preview" srcDoc={renderedPreview} sandbox="" scrolling="no" className="w-full h-full bg-white border-0 block" />
+                <div className="flex-1 min-h-0 overflow-y-auto">
+                  <iframe title="Email preview" srcDoc={renderedPreview} sandbox="" className="w-full h-full min-h-[60vh] lg:min-h-0 bg-white border-0 block" />
                 </div>
               </div>
+            </div>
             </div>
           )}
 

@@ -52,13 +52,19 @@ export const getAttendeesByForm = async (formId: string): Promise<Attendee[]> =>
 
 export const saveAttendee = async (attendee: Attendee): Promise<void> => {
   const dbRecord = mapAttendeeToDb(attendee);
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('attendees')
-    .upsert(dbRecord);
+    .upsert(dbRecord)
+    .select('id');
 
   if (error) {
     console.error("Failed to save attendee", error);
     throw new Error(`Failed to save attendee: ${error.message}`);
+  }
+  // Per project rule #4: upsert/update/delete can silently affect 0 rows under
+  // RLS without erroring. Verify the write actually landed.
+  if (!data || data.length === 0) {
+    throw new Error('Attendee was not saved (0 rows affected — check RLS/permissions).');
   }
 };
 

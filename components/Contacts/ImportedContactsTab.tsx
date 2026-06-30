@@ -12,6 +12,7 @@ import {
 } from '../../services/importedContactsService';
 import { useNotifications } from '../NotificationSystem';
 import BulkImportModal from '../BulkImport/BulkImportModal';
+import AddContactModal from './AddContactModal';
 
 interface Props {
   settings: AppSettings | null;
@@ -63,6 +64,7 @@ export default function ImportedContactsTab({ settings }: Props) {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [search, setSearch] = useState('');
   const [modal, setModal] = useState<ModalState | null>(null);
+  const [addContactOpen, setAddContactOpen] = useState(false);
 
   // Tagging + multi-select
   const [allTags, setAllTags] = useState<string[]>([]);
@@ -309,6 +311,13 @@ export default function ImportedContactsTab({ settings }: Props) {
           className="flex items-center gap-1.5 px-3 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 transition shadow-sm"
         >
           <Upload className="w-4 h-4" /> Bulk import
+        </button>
+
+        <button
+          onClick={() => setAddContactOpen(true)}
+          className="flex items-center gap-1.5 px-3 py-2 bg-white border border-indigo-200 text-indigo-700 rounded-lg text-sm font-semibold hover:bg-indigo-50 transition shadow-sm"
+        >
+          <Plus className="w-4 h-4" /> Add contact
         </button>
 
         {/* Batch filter */}
@@ -577,6 +586,13 @@ export default function ImportedContactsTab({ settings }: Props) {
           onComplete={() => load()}
         />
       )}
+
+      <AddContactModal
+        open={addContactOpen}
+        onClose={() => setAddContactOpen(false)}
+        existingContacts={contacts}
+        onCreated={load}
+      />
     </div>
   );
 }
