@@ -114,6 +114,8 @@ export interface FormRendererProps {
   promoFieldHint?: string;
   /** Speaker / promo-required category — mask dollar amounts in category + total UI. */
   maskSpeakerPricing?: boolean;
+  /** Field ids rendered read-only — e.g. invite-prefilled name/email the registrant can't change. */
+  lockedFieldIds?: Set<string>;
 }
 
 export const FormRenderer: React.FC<FormRendererProps> = ({
@@ -173,6 +175,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   showPromoCodeField = false,
   promoFieldHint,
   maskSpeakerPricing = false,
+  lockedFieldIds,
 }) => {
   return (
     <>
@@ -851,11 +854,17 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
               <input
                 type={field.type === 'number' ? 'number' : field.type === 'email' ? 'email' : field.type === 'phone' ? 'tel' : 'text'}
                 inputMode={field.type === 'text' && field.validation === 'int' ? 'numeric' : undefined}
-                className={`w-full ${field.type === 'address' ? 'pl-10 pr-4' : 'px-4'} py-2.5 rounded-full gradient-border-input focus:outline-none focus:ring-2 focus:ring-gansid-secondary/40 font-body text-sm`}
+                className={`w-full ${field.type === 'address' ? 'pl-10 pr-4' : 'px-4'} py-2.5 rounded-full gradient-border-input focus:outline-none focus:ring-2 focus:ring-gansid-secondary/40 font-body text-sm ${lockedFieldIds?.has(field.id) ? 'opacity-70 cursor-not-allowed bg-gray-50' : ''}`}
                 placeholder={field.placeholder}
                 value={answers[field.id] || ''}
                 onChange={e => onFieldChange(field.id, e.target.value)}
+                readOnly={lockedFieldIds?.has(field.id)}
+                disabled={lockedFieldIds?.has(field.id)}
+                aria-readonly={lockedFieldIds?.has(field.id)}
               />
+              {lockedFieldIds?.has(field.id) && (
+                <p className="text-[11px] text-gansid-on-surface/40 mt-1 ml-2">From your invitation — contact the organizers to change this.</p>
+              )}
             </div>
           )}
         </div>

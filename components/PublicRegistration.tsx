@@ -185,6 +185,22 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   // Detect RMS field on the form
   const rmsField = form?.fields?.find((f: any) => f.type === 'registration-mode-selector') ?? null;
 
+  // In invite mode the registrant's name + email come prefilled from the invitation
+  // and must not be editable. Lock the identity fields (same detection as the prefill).
+  const lockedInviteFieldIds = inviteMode && form
+    ? new Set(
+        (form.fields as FormField[])
+          .filter((f) => {
+            const id = (f.id || '').toLowerCase();
+            const lbl = (f.label || '').toLowerCase();
+            return id.includes('fname') || id.includes('lname') ||
+              lbl.includes('first name') || lbl.includes('last name') ||
+              f.type === 'email' || lbl.includes('email');
+          })
+          .map((f) => f.id),
+      )
+    : undefined;
+
   const [registrationMode, setRegistrationMode] = useState<'individual' | 'group' | null>(null);
   // `groupSize` = number of ADDITIONAL people the purchaser is registering (1..5).
   // The purchaser themselves is always registered separately via the main form.
@@ -2289,6 +2305,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                 showPromoCodeField={showPromoCodeField}
                 promoFieldHint={promoFieldHint}
                 maskSpeakerPricing={isSpeakerCategory}
+                lockedFieldIds={lockedInviteFieldIds}
               />
             ) : (
               <SingleFormShell
@@ -2347,6 +2364,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                 showPromoCodeField={showPromoCodeField}
                 promoFieldHint={promoFieldHint}
                 maskSpeakerPricing={isSpeakerCategory}
+                lockedFieldIds={lockedInviteFieldIds}
               />
             )}
 

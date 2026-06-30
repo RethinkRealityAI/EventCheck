@@ -270,7 +270,12 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume,
         // Closed forms can't accept registrations — hide them from the picker.
         const usable = all.filter(f => f.status !== 'closed');
         setForms(usable);
-        setFormId(prev => prev || usable[0]?.id || '');
+        // Default to the dedicated free-registration form so contacts aren't
+        // accidentally invited to the paid/stepped congress form.
+        setFormId(prev => prev
+          || usable.find(f => f.id === 'gansid-congress-2026-invite')?.id
+          || usable[0]?.id
+          || '');
       } finally {
         if (!cancelled) setFormsLoading(false);
       }
