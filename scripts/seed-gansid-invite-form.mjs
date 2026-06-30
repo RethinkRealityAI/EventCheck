@@ -26,7 +26,12 @@ if (!rows.length) { console.error('source form gansid-congress-2026 not found');
 
 const fields = rows[0].fields
   .filter((f) => !DROP.has(f.id))
-  .map((f) => ({ ...f, required: KEEP_REQUIRED.has(f.id) ? true : false }));
+  .map((f) => {
+    // Strip pricing-only metadata — this form has no pricing template, so a
+    // lingering usedForPricing flag would just be misleading dead config.
+    const { usedForPricing, ...rest } = f;
+    return { ...rest, required: KEEP_REQUIRED.has(f.id) ? true : false };
+  });
 
 const settings = {
   renderMode: 'single',

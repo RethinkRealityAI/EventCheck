@@ -197,9 +197,12 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
           .filter((f) => {
             const id = (f.id || '').toLowerCase();
             const lbl = (f.label || '').toLowerCase();
+            // Lock exactly what the prefill fills: split first/last name (by id/label)
+            // and the email field (by type). NOT a label match on "email" — that could
+            // lock a non-prefilled field like "Alternate email", leaving it stuck empty.
             return id.includes('fname') || id.includes('lname') ||
               lbl.includes('first name') || lbl.includes('last name') ||
-              f.type === 'email' || lbl.includes('email');
+              f.type === 'email';
           })
           .map((f) => f.id),
       )
