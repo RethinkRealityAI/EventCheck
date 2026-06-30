@@ -27,6 +27,7 @@ import {
 import { buildBogoPostCheckoutNotice, formatVerifyPaymentError } from '../utils/verifyPaymentErrors';
 import { computeGroupTotal, computeGroupBaseAndAddons, type GroupMemberPricingInput } from '../utils/groupPricing';
 import { clearAllProgress } from '../utils/registrationProgress';
+import { validateRequiredAnswers } from '../utils/formValidation';
 import CountryField from './FormBuilder/fields/CountryField';
 import { getCountryName } from '../utils/countries';
 import GroupPersonRow from './Group/GroupPersonRow';
@@ -1185,6 +1186,14 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
 
   const finalizeInviteRegistration = async () => {
     if (!form || !inviteToken) return;
+    // Enforce the form's required fields (notably the consent checkboxes) before
+    // the free registration — the invite form makes everything optional EXCEPT
+    // the consents, so this is what guarantees they're accepted.
+    const missingRequired = validateRequiredAnswers(form.fields, answers);
+    if (missingRequired.length) {
+      setError('Please complete all required fields, including the consent checkboxes, before continuing.');
+      return;
+    }
     setLoading(true);
     setError('');
     try {

@@ -6,6 +6,7 @@ import { saveAttendee } from '../services/storageService';
 import { useNotifications } from './NotificationSystem';
 import { computeDonationPool } from '../utils/donationPool';
 import { CURRENT_SITE } from '../config/sites';
+import { isValidEmail } from '../utils/formValidation';
 import {
   type AttendeeCategory,
   getCategoryOptionsForSite,
@@ -36,6 +37,7 @@ const AddAttendeeModal: React.FC<AddAttendeeModalProps> = ({ forms, selectedForm
   const [attendeeCategory, setAttendeeCategory] = useState<AttendeeCategory | ''>('');
   const categoryOptions = getCategoryOptionsForSite(CURRENT_SITE.portalEnabled);
   const [answers, setAnswers] = useState<Record<string, any>>({});
+  const [dupConfirmed, setDupConfirmed] = useState(false);
 
   // Live donated-seat pool from the attendee list. Drives the hint copy on
   // the donated-seat checkbox so the admin knows whether they have any
@@ -99,6 +101,20 @@ const AddAttendeeModal: React.FC<AddAttendeeModalProps> = ({ forms, selectedForm
     if (!resolvedEmail) {
       showNotification(`Please fill in "${emailField?.label || 'email'}" — required so we can deliver their ticket.`, 'warning');
       return;
+    }
+    if (!isValidEmail(resolvedEmail)) {
+      showNotification('Please enter a valid email address.', 'warning');
+      return;
+    }
+    // Duplicate guard: warn once if a non-test attendee with the same email
+    // already exists on this form. A second submit proceeds (intentional adds).
+    if (!dupConfirmed && !isTest) {
+      const dup = attendees.some(a => a.formId === formId && !a.isTest && (a.email || '').trim().toLowerCase() === resolvedEmail.toLowerCase());
+      if (dup) {
+        setDupConfirmed(true);
+        showNotification('An attendee with this email already exists on this form — click "Add Attendee" again to add anyway.', 'warning');
+        return;
+      }
     }
     // Block over-claiming when the pool is empty. Skip the check for test
     // rows since they're excluded from the pool anyway.
