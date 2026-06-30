@@ -37,10 +37,10 @@ function generateEmailTemplate(data: {
     const isGansid = /gansid/i.test(rawName);
     const palette = isGansid
       ? {
-          headerGradient: 'linear-gradient(135deg, #ba0028 0%, #E0243C 55%, #2260a1 100%)',
-          footerGradient: 'linear-gradient(135deg, #ba0028 0%, #E0243C 60%, #2260a1 100%)',
+          headerGradient: 'linear-gradient(135deg, #ba0028 0%, #E0243C 38%, #2260a1 100%)',
+          footerGradient: 'linear-gradient(135deg, #ba0028 0%, #E0243C 42%, #2260a1 100%)',
           buttonColor: '#ba0028',
-          brandLabel: "GANSID '26",
+          brandLabel: 'GANSID Congress 2026',
           subtitle: 'Hyderabad, India · October 23–25, 2026',
           contactEmail: 'congress@inheritedblooddisorders.world',
         }

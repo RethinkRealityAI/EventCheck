@@ -26,11 +26,11 @@ export interface EmailPalette {
 
 export const EMAIL_PALETTES: Record<SiteKey, EmailPalette> = {
   gansid: {
-    headerGradient: 'linear-gradient(135deg, #ba0028 0%, #E0243C 55%, #2260a1 100%)',
-    footerGradient: 'linear-gradient(135deg, #ba0028 0%, #E0243C 60%, #2260a1 100%)',
+    headerGradient: 'linear-gradient(135deg, #ba0028 0%, #E0243C 38%, #2260a1 100%)',
+    footerGradient: 'linear-gradient(135deg, #ba0028 0%, #E0243C 42%, #2260a1 100%)',
     buttonGradient: 'linear-gradient(135deg, #ba0028, #E0243C)',
     buttonColor: '#ba0028',
-    footerBrandLabel: "GANSID '26",
+    footerBrandLabel: 'GANSID Congress 2026',
     footerSubtitle: 'Hyderabad, India · October 23–25, 2026',
     footerContactEmail: 'congress@inheritedblooddisorders.world',
   },
