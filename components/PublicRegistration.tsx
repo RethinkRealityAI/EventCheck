@@ -1167,34 +1167,45 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
 
       const attendeeId = (data as any).attendeeId as string;
 
-      // Optional portal signup — mirrors the pending-claim opt-in. Uses the
-      // invited contact's email so the trigger link_attendees_to_new_user
-      // backfills user_id on their new free attendee row after they verify.
-      // We INSPECT the result so the success screen doesn't claim "verification
-      // email sent" when the account already exists (Supabase anti-enumeration
-      // returns success with identities=[]) or signUp errored. Registration has
-      // already succeeded — never block the success screen on the signup outcome.
+      // Optional portal account — PRE-VERIFIED. The invite token already proves
+      // the contact owns this email, so rather than supabase.auth.signUp() (which
+      // sends a Supabase verification email when "Confirm email" is on), we mint
+      // the account email_confirm=true via the service-role contact-invite-account
+      // edge fn and sign them in immediately. The token — not the client —
+      // dictates which email the account is created for. The
+      // link_attendees_to_new_user trigger backfills user_id on their free
+      // attendee row. Never block the success screen on the account outcome.
       if (claimSignupOptIn && !user && email && claimSignupPassword.length >= 8) {
         try {
-          const { data: suData, error: suErr } = await supabase.auth.signUp({
-            email,
-            password: claimSignupPassword,
-            options: {
-              data: { full_name: name, role: 'attendee' },
-              emailRedirectTo: portalEmailRedirectTo(),
-            },
+          const { data: acctData, error: acctErr } = await supabase.functions.invoke('contact-invite-account', {
+            body: { token: inviteToken, password: claimSignupPassword, fullName: name },
           });
-          if (suErr) {
-            setBogoSuccessNotice(`Your free registration is confirmed. We couldn't set up your login (${suErr.message}) — you can set a password later from the Sign In page.`);
-          } else if (suData?.user && Array.isArray(suData.user.identities) && suData.user.identities.length === 0) {
-            // Duplicate email → no new account created (anti-enumeration).
-            setBogoSuccessNotice("You're registered! This email already has a portal account — use Sign In to log in (no new password was set).");
+          let acctCode = '';
+          if (acctErr) {
+            acctCode = acctErr.message;
+            try { const eb = await (acctErr as any).context?.json?.(); if (eb?.error) acctCode = eb.error; } catch { /* ignore parse failure */ }
           } else {
-            // Genuinely-new account — the ONLY case where a verification email was sent.
-            setBogoSuccessNotice("You're registered! Check your email to verify your account, then you can log in.");
+            acctCode = (acctData as any)?.error || '';
+          }
+
+          if (acctData && (acctData as any).ok) {
+            // Confirmed account — sign in straight away so they're already in
+            // their portal, no verification step. Stay on this ticket screen.
+            const { error: siErr } = await supabase.auth.signInWithPassword({ email, password: claimSignupPassword });
+            if (siErr) {
+              setBogoSuccessNotice("Your portal account is ready — sign in with your email and the password you just set.");
+            } else {
+              setBogoSuccessNotice("You're registered and signed in — your portal account is ready and your email is already verified.");
+            }
+          } else if (acctCode === 'already-exists') {
+            setBogoSuccessNotice("You're registered! This email already has a portal account — use Sign In to log in (no new password was set).");
+          } else if (acctCode === 'weak-password') {
+            setBogoSuccessNotice("You're registered! That password was too short to create a login — you can set one later from the Sign In page.");
+          } else {
+            setBogoSuccessNotice(`Your free registration is confirmed. We couldn't set up your login${acctCode ? ` (${acctCode})` : ''} — you can set a password later from the Sign In page.`);
           }
         } catch (signupErr: any) {
-          console.warn('Optional portal signup during invite registration failed (continuing):', signupErr);
+          console.warn('Optional pre-verified account during invite registration failed (continuing):', signupErr);
           setBogoSuccessNotice(`Your free registration is confirmed. We couldn't set up your login (${signupErr?.message || 'unknown error'}) — you can set a password later from the Sign In page.`);
         }
       }
@@ -2403,7 +2414,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                       placeholder="••••••••"
                       className="w-full px-3 py-2 border border-indigo-200 rounded-lg text-sm bg-white"
                     />
-                    <p className="text-[11px] text-indigo-700 mt-1">You'll receive a verification email to activate your account.</p>
+                    <p className="text-[11px] text-indigo-700 mt-1">No verification email needed — your address is already confirmed, so you'll be signed in right away.</p>
                   </div>
                 )}
               </div>
