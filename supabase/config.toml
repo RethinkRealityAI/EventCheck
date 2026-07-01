@@ -62,3 +62,10 @@ verify_jwt = false
 # client. Must be gateway-open, exactly like contact-invite-claim.
 [functions.contact-invite-account]
 verify_jwt = false
+
+# Admin-only. Issues a FREE ticket to an imported contact WITHOUT them filling the
+# form — creates an 'Issued (free)' attendee + sends the P4 registration-confirmed
+# (ticket download-link) email. Gateway requires a JWT; the function additionally
+# asserts the caller is an admin/super_admin.
+[functions.contact-issue-ticket]
+verify_jwt = true
