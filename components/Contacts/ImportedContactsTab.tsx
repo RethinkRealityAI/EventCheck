@@ -13,6 +13,7 @@ import {
 import { useNotifications } from '../NotificationSystem';
 import BulkImportModal from '../BulkImport/BulkImportModal';
 import AddContactModal from './AddContactModal';
+import IssueTicketModal from './IssueTicketModal';
 
 interface Props {
   settings: AppSettings | null;
@@ -65,6 +66,7 @@ export default function ImportedContactsTab({ settings }: Props) {
   const [search, setSearch] = useState('');
   const [modal, setModal] = useState<ModalState | null>(null);
   const [addContactOpen, setAddContactOpen] = useState(false);
+  const [issueTicketOpen, setIssueTicketOpen] = useState(false);
 
   // Tagging + multi-select
   const [allTags, setAllTags] = useState<string[]>([]);
@@ -443,6 +445,7 @@ export default function ImportedContactsTab({ settings }: Props) {
           </span>
           <div className="h-5 w-px bg-white/30" />
           <BulkBtn onClick={bulkSendInvite} disabled={!smtpReady} title={!smtpReady ? 'Configure SMTP in Settings first' : 'Email a free-registration invite link'} icon={<Ticket className="w-4 h-4" />} label="Send registration invite" />
+          <BulkBtn onClick={() => setIssueTicketOpen(true)} disabled={!smtpReady} title={!smtpReady ? 'Configure SMTP in Settings first' : 'Issue a free ticket + email it directly (no form needed)'} icon={<TicketCheck className="w-4 h-4" />} label="Send ticket" />
           <BulkBtn onClick={bulkResend} disabled={!smtpReady} title={!smtpReady ? 'Configure SMTP in Settings first' : 'Compose a campaign to these contacts'} icon={<SendIcon className="w-4 h-4" />} label="Resend campaign" />
           <BulkBtn onClick={bulkAddTag} icon={<Plus className="w-4 h-4" />} label="Add tag" />
           <BulkBtn onClick={bulkRemoveTag} icon={<Minus className="w-4 h-4" />} label="Remove tag" />
@@ -592,6 +595,13 @@ export default function ImportedContactsTab({ settings }: Props) {
         onClose={() => setAddContactOpen(false)}
         existingContacts={contacts}
         onCreated={load}
+      />
+
+      <IssueTicketModal
+        open={issueTicketOpen}
+        contacts={selectedContacts}
+        onClose={() => setIssueTicketOpen(false)}
+        onComplete={load}
       />
     </div>
   );
