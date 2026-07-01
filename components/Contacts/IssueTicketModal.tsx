@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import ReactDOM from 'react-dom';
-import { X, TicketCheck, Loader2, CheckCircle2, XCircle, ChevronDown } from 'lucide-react';
+import { X, TicketCheck, Loader2, CheckCircle2, XCircle, ChevronDown, AlertTriangle } from 'lucide-react';
 import { getForms } from '../../services/storageService';
 import { supabase } from '../../services/supabaseClient';
 import type { Form } from '../../types';
@@ -9,7 +9,7 @@ import type { ImportedContact } from '../../services/importedContactsService';
 const DEFAULT_FORM_ID = 'gansid-congress-2026-invite';
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
-type RowStatus = 'pending' | 'sending' | 'sent' | 'resent' | 'failed';
+type RowStatus = 'pending' | 'sending' | 'sent' | 'resent' | 'sent-no-email' | 'failed';
 
 interface Props {
   open: boolean;
@@ -37,12 +37,18 @@ const IssueTicketModal: React.FC<Props> = ({ open, contacts, onClose, onComplete
       try {
         const all = await getForms();
         if (cancelled) return;
-        const usable = all.filter(f => f.status !== 'closed');
+        const usable = all.filter(f => f.status !== 'closed' && (f.formType ?? 'event') === 'event');
         setForms(usable);
         setFormId(prev => prev || usable.find(f => f.id === DEFAULT_FORM_ID)?.id || usable[0]?.id || '');
       } finally { if (!cancelled) setFormsLoading(false); }
     })();
     return () => { cancelled = true; };
+  }, [open]);
+
+  // Reset the send state each time the modal opens, so a fresh selection never
+  // shows the previous run's statuses / "Done" footer.
+  useEffect(() => {
+    if (open) { setDone(false); setSending(false); setStatuses({}); }
   }, [open]);
 
   const selectedForm = useMemo(() => forms.find(f => f.id === formId) || null, [forms, formId]);
@@ -51,6 +57,7 @@ const IssueTicketModal: React.FC<Props> = ({ open, contacts, onClose, onComplete
     const v = Object.values(statuses);
     return {
       sent: v.filter(s => s === 'sent' || s === 'resent').length,
+      noEmail: v.filter(s => s === 'sent-no-email').length,
       failed: v.filter(s => s === 'failed').length,
     };
   }, [statuses]);
@@ -69,7 +76,12 @@ const IssueTicketModal: React.FC<Props> = ({ open, contacts, onClose, onComplete
           body: { contactId: c.id, formId, origin: window.location.origin },
         });
         if (error || (data as any)?.error) throw new Error((data as any)?.error || error?.message || 'failed');
-        setStatuses(prev => ({ ...prev, [c.id]: (data as any)?.resent ? 'resent' : 'sent' }));
+        // The ticket is created even if the confirmation email fails (best-effort
+        // server-side) — surface that distinctly instead of a false green "sent".
+        const status: RowStatus = (data as any)?.emailSent === false
+          ? 'sent-no-email'
+          : ((data as any)?.resent ? 'resent' : 'sent');
+        setStatuses(prev => ({ ...prev, [c.id]: status }));
       } catch {
         setStatuses(prev => ({ ...prev, [c.id]: 'failed' }));
       }
@@ -126,6 +138,7 @@ const IssueTicketModal: React.FC<Props> = ({ open, contacts, onClose, onComplete
                     <span className="shrink-0 ml-2">
                       {s === 'sending' && <Loader2 className="w-4 h-4 animate-spin text-gray-400" />}
                       {(s === 'sent' || s === 'resent') && <span className="text-emerald-600 flex items-center gap-1 text-xs"><CheckCircle2 className="w-4 h-4" />{s === 'resent' ? 'resent' : 'sent'}</span>}
+                      {s === 'sent-no-email' && <span className="text-amber-600 flex items-center gap-1 text-xs" title="Ticket created, but the confirmation email failed to send — check SMTP."><AlertTriangle className="w-4 h-4" />email failed</span>}
                       {s === 'failed' && <span className="text-red-600 flex items-center gap-1 text-xs"><XCircle className="w-4 h-4" />failed</span>}
                       {s === 'pending' && <span className="text-gray-300 text-xs">…</span>}
                     </span>
@@ -137,7 +150,7 @@ const IssueTicketModal: React.FC<Props> = ({ open, contacts, onClose, onComplete
         </div>
 
         <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-between gap-3">
-          <span className="text-xs text-gray-500">{done ? `Done — ${counts.sent} sent, ${counts.failed} failed` : sending ? `Sending… ${counts.sent + counts.failed}/${withEmail.length}` : `${withEmail.length} recipient${withEmail.length !== 1 ? 's' : ''}`}</span>
+          <span className="text-xs text-gray-500">{done ? `Done — ${counts.sent} sent${counts.noEmail ? `, ${counts.noEmail} email-failed` : ''}${counts.failed ? `, ${counts.failed} failed` : ''}` : sending ? `Sending… ${counts.sent + counts.noEmail + counts.failed}/${withEmail.length}` : `${withEmail.length} recipient${withEmail.length !== 1 ? 's' : ''}`}</span>
           {done ? (
             <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg bg-gansid-primary-gradient text-white text-sm font-semibold">Close</button>
           ) : (

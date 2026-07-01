@@ -85,7 +85,7 @@ Deno.serve(async (req: Request) => {
     // 2. An attendee already exists for this email+form (registered elsewhere) →
     //    link this contact to it + resend (case-insensitive match).
     const { data: existing } = await svc.from('attendees')
-      .select('id').eq('form_id', formId).ilike('email', email).limit(1);
+      .select('id').eq('form_id', formId).ilike('email', email).neq('is_test', true).limit(1);
     if (existing && existing.length) {
       const existingId = (existing[0] as any).id as string;
       await svc.from('imported_contacts')
