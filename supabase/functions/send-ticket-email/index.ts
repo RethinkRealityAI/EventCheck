@@ -106,12 +106,20 @@ function buildTransporter(smtpConfig?: any) {
     const fromName = (smtpConfig?.fromName && String(smtpConfig.fromName).trim())
       || Deno.env.get('SMTP_FROM_NAME')
       || 'SCAGO';
+    // Header/envelope From address. IONOS uses the SMTP login as the sender, but
+    // providers like Resend authenticate with a fixed username ("resend") that is
+    // NOT a valid From address, so the sender must be decoupled from the login.
+    // Falls back to smtpUser when SMTP_FROM is unset → identical behaviour on the
+    // current IONOS setup; setting SMTP_FROM flips the sender with no code change.
+    const fromAddress = (smtpConfig?.from && String(smtpConfig.from).trim())
+      || Deno.env.get('SMTP_FROM')
+      || smtpUser;
     return { transporter: nodemailer.createTransport({
         host: smtpHost,
         port: smtpPort,
         secure: smtpPort === 465,
         auth: { user: smtpUser, pass: smtpPass },
-    }), smtpUser, fromName };
+    }), smtpUser, fromName, fromAddress };
 }
 
 /**
@@ -119,9 +127,9 @@ function buildTransporter(smtpConfig?: any) {
  * Reads SMTP config from environment variables.
  */
 async function sendSimpleEmail({ to, subject, html, smtpConfig }: { to: string; subject: string; html: string; smtpConfig?: any }) {
-    const { transporter, smtpUser, fromName } = buildTransporter(smtpConfig);
+    const { transporter, fromName, fromAddress } = buildTransporter(smtpConfig);
     await transporter.sendMail({
-        from: `"${fromName}" <${smtpUser}>`,
+        from: `"${fromName}" <${fromAddress}>`,
         to,
         subject,
         html,
@@ -148,9 +156,9 @@ serve(async (req: Request) => {
             if (!to || !subject || !html) {
                 return jsonResponse({ error: 'Missing to/subject/html' }, 400);
             }
-            const { transporter, smtpUser, fromName } = buildTransporter(smtpConfig);
+            const { transporter, fromName, fromAddress } = buildTransporter(smtpConfig);
             await transporter.sendMail({
-                from: `"${fromName}" <${smtpUser}>`,
+                from: `"${fromName}" <${fromAddress}>`,
                 to,
                 subject,
                 html,
@@ -574,7 +582,7 @@ serve(async (req: Request) => {
             });
 
             // Use the transporter directly so we can include attachments.
-            const { transporter, smtpUser, fromName } = buildTransporter(smtpConfig);
+            const { transporter, fromName, fromAddress } = buildTransporter(smtpConfig);
             const attachments = (body.attachments || []).map((att: { filename: string; content: string; contentType?: string }) => ({
                 filename: att.filename,
                 content: att.content,
@@ -582,7 +590,7 @@ serve(async (req: Request) => {
                 contentType: att.contentType || 'application/pdf',
             }));
             await transporter.sendMail({
-                from: `"${fromName}" <${smtpUser}>`,
+                from: `"${fromName}" <${fromAddress}>`,
                 to: body.to,
                 subject,
                 html,
@@ -1050,6 +1058,12 @@ serve(async (req: Request) => {
         const fromName = (smtpConfig?.fromName && String(smtpConfig.fromName).trim())
             || Deno.env.get('SMTP_FROM_NAME')
             || 'SCAGO';
+        // Decouple sender from SMTP login (see buildTransporter) so Resend works;
+        // falls back to smtpUser → unchanged for IONOS. This also fixes a latent
+        // mismatch where the From used smtpConfig.user while auth used smtpUser.
+        const fromAddress = (smtpConfig?.from && String(smtpConfig.from).trim())
+            || Deno.env.get('SMTP_FROM')
+            || smtpUser;
 
         if (!smtpUser || !smtpPass) {
             return new Response(
@@ -1099,7 +1113,7 @@ serve(async (req: Request) => {
         }));
 
         await transporter.sendMail({
-            from: `"${fromName}" <${smtpConfig.user}>`,
+            from: `"${fromName}" <${fromAddress}>`,
             to: email.to,
             subject: email.subject,
             html: html,

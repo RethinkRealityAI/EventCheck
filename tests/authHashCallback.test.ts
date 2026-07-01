@@ -17,6 +17,18 @@ describe('getHashAuthSearchParams', () => {
     expect(getHashAuthSearchParams('#/portal')).toBeNull();
   });
 
+  it('parses token_hash recovery link (cross-device-safe template format)', () => {
+    const p = getHashAuthSearchParams('#/reset-password?token_hash=pkce_abc123&type=recovery');
+    expect(p?.get('token_hash')).toBe('pkce_abc123');
+    expect(p?.get('type')).toBe('recovery');
+  });
+
+  it('parses token_hash signup confirmation link', () => {
+    const p = getHashAuthSearchParams('#/portal?token_hash=xyz789&type=signup');
+    expect(p?.get('token_hash')).toBe('xyz789');
+    expect(p?.get('type')).toBe('signup');
+  });
+
   it('parses Supabase error redirect without route or question mark', () => {
     const p = getHashAuthSearchParams(
       '#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired',
@@ -57,6 +69,14 @@ describe('getAuthCallbackSearchParams', () => {
     loc.search = '?code=from-search';
     const p = getAuthCallbackSearchParams();
     expect(p?.get('code')).toBe('from-search');
+  });
+
+  it('recognizes token_hash recovery links in the hash', () => {
+    loc.hash = '#/reset-password?token_hash=abc&type=recovery';
+    loc.search = '';
+    const p = getAuthCallbackSearchParams();
+    expect(p?.get('token_hash')).toBe('abc');
+    expect(p?.get('type')).toBe('recovery');
   });
 });
 
