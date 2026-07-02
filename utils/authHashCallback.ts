@@ -136,11 +136,17 @@ export async function handleSupabaseAuthCallback(
     return { status: 'error', errorMessage: msg };
   }
 
+  // Clear any prior/stale session in THIS browser (e.g. an admin already signed
+  // in, or a half-completed flow) BEFORE establishing the new one. Local scope
+  // only: a global signOut here revokes the user's sessions on their OTHER
+  // devices and surfaces as "session not found" there. Doing it up-front also
+  // means a FAILED email-link exchange below (expired link, or opened on a
+  // different device than it was requested from) leaves the browser signed-out
+  // rather than acting on the wrong account.
+  await supabase.auth.signOut({ scope: 'local' });
+
   const code = params.get('code');
   if (code) {
-    // Avoid keeping a prior session (e.g. admin in same browser) when the
-    // confirm link is for a newly created attendee account.
-    await supabase.auth.signOut();
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (error) {
       return { status: 'error', errorMessage: error.message };
