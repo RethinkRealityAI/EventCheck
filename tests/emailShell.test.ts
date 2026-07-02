@@ -28,6 +28,10 @@ describe('applyPlaceholders', () => {
   it('leaves text with no tokens untouched', () => {
     expect(applyPlaceholders('plain text', { a: 'b' })).toBe('plain text');
   });
+
+  it('coerces numeric var values to strings', () => {
+    expect(applyPlaceholders('count: {{n}}', { n: 42 })).toBe('count: 42');
+  });
 });
 
 describe('renderEmailShell (shared)', () => {

@@ -14,7 +14,7 @@ export type EmailTemplateKey =
 /** Templates exposed for per-form override in the FormBuilder UI (spec decision). */
 export const CORE_OVERRIDE_TEMPLATE_KEYS = [
   'ticket', 'table-purchaser', 'guest', 'guest-claim', 'guest-confirmed',
-] as const;
+] as const satisfies readonly EmailTemplateKey[];
 
 export interface FormTemplateOverride {
   subject?: string;
