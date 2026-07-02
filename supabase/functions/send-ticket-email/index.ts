@@ -1199,12 +1199,29 @@ serve(async (req: Request) => {
         const messageHtml = /^\s*<(p|div|h\d|table|ul|ol|blockquote|figure)/i.test(email.message)
             ? email.message
             : `<p>${email.message}</p>`;
+        // Branding for the shared shell (global only on this path; per-form header
+        // override applies to the P4 registration-confirmed path, not the PDF path).
+        let ticketHeaderImage: string | undefined;
+        let ticketFooterText: string | undefined;
+        try {
+            const sbUrl = Deno.env.get('SUPABASE_URL')!;
+            const sbKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+            const sb = createClient(sbUrl, sbKey);
+            const { data: appS } = await sb.from('app_settings').select('email_header_logo, email_footer_text').eq('id', 1).maybeSingle();
+            // This path hands the RAW URL to the adapter (no resolveEmailTemplate),
+            // so replicate the resolver's http(s)-only filter here — data:/blob:
+            // URIs get stripped by Gmail/Outlook and would arrive broken.
+            const raw = (appS as any)?.email_header_logo;
+            ticketHeaderImage = (typeof raw === 'string' && /^https?:\/\//i.test(raw.trim())) ? raw.trim() : undefined;
+            ticketFooterText = (appS as any)?.email_footer_text || undefined;
+        } catch { /* branding is best-effort; fall back to wordmark */ }
         const html = generateEmailTemplate({
             title: bannerTitle,
-            greeting: `Hello ${email.name}`,
             content: messageHtml,
             attachmentNote: hasAttachments ? 'Attachment included — please review the PDF.' : undefined,
             fromName,
+            headerImageUrl: ticketHeaderImage,
+            footerText: ticketFooterText,
         });
 
         // Nodemailer accepts base64 natively
