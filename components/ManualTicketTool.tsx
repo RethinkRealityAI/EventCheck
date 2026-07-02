@@ -3,6 +3,7 @@ import { Send, Loader2, User, Search, RefreshCw, QrCode, Mail, FileText, Users, 
 import { Attendee, AppSettings, Form } from '../types';
 import { getAttendees, saveAttendee, getSettings, getForms, updateAttendee } from '../services/storageService';
 import { generateTicketPDF } from '../utils/pdfGenerator';
+import { applyPlaceholders } from '../utils/emailShell';
 import { sendTicketEmail, arrayBufferToBase64 } from '../services/smtpService';
 import { computeDonationPool } from '../utils/donationPool';
 import { CURRENT_SITE } from '../config/sites';
@@ -401,12 +402,20 @@ const ManualTicketTool: React.FC = () => {
             contentType: 'application/pdf',
           });
         }
+        // Substitute {{tokens}} in the admin's free-text subject/message and
+        // scrub any leftovers so raw placeholders never reach the recipient.
+        // Byte-identical for the token-free defaults.
+        const emailVars = {
+          name: primary.name || '',
+          event: selectedForm?.title || 'the event',
+          id: primary.id || '',
+        };
         await sendTicketEmail(settings, {
           to: formData.email,
-          subject: customSubject,
+          subject: applyPlaceholders(customSubject, emailVars),
           name: primary.name,
           title: selectedForm?.title || undefined,
-          message: customMessage,
+          message: applyPlaceholders(customMessage, emailVars),
           attachments,
         });
         // Stamp lastTicketEmailAt across the whole batch. Best-effort —
@@ -454,12 +463,20 @@ const ManualTicketTool: React.FC = () => {
       const form = previewForm || (await getForms()).find(f => f.id === selectedAttendee.formId);
       if (!form) throw new Error('Form not found for this ticket.');
       const doc = await generateTicketPDF(selectedAttendee, settings, form);
+      // Substitute {{tokens}} in the admin's free-text subject/message and
+      // scrub any leftovers so raw placeholders never reach the recipient.
+      const emailVars = {
+        name: selectedAttendee.name || '',
+        event: form.title || 'the event',
+        id: selectedAttendee.id || '',
+        amount: selectedAttendee.paymentAmount || '',
+      };
       await sendTicketEmail(settings, {
         to: selectedAttendee.email,
-        subject: customSubject,
+        subject: applyPlaceholders(customSubject, emailVars),
         name: selectedAttendee.name,
         title: form.title || undefined,
-        message: customMessage,
+        message: applyPlaceholders(customMessage, emailVars),
         attachments: [{
           filename: `${selectedAttendee.name.replace(/[^a-zA-Z0-9 ]/g, '_')}_Ticket.pdf`,
           content: arrayBufferToBase64(doc.output('arraybuffer')),

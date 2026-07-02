@@ -40,6 +40,7 @@ import { generateTicketPDF } from '../utils/pdfGenerator';
 import { PayPalScriptProvider, PayPalButtons } from "@paypal/react-paypal-js";
 import { FlutterwavePay } from "./payments/FlutterwavePay";
 import { sendTicketEmail, arrayBufferToBase64 } from '../services/smtpService';
+import { applyPlaceholders } from '../utils/emailShell';
 import QRCode from 'react-qr-code';
 import PublicSponsorForm from './Sponsors/PublicSponsorForm';
 import PublicExhibitorForm from './Exhibitor/PublicExhibitorForm';
@@ -1731,11 +1732,12 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
           if (!g.email || g.email === purchaserEmail || g.email === 'unknown@example.com') continue;
           const subjectTpl = settings.emailGuestConfirmedSubject || 'Your ticket for {{event}} is confirmed';
           const bodyTpl = settings.emailGuestConfirmedBody || '<p>Hi {{name}},</p><p><strong>{{purchaser}}</strong> has registered you for <strong>{{event}}</strong>. Your ticket is attached.</p><p>Create a portal account here to view your ticket anytime: <a href="{{signup_url}}">{{signup_url}}</a></p>';
-          const replace = (s: string) => s
-            .replace(/\{\{event\}\}/g, form.title)
-            .replace(/\{\{purchaser\}\}/g, purchaserName)
-            .replace(/\{\{name\}\}/g, g.name)
-            .replace(/\{\{signup_url\}\}/g, signupUrl);
+          const replace = (s: string) => applyPlaceholders(s, {
+            event: form.title,
+            purchaser: purchaserName,
+            name: g.name,
+            signup_url: signupUrl,
+          });
           const safeName = g.name.replace(/[^a-zA-Z0-9 ]/g, '_') || 'Guest';
           await sendTicketEmail(settings, {
             to: g.email,
@@ -1766,14 +1768,19 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
               ? `Guest_${idx + 2}`
               : gt.attendee.name.replace(/[^a-zA-Z0-9 ]/g, '_');
             const guestDoc = await generateTicketPDF(gt.attendee, settings, form, gt.registrationUrl);
-            const guestSubject = (settings.emailGuestSubject || 'Your Ticket for {{event}}')
-              .replace(/\{\{event\}\}/g, form.title)
-              .replace(/\{\{purchaser\}\}/g, purchaserName)
-              .replace(/\{\{name\}\}/g, gt.attendee.name);
-            const guestBody = (settings.emailGuestBody || 'Great news! {{purchaser}} has registered you for {{event}}. Your ticket is attached — please bring it with you to the event. You can scan the QR code on your ticket for entry.')
-              .replace(/\{\{event\}\}/g, form.title)
-              .replace(/\{\{purchaser\}\}/g, purchaserName)
-              .replace(/\{\{name\}\}/g, gt.attendee.name);
+            const guestEmailVars = {
+              event: form.title,
+              purchaser: purchaserName,
+              name: gt.attendee.name,
+            };
+            const guestSubject = applyPlaceholders(
+              settings.emailGuestSubject || 'Your Ticket for {{event}}',
+              guestEmailVars,
+            );
+            const guestBody = applyPlaceholders(
+              settings.emailGuestBody || 'Great news! {{purchaser}} has registered you for {{event}}. Your ticket is attached — please bring it with you to the event. You can scan the QR code on your ticket for entry.',
+              guestEmailVars,
+            );
             await sendTicketEmail(settings, {
               to: gt.attendee.email,
               subject: guestSubject,

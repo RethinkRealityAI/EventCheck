@@ -1,6 +1,7 @@
 import { Attendee, Form } from '../types';
 import { getAttendee, getSettings, getStaffForPrimary, updateAttendee } from '../services/storageService';
 import { sendTicketEmail, arrayBufferToBase64 } from '../services/smtpService';
+import { applyPlaceholders } from './emailShell';
 import { generateTicketPDF } from './pdfGenerator';
 import { isPlaceholderGuestName, resolveAttendeeDisplayName } from './resolveAttendeeDisplayName';
 import { isTableGuestRow } from './tableSeats';
@@ -44,7 +45,10 @@ export async function resendTicketEmailForAttendee(
   }
 
   const settings = await getSettings();
-  if (!settings.smtpUser || !settings.smtpPass) {
+  // Env-first SMTP (Resend on GANSID) means the client cannot see the real
+  // credentials; smtp_pass is intentionally cleared on GANSID. Only block when
+  // NOTHING is configured on either side (smtp_user present keeps the gate green).
+  if (!settings.smtpUser && !settings.smtpPass) {
     throw new Error('SMTP is not configured. Set it up in Settings before resending tickets.');
   }
 
@@ -100,12 +104,13 @@ export async function resendTicketEmailForAttendee(
     ? (settings.emailTablePurchaserBody || settings.emailBodyTemplate || '<p>Thank you for registering for <strong>{{event}}</strong>.</p>')
     : (settings.emailBodyTemplate || '<p>Thank you for registering for <strong>{{event}}</strong>.</p>');
 
-  const render = (s: string) => s
-    .replace(/\{\{event\}\}/g, fresh.formTitle || form?.title || '')
-    .replace(/\{\{name\}\}/g, primaryDisplayName)
-    .replace(/\{\{id\}\}/g, fresh.id || '')
-    .replace(/\{\{invoiceId\}\}/g, fresh.invoiceId || '')
-    .replace(/\{\{amount\}\}/g, fresh.paymentAmount || '');
+  const render = (s: string) => applyPlaceholders(s, {
+    event: fresh.formTitle || form?.title || '',
+    name: primaryDisplayName,
+    id: fresh.id || '',
+    invoiceId: fresh.invoiceId || '',
+    amount: fresh.paymentAmount || '',
+  });
 
   await sendTicketEmail(settings, {
     to: fresh.email,
