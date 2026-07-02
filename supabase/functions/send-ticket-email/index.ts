@@ -876,7 +876,7 @@ serve(async (req: Request) => {
                     .eq('id', free.bogo_source_attendee_id).maybeSingle()
                 : { data: null };
             const { data: form } = await supabase
-                .from('forms').select('title').eq('id', free.form_id).maybeSingle();
+                .from('forms').select('title, settings').eq('id', free.form_id).maybeSingle();
             const { data: appSettings } = await supabase
                 .from('app_settings').select('*').eq('id', 1).maybeSingle();
             const smtpConfig = appSettings
@@ -905,33 +905,57 @@ serve(async (req: Request) => {
             const qrData = free.qr_payload || free.id;
             const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(qrData)}`;
 
-            const rawSubject = (appSettings as any)?.email_bogo_ticket_subject
-                || '{{purchaser}} has sent you a free ticket to {{event}}';
-            const rawBody = (appSettings as any)?.email_bogo_ticket_body
-                || `<p>Hi {{name}},</p>
+            // Human label for the free guest's pricing category (advertised as {{free_category_name}}).
+            // categories live in the pricing_templates TABLE (jsonb), keyed by `name`.
+            let freeCategoryName = '';
+            try {
+                const catId = (free as any).pricing_category_id;
+                const tplId = (free as any).pricing_template_id || (form as any)?.settings?.pricingTemplateId;
+                if (catId && tplId) {
+                    const { data: pt } = await supabase
+                        .from('pricing_templates').select('categories').eq('id', tplId).maybeSingle();
+                    const cats = Array.isArray((pt as any)?.categories) ? (pt as any).categories : [];
+                    freeCategoryName = (cats.find((c: any) => c.id === catId)?.name) || '';
+                }
+            } catch { freeCategoryName = ''; }
+
+            const formEmailOverrides = (form as any)?.settings?.emailOverrides;
+            const overrideOn = formEmailOverrides?.enabled === true;
+            const tpl = resolveEmailTemplate({
+                formOverride: overrideOn ? formEmailOverrides?.templates?.['bogo-ticket'] : undefined,
+                globalSubject: (appSettings as any)?.email_bogo_ticket_subject,
+                globalBody: (appSettings as any)?.email_bogo_ticket_body,
+                defaultSubject: '{{purchaser}} has sent you a free ticket to {{event}}',
+                defaultBody: `<p>Hi {{name}},</p>
 <p><strong>{{purchaser}}</strong> has gifted you a free ticket to <strong>{{event}}</strong>.</p>
 <p>Your check-in QR code is below. Show it at the door.</p>
 <div style="text-align:center;margin:24px 0;"><img src="{{qr_image_url}}" alt="Check-in QR code" width="240" height="240" style="border:1px solid #e5e7eb;border-radius:8px;padding:8px;background:#fff;" /></div>
 <p style="color:#666;font-size:13px;">Registration ID: {{registration_id}}</p>
 <p style="margin-top:20px;padding:12px;background:#f9fafb;border-left:3px solid #e5e7eb;font-size:14px;">This ticket is issued to your email address and cannot be transferred to another person. If you have questions or issues, contact <a href="mailto:{{admin_contact}}">{{admin_contact}}</a>.</p>
-<p style="margin-top:16px;font-size:14px;">Optional: <a href="{{signup_url}}">create a profile</a> to manage your ticket and access event resources.</p>`;
+<p style="margin-top:16px;font-size:14px;">Optional: <a href="{{signup_url}}">create a profile</a> to manage your ticket and access event resources.</p>`,
+                formHeaderImageUrl: overrideOn ? formEmailOverrides?.headerImageUrl : undefined,
+                globalHeaderImageUrl: (appSettings as any)?.email_header_logo,
+                globalFooterText: (appSettings as any)?.email_footer_text,
+            });
 
-            const replace = (s: string) => s
-                .replace(/\{\{name\}\}/g, free.name || 'there')
-                .replace(/\{\{purchaser\}\}/g, source?.name || 'A colleague')
-                .replace(/\{\{event\}\}/g, eventName)
-                .replace(/\{\{qr_image_url\}\}/g, qrImageUrl)
-                .replace(/\{\{registration_id\}\}/g, free.id)
-                .replace(/\{\{signup_url\}\}/g, signupUrl)
-                .replace(/\{\{admin_contact\}\}/g, BOGO_ADMIN_CONTACT);
-
-            const subject = replace(rawSubject);
-            const body_html = replace(rawBody);
+            const vars = {
+                name: free.name || 'there',
+                purchaser: source?.name || 'A colleague',
+                event: eventName,
+                qr_image_url: qrImageUrl,
+                registration_id: free.id,
+                signup_url: signupUrl,
+                admin_contact: BOGO_ADMIN_CONTACT,
+                free_category_name: freeCategoryName,
+            };
+            const subject = applyPlaceholders(tpl.subject, vars);
+            const body_html = applyPlaceholders(tpl.body, vars);
             const html = generateEmailTemplate({
                 title: eventName,
-                greeting: `Hi ${free.name || 'there'}`,
                 content: body_html,
                 fromName: smtpConfig?.fromName,
+                headerImageUrl: tpl.headerImageUrl,
+                footerText: tpl.footerText,
             });
 
             try {
@@ -964,30 +988,39 @@ serve(async (req: Request) => {
             const claimUrl = `${origin}/#/form/${free.form_id}?ref=${free.id}`;
             const portalTicketsUrl = `${origin}/#/portal/tickets`;
 
-            const rawSubject = (appSettings as any)?.email_bogo_claim_link_subject
-                || 'Your free guest claim link for {{event}}';
-            const rawBody = (appSettings as any)?.email_bogo_claim_link_body
-                || `<p>Hi {{payer_name}},</p>
+            const formEmailOverrides = (form as any)?.settings?.emailOverrides;
+            const overrideOn = formEmailOverrides?.enabled === true;
+            const tpl = resolveEmailTemplate({
+                formOverride: overrideOn ? formEmailOverrides?.templates?.['bogo-claim-link'] : undefined,
+                globalSubject: (appSettings as any)?.email_bogo_claim_link_subject,
+                globalBody: (appSettings as any)?.email_bogo_claim_link_body,
+                defaultSubject: 'Your free guest claim link for {{event}}',
+                defaultBody: `<p>Hi {{payer_name}},</p>
 <p>Your free guest claim link for <strong>{{event}}</strong> is ready.</p>
 <p style="text-align:center;margin:24px 0;"><a href="{{claim_url}}" style="display:inline-block;padding:12px 24px;background:#ba0028;color:#fff;text-decoration:none;border-radius:6px;font-weight:600;">Forward this claim link</a></p>
 <p>Forward the link to the person you'd like to bring — they'll complete the short claim form and receive their ticket.</p>
 <p>You can also manage this and your other tickets from your portal: <a href="{{portal_tickets_url}}">{{portal_tickets_url}}</a></p>
-<p style="margin-top:20px;padding:12px;background:#f9fafb;border-left:3px solid #e5e7eb;font-size:14px;">Once your guest claims this ticket, the email they enter is locked to them. Make sure to forward this to the actual person attending. For issues, contact <a href="mailto:{{admin_contact}}">{{admin_contact}}</a>.</p>`;
+<p style="margin-top:20px;padding:12px;background:#f9fafb;border-left:3px solid #e5e7eb;font-size:14px;">Once your guest claims this ticket, the email they enter is locked to them. Make sure to forward this to the actual person attending. For issues, contact <a href="mailto:{{admin_contact}}">{{admin_contact}}</a>.</p>`,
+                formHeaderImageUrl: overrideOn ? formEmailOverrides?.headerImageUrl : undefined,
+                globalHeaderImageUrl: (appSettings as any)?.email_header_logo,
+                globalFooterText: (appSettings as any)?.email_footer_text,
+            });
 
-            const replace = (s: string) => s
-                .replace(/\{\{payer_name\}\}/g, source?.name || 'there')
-                .replace(/\{\{event\}\}/g, eventName)
-                .replace(/\{\{claim_url\}\}/g, claimUrl)
-                .replace(/\{\{portal_tickets_url\}\}/g, portalTicketsUrl)
-                .replace(/\{\{admin_contact\}\}/g, BOGO_ADMIN_CONTACT);
-
-            const subject = replace(rawSubject);
-            const body_html = replace(rawBody);
+            const vars = {
+                payer_name: source?.name || 'there',
+                event: eventName,
+                claim_url: claimUrl,
+                portal_tickets_url: portalTicketsUrl,
+                admin_contact: BOGO_ADMIN_CONTACT,
+            };
+            const subject = applyPlaceholders(tpl.subject, vars);
+            const body_html = applyPlaceholders(tpl.body, vars);
             const html = generateEmailTemplate({
                 title: eventName,
-                greeting: `Hi ${source?.name || 'there'}`,
                 content: body_html,
                 fromName: smtpConfig?.fromName,
+                headerImageUrl: tpl.headerImageUrl,
+                footerText: tpl.footerText,
             });
 
             try {
@@ -1014,28 +1047,37 @@ serve(async (req: Request) => {
             const qrData = free.qr_payload || free.id;
             const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(qrData)}`;
 
-            const rawSubject = (appSettings as any)?.email_bogo_ticket_updated_subject
-                || 'Your {{event}} ticket has been updated';
-            const rawBody = (appSettings as any)?.email_bogo_ticket_updated_body
-                || `<p>Hi {{name}},</p>
+            const formEmailOverrides = (form as any)?.settings?.emailOverrides;
+            const overrideOn = formEmailOverrides?.enabled === true;
+            const tpl = resolveEmailTemplate({
+                formOverride: overrideOn ? formEmailOverrides?.templates?.['bogo-ticket-updated'] : undefined,
+                globalSubject: (appSettings as any)?.email_bogo_ticket_updated_subject,
+                globalBody: (appSettings as any)?.email_bogo_ticket_updated_body,
+                defaultSubject: 'Your {{event}} ticket has been updated',
+                defaultBody: `<p>Hi {{name}},</p>
 <p>Your ticket for <strong>{{event}}</strong> has been updated by <strong>{{purchaser}}</strong>. The latest version is below — please discard any earlier copies.</p>
 <div style="text-align:center;margin:24px 0;"><img src="{{qr_image_url}}" alt="Check-in QR code" width="240" height="240" style="border:1px solid #e5e7eb;border-radius:8px;padding:8px;background:#fff;" /></div>
-<p style="margin-top:20px;padding:12px;background:#f9fafb;border-left:3px solid #e5e7eb;font-size:14px;">This ticket is issued to your email address and cannot be transferred. Questions? <a href="mailto:{{admin_contact}}">{{admin_contact}}</a>.</p>`;
+<p style="margin-top:20px;padding:12px;background:#f9fafb;border-left:3px solid #e5e7eb;font-size:14px;">This ticket is issued to your email address and cannot be transferred. Questions? <a href="mailto:{{admin_contact}}">{{admin_contact}}</a>.</p>`,
+                formHeaderImageUrl: overrideOn ? formEmailOverrides?.headerImageUrl : undefined,
+                globalHeaderImageUrl: (appSettings as any)?.email_header_logo,
+                globalFooterText: (appSettings as any)?.email_footer_text,
+            });
 
-            const replace = (s: string) => s
-                .replace(/\{\{name\}\}/g, free.name || 'there')
-                .replace(/\{\{purchaser\}\}/g, source?.name || 'the buyer')
-                .replace(/\{\{event\}\}/g, eventName)
-                .replace(/\{\{qr_image_url\}\}/g, qrImageUrl)
-                .replace(/\{\{admin_contact\}\}/g, BOGO_ADMIN_CONTACT);
-
-            const subject = replace(rawSubject);
-            const body_html = replace(rawBody);
+            const vars = {
+                name: free.name || 'there',
+                purchaser: source?.name || 'the buyer',
+                event: eventName,
+                qr_image_url: qrImageUrl,
+                admin_contact: BOGO_ADMIN_CONTACT,
+            };
+            const subject = applyPlaceholders(tpl.subject, vars);
+            const body_html = applyPlaceholders(tpl.body, vars);
             const html = generateEmailTemplate({
                 title: eventName,
-                greeting: `Hi ${free.name || 'there'}`,
                 content: body_html,
                 fromName: smtpConfig?.fromName,
+                headerImageUrl: tpl.headerImageUrl,
+                footerText: tpl.footerText,
             });
 
             try {
@@ -1073,26 +1115,31 @@ serve(async (req: Request) => {
                 ? { host: appSettings.smtp_host, port: Number(appSettings.smtp_port || 587), user: appSettings.smtp_user, pass: appSettings.smtp_pass, fromName: (appSettings as any).email_from_name || 'GANSID Congress' }
                 : undefined;
 
-            const rawSubject = (appSettings as any)?.email_bogo_ticket_withdrawn_subject
-                || 'Your free ticket to {{event}} has been withdrawn';
-            const rawBody = (appSettings as any)?.email_bogo_ticket_withdrawn_body
-                || `<p>Hi {{name}},</p>
+            const tpl = resolveEmailTemplate({
+                globalSubject: (appSettings as any)?.email_bogo_ticket_withdrawn_subject,
+                globalBody: (appSettings as any)?.email_bogo_ticket_withdrawn_body,
+                defaultSubject: 'Your free ticket to {{event}} has been withdrawn',
+                defaultBody: `<p>Hi {{name}},</p>
 <p>The free ticket <strong>{{purchaser}}</strong> sent you for <strong>{{event}}</strong> has been withdrawn. We're sorry for the inconvenience.</p>
-<p style="margin-top:20px;padding:12px;background:#f9fafb;border-left:3px solid #e5e7eb;font-size:14px;">For questions or alternatives, please contact <a href="mailto:{{admin_contact}}">{{admin_contact}}</a>.</p>`;
+<p style="margin-top:20px;padding:12px;background:#f9fafb;border-left:3px solid #e5e7eb;font-size:14px;">For questions or alternatives, please contact <a href="mailto:{{admin_contact}}">{{admin_contact}}</a>.</p>`,
+                globalHeaderImageUrl: (appSettings as any)?.email_header_logo,
+                globalFooterText: (appSettings as any)?.email_footer_text,
+            });
 
-            const replace = (s: string) => s
-                .replace(/\{\{name\}\}/g, guestName)
-                .replace(/\{\{purchaser\}\}/g, payerName)
-                .replace(/\{\{event\}\}/g, eventName)
-                .replace(/\{\{admin_contact\}\}/g, BOGO_ADMIN_CONTACT);
-
-            const subject = replace(rawSubject);
-            const body_html = replace(rawBody);
+            const vars = {
+                name: guestName,
+                purchaser: payerName,
+                event: eventName,
+                admin_contact: BOGO_ADMIN_CONTACT,
+            };
+            const subject = applyPlaceholders(tpl.subject, vars);
+            const body_html = applyPlaceholders(tpl.body, vars);
             const html = generateEmailTemplate({
                 title: eventName,
-                greeting: `Hi ${guestName}`,
                 content: body_html,
                 fromName: smtpConfig?.fromName,
+                headerImageUrl: tpl.headerImageUrl,
+                footerText: tpl.footerText,
             });
 
             try {
