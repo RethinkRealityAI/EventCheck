@@ -378,7 +378,8 @@ const ManualTicketTool: React.FC = () => {
     setMode('existing');
     setFormData(prev => ({ ...prev, firstName: '', lastName: '', email: '' }));
 
-    if (settings && settings.smtpUser && settings.smtpPass) {
+    // Env-first SMTP: partial config is valid (GANSID clears smtp_pass; edge secrets fill the rest).
+    if (settings && (settings.smtpUser || settings.smtpPass)) {
       try {
         // Generate PDF for the primary plus each placeholder. Placeholders
         // get a registration URL so the recipient can self-claim their
@@ -456,7 +457,8 @@ const ManualTicketTool: React.FC = () => {
     setLoading(true);
     setSuccessMsg('');
     try {
-      if (!settings || !settings.smtpUser || !settings.smtpPass) {
+      // Env-first SMTP: partial config is valid (GANSID clears smtp_pass; edge secrets fill the rest).
+      if (!settings || (!settings.smtpUser && !settings.smtpPass)) {
         setSuccessMsg('Cannot send email - SMTP not configured.');
         return;
       }

@@ -1679,7 +1679,8 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
     setGeneratedTicket(newAttendee);
 
     // --- SMTP Email Integration (runs for ALL registration types) ---
-    if (settings && settings.smtpUser && settings.smtpPass) {
+    // Env-first SMTP: partial config is valid (GANSID clears smtp_pass; edge secrets fill the rest).
+    if (settings && (settings.smtpUser || settings.smtpPass)) {
       try {
         // Group mode: build a PDF for every additional registrant so each
         // inline guest can be emailed their own ticket below. (The purchaser
