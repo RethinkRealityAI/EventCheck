@@ -245,7 +245,10 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume,
   const cancelRef = useRef(false);
   const mountedRef = useRef(true);
 
-  const smtpReady = !!(settings.smtpUser && settings.smtpPass);
+  // ENV-FIRST SMTP (Resend edge secrets on GANSID; app_settings.smtp_pass cleared)
+  // means the client can't verify config — any partial app_settings SMTP counts as
+  // ready; real failures surface per-row in the send queue.
+  const smtpReady = !!(settings.smtpUser || settings.smtpPass);
 
   // On unmount, stop the send loop and suppress any further React state writes
   // from in-flight sends. The DB writes inside sendOne still complete so status

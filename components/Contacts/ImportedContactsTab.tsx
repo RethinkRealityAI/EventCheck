@@ -302,7 +302,11 @@ export default function ImportedContactsTab({ settings }: Props) {
     }
   };
 
-  const smtpReady = !!(settings?.smtpUser && settings?.smtpPass);
+  // SMTP creds resolve ENV-FIRST inside send-ticket-email (GANSID runs on Resend
+  // edge secrets with app_settings.smtp_pass deliberately cleared), so the client
+  // can't reliably detect "configured". Treat any partial app_settings SMTP as
+  // ready and let the send queue surface real per-row failures.
+  const smtpReady = !!(settings?.smtpUser || settings?.smtpPass);
 
   return (
     <div className="space-y-3">
