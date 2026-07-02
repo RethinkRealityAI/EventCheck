@@ -733,6 +733,24 @@ git commit -m "fix(email): client resend/checkout use shared scrub; relax stale 
 
 ---
 
+## Task 8b: TicketDownloadPage premium redesign (user request 2026-07-02)
+
+**Context:** The `/#/tickets?token=` download page (P4) is unbranded and utilitarian; the user wants it premium: the branded header image at the top, brand-gradient download buttons, smooth polished layout — including a nicer invalid/expired-link panel (the state the user saw when a test email used a placeholder token).
+
+**Files:**
+- Modify: `supabase/functions/registration-download/index.ts` — add `'email_header_logo'` to `SAFE_SETTINGS_KEYS` with a comment (`// public storage URL used for the page header banner — non-secret`). It's a public https URL (verified GANSID: hosted PNG on public storage; SCAGO: data: URI which the page must reject like the email resolver does). Deploy GANSID with the Task 5-7 deploy; SCAGO in Task 9.
+- Modify: `components/TicketDownload/TicketDownloadPage.tsx` (168 lines) — redesign:
+  - **Header:** if `settings.email_header_logo` is an http(s) URL, render it as a full-width banner at the top of the card (max-width matching the card, rounded top corners). Otherwise render a brand-gradient wordmark band (use the `CURRENT_SITE`-driven gradient below) so SCAGO/data:-URI tenants still look finished.
+  - **Buttons:** brand gradient per tenant — follow the existing `isGansid`/`brandGradientClass`/`brandDefaultStyle` precedent from `PublicRegistration.tsx` (GANSID = `bg-gansid-primary-gradient` red→blue; SCAGO keeps its current scheme). Apply to the per-ticket Download buttons and any primary action.
+  - **Polish:** card layout (rounded-2xl, soft shadow, subtle gradient accents), clear ticket list rows (name + ticket type + per-row download), premium loading state, and a redesigned error/invalid-token panel (icon, friendly copy "This ticket link is invalid or has expired — contact the organizers or check the latest email", same visual language).
+  - Responsive (mobile-first); no new external assets beyond the logo URL; keep ALL existing data flow (`registration-download` fetch, `generateTicketPDF` calls) unchanged.
+- No new tests required (pure UI + one allow-list string), but `npx tsc --noEmit` + `npm run build` must stay green; verify visually with `npm run dev` (error state renders with a fake token; the real-token happy path is exercised in Task 9's E2E).
+
+- [ ] **Step 1:** Add the allow-list entry.
+- [ ] **Step 2:** Redesign the page per above.
+- [ ] **Step 3:** Browser-verify both states (fake token error panel + layout at mobile/desktop widths).
+- [ ] **Step 4:** Commit: `git add … && git commit -m "feat(tickets): premium branded ticket-download page (header banner + gradient buttons)"`
+
 ## Task 9: Preview parity + cold audit + SCAGO rollout
 
 - [ ] **Step 1: Verify preview == inbox for GANSID.** In the dev server, open Settings → Email Templates; the preview already calls `renderEmailShell({ headerImageUrl: settings.emailHeaderLogo })`. Confirm the live GANSID inbox emails from Tasks 4–7 now visually match that preview (same banner, footer, single greeting).
@@ -755,12 +773,18 @@ curl -s -X POST "https://iigbgbgakevcgilucvbs.supabase.co/functions/v1/send-tick
 ```
 Then send one real SCAGO ticket/resend and confirm it renders the SCAGO shell. NOTE (verified live): SCAGO's `email_header_logo` is a base64 `data:` SVG — the resolver's `usableImageUrl` intentionally drops it, so SCAGO emails render the SCAGO-red **wordmark** header. That is correct behavior (Gmail would have shown a broken image otherwise); if SCAGO wants a banner later, upload a hosted PNG in Settings like GANSID's (`…/sponsor-logos/branding/email-header-logo-….png`). Expected: clean JSON 4xx from curl; SCAGO email uses SCAGO red palette, no regressions.
 
+- [ ] **Step 3b: E2E real-token download proof.** The 2026-07-02 visual-check email used a placeholder token, so its download link correctly failed — prove the REAL pipeline for the user: trigger a genuine issued-ticket send (admin "Send ticket" to the datadaps@gmail.com contact, or an equivalent real `contact-issue-ticket`/`verify-payment` path that mints a token in-runtime), open the emailed `/#/tickets?token=…` link, and confirm the redesigned page loads the ticket(s) and the PDF downloads. This also visually verifies Task 8b's happy path.
+
 - [ ] **Step 4: Post-deploy DB smoke** (CLAUDE.md §15). No migration ran, but confirm nothing else broke:
 
 ```bash
 npm run smoke:db
 ```
-Expected: green on both tenants.
+Expected: green on both tenants. Also deploy `registration-download` (Task 8b allow-list) to SCAGO alongside `send-ticket-email`:
+
+```bash
+npx --yes supabase functions deploy registration-download --project-ref iigbgbgakevcgilucvbs --use-api
+```
 
 - [ ] **Step 5: Commit any audit fixes**
 
@@ -856,6 +880,10 @@ git commit -m "docs(email): document unified email shell + per-form overrides"
 - **Type consistency:** `applyPlaceholders`, `resolveEmailTemplate`, `renderEmailShell`, `SiteKey`, `EmailTemplateKey`, `CORE_OVERRIDE_TEMPLATE_KEYS` are the exact names defined in Tasks 1–2 and reused verbatim thereafter.
 - **Naming worlds:** the edge passes snake_case `s.email_*` columns as `globalSubject/globalBody`; the client passes camelCase `settings.email*`. The resolver is naming-agnostic by design (callers extract their own strings) — do not add field-name maps to `_shared/`.
 - **Risk backstops:** Task 1 Step 5 gates the cross-boundary import (both tsc AND build already probed green 2026-07-02; fallback = twin+parity test); every edge task deploys GANSID-only until Task 9; edge deploys are CLI `--use-api` (never MCP); no DB migration so no dual-tenant schema risk.
+
+## Review-finding disposition (2026-07-02, T3+T4 quality review)
+
+A quality reviewer flagged "CRITICAL: unescaped user input in subject line (new regression)" and proposed an HTML-escaping `applyPlaceholdersToSubject`. **Rejected by the orchestrator with evidence:** the PRE-change code already ran the full token map (including `{{name}}`) over the subject — `const subject = replace(rawSubject);` at pre-change index.ts:295 — so subject substitution is byte-identical old→new, not a regression; per-form subject overrides are admin-authored (same trust tier as app_settings). Additionally, HTML-escaping a plain-text email subject would introduce a REAL bug (visible `&amp;`/`&#39;` entities for names like "O'Brien & Sons"). Do NOT add subject escaping. The pre-existing unescaped-name-in-HTML-body behavior is acknowledged as a design-accepted, low-severity hardening opportunity (email clients sanitize aggressively; admin-curated bodies) — out of scope here. T9's cold auditor: do not re-raise these two without NEW evidence.
 
 ## Pre-implementation audit findings (2026-07-02, verified against live data + code)
 
