@@ -44,9 +44,10 @@ function json(body: unknown, status = 200) {
 // ─────────────────────────────────────────────────────────────────────────────
 const SAFE_SETTINGS_KEYS: string[] = [
   'id',
-  'pdf_settings',    // JSONB: logoUrl, primaryColor, organizationName, footerText, backgroundImage, eventTitle, enabled
-  'currency',        // e.g. 'CAD' — used in ticket amount display
-  'email_from_name', // non-secret display name; needed for page branding fallback
+  'pdf_settings',      // JSONB: logoUrl, primaryColor, organizationName, footerText, backgroundImage, eventTitle, enabled
+  'currency',          // e.g. 'CAD' — used in ticket amount display
+  'email_from_name',   // non-secret display name; needed for page branding fallback
+  'email_header_logo', // public storage URL for the page header banner — non-secret
 ];
 
 serve(async (req: Request) => {
