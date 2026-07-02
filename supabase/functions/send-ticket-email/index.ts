@@ -5,6 +5,8 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import nodemailer from 'npm:nodemailer';
+import { renderEmailShell, applyPlaceholders } from '../_shared/emailShell.ts';
+import { resolveEmailTemplate } from '../_shared/emailTemplates.ts';
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -21,78 +23,40 @@ function jsonResponse(body: Record<string, any>, status = 200) {
 }
 
 /**
- * Branded HTML email shell — must match the visual language of
- * utils/emailShell.ts in the browser so admin previews and real sends look
- * identical. `fromName` is used as a coarse site-key signal (any name
- * containing "GANSID" gets the tri-stop gradient; else SCAGO red).
+ * Adapter kept for call-site compatibility. Delegates to the ONE shared shell
+ * (_shared/emailShell.ts — also re-exported to the client as utils/emailShell.ts)
+ * so admin previews and real sends are byte-identical. Notes:
+ *  - The template body owns its own greeting ("Hello {{name}},"); we no longer
+ *    inject a separate greeting line (that caused a double greeting and a look
+ *    the preview never showed). `greeting` is accepted but ignored.
+ *  - `headerImageUrl` renders the branded banner; omit → wordmark fallback.
+ *  - Site detection: the project ref in SUPABASE_URL is deterministic per tenant
+ *    (gticuvgclbvhwvpzkuez = GANSID, iigbgbgakevcgilucvbs = SCAGO). The legacy
+ *    /gansid/i-on-fromName heuristic stays only as a last-resort fallback — an
+ *    admin renaming email_from_name must NOT flip the palette.
  */
 function generateEmailTemplate(data: {
     title: string;
-    greeting: string;
+    greeting?: string;
     content: string;
     attachmentNote?: string;
     fromName?: string;
+    headerImageUrl?: string;
+    footerText?: string;
 }) {
-    const rawName = (data.fromName && data.fromName.trim()) ? data.fromName : 'SCAGO';
-    const isGansid = /gansid/i.test(rawName);
-    const palette = isGansid
-      ? {
-          headerGradient: 'linear-gradient(135deg, #ba0028 0%, #E0243C 38%, #2260a1 100%)',
-          footerGradient: 'linear-gradient(135deg, #ba0028 0%, #E0243C 42%, #2260a1 100%)',
-          buttonColor: '#ba0028',
-          brandLabel: 'GANSID Congress 2026',
-          subtitle: 'Hyderabad, India · October 23–25, 2026',
-          contactEmail: 'congress@inheritedblooddisorders.world',
-        }
-      : {
-          headerGradient: 'linear-gradient(135deg, #B3282D 0%, #8B1F24 100%)',
-          footerGradient: 'linear-gradient(135deg, #B3282D 0%, #8B1F24 100%)',
-          buttonColor: '#B3282D',
-          brandLabel: 'SCAGO',
-          subtitle: 'Sickle Cell Awareness Group of Ontario',
-          contactEmail: 'info@scago.ca',
-        };
-
-    return `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <style>
-    body { margin: 0; padding: 0; background: #f3f4f6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Tahoma, sans-serif; color: #1a1c1c; }
-    .container { max-width: 560px; margin: 40px auto; background: white; border-radius: 20px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.08); }
-    .header { background: ${palette.headerGradient}; padding: 44px 32px 40px; text-align: center; color: white; }
-    .header-title { font-size: 26px; font-weight: 800; letter-spacing: 1px; color: white; text-transform: uppercase; margin: 0; }
-    .header-subtitle { font-size: 13px; color: rgba(255,255,255,0.9); margin-top: 8px; }
-    .body { padding: 40px 32px; }
-    .body h1, .body h2, .body h3 { color: #1a1c1c; margin: 0 0 16px; line-height: 1.2; }
-    .body p { font-size: 16px; line-height: 1.6; color: #1a1c1c; opacity: 0.85; margin: 0 0 20px; }
-    .body a { color: ${palette.buttonColor}; }
-    .greeting { font-size: 18px; font-weight: 600; color: #1a1a2e; margin: 0 0 20px; }
-    .attachment-callout { margin-top: 24px; background: rgba(0,0,0,0.03); border-radius: 10px; padding: 14px 18px; font-size: 14px; color: #4b5563; border-left: 3px solid ${palette.buttonColor}; }
-    .footer { padding: 28px 32px; background: ${palette.footerGradient}; text-align: center; font-size: 12px; color: rgba(255,255,255,0.92); }
-    .footer a { color: white; text-decoration: underline; }
-    .footer-brand { font-size: 13px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; color: white; margin-bottom: 6px; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="header">
-      <div class="header-title">${data.title}</div>
-      <div class="header-subtitle">${palette.subtitle}</div>
-    </div>
-    <div class="body">
-      <p class="greeting">${data.greeting},</p>
-      ${data.content}
-      ${data.attachmentNote ? `<div class="attachment-callout">📎 ${data.attachmentNote}</div>` : ''}
-    </div>
-    <div class="footer">
-      <div class="footer-brand">${palette.brandLabel}</div>
-      Questions? <a href="mailto:${palette.contactEmail}">${palette.contactEmail}</a>
-    </div>
-  </div>
-</body>
-</html>`;
+    const projectUrl = Deno.env.get('SUPABASE_URL') || '';
+    const site = projectUrl.includes('gticuvgclbvhwvpzkuez') ? 'gansid'
+        : projectUrl.includes('iigbgbgakevcgilucvbs') ? 'scago'
+        : (/gansid/i.test((data.fromName && data.fromName.trim()) || 'SCAGO') ? 'gansid' : 'scago');
+    const attachHtml = data.attachmentNote
+        ? `<div style="margin-top:24px;background:rgba(0,0,0,0.03);border-radius:10px;padding:14px 18px;font-size:14px;color:#4b5563;">📎 ${data.attachmentNote}</div>`
+        : '';
+    return renderEmailShell({
+        site,
+        content: data.content + attachHtml,
+        headerImageUrl: data.headerImageUrl && data.headerImageUrl.trim() ? data.headerImageUrl : undefined,
+        footerText: data.footerText && data.footerText.trim() ? data.footerText : undefined,
+    });
 }
 
 /**
