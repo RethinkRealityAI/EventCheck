@@ -215,8 +215,9 @@ serve(async (req: Request) => {
             if (primary.is_test === true) return jsonResponse({ ok: true, skipped: 'test' });
 
             const { data: form } = await supabase
-                .from('forms').select('title').eq('id', primary.form_id).maybeSingle();
+                .from('forms').select('title, settings').eq('id', primary.form_id).maybeSingle();
             const eventName = form?.title || 'the event';
+            const formEmailOverrides = (form as any)?.settings?.emailOverrides;
 
             // Table/group purchaser? Pick the table-purchaser template if linked guests exist.
             const { count: guestCount } = await supabase
@@ -231,13 +232,23 @@ serve(async (req: Request) => {
                 ? { host: s.smtp_host, port: Number(s.smtp_port || 587), user: s.smtp_user, pass: s.smtp_pass, fromName: s.email_from_name || 'SCAGO' }
                 : undefined;
 
-            // Column names reconciled against storageService AppSettings mapper:
-            //   email_subject / email_body_template (standard purchaser),
-            //   email_table_purchaser_subject / email_table_purchaser_body (table/group).
-            const rawSubject = (isTableOrGroup ? s.email_table_purchaser_subject : s.email_subject)
-                || s.email_subject || 'Your registration for {{event}} is confirmed';
-            const rawBody = (isTableOrGroup ? s.email_table_purchaser_body : s.email_body_template)
-                || s.email_body_template || '<p>Thank you for registering for <strong>{{event}}</strong>.</p>';
+            // Which template key? Table/group purchaser gets the table variant.
+            const key = isTableOrGroup ? 'table-purchaser' : 'ticket';
+            const overrideOn = formEmailOverrides?.enabled === true;
+            const formOverride = overrideOn ? formEmailOverrides?.templates?.[key] : undefined;
+
+            // Table/group purchasers historically fell back to the STANDARD template
+            // when the table variant was empty — preserved via the inner ||.
+            const tpl = resolveEmailTemplate({
+                formOverride,
+                globalSubject: isTableOrGroup ? (s.email_table_purchaser_subject || s.email_subject) : s.email_subject,
+                globalBody: isTableOrGroup ? (s.email_table_purchaser_body || s.email_body_template) : s.email_body_template,
+                defaultSubject: 'Your registration for {{event}} is confirmed',
+                defaultBody: '<p>Hello {{name}},</p><p>Thank you for registering for <strong>{{event}}</strong>. Your registration is confirmed.</p>',
+                formHeaderImageUrl: overrideOn ? formEmailOverrides?.headerImageUrl : undefined,
+                globalHeaderImageUrl: s.email_header_logo,
+                globalFooterText: s.email_footer_text,
+            });
 
             const downloadUrl = body.downloadUrl || '';
             const downloadBlock = downloadUrl
@@ -248,21 +259,22 @@ serve(async (req: Request) => {
                    </div>`
                 : '';
 
-            const replace = (str: string) => str
-                .replace(/\{\{event\}\}/g, eventName)
-                .replace(/\{\{name\}\}/g, primary.name || '')
-                .replace(/\{\{id\}\}/g, primary.id || '')
-                .replace(/\{\{invoiceId\}\}/g, primary.invoice_id || '')
-                .replace(/\{\{amount\}\}/g, primary.payment_amount || '')
-                .replace(/\{\{download_url\}\}/g, downloadUrl);
-
-            const subject = replace(rawSubject);
-            const contentHtml = replace(rawBody) + downloadBlock;
+            const vars = {
+                event: eventName,
+                name: primary.name || '',
+                id: primary.id || '',
+                invoiceId: primary.invoice_id || '',
+                amount: primary.payment_amount || '',
+                download_url: downloadUrl,
+            };
+            const subject = applyPlaceholders(tpl.subject, vars);
+            const contentHtml = applyPlaceholders(tpl.body, vars) + downloadBlock;
             const html = generateEmailTemplate({
                 title: eventName,
-                greeting: `Hi ${primary.name || 'there'}`,
                 content: contentHtml,
                 fromName: smtpConfig?.fromName,
+                headerImageUrl: tpl.headerImageUrl,
+                footerText: tpl.footerText,
             });
 
             await sendSimpleEmail({ to: primary.email, subject, html, smtpConfig });
