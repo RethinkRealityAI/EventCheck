@@ -295,6 +295,19 @@ export interface Form {
     /** Optional admin-customizable copy shown to the buyer in the BOGO
      *  section at checkout. Falls back to a sensible default if empty. */
     bogoNoteToBuyer?: string;
+    /** Per-form email template overrides. Default OFF → the form uses the
+     *  global Email Templates (app_settings). When `enabled` is true, any
+     *  per-template subject/body set here wins; unset fields inherit global.
+     *  Lives in the forms.settings jsonb — additive, no migration. The edge
+     *  (send-ticket-email) and client both resolve it via _shared/emailTemplates. */
+    emailOverrides?: {
+      enabled?: boolean;
+      headerImageUrl?: string;
+      templates?: Partial<Record<
+        'ticket' | 'table-purchaser' | 'guest' | 'guest-claim' | 'guest-confirmed',
+        { subject?: string; body?: string }
+      >>;
+    };
   };
   pdfSettings?: Partial<PdfSettings>; // Per-form PDF overrides
   pricingTemplate?: PricingTemplate; // Runtime-attached in getFormById; not persisted in DB
