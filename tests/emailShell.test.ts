@@ -21,8 +21,12 @@ describe('applyPlaceholders', () => {
     expect(applyPlaceholders('{{n}}-{{n}}', { n: '7' })).toBe('7-7');
   });
 
-  it('scrubs spaced tokens like {{ name }} that substitution can never match', () => {
-    expect(applyPlaceholders('Hi {{ name }}!', { name: 'Dapo' })).toBe('Hi !');
+  it('substitutes spaced tokens like {{ name }}', () => {
+    expect(applyPlaceholders('Hi {{ name }}!', { name: 'Dapo' })).toBe('Hi Dapo!');
+  });
+
+  it('still scrubs UNKNOWN spaced tokens', () => {
+    expect(applyPlaceholders('Hi {{ unknown }}!', { name: 'Dapo' })).toBe('Hi !');
   });
 
   it('leaves text with no tokens untouched', () => {

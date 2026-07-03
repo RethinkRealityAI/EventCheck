@@ -147,7 +147,7 @@ export function mergePlaceholders(template: string, vars: Record<string, string 
   let out = template;
   for (const [key, value] of Object.entries(vars)) {
     const v = value === null || value === undefined ? '' : String(value);
-    out = out.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), v);
+    out = out.replace(new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, 'g'), v);
   }
   return out;
 }

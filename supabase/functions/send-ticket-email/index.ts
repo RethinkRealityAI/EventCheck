@@ -361,12 +361,14 @@ serve(async (req: Request) => {
                     globalFooterText: (appSettings as any)?.email_footer_text,
                 });
 
+                const publicSiteUrl = (Deno.env.get('PUBLIC_SITE_URL') || '').trim().replace(/\/+$/, '');
                 const vars = {
                     name: attendee.name || 'there',
                     event: eventName,
                     registration_id: attendee.id,
                     qr_image_url: qrImageUrl,
                     purchaser: primary?.name || 'The purchaser',
+                    signup_url: publicSiteUrl ? `${publicSiteUrl}/#/` : '',
                 };
                 const subject = applyPlaceholders(tpl.subject, vars);
                 const body_html = applyPlaceholders(tpl.body, vars);

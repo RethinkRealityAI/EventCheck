@@ -1738,6 +1738,8 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
             purchaser: purchaserName,
             name: g.name,
             signup_url: signupUrl,
+            registration_id: g.guestId,
+            qr_image_url: `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(JSON.stringify({ id: g.guestId }))}`,
           });
           const safeName = g.name.replace(/[^a-zA-Z0-9 ]/g, '_') || 'Guest';
           await sendTicketEmail(settings, {
