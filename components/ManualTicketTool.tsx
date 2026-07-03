@@ -3,6 +3,7 @@ import { Send, Loader2, User, Search, RefreshCw, QrCode, Mail, FileText, Users, 
 import { Attendee, AppSettings, Form } from '../types';
 import { getAttendees, saveAttendee, getSettings, getForms, updateAttendee } from '../services/storageService';
 import { generateTicketPDF } from '../utils/pdfGenerator';
+import { applyPlaceholders, renderEmailShell, plainTextToHtml } from '../utils/emailShell';
 import { sendTicketEmail, arrayBufferToBase64 } from '../services/smtpService';
 import { computeDonationPool } from '../utils/donationPool';
 import { CURRENT_SITE } from '../config/sites';
@@ -19,54 +20,41 @@ const defaultSubjectForNew = (formTitle?: string) =>
   `Your Ticket for ${formTitle || 'the event'}`;
 
 const defaultMessageForNew = (formTitle?: string) =>
-  `Your ticket has been manually issued for ${formTitle || 'the event'}. Attached is your PDF ticket — please bring it with you (or scan the QR code on your phone) to the event for check-in.`;
+  `Hi {{name}},\n\nYour ticket has been manually issued for ${formTitle || 'the event'}. Attached is your PDF ticket — please bring it with you (or scan the QR code on your phone) to the event for check-in.`;
 
 const defaultSubjectForResend = (formTitle?: string) =>
   `Your Ticket for ${formTitle || 'the event'}`;
 
 const defaultMessageForResend = (formTitle?: string) =>
-  `As requested, here is your ticket for ${formTitle || 'the event'}. Attached is your PDF ticket — please bring it with you (or scan the QR code on your phone) to the event for check-in.`;
+  `Hi {{name}},\n\nAs requested, here is your ticket for ${formTitle || 'the event'}. Attached is your PDF ticket — please bring it with you (or scan the QR code on your phone) to the event for check-in.`;
 
 /**
- * Mirrors the branded HTML wrapper that `send-ticket-email` applies server-side,
- * so the admin sees the same layout they'll actually send. Kept in sync with
- * `generateEmailTemplate` in supabase/functions/send-ticket-email/index.ts.
+ * Renders the admin preview through the SAME shared email shell that real sends
+ * use (utils/emailShell.ts → _shared/emailShell.ts), so the on-screen preview
+ * matches the delivered email: branded header image (falls back to the site
+ * wordmark), placeholder substitution, and the gradient footer. No injected
+ * greeting — the message body owns its own "Hi {{name}}," like every template.
  */
 function renderEmailPreviewHtml(args: {
-  greeting: string;
   message: string;
-  attachmentNote?: string;
+  vars: Record<string, string>;
+  settings: AppSettings | null;
 }) {
-  const { greeting, message, attachmentNote } = args;
-  return `
-    <div style="background-color:#f4f6f9;padding:40px 20px;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;">
-      <div style="max-width:600px;margin:0 auto;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);background:#fff;">
-        <div style="background:linear-gradient(135deg,#1a73e8,#0052cc);padding:40px 40px 30px;text-align:center;">
-          <h1 style="margin:0;color:#ffffff;font-size:26px;font-weight:700;letter-spacing:0.5px;">Event Registration</h1>
-          <div style="width:50px;height:3px;background:rgba(255,255,255,0.5);margin:16px auto 0;border-radius:2px;"></div>
-        </div>
-        <div style="padding:40px;">
-          <p style="margin:0 0 20px;font-size:18px;font-weight:600;color:#1a1a2e;">${escapeHtml(greeting)},</p>
-          <div style="font-size:15px;line-height:1.7;color:#444;white-space:pre-wrap;">${escapeHtml(message)}</div>
-          ${attachmentNote
-      ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:28px;background-color:#f0f7ff;border-radius:8px;border:1px solid #d4e5f7;"><tr><td style="padding:16px 20px;"><p style="margin:0;font-size:14px;color:#1a73e8;font-weight:600;">&#128206; ${escapeHtml(attachmentNote)}</p></td></tr></table>`
-      : ''}
-        </div>
-        <div style="background-color:#f8f9fb;padding:24px 40px;text-align:center;border-top:1px solid #eaedf0;">
-          <p style="margin:0;font-size:12px;color:#8c95a1;">This email was sent by SCAGO Event Management.</p>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-function escapeHtml(s: string) {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+  const { message, vars, settings } = args;
+  const rawLogo = settings?.emailHeaderLogo?.trim();
+  const banner = rawLogo && /^https?:\/\//i.test(rawLogo) ? rawLogo : undefined;
+  const substituted = applyPlaceholders(message, vars);
+  const content = /^\s*<(p|div|h\d|table|ul|ol|blockquote|figure)/i.test(substituted)
+    ? substituted
+    : plainTextToHtml(substituted);
+  const attachmentCallout = `<div style="margin-top:24px;background:rgba(0,0,0,0.03);border-radius:10px;padding:14px 18px;font-size:14px;color:#4b5563;">📎 Attachment included — please review the PDF.</div>`;
+  return renderEmailShell({
+    content: content + attachmentCallout,
+    site: CURRENT_SITE.key,
+    headerImageUrl: banner,
+    footerText: settings?.emailFooterText || undefined,
+    previewMode: true,
+  });
 }
 
 const ManualTicketTool: React.FC = () => {
@@ -377,7 +365,8 @@ const ManualTicketTool: React.FC = () => {
     setMode('existing');
     setFormData(prev => ({ ...prev, firstName: '', lastName: '', email: '' }));
 
-    if (settings && settings.smtpUser && settings.smtpPass) {
+    // Env-first SMTP: partial config is valid (GANSID clears smtp_pass; edge secrets fill the rest).
+    if (settings && (settings.smtpUser || settings.smtpPass)) {
       try {
         // Generate PDF for the primary plus each placeholder. Placeholders
         // get a registration URL so the recipient can self-claim their
@@ -401,12 +390,20 @@ const ManualTicketTool: React.FC = () => {
             contentType: 'application/pdf',
           });
         }
+        // Substitute {{tokens}} in the admin's free-text subject/message and
+        // scrub any leftovers so raw placeholders never reach the recipient.
+        // Byte-identical for the token-free defaults.
+        const emailVars = {
+          name: primary.name || '',
+          event: selectedForm?.title || 'the event',
+          id: primary.id || '',
+        };
         await sendTicketEmail(settings, {
           to: formData.email,
-          subject: customSubject,
+          subject: applyPlaceholders(customSubject, emailVars),
           name: primary.name,
           title: selectedForm?.title || undefined,
-          message: customMessage,
+          message: applyPlaceholders(customMessage, emailVars),
           attachments,
         });
         // Stamp lastTicketEmailAt across the whole batch. Best-effort —
@@ -447,19 +444,29 @@ const ManualTicketTool: React.FC = () => {
     setLoading(true);
     setSuccessMsg('');
     try {
-      if (!settings || !settings.smtpUser || !settings.smtpPass) {
+      // Env-first SMTP: partial config is valid (GANSID clears smtp_pass; edge secrets fill the rest).
+      if (!settings || (!settings.smtpUser && !settings.smtpPass)) {
         setSuccessMsg('Cannot send email - SMTP not configured.');
         return;
       }
       const form = previewForm || (await getForms()).find(f => f.id === selectedAttendee.formId);
       if (!form) throw new Error('Form not found for this ticket.');
       const doc = await generateTicketPDF(selectedAttendee, settings, form);
+      // Substitute {{tokens}} in the admin's free-text subject/message and
+      // scrub any leftovers so raw placeholders never reach the recipient.
+      const emailVars = {
+        name: selectedAttendee.name || '',
+        event: form.title || 'the event',
+        id: selectedAttendee.id || '',
+        invoiceId: selectedAttendee.invoiceId || '',
+        amount: selectedAttendee.paymentAmount || '',
+      };
       await sendTicketEmail(settings, {
         to: selectedAttendee.email,
-        subject: customSubject,
+        subject: applyPlaceholders(customSubject, emailVars),
         name: selectedAttendee.name,
         title: form.title || undefined,
-        message: customMessage,
+        message: applyPlaceholders(customMessage, emailVars),
         attachments: [{
           filename: `${selectedAttendee.name.replace(/[^a-zA-Z0-9 ]/g, '_')}_Ticket.pdf`,
           content: arrayBufferToBase64(doc.output('arraybuffer')),
@@ -483,13 +490,19 @@ const ManualTicketTool: React.FC = () => {
   };
 
   const emailPreviewHtml = useMemo(() => {
-    const greeting = `Hello ${previewAttendee?.name || formData.firstName || 'Guest'}`;
+    const previewVars = {
+      name: previewAttendee?.name || formData.firstName || 'Guest',
+      event: selectedForm?.title || 'the event',
+      id: previewAttendee?.id || '',
+      invoiceId: previewAttendee?.invoiceId || '',
+      amount: previewAttendee?.paymentAmount || '',
+    };
     return renderEmailPreviewHtml({
-      greeting,
       message: customMessage || '(message body is empty)',
-      attachmentNote: 'Attachment included — please review the PDF.',
+      vars: previewVars,
+      settings,
     });
-  }, [customMessage, previewAttendee, formData.firstName]);
+  }, [customMessage, previewAttendee, formData.firstName, selectedForm, settings]);
 
   const canSend = mode === 'existing'
     ? !!selectedAttendee

@@ -43,3 +43,11 @@ export const generateEmailHtml = (settings: AppSettings, template: string, atten
     footerText: settings.emailFooterText,
   });
 };
+
+// Re-export the canonical per-form template resolver so client call sites can
+// import `resolveEmailTemplate` (+ types) from `utils/emailTemplates`, applying
+// the SAME precedence rule (per-form override → global → default) the edge uses
+// from ONE source. Mirrors utils/emailShell.ts; the cross-boundary import builds.
+// No name collision: the shared module exports resolveEmailTemplate / types only,
+// not generateEmailHtml above.
+export * from '../supabase/functions/_shared/emailTemplates';

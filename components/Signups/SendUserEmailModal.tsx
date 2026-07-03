@@ -429,7 +429,8 @@ export default function SendUserEmailModal({ user, settings, forms, onClose, onS
     }
     setSending(true);
     try {
-      if (!settings.smtpUser || !settings.smtpPass) {
+      // Env-first SMTP: partial config is valid (GANSID clears smtp_pass; edge secrets fill the rest).
+      if (!settings.smtpUser && !settings.smtpPass) {
         throw new Error('SMTP credentials are not configured in Settings.');
       }
       const trackingId = generateTrackingId();

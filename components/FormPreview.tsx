@@ -334,7 +334,8 @@ const FormPreview: React.FC<FormPreviewProps> = ({ form }) => {
             setLastGeneratedAttendee(newAttendee);
 
             // --- SMTP Email Integration ---
-            if (appSettings && appSettings.smtpUser && appSettings.smtpPass) {
+            // Env-first SMTP: partial config is valid (GANSID clears smtp_pass; edge secrets fill the rest).
+            if (appSettings && (appSettings.smtpUser || appSettings.smtpPass)) {
                 try {
                     const attachments = [];
                     const primaryDoc = await generateTicketPDF(newAttendee, appSettings, form);

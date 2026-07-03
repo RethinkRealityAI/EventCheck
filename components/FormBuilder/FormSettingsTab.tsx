@@ -4,6 +4,7 @@ import QRCode from 'react-qr-code';
 import { Form } from '../../types';
 import RichTextEditor from '../RichTextEditor';
 import { StepsManager } from './StepsManager';
+import EmailOverridesSection from './EmailOverridesSection';
 
 interface FormSettingsTabProps {
     form: Form;
@@ -510,6 +511,11 @@ const FormSettingsTab: React.FC<FormSettingsTabProps> = ({ form, onUpdate, onIma
                             </p>
                         </div>
                     </div>
+                </div>
+
+                {/* Per-form email template overrides (registrant-facing emails). */}
+                <div className="mt-6">
+                    <EmailOverridesSection form={form} onUpdate={onUpdate} />
                 </div>
             </div>
         </div>

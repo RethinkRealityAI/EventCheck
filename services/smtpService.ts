@@ -77,7 +77,11 @@ export async function sendTicketEmail(settings: AppSettings, data: {
    *  (e.g. "Hope Gala") so recipients see the right header. */
   title?: string;
 }): Promise<void> {
-  if (!settings.smtpUser || !settings.smtpPass) {
+  // Env-first SMTP (Resend on GANSID) means the client cannot see the real
+  // credentials — smtp_pass is intentionally cleared in app_settings there.
+  // Only skip when NOTHING is configured on either field; the edge function
+  // resolves env secrets first and falls back to this smtpConfig per-field.
+  if (!settings.smtpUser && !settings.smtpPass) {
     console.warn('SMTP credentials not configured — skipping email send.');
     return;
   }

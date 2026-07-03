@@ -5,6 +5,8 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import nodemailer from 'npm:nodemailer';
+import { renderEmailShell, applyPlaceholders } from '../_shared/emailShell.ts';
+import { resolveEmailTemplate } from '../_shared/emailTemplates.ts';
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -21,78 +23,40 @@ function jsonResponse(body: Record<string, any>, status = 200) {
 }
 
 /**
- * Branded HTML email shell — must match the visual language of
- * utils/emailShell.ts in the browser so admin previews and real sends look
- * identical. `fromName` is used as a coarse site-key signal (any name
- * containing "GANSID" gets the tri-stop gradient; else SCAGO red).
+ * Adapter kept for call-site compatibility. Delegates to the ONE shared shell
+ * (_shared/emailShell.ts — also re-exported to the client as utils/emailShell.ts)
+ * so admin previews and real sends are byte-identical. Notes:
+ *  - The template body owns its own greeting ("Hello {{name}},"); we no longer
+ *    inject a separate greeting line (that caused a double greeting and a look
+ *    the preview never showed). `greeting` is accepted but ignored.
+ *  - `headerImageUrl` renders the branded banner; omit → wordmark fallback.
+ *  - Site detection: the project ref in SUPABASE_URL is deterministic per tenant
+ *    (gticuvgclbvhwvpzkuez = GANSID, iigbgbgakevcgilucvbs = SCAGO). The legacy
+ *    /gansid/i-on-fromName heuristic stays only as a last-resort fallback — an
+ *    admin renaming email_from_name must NOT flip the palette.
  */
 function generateEmailTemplate(data: {
     title: string;
-    greeting: string;
+    greeting?: string;
     content: string;
     attachmentNote?: string;
     fromName?: string;
+    headerImageUrl?: string;
+    footerText?: string;
 }) {
-    const rawName = (data.fromName && data.fromName.trim()) ? data.fromName : 'SCAGO';
-    const isGansid = /gansid/i.test(rawName);
-    const palette = isGansid
-      ? {
-          headerGradient: 'linear-gradient(135deg, #ba0028 0%, #E0243C 38%, #2260a1 100%)',
-          footerGradient: 'linear-gradient(135deg, #ba0028 0%, #E0243C 42%, #2260a1 100%)',
-          buttonColor: '#ba0028',
-          brandLabel: 'GANSID Congress 2026',
-          subtitle: 'Hyderabad, India · October 23–25, 2026',
-          contactEmail: 'congress@inheritedblooddisorders.world',
-        }
-      : {
-          headerGradient: 'linear-gradient(135deg, #B3282D 0%, #8B1F24 100%)',
-          footerGradient: 'linear-gradient(135deg, #B3282D 0%, #8B1F24 100%)',
-          buttonColor: '#B3282D',
-          brandLabel: 'SCAGO',
-          subtitle: 'Sickle Cell Awareness Group of Ontario',
-          contactEmail: 'info@scago.ca',
-        };
-
-    return `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <style>
-    body { margin: 0; padding: 0; background: #f3f4f6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Tahoma, sans-serif; color: #1a1c1c; }
-    .container { max-width: 560px; margin: 40px auto; background: white; border-radius: 20px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.08); }
-    .header { background: ${palette.headerGradient}; padding: 44px 32px 40px; text-align: center; color: white; }
-    .header-title { font-size: 26px; font-weight: 800; letter-spacing: 1px; color: white; text-transform: uppercase; margin: 0; }
-    .header-subtitle { font-size: 13px; color: rgba(255,255,255,0.9); margin-top: 8px; }
-    .body { padding: 40px 32px; }
-    .body h1, .body h2, .body h3 { color: #1a1c1c; margin: 0 0 16px; line-height: 1.2; }
-    .body p { font-size: 16px; line-height: 1.6; color: #1a1c1c; opacity: 0.85; margin: 0 0 20px; }
-    .body a { color: ${palette.buttonColor}; }
-    .greeting { font-size: 18px; font-weight: 600; color: #1a1a2e; margin: 0 0 20px; }
-    .attachment-callout { margin-top: 24px; background: rgba(0,0,0,0.03); border-radius: 10px; padding: 14px 18px; font-size: 14px; color: #4b5563; border-left: 3px solid ${palette.buttonColor}; }
-    .footer { padding: 28px 32px; background: ${palette.footerGradient}; text-align: center; font-size: 12px; color: rgba(255,255,255,0.92); }
-    .footer a { color: white; text-decoration: underline; }
-    .footer-brand { font-size: 13px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; color: white; margin-bottom: 6px; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="header">
-      <div class="header-title">${data.title}</div>
-      <div class="header-subtitle">${palette.subtitle}</div>
-    </div>
-    <div class="body">
-      <p class="greeting">${data.greeting},</p>
-      ${data.content}
-      ${data.attachmentNote ? `<div class="attachment-callout">📎 ${data.attachmentNote}</div>` : ''}
-    </div>
-    <div class="footer">
-      <div class="footer-brand">${palette.brandLabel}</div>
-      Questions? <a href="mailto:${palette.contactEmail}">${palette.contactEmail}</a>
-    </div>
-  </div>
-</body>
-</html>`;
+    const projectUrl = Deno.env.get('SUPABASE_URL') || '';
+    const site = projectUrl.includes('gticuvgclbvhwvpzkuez') ? 'gansid'
+        : projectUrl.includes('iigbgbgakevcgilucvbs') ? 'scago'
+        : (/gansid/i.test((data.fromName && data.fromName.trim()) || 'SCAGO') ? 'gansid' : 'scago');
+    const attachHtml = data.attachmentNote
+        ? `<div style="margin-top:24px;background:rgba(0,0,0,0.03);border-radius:10px;padding:14px 18px;font-size:14px;color:#4b5563;">📎 ${data.attachmentNote}</div>`
+        : '';
+    return renderEmailShell({
+        site,
+        content: data.content + attachHtml,
+        headerImageUrl: data.headerImageUrl && data.headerImageUrl.trim() ? data.headerImageUrl : undefined,
+        footerText: data.footerText && data.footerText.trim() ? data.footerText : undefined,
+    });
 }
 
 /**
@@ -182,8 +146,9 @@ serve(async (req: Request) => {
                 .from('attendees').select('name, email').eq('id', guest.primary_attendee_id).maybeSingle();
 
             const { data: form } = await supabase
-                .from('forms').select('title').eq('id', guest.form_id).maybeSingle();
+                .from('forms').select('title, settings').eq('id', guest.form_id).maybeSingle();
             const eventName = form?.title || 'the event';
+            const formEmailOverrides = (form as any)?.settings?.emailOverrides;
 
             const { data: appSettings } = await supabase
                 .from('app_settings').select('*').eq('id', 1).maybeSingle();
@@ -195,22 +160,33 @@ serve(async (req: Request) => {
             const completeUrl = `${origin}/#/form/${guest.form_id}?ref=${guest.id}`;
             const signupUrl = `${origin}/#/`;
 
-            const rawSubject = (appSettings as any)?.email_guest_claim_subject || 'Complete your registration for {{event}}';
-            const rawBody = (appSettings as any)?.email_guest_claim_body || `<p>Hi {{name}},</p><p><strong>{{purchaser}}</strong> has purchased your ticket for <strong>{{event}}</strong>. Your ticket is attached and will be fully confirmed once you complete a few personal details:</p><p style="text-align:center;margin:24px 0;"><a href="{{complete_url}}" style="display:inline-block;padding:12px 24px;background:#1E4A8C;color:#fff;text-decoration:none;border-radius:6px;font-weight:600;">Complete my registration</a></p><p>You can also create a portal account with this same email so you can view your ticket and updates anytime: <a href="{{signup_url}}">{{signup_url}}</a></p>`;
+            const overrideOn = formEmailOverrides?.enabled === true;
+            const tpl = resolveEmailTemplate({
+                formOverride: overrideOn ? formEmailOverrides?.templates?.['guest-claim'] : undefined,
+                globalSubject: (appSettings as any)?.email_guest_claim_subject,
+                globalBody: (appSettings as any)?.email_guest_claim_body,
+                defaultSubject: 'Complete your registration for {{event}}',
+                defaultBody: `<p>Hi {{name}},</p><p><strong>{{purchaser}}</strong> has purchased your ticket for <strong>{{event}}</strong>. Your ticket is attached and will be fully confirmed once you complete a few personal details:</p><p style="text-align:center;margin:24px 0;"><a href="{{complete_url}}" style="display:inline-block;padding:12px 24px;background:#1E4A8C;color:#fff;text-decoration:none;border-radius:6px;font-weight:600;">Complete my registration</a></p><p>You can also create a portal account with this same email so you can view your ticket and updates anytime: <a href="{{signup_url}}">{{signup_url}}</a></p>`,
+                formHeaderImageUrl: overrideOn ? formEmailOverrides?.headerImageUrl : undefined,
+                globalHeaderImageUrl: (appSettings as any)?.email_header_logo,
+                globalFooterText: (appSettings as any)?.email_footer_text,
+            });
 
-            const replace = (s: string) => s
-                .replace(/\{\{name\}\}/g, guest.name || 'there')
-                .replace(/\{\{purchaser\}\}/g, primary?.name || 'A colleague')
-                .replace(/\{\{event\}\}/g, eventName)
-                .replace(/\{\{complete_url\}\}/g, completeUrl)
-                .replace(/\{\{signup_url\}\}/g, signupUrl);
-            const subject = replace(rawSubject);
-            const body_html = replace(rawBody);
+            const vars = {
+                name: guest.name || 'there',
+                purchaser: primary?.name || 'A colleague',
+                event: eventName,
+                complete_url: completeUrl,
+                signup_url: signupUrl,
+            };
+            const subject = applyPlaceholders(tpl.subject, vars);
+            const body_html = applyPlaceholders(tpl.body, vars);
             const html = generateEmailTemplate({
                 title: eventName,
-                greeting: `Hi ${guest.name || 'there'}`,
                 content: body_html,
                 fromName: smtpConfig?.fromName,
+                headerImageUrl: tpl.headerImageUrl,
+                footerText: tpl.footerText,
             });
 
             await sendSimpleEmail({ to: guest.email, subject, html, smtpConfig });
@@ -251,8 +227,9 @@ serve(async (req: Request) => {
             if (primary.is_test === true) return jsonResponse({ ok: true, skipped: 'test' });
 
             const { data: form } = await supabase
-                .from('forms').select('title').eq('id', primary.form_id).maybeSingle();
+                .from('forms').select('title, settings').eq('id', primary.form_id).maybeSingle();
             const eventName = form?.title || 'the event';
+            const formEmailOverrides = (form as any)?.settings?.emailOverrides;
 
             // Table/group purchaser? Pick the table-purchaser template if linked guests exist.
             const { count: guestCount } = await supabase
@@ -267,13 +244,23 @@ serve(async (req: Request) => {
                 ? { host: s.smtp_host, port: Number(s.smtp_port || 587), user: s.smtp_user, pass: s.smtp_pass, fromName: s.email_from_name || 'SCAGO' }
                 : undefined;
 
-            // Column names reconciled against storageService AppSettings mapper:
-            //   email_subject / email_body_template (standard purchaser),
-            //   email_table_purchaser_subject / email_table_purchaser_body (table/group).
-            const rawSubject = (isTableOrGroup ? s.email_table_purchaser_subject : s.email_subject)
-                || s.email_subject || 'Your registration for {{event}} is confirmed';
-            const rawBody = (isTableOrGroup ? s.email_table_purchaser_body : s.email_body_template)
-                || s.email_body_template || '<p>Thank you for registering for <strong>{{event}}</strong>.</p>';
+            // Which template key? Table/group purchaser gets the table variant.
+            const key = isTableOrGroup ? 'table-purchaser' : 'ticket';
+            const overrideOn = formEmailOverrides?.enabled === true;
+            const formOverride = overrideOn ? formEmailOverrides?.templates?.[key] : undefined;
+
+            // Table/group purchasers historically fell back to the STANDARD template
+            // when the table variant was empty — preserved via the inner ||.
+            const tpl = resolveEmailTemplate({
+                formOverride,
+                globalSubject: isTableOrGroup ? (s.email_table_purchaser_subject || s.email_subject) : s.email_subject,
+                globalBody: isTableOrGroup ? (s.email_table_purchaser_body || s.email_body_template) : s.email_body_template,
+                defaultSubject: 'Your registration for {{event}} is confirmed',
+                defaultBody: '<p>Hello {{name}},</p><p>Thank you for registering for <strong>{{event}}</strong>. Your registration is confirmed.</p>',
+                formHeaderImageUrl: overrideOn ? formEmailOverrides?.headerImageUrl : undefined,
+                globalHeaderImageUrl: s.email_header_logo,
+                globalFooterText: s.email_footer_text,
+            });
 
             const downloadUrl = body.downloadUrl || '';
             const downloadBlock = downloadUrl
@@ -284,21 +271,22 @@ serve(async (req: Request) => {
                    </div>`
                 : '';
 
-            const replace = (str: string) => str
-                .replace(/\{\{event\}\}/g, eventName)
-                .replace(/\{\{name\}\}/g, primary.name || '')
-                .replace(/\{\{id\}\}/g, primary.id || '')
-                .replace(/\{\{invoiceId\}\}/g, primary.invoice_id || '')
-                .replace(/\{\{amount\}\}/g, primary.payment_amount || '')
-                .replace(/\{\{download_url\}\}/g, downloadUrl);
-
-            const subject = replace(rawSubject);
-            const contentHtml = replace(rawBody) + downloadBlock;
+            const vars = {
+                event: eventName,
+                name: primary.name || '',
+                id: primary.id || '',
+                invoiceId: primary.invoice_id || '',
+                amount: primary.payment_amount || '',
+                download_url: downloadUrl,
+            };
+            const subject = applyPlaceholders(tpl.subject, vars);
+            const contentHtml = applyPlaceholders(tpl.body, vars) + downloadBlock;
             const html = generateEmailTemplate({
                 title: eventName,
-                greeting: `Hi ${primary.name || 'there'}`,
                 content: contentHtml,
                 fromName: smtpConfig?.fromName,
+                headerImageUrl: tpl.headerImageUrl,
+                footerText: tpl.footerText,
             });
 
             await sendSimpleEmail({ to: primary.email, subject, html, smtpConfig });
@@ -328,10 +316,12 @@ serve(async (req: Request) => {
 
             const { data: form } = await supabase
                 .from('forms')
-                .select('title')
+                .select('title, settings')
                 .eq('id', attendee.form_id)
                 .maybeSingle();
             const eventName = form?.title || 'the event';
+            const formEmailOverrides = (form as any)?.settings?.emailOverrides;
+            const overrideOn = formEmailOverrides?.enabled === true;
 
             // Pull SMTP + fromName from admin-configurable app_settings so a
             // credential rotation in Settings propagates to this mode instead of
@@ -342,30 +332,52 @@ serve(async (req: Request) => {
                 ? { host: appSettings.smtp_host, port: Number(appSettings.smtp_port || 587), user: appSettings.smtp_user, pass: appSettings.smtp_pass, fromName: (appSettings as any).email_from_name || 'SCAGO' }
                 : undefined;
 
+            // Fetch the purchaser up-front — the guest confirmation template references
+            // {{purchaser}} (the live GANSID template does), and the notify send needs it too.
+            let primary: { name: string | null; email: string | null } | null = null;
+            if (attendee.primary_attendee_id) {
+                const { data } = await supabase
+                    .from('attendees')
+                    .select('name, email')
+                    .eq('id', attendee.primary_attendee_id)
+                    .maybeSingle();
+                primary = data;
+            }
+
             // 1. Send a personal ticket confirmation to the claimed guest.
             let ticketOk = true;
             try {
                 const qrData = attendee.qr_payload || attendee.id;
                 const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(qrData)}`;
 
-                const rawSubject = (appSettings as any)?.email_guest_confirmed_subject
-                    || 'Your registration for {{event}} is confirmed';
-                const rawBody = (appSettings as any)?.email_guest_confirmed_body
-                    || `<p>Thank you for completing your registration for <strong>{{event}}</strong>!</p><p>Your check-in QR code is below. Present this email at the entrance — the team will scan it.</p><div style="text-align:center;margin:24px 0;"><img src="{{qr_image_url}}" alt="Check-in QR code" width="240" height="240" style="border:1px solid #e5e7eb;border-radius:8px;padding:8px;background:#fff;" /></div><p style="color:#666;font-size:13px;">Registration ID: {{registration_id}}</p>`;
+                const tpl = resolveEmailTemplate({
+                    formOverride: overrideOn ? formEmailOverrides?.templates?.['guest-confirmed'] : undefined,
+                    globalSubject: (appSettings as any)?.email_guest_confirmed_subject,
+                    globalBody: (appSettings as any)?.email_guest_confirmed_body,
+                    defaultSubject: 'Your registration for {{event}} is confirmed',
+                    defaultBody: `<p>Hi {{name}},</p><p>Thank you for completing your registration for <strong>{{event}}</strong>!</p><p>Your check-in QR code is below. Present this email at the entrance — the team will scan it.</p><div style="text-align:center;margin:24px 0;"><img src="{{qr_image_url}}" alt="Check-in QR code" width="240" height="240" style="border:1px solid #e5e7eb;border-radius:8px;padding:8px;background:#fff;" /></div><p style="color:#666;font-size:13px;">Registration ID: {{registration_id}}</p>`,
+                    formHeaderImageUrl: overrideOn ? formEmailOverrides?.headerImageUrl : undefined,
+                    globalHeaderImageUrl: (appSettings as any)?.email_header_logo,
+                    globalFooterText: (appSettings as any)?.email_footer_text,
+                });
 
-                const replace = (s: string) => s
-                    .replace(/\{\{name\}\}/g, attendee.name || 'there')
-                    .replace(/\{\{event\}\}/g, eventName)
-                    .replace(/\{\{registration_id\}\}/g, attendee.id)
-                    .replace(/\{\{qr_image_url\}\}/g, qrImageUrl);
-
-                const subject = replace(rawSubject);
-                const body_html = replace(rawBody);
+                const publicSiteUrl = (Deno.env.get('PUBLIC_SITE_URL') || '').trim().replace(/\/+$/, '');
+                const vars = {
+                    name: attendee.name || 'there',
+                    event: eventName,
+                    registration_id: attendee.id,
+                    qr_image_url: qrImageUrl,
+                    purchaser: primary?.name || 'The purchaser',
+                    signup_url: publicSiteUrl ? `${publicSiteUrl}/#/` : '',
+                };
+                const subject = applyPlaceholders(tpl.subject, vars);
+                const body_html = applyPlaceholders(tpl.body, vars);
                 const html = generateEmailTemplate({
                     title: eventName,
-                    greeting: `Hi ${attendee.name || 'there'}`,
                     content: body_html,
                     fromName: smtpConfig?.fromName,
+                    headerImageUrl: tpl.headerImageUrl,
+                    footerText: tpl.footerText,
                 });
                 await sendSimpleEmail({ to: attendee.email, subject, html, smtpConfig });
             } catch (e) {
@@ -374,33 +386,34 @@ serve(async (req: Request) => {
             }
 
             // 2. Notify the primary (best-effort)
-            if (attendee.primary_attendee_id) {
-                const { data: primary } = await supabase
-                    .from('attendees')
-                    .select('name, email')
-                    .eq('id', attendee.primary_attendee_id)
-                    .maybeSingle();
-                if (primary?.email) {
-                    // Admin-editable notification template. Falls back to a
-                    // sensible default when the admin hasn't customised it.
-                    const notifyRawSubject = (appSettings as any)?.email_guest_completion_notify_subject
-                        || '{{name}} has completed their registration for {{event}}';
-                    const notifyRawBody = (appSettings as any)?.email_guest_completion_notify_body
-                        || `<p>Hi {{purchaser}},</p><p><strong>{{name}}</strong> has completed their registration details for <strong>{{event}}</strong>. Their individual ticket confirmation has been emailed to them directly — no action needed from you.</p>`;
-                    const notifyReplace = (s: string) => s
-                        .replace(/\{\{name\}\}/g, attendee.name || 'Guest')
-                        .replace(/\{\{purchaser\}\}/g, primary.name || 'there')
-                        .replace(/\{\{event\}\}/g, eventName);
-                    const subject = notifyReplace(notifyRawSubject);
-                    const html = generateEmailTemplate({
-                        title: eventName,
-                        greeting: `Hi ${primary.name || 'there'}`,
-                        content: notifyReplace(notifyRawBody),
-                        fromName: smtpConfig?.fromName,
-                    });
-                    await sendSimpleEmail({ to: primary.email, subject, html, smtpConfig })
-                        .catch(e => console.warn('Primary notification failed', e));
-                }
+            if (primary?.email) {
+                // Admin-editable notification template. Falls back to a
+                // sensible default when the admin hasn't customised it.
+                const notifyTpl = resolveEmailTemplate({
+                    formOverride: overrideOn ? formEmailOverrides?.templates?.['guest-completion-notify'] : undefined,
+                    globalSubject: (appSettings as any)?.email_guest_completion_notify_subject,
+                    globalBody: (appSettings as any)?.email_guest_completion_notify_body,
+                    defaultSubject: '{{name}} has completed their registration for {{event}}',
+                    defaultBody: `<p>Hi {{purchaser}},</p><p><strong>{{name}}</strong> has completed their registration details for <strong>{{event}}</strong>. Their individual ticket confirmation has been emailed to them directly — no action needed from you.</p>`,
+                    formHeaderImageUrl: overrideOn ? formEmailOverrides?.headerImageUrl : undefined,
+                    globalHeaderImageUrl: (appSettings as any)?.email_header_logo,
+                    globalFooterText: (appSettings as any)?.email_footer_text,
+                });
+                const notifyVars = {
+                    name: attendee.name || 'Guest',
+                    purchaser: primary.name || 'there',
+                    event: eventName,
+                };
+                const subject = applyPlaceholders(notifyTpl.subject, notifyVars);
+                const html = generateEmailTemplate({
+                    title: eventName,
+                    content: applyPlaceholders(notifyTpl.body, notifyVars),
+                    fromName: smtpConfig?.fromName,
+                    headerImageUrl: notifyTpl.headerImageUrl,
+                    footerText: notifyTpl.footerText,
+                });
+                await sendSimpleEmail({ to: primary.email, subject, html, smtpConfig })
+                    .catch(e => console.warn('Primary notification failed', e));
             }
 
             // Stamp `last_ticket_email_at` so the dashboard reflects "Sent"
@@ -455,6 +468,10 @@ serve(async (req: Request) => {
             let completeUrl = body.completeUrl as string | undefined;
             let signupUrl = body.signupUrl as string | undefined;
             let eventName = body.eventName as string | undefined;
+            // Per-form overrides are only resolvable when we hydrate the form row
+            // (pattern 2). Pre-composed callers (pattern 1) don't identify the form,
+            // so they get the global/default template chain.
+            let formEmailOverrides: any = undefined;
 
             const needsHydration = !to || !completeUrl || !name;
             if (needsHydration && body.attendeeId) {
@@ -474,9 +491,10 @@ serve(async (req: Request) => {
                     : { data: null } as any;
                 const { data: form } = await supabase
                     .from('forms')
-                    .select('title')
+                    .select('title, settings')
                     .eq('id', staff.form_id)
                     .maybeSingle();
+                formEmailOverrides = (form as any)?.settings?.emailOverrides;
 
                 const origin = body.origin || '';
                 const staffCategory = (staff.answers as any)?.staffCategory;
@@ -517,28 +535,36 @@ serve(async (req: Request) => {
                 ? { host: appSettings.smtp_host, port: Number(appSettings.smtp_port || 587), user: appSettings.smtp_user, pass: appSettings.smtp_pass, fromName: (appSettings as any).email_from_name || 'GANSID Congress' }
                 : undefined;
 
-            const rawSubject = (appSettings as any)?.email_staff_invite_subject
-                || 'Complete your registration for {{event}}';
-            const rawBody = (appSettings as any)?.email_staff_invite_body
-                || `<p>Hi {{name}},</p><p><strong>{{purchaser}}</strong> has registered you for <strong>{{event}}</strong> on behalf of <strong>{{org_name}}</strong> ({{category}}).</p><p>Please complete your personal details:</p><p style="text-align:center;margin:24px 0;"><a href="{{complete_url}}" style="display:inline-block;padding:12px 24px;background:#1E4A8C;color:#fff;text-decoration:none;border-radius:6px;font-weight:600;">Complete my registration</a></p><p>You can also create a portal account: <a href="{{signup_url}}">{{signup_url}}</a></p>`;
+            const overrideOn = formEmailOverrides?.enabled === true;
+            const tpl = resolveEmailTemplate({
+                formOverride: overrideOn ? formEmailOverrides?.templates?.['staff-invite'] : undefined,
+                globalSubject: (appSettings as any)?.email_staff_invite_subject,
+                globalBody: (appSettings as any)?.email_staff_invite_body,
+                defaultSubject: 'Complete your registration for {{event}}',
+                defaultBody: `<p>Hi {{name}},</p><p><strong>{{purchaser}}</strong> has registered you for <strong>{{event}}</strong> on behalf of <strong>{{org_name}}</strong> ({{category}}).</p><p>Please complete your personal details:</p><p style="text-align:center;margin:24px 0;"><a href="{{complete_url}}" style="display:inline-block;padding:12px 24px;background:#1E4A8C;color:#fff;text-decoration:none;border-radius:6px;font-weight:600;">Complete my registration</a></p><p>You can also create a portal account: <a href="{{signup_url}}">{{signup_url}}</a></p>`,
+                formHeaderImageUrl: overrideOn ? formEmailOverrides?.headerImageUrl : undefined,
+                globalHeaderImageUrl: (appSettings as any)?.email_header_logo,
+                globalFooterText: (appSettings as any)?.email_footer_text,
+            });
 
-            const replace = (s: string) => s
-                .replace(/\{\{name\}\}/g, name || 'there')
-                .replace(/\{\{purchaser\}\}/g, purchaser || 'A colleague')
-                .replace(/\{\{org_name\}\}/g, orgName || '')
-                .replace(/\{\{category\}\}/g, category || '')
-                .replace(/\{\{complete_url\}\}/g, completeUrl || '')
-                .replace(/\{\{signup_url\}\}/g, signupUrl || '')
-                .replace(/\{\{event\}\}/g, eventName || 'the event');
-
-            const subject = replace(rawSubject);
-            const body_html = replace(rawBody);
+            const vars = {
+                name: name || 'there',
+                purchaser: purchaser || 'A colleague',
+                org_name: orgName || '',
+                category: category || '',
+                complete_url: completeUrl || '',
+                signup_url: signupUrl || '',
+                event: eventName || 'the event',
+            };
+            const subject = applyPlaceholders(tpl.subject, vars);
+            const body_html = applyPlaceholders(tpl.body, vars);
             const html = generateEmailTemplate({
                 title: eventName || 'the event',
-                greeting: `Hi ${name || 'there'}`,
                 content: body_html,
                 // No attachments — suppress the callout.
                 fromName: smtpConfig?.fromName,
+                headerImageUrl: tpl.headerImageUrl,
+                footerText: tpl.footerText,
             });
 
             await sendSimpleEmail({ to, subject, html, smtpConfig });
@@ -560,25 +586,30 @@ serve(async (req: Request) => {
                 ? { host: appSettings.smtp_host, port: Number(appSettings.smtp_port || 587), user: appSettings.smtp_user, pass: appSettings.smtp_pass, fromName: (appSettings as any).email_from_name || 'GANSID Congress' }
                 : undefined;
 
-            const rawSubject = (appSettings as any)?.email_staff_confirmed_subject
-                || 'Your registration for {{event}} is confirmed';
-            const rawBody = (appSettings as any)?.email_staff_confirmed_body
-                || `<p>Hi {{name}},</p><p>Thank you for completing your registration for <strong>{{event}}</strong> on behalf of <strong>{{org_name}}</strong>!</p><p>Your ticket is attached. Please bring it (or the QR code) to the event for check-in.</p>`;
+            const tpl = resolveEmailTemplate({
+                globalSubject: (appSettings as any)?.email_staff_confirmed_subject,
+                globalBody: (appSettings as any)?.email_staff_confirmed_body,
+                defaultSubject: 'Your registration for {{event}} is confirmed',
+                defaultBody: `<p>Hi {{name}},</p><p>Thank you for completing your registration for <strong>{{event}}</strong> on behalf of <strong>{{org_name}}</strong>!</p><p>Your ticket is attached. Please bring it (or the QR code) to the event for check-in.</p>`,
+                globalHeaderImageUrl: (appSettings as any)?.email_header_logo,
+                globalFooterText: (appSettings as any)?.email_footer_text,
+            });
 
-            const replace = (s: string) => s
-                .replace(/\{\{name\}\}/g, body.name || 'there')
-                .replace(/\{\{org_name\}\}/g, body.orgName || '')
-                .replace(/\{\{event\}\}/g, body.eventName || 'the event');
-
-            const subject = replace(rawSubject);
-            const body_html = replace(rawBody);
+            const vars = {
+                name: body.name || 'there',
+                org_name: body.orgName || '',
+                event: body.eventName || 'the event',
+            };
+            const subject = applyPlaceholders(tpl.subject, vars);
+            const body_html = applyPlaceholders(tpl.body, vars);
             const hasAttachments = Array.isArray(body.attachments) && body.attachments.length > 0;
             const html = generateEmailTemplate({
                 title: body.eventName || 'the event',
-                greeting: `Hi ${body.name || 'there'}`,
                 content: body_html,
                 attachmentNote: hasAttachments ? 'Attachment included — please review the PDF.' : undefined,
                 fromName: smtpConfig?.fromName,
+                headerImageUrl: tpl.headerImageUrl,
+                footerText: tpl.footerText,
             });
 
             // Use the transporter directly so we can include attachments.
@@ -648,10 +679,11 @@ serve(async (req: Request) => {
 
             const { data: form } = await supabase
                 .from('forms')
-                .select('title')
+                .select('title, settings')
                 .eq('id', staff.form_id)
                 .maybeSingle();
             const eventName = form?.title || 'the GANSID Congress';
+            const formEmailOverrides = (form as any)?.settings?.emailOverrides;
             const orgName = (org?.company_info as any)?.orgName || 'your organization';
             // Prefer the contact person's name (company_info.contactName) over the
             // primary attendee's `name` column — see staff-invite branch above for rationale.
@@ -667,27 +699,35 @@ serve(async (req: Request) => {
             const registrationLink = `${origin}/#/form/${staff.form_id}?ref=${staff.id}`;
             const signupUrl = `${origin}/#/`;
 
-            const rawSubject = (appSettings as any)?.email_staff_invite_subject
-                || 'Complete your registration for {{event}}';
-            const rawBody = (appSettings as any)?.email_staff_invite_body
-                || `<p>Hi {{name}},</p><p><strong>{{purchaser}}</strong> has registered you for <strong>{{event}}</strong> on behalf of <strong>{{org_name}}</strong> ({{category}}).</p><p>Please complete your personal details:</p><p style="text-align:center;margin:24px 0;"><a href="{{complete_url}}" style="display:inline-block;padding:12px 24px;background:#1E4A8C;color:#fff;text-decoration:none;border-radius:6px;font-weight:600;">Complete my registration</a></p><p>You can also create a portal account: <a href="{{signup_url}}">{{signup_url}}</a></p>`;
+            const overrideOn = formEmailOverrides?.enabled === true;
+            const tpl = resolveEmailTemplate({
+                formOverride: overrideOn ? formEmailOverrides?.templates?.['staff-invite'] : undefined,
+                globalSubject: (appSettings as any)?.email_staff_invite_subject,
+                globalBody: (appSettings as any)?.email_staff_invite_body,
+                defaultSubject: 'Complete your registration for {{event}}',
+                defaultBody: `<p>Hi {{name}},</p><p><strong>{{purchaser}}</strong> has registered you for <strong>{{event}}</strong> on behalf of <strong>{{org_name}}</strong> ({{category}}).</p><p>Please complete your personal details:</p><p style="text-align:center;margin:24px 0;"><a href="{{complete_url}}" style="display:inline-block;padding:12px 24px;background:#1E4A8C;color:#fff;text-decoration:none;border-radius:6px;font-weight:600;">Complete my registration</a></p><p>You can also create a portal account: <a href="{{signup_url}}">{{signup_url}}</a></p>`,
+                formHeaderImageUrl: overrideOn ? formEmailOverrides?.headerImageUrl : undefined,
+                globalHeaderImageUrl: (appSettings as any)?.email_header_logo,
+                globalFooterText: (appSettings as any)?.email_footer_text,
+            });
 
-            const replace = (s: string) => s
-                .replace(/\{\{name\}\}/g, staff.name || 'there')
-                .replace(/\{\{purchaser\}\}/g, purchaser)
-                .replace(/\{\{org_name\}\}/g, orgName)
-                .replace(/\{\{category\}\}/g, 'Exhibitor staff')
-                .replace(/\{\{complete_url\}\}/g, registrationLink)
-                .replace(/\{\{signup_url\}\}/g, signupUrl)
-                .replace(/\{\{event\}\}/g, eventName);
-
-            const subject = replace(rawSubject);
-            const body_html = replace(rawBody);
+            const vars = {
+                name: staff.name || 'there',
+                purchaser: purchaser,
+                org_name: orgName,
+                category: 'Exhibitor staff',
+                complete_url: registrationLink,
+                signup_url: signupUrl,
+                event: eventName,
+            };
+            const subject = applyPlaceholders(tpl.subject, vars);
+            const body_html = applyPlaceholders(tpl.body, vars);
             const html = generateEmailTemplate({
                 title: eventName,
-                greeting: `Hi ${staff.name || 'there'}`,
                 content: body_html,
                 fromName: smtpConfig?.fromName,
+                headerImageUrl: tpl.headerImageUrl,
+                footerText: tpl.footerText,
             });
 
             await sendSimpleEmail({ to: staff.email, subject, html, smtpConfig });
@@ -710,10 +750,12 @@ serve(async (req: Request) => {
 
             const { data: form } = await supabase
                 .from('forms')
-                .select('title')
+                .select('title, settings')
                 .eq('id', staff.form_id)
                 .maybeSingle();
             const eventName = form?.title || 'the GANSID Congress';
+            const formEmailOverrides = (form as any)?.settings?.emailOverrides;
+            const overrideOn = formEmailOverrides?.enabled === true;
 
             const { data: org } = staff.primary_attendee_id
                 ? await supabase
@@ -730,15 +772,22 @@ serve(async (req: Request) => {
                 ? { host: appSettings.smtp_host, port: Number(appSettings.smtp_port || 587), user: appSettings.smtp_user, pass: appSettings.smtp_pass, fromName: (appSettings as any).email_from_name || 'GANSID Congress' }
                 : undefined;
 
-            const rawSubject = (appSettings as any)?.email_staff_confirmed_subject
-                || 'Your registration for {{event}} is confirmed';
-            const rawBody = (appSettings as any)?.email_staff_confirmed_body
-                || `<p>Hi {{name}},</p><p>Thank you for completing your registration for <strong>{{event}}</strong> on behalf of <strong>{{org_name}}</strong>!</p><p>You are all set. Please bring this confirmation (or the QR code on your ticket) to the event for check-in.</p>`;
+            const tpl = resolveEmailTemplate({
+                formOverride: overrideOn ? formEmailOverrides?.templates?.['staff-confirmed'] : undefined,
+                globalSubject: (appSettings as any)?.email_staff_confirmed_subject,
+                globalBody: (appSettings as any)?.email_staff_confirmed_body,
+                defaultSubject: 'Your registration for {{event}} is confirmed',
+                defaultBody: `<p>Hi {{name}},</p><p>Thank you for completing your registration for <strong>{{event}}</strong> on behalf of <strong>{{org_name}}</strong>!</p><p>You are all set. Please bring this confirmation (or the QR code on your ticket) to the event for check-in.</p>`,
+                formHeaderImageUrl: overrideOn ? formEmailOverrides?.headerImageUrl : undefined,
+                globalHeaderImageUrl: (appSettings as any)?.email_header_logo,
+                globalFooterText: (appSettings as any)?.email_footer_text,
+            });
 
-            const replace = (s: string) => s
-                .replace(/\{\{name\}\}/g, staff.name || 'there')
-                .replace(/\{\{org_name\}\}/g, orgName)
-                .replace(/\{\{event\}\}/g, eventName);
+            const vars = {
+                name: staff.name || 'there',
+                org_name: orgName,
+                event: eventName,
+            };
 
             // 1. Send personal ticket confirmation to the staff member
             // We track success so we can gate the `last_ticket_email_at`
@@ -750,13 +799,14 @@ serve(async (req: Request) => {
                 console.error('exhibitor-staff-claim-completed: staff has no email', { staffId: staff.id });
             } else {
                 try {
-                    const subject = replace(rawSubject);
-                    const body_html = replace(rawBody);
+                    const subject = applyPlaceholders(tpl.subject, vars);
+                    const body_html = applyPlaceholders(tpl.body, vars);
                     const html = generateEmailTemplate({
                         title: eventName,
-                        greeting: `Hi ${staff.name || 'there'}`,
                         content: body_html,
                         fromName: smtpConfig?.fromName,
+                        headerImageUrl: tpl.headerImageUrl,
+                        footerText: tpl.footerText,
                     });
                     await sendSimpleEmail({ to: staff.email, subject, html, smtpConfig });
                     staffTicketEmailSent = true;
@@ -770,21 +820,29 @@ serve(async (req: Request) => {
             //    customised in Settings → Email Templates.
             if (org?.email) {
                 const contactName = (org?.company_info as any)?.contactName || 'there';
-                const notifyRawSubject = (appSettings as any)?.email_exhibitor_staff_completion_notify_subject
-                    || '{{name}} has completed their registration';
-                const notifyRawBody = (appSettings as any)?.email_exhibitor_staff_completion_notify_body
-                    || `<p>Hi {{contact_name}},</p><p><strong>{{name}}</strong> has completed their registration details for the <strong>{{event}}</strong> on behalf of <strong>{{org_name}}</strong>.</p><p>Their individual ticket confirmation has been emailed to them directly.</p>`;
-                const notifyReplace = (s: string) => s
-                    .replace(/\{\{name\}\}/g, staff.name || 'Staff member')
-                    .replace(/\{\{contact_name\}\}/g, contactName)
-                    .replace(/\{\{org_name\}\}/g, orgName || '')
-                    .replace(/\{\{event\}\}/g, eventName);
-                const subject = notifyReplace(notifyRawSubject);
+                const notifyTpl = resolveEmailTemplate({
+                    formOverride: overrideOn ? formEmailOverrides?.templates?.['exhibitor-staff-completion-notify'] : undefined,
+                    globalSubject: (appSettings as any)?.email_exhibitor_staff_completion_notify_subject,
+                    globalBody: (appSettings as any)?.email_exhibitor_staff_completion_notify_body,
+                    defaultSubject: '{{name}} has completed their registration',
+                    defaultBody: `<p>Hi {{contact_name}},</p><p><strong>{{name}}</strong> has completed their registration details for the <strong>{{event}}</strong> on behalf of <strong>{{org_name}}</strong>.</p><p>Their individual ticket confirmation has been emailed to them directly.</p>`,
+                    formHeaderImageUrl: overrideOn ? formEmailOverrides?.headerImageUrl : undefined,
+                    globalHeaderImageUrl: (appSettings as any)?.email_header_logo,
+                    globalFooterText: (appSettings as any)?.email_footer_text,
+                });
+                const notifyVars = {
+                    name: staff.name || 'Staff member',
+                    contact_name: contactName,
+                    org_name: orgName || '',
+                    event: eventName,
+                };
+                const subject = applyPlaceholders(notifyTpl.subject, notifyVars);
                 const html = generateEmailTemplate({
                     title: eventName,
-                    greeting: `Hi ${contactName}`,
-                    content: notifyReplace(notifyRawBody),
+                    content: applyPlaceholders(notifyTpl.body, notifyVars),
                     fromName: smtpConfig?.fromName,
+                    headerImageUrl: notifyTpl.headerImageUrl,
+                    footerText: notifyTpl.footerText,
                 });
                 await sendSimpleEmail({ to: org.email, subject, html, smtpConfig })
                     .catch(e => console.warn('Org contact notification failed', e));
@@ -820,7 +878,7 @@ serve(async (req: Request) => {
                     .eq('id', free.bogo_source_attendee_id).maybeSingle()
                 : { data: null };
             const { data: form } = await supabase
-                .from('forms').select('title').eq('id', free.form_id).maybeSingle();
+                .from('forms').select('title, settings').eq('id', free.form_id).maybeSingle();
             const { data: appSettings } = await supabase
                 .from('app_settings').select('*').eq('id', 1).maybeSingle();
             const smtpConfig = appSettings
@@ -849,33 +907,57 @@ serve(async (req: Request) => {
             const qrData = free.qr_payload || free.id;
             const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(qrData)}`;
 
-            const rawSubject = (appSettings as any)?.email_bogo_ticket_subject
-                || '{{purchaser}} has sent you a free ticket to {{event}}';
-            const rawBody = (appSettings as any)?.email_bogo_ticket_body
-                || `<p>Hi {{name}},</p>
+            // Human label for the free guest's pricing category (advertised as {{free_category_name}}).
+            // categories live in the pricing_templates TABLE (jsonb), keyed by `name`.
+            let freeCategoryName = '';
+            try {
+                const catId = (free as any).pricing_category_id;
+                const tplId = (free as any).pricing_template_id || (form as any)?.settings?.pricingTemplateId;
+                if (catId && tplId) {
+                    const { data: pt } = await supabase
+                        .from('pricing_templates').select('categories').eq('id', tplId).maybeSingle();
+                    const cats = Array.isArray((pt as any)?.categories) ? (pt as any).categories : [];
+                    freeCategoryName = (cats.find((c: any) => c.id === catId)?.name) || '';
+                }
+            } catch { freeCategoryName = ''; }
+
+            const formEmailOverrides = (form as any)?.settings?.emailOverrides;
+            const overrideOn = formEmailOverrides?.enabled === true;
+            const tpl = resolveEmailTemplate({
+                formOverride: overrideOn ? formEmailOverrides?.templates?.['bogo-ticket'] : undefined,
+                globalSubject: (appSettings as any)?.email_bogo_ticket_subject,
+                globalBody: (appSettings as any)?.email_bogo_ticket_body,
+                defaultSubject: '{{purchaser}} has sent you a free ticket to {{event}}',
+                defaultBody: `<p>Hi {{name}},</p>
 <p><strong>{{purchaser}}</strong> has gifted you a free ticket to <strong>{{event}}</strong>.</p>
 <p>Your check-in QR code is below. Show it at the door.</p>
 <div style="text-align:center;margin:24px 0;"><img src="{{qr_image_url}}" alt="Check-in QR code" width="240" height="240" style="border:1px solid #e5e7eb;border-radius:8px;padding:8px;background:#fff;" /></div>
 <p style="color:#666;font-size:13px;">Registration ID: {{registration_id}}</p>
 <p style="margin-top:20px;padding:12px;background:#f9fafb;border-left:3px solid #e5e7eb;font-size:14px;">This ticket is issued to your email address and cannot be transferred to another person. If you have questions or issues, contact <a href="mailto:{{admin_contact}}">{{admin_contact}}</a>.</p>
-<p style="margin-top:16px;font-size:14px;">Optional: <a href="{{signup_url}}">create a profile</a> to manage your ticket and access event resources.</p>`;
+<p style="margin-top:16px;font-size:14px;">Optional: <a href="{{signup_url}}">create a profile</a> to manage your ticket and access event resources.</p>`,
+                formHeaderImageUrl: overrideOn ? formEmailOverrides?.headerImageUrl : undefined,
+                globalHeaderImageUrl: (appSettings as any)?.email_header_logo,
+                globalFooterText: (appSettings as any)?.email_footer_text,
+            });
 
-            const replace = (s: string) => s
-                .replace(/\{\{name\}\}/g, free.name || 'there')
-                .replace(/\{\{purchaser\}\}/g, source?.name || 'A colleague')
-                .replace(/\{\{event\}\}/g, eventName)
-                .replace(/\{\{qr_image_url\}\}/g, qrImageUrl)
-                .replace(/\{\{registration_id\}\}/g, free.id)
-                .replace(/\{\{signup_url\}\}/g, signupUrl)
-                .replace(/\{\{admin_contact\}\}/g, BOGO_ADMIN_CONTACT);
-
-            const subject = replace(rawSubject);
-            const body_html = replace(rawBody);
+            const vars = {
+                name: free.name || 'there',
+                purchaser: source?.name || 'A colleague',
+                event: eventName,
+                qr_image_url: qrImageUrl,
+                registration_id: free.id,
+                signup_url: signupUrl,
+                admin_contact: BOGO_ADMIN_CONTACT,
+                free_category_name: freeCategoryName,
+            };
+            const subject = applyPlaceholders(tpl.subject, vars);
+            const body_html = applyPlaceholders(tpl.body, vars);
             const html = generateEmailTemplate({
                 title: eventName,
-                greeting: `Hi ${free.name || 'there'}`,
                 content: body_html,
                 fromName: smtpConfig?.fromName,
+                headerImageUrl: tpl.headerImageUrl,
+                footerText: tpl.footerText,
             });
 
             try {
@@ -908,30 +990,39 @@ serve(async (req: Request) => {
             const claimUrl = `${origin}/#/form/${free.form_id}?ref=${free.id}`;
             const portalTicketsUrl = `${origin}/#/portal/tickets`;
 
-            const rawSubject = (appSettings as any)?.email_bogo_claim_link_subject
-                || 'Your free guest claim link for {{event}}';
-            const rawBody = (appSettings as any)?.email_bogo_claim_link_body
-                || `<p>Hi {{payer_name}},</p>
+            const formEmailOverrides = (form as any)?.settings?.emailOverrides;
+            const overrideOn = formEmailOverrides?.enabled === true;
+            const tpl = resolveEmailTemplate({
+                formOverride: overrideOn ? formEmailOverrides?.templates?.['bogo-claim-link'] : undefined,
+                globalSubject: (appSettings as any)?.email_bogo_claim_link_subject,
+                globalBody: (appSettings as any)?.email_bogo_claim_link_body,
+                defaultSubject: 'Your free guest claim link for {{event}}',
+                defaultBody: `<p>Hi {{payer_name}},</p>
 <p>Your free guest claim link for <strong>{{event}}</strong> is ready.</p>
 <p style="text-align:center;margin:24px 0;"><a href="{{claim_url}}" style="display:inline-block;padding:12px 24px;background:#ba0028;color:#fff;text-decoration:none;border-radius:6px;font-weight:600;">Forward this claim link</a></p>
 <p>Forward the link to the person you'd like to bring — they'll complete the short claim form and receive their ticket.</p>
 <p>You can also manage this and your other tickets from your portal: <a href="{{portal_tickets_url}}">{{portal_tickets_url}}</a></p>
-<p style="margin-top:20px;padding:12px;background:#f9fafb;border-left:3px solid #e5e7eb;font-size:14px;">Once your guest claims this ticket, the email they enter is locked to them. Make sure to forward this to the actual person attending. For issues, contact <a href="mailto:{{admin_contact}}">{{admin_contact}}</a>.</p>`;
+<p style="margin-top:20px;padding:12px;background:#f9fafb;border-left:3px solid #e5e7eb;font-size:14px;">Once your guest claims this ticket, the email they enter is locked to them. Make sure to forward this to the actual person attending. For issues, contact <a href="mailto:{{admin_contact}}">{{admin_contact}}</a>.</p>`,
+                formHeaderImageUrl: overrideOn ? formEmailOverrides?.headerImageUrl : undefined,
+                globalHeaderImageUrl: (appSettings as any)?.email_header_logo,
+                globalFooterText: (appSettings as any)?.email_footer_text,
+            });
 
-            const replace = (s: string) => s
-                .replace(/\{\{payer_name\}\}/g, source?.name || 'there')
-                .replace(/\{\{event\}\}/g, eventName)
-                .replace(/\{\{claim_url\}\}/g, claimUrl)
-                .replace(/\{\{portal_tickets_url\}\}/g, portalTicketsUrl)
-                .replace(/\{\{admin_contact\}\}/g, BOGO_ADMIN_CONTACT);
-
-            const subject = replace(rawSubject);
-            const body_html = replace(rawBody);
+            const vars = {
+                payer_name: source?.name || 'there',
+                event: eventName,
+                claim_url: claimUrl,
+                portal_tickets_url: portalTicketsUrl,
+                admin_contact: BOGO_ADMIN_CONTACT,
+            };
+            const subject = applyPlaceholders(tpl.subject, vars);
+            const body_html = applyPlaceholders(tpl.body, vars);
             const html = generateEmailTemplate({
                 title: eventName,
-                greeting: `Hi ${source?.name || 'there'}`,
                 content: body_html,
                 fromName: smtpConfig?.fromName,
+                headerImageUrl: tpl.headerImageUrl,
+                footerText: tpl.footerText,
             });
 
             try {
@@ -958,28 +1049,37 @@ serve(async (req: Request) => {
             const qrData = free.qr_payload || free.id;
             const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(qrData)}`;
 
-            const rawSubject = (appSettings as any)?.email_bogo_ticket_updated_subject
-                || 'Your {{event}} ticket has been updated';
-            const rawBody = (appSettings as any)?.email_bogo_ticket_updated_body
-                || `<p>Hi {{name}},</p>
+            const formEmailOverrides = (form as any)?.settings?.emailOverrides;
+            const overrideOn = formEmailOverrides?.enabled === true;
+            const tpl = resolveEmailTemplate({
+                formOverride: overrideOn ? formEmailOverrides?.templates?.['bogo-ticket-updated'] : undefined,
+                globalSubject: (appSettings as any)?.email_bogo_ticket_updated_subject,
+                globalBody: (appSettings as any)?.email_bogo_ticket_updated_body,
+                defaultSubject: 'Your {{event}} ticket has been updated',
+                defaultBody: `<p>Hi {{name}},</p>
 <p>Your ticket for <strong>{{event}}</strong> has been updated by <strong>{{purchaser}}</strong>. The latest version is below — please discard any earlier copies.</p>
 <div style="text-align:center;margin:24px 0;"><img src="{{qr_image_url}}" alt="Check-in QR code" width="240" height="240" style="border:1px solid #e5e7eb;border-radius:8px;padding:8px;background:#fff;" /></div>
-<p style="margin-top:20px;padding:12px;background:#f9fafb;border-left:3px solid #e5e7eb;font-size:14px;">This ticket is issued to your email address and cannot be transferred. Questions? <a href="mailto:{{admin_contact}}">{{admin_contact}}</a>.</p>`;
+<p style="margin-top:20px;padding:12px;background:#f9fafb;border-left:3px solid #e5e7eb;font-size:14px;">This ticket is issued to your email address and cannot be transferred. Questions? <a href="mailto:{{admin_contact}}">{{admin_contact}}</a>.</p>`,
+                formHeaderImageUrl: overrideOn ? formEmailOverrides?.headerImageUrl : undefined,
+                globalHeaderImageUrl: (appSettings as any)?.email_header_logo,
+                globalFooterText: (appSettings as any)?.email_footer_text,
+            });
 
-            const replace = (s: string) => s
-                .replace(/\{\{name\}\}/g, free.name || 'there')
-                .replace(/\{\{purchaser\}\}/g, source?.name || 'the buyer')
-                .replace(/\{\{event\}\}/g, eventName)
-                .replace(/\{\{qr_image_url\}\}/g, qrImageUrl)
-                .replace(/\{\{admin_contact\}\}/g, BOGO_ADMIN_CONTACT);
-
-            const subject = replace(rawSubject);
-            const body_html = replace(rawBody);
+            const vars = {
+                name: free.name || 'there',
+                purchaser: source?.name || 'the buyer',
+                event: eventName,
+                qr_image_url: qrImageUrl,
+                admin_contact: BOGO_ADMIN_CONTACT,
+            };
+            const subject = applyPlaceholders(tpl.subject, vars);
+            const body_html = applyPlaceholders(tpl.body, vars);
             const html = generateEmailTemplate({
                 title: eventName,
-                greeting: `Hi ${free.name || 'there'}`,
                 content: body_html,
                 fromName: smtpConfig?.fromName,
+                headerImageUrl: tpl.headerImageUrl,
+                footerText: tpl.footerText,
             });
 
             try {
@@ -1017,26 +1117,31 @@ serve(async (req: Request) => {
                 ? { host: appSettings.smtp_host, port: Number(appSettings.smtp_port || 587), user: appSettings.smtp_user, pass: appSettings.smtp_pass, fromName: (appSettings as any).email_from_name || 'GANSID Congress' }
                 : undefined;
 
-            const rawSubject = (appSettings as any)?.email_bogo_ticket_withdrawn_subject
-                || 'Your free ticket to {{event}} has been withdrawn';
-            const rawBody = (appSettings as any)?.email_bogo_ticket_withdrawn_body
-                || `<p>Hi {{name}},</p>
+            const tpl = resolveEmailTemplate({
+                globalSubject: (appSettings as any)?.email_bogo_ticket_withdrawn_subject,
+                globalBody: (appSettings as any)?.email_bogo_ticket_withdrawn_body,
+                defaultSubject: 'Your free ticket to {{event}} has been withdrawn',
+                defaultBody: `<p>Hi {{name}},</p>
 <p>The free ticket <strong>{{purchaser}}</strong> sent you for <strong>{{event}}</strong> has been withdrawn. We're sorry for the inconvenience.</p>
-<p style="margin-top:20px;padding:12px;background:#f9fafb;border-left:3px solid #e5e7eb;font-size:14px;">For questions or alternatives, please contact <a href="mailto:{{admin_contact}}">{{admin_contact}}</a>.</p>`;
+<p style="margin-top:20px;padding:12px;background:#f9fafb;border-left:3px solid #e5e7eb;font-size:14px;">For questions or alternatives, please contact <a href="mailto:{{admin_contact}}">{{admin_contact}}</a>.</p>`,
+                globalHeaderImageUrl: (appSettings as any)?.email_header_logo,
+                globalFooterText: (appSettings as any)?.email_footer_text,
+            });
 
-            const replace = (s: string) => s
-                .replace(/\{\{name\}\}/g, guestName)
-                .replace(/\{\{purchaser\}\}/g, payerName)
-                .replace(/\{\{event\}\}/g, eventName)
-                .replace(/\{\{admin_contact\}\}/g, BOGO_ADMIN_CONTACT);
-
-            const subject = replace(rawSubject);
-            const body_html = replace(rawBody);
+            const vars = {
+                name: guestName,
+                purchaser: payerName,
+                event: eventName,
+                admin_contact: BOGO_ADMIN_CONTACT,
+            };
+            const subject = applyPlaceholders(tpl.subject, vars);
+            const body_html = applyPlaceholders(tpl.body, vars);
             const html = generateEmailTemplate({
                 title: eventName,
-                greeting: `Hi ${guestName}`,
                 content: body_html,
                 fromName: smtpConfig?.fromName,
+                headerImageUrl: tpl.headerImageUrl,
+                footerText: tpl.footerText,
             });
 
             try {
@@ -1096,12 +1201,29 @@ serve(async (req: Request) => {
         const messageHtml = /^\s*<(p|div|h\d|table|ul|ol|blockquote|figure)/i.test(email.message)
             ? email.message
             : `<p>${email.message}</p>`;
+        // Branding for the shared shell (global only on this path; per-form header
+        // override applies to the P4 registration-confirmed path, not the PDF path).
+        let ticketHeaderImage: string | undefined;
+        let ticketFooterText: string | undefined;
+        try {
+            const sbUrl = Deno.env.get('SUPABASE_URL')!;
+            const sbKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+            const sb = createClient(sbUrl, sbKey);
+            const { data: appS } = await sb.from('app_settings').select('email_header_logo, email_footer_text').eq('id', 1).maybeSingle();
+            // This path hands the RAW URL to the adapter (no resolveEmailTemplate),
+            // so replicate the resolver's http(s)-only filter here — data:/blob:
+            // URIs get stripped by Gmail/Outlook and would arrive broken.
+            const raw = (appS as any)?.email_header_logo;
+            ticketHeaderImage = (typeof raw === 'string' && /^https?:\/\//i.test(raw.trim())) ? raw.trim() : undefined;
+            ticketFooterText = (appS as any)?.email_footer_text || undefined;
+        } catch { /* branding is best-effort; fall back to wordmark */ }
         const html = generateEmailTemplate({
             title: bannerTitle,
-            greeting: `Hello ${email.name}`,
             content: messageHtml,
             attachmentNote: hasAttachments ? 'Attachment included — please review the PDF.' : undefined,
             fromName,
+            headerImageUrl: ticketHeaderImage,
+            footerText: ticketFooterText,
         });
 
         // Nodemailer accepts base64 natively

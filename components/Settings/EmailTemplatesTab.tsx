@@ -114,7 +114,7 @@ const TEMPLATES: TemplateEntry[] = [
     description: 'Sent to group registrants when the purchaser filled their full details inline.',
     subjectField: 'emailGuestConfirmedSubject',
     bodyField: 'emailGuestConfirmedBody',
-    placeholders: ['name', 'purchaser', 'event', 'registration_id', 'qr_image_url'],
+    placeholders: ['name', 'purchaser', 'event', 'registration_id', 'qr_image_url', 'signup_url'],
     global: false,
   },
   {

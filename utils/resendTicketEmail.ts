@@ -1,6 +1,8 @@
 import { Attendee, Form } from '../types';
 import { getAttendee, getSettings, getStaffForPrimary, updateAttendee } from '../services/storageService';
 import { sendTicketEmail, arrayBufferToBase64 } from '../services/smtpService';
+import { applyPlaceholders } from './emailShell';
+import { resolveEmailTemplate } from './emailTemplates';
 import { generateTicketPDF } from './pdfGenerator';
 import { isPlaceholderGuestName, resolveAttendeeDisplayName } from './resolveAttendeeDisplayName';
 import { isTableGuestRow } from './tableSeats';
@@ -44,7 +46,10 @@ export async function resendTicketEmailForAttendee(
   }
 
   const settings = await getSettings();
-  if (!settings.smtpUser || !settings.smtpPass) {
+  // Env-first SMTP (Resend on GANSID) means the client cannot see the real
+  // credentials; smtp_pass is intentionally cleared on GANSID. Only block when
+  // NOTHING is configured on either side (smtp_user present keeps the gate green).
+  if (!settings.smtpUser && !settings.smtpPass) {
     throw new Error('SMTP is not configured. Set it up in Settings before resending tickets.');
   }
 
@@ -93,19 +98,37 @@ export async function resendTicketEmailForAttendee(
     : '';
 
   const isTable = guests.length > 0;
-  const subjectTpl = isTable
-    ? (settings.emailTablePurchaserSubject || settings.emailSubject || 'Your ticket for {{event}}')
-    : (settings.emailSubject || 'Your ticket for {{event}}');
-  const bodyTpl = isTable
-    ? (settings.emailTablePurchaserBody || settings.emailBodyTemplate || '<p>Thank you for registering for <strong>{{event}}</strong>.</p>')
-    : (settings.emailBodyTemplate || '<p>Thank you for registering for <strong>{{event}}</strong>.</p>');
+  // Resolve subject/body through the canonical resolver so a per-form override
+  // (form.settings.emailOverrides, gated on enabled) wins consistently — the
+  // same precedence the edge P4 confirmation applies. Preserves the historical
+  // table→standard `||` fallback and the inline defaults for the global tier.
+  // NOTE: sendTicketEmail wraps via the edge shell (global branding), so the
+  // per-form header image does NOT flow through this attachment path; we only
+  // apply the subject/body override here (header image is a nice-to-have on
+  // this path, deliberately not re-architected).
+  const overrides = form?.settings?.emailOverrides;
+  const ovEnabled = overrides?.enabled === true;
+  const tplKey = isTable ? 'table-purchaser' : 'ticket';
+  const resolved = resolveEmailTemplate({
+    formOverride: ovEnabled ? overrides?.templates?.[tplKey] : undefined,
+    globalSubject: isTable ? (settings.emailTablePurchaserSubject || settings.emailSubject) : settings.emailSubject,
+    globalBody: isTable ? (settings.emailTablePurchaserBody || settings.emailBodyTemplate) : settings.emailBodyTemplate,
+    defaultSubject: 'Your ticket for {{event}}',
+    defaultBody: '<p>Thank you for registering for <strong>{{event}}</strong>.</p>',
+    formHeaderImageUrl: ovEnabled ? overrides?.headerImageUrl : undefined,
+    globalHeaderImageUrl: settings.emailHeaderLogo,
+    globalFooterText: settings.emailFooterText,
+  });
+  const subjectTpl = resolved.subject;
+  const bodyTpl = resolved.body;
 
-  const render = (s: string) => s
-    .replace(/\{\{event\}\}/g, fresh.formTitle || form?.title || '')
-    .replace(/\{\{name\}\}/g, primaryDisplayName)
-    .replace(/\{\{id\}\}/g, fresh.id || '')
-    .replace(/\{\{invoiceId\}\}/g, fresh.invoiceId || '')
-    .replace(/\{\{amount\}\}/g, fresh.paymentAmount || '');
+  const render = (s: string) => applyPlaceholders(s, {
+    event: fresh.formTitle || form?.title || '',
+    name: primaryDisplayName,
+    id: fresh.id || '',
+    invoiceId: fresh.invoiceId || '',
+    amount: fresh.paymentAmount || '',
+  });
 
   await sendTicketEmail(settings, {
     to: fresh.email,

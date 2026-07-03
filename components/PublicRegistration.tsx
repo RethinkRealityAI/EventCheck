@@ -40,6 +40,8 @@ import { generateTicketPDF } from '../utils/pdfGenerator';
 import { PayPalScriptProvider, PayPalButtons } from "@paypal/react-paypal-js";
 import { FlutterwavePay } from "./payments/FlutterwavePay";
 import { sendTicketEmail, arrayBufferToBase64 } from '../services/smtpService';
+import { applyPlaceholders } from '../utils/emailShell';
+import { resolveEmailTemplate } from '../utils/emailTemplates';
 import QRCode from 'react-qr-code';
 import PublicSponsorForm from './Sponsors/PublicSponsorForm';
 import PublicExhibitorForm from './Exhibitor/PublicExhibitorForm';
@@ -1678,7 +1680,8 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
     setGeneratedTicket(newAttendee);
 
     // --- SMTP Email Integration (runs for ALL registration types) ---
-    if (settings && settings.smtpUser && settings.smtpPass) {
+    // Env-first SMTP: partial config is valid (GANSID clears smtp_pass; edge secrets fill the rest).
+    if (settings && (settings.smtpUser || settings.smtpPass)) {
       try {
         // Group mode: build a PDF for every additional registrant so each
         // inline guest can be emailed their own ticket below. (The purchaser
@@ -1729,13 +1732,27 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
         for (const g of groupGuestPdfs) {
           if (!g.isInline) continue;
           if (!g.email || g.email === purchaserEmail || g.email === 'unknown@example.com') continue;
-          const subjectTpl = settings.emailGuestConfirmedSubject || 'Your ticket for {{event}} is confirmed';
-          const bodyTpl = settings.emailGuestConfirmedBody || '<p>Hi {{name}},</p><p><strong>{{purchaser}}</strong> has registered you for <strong>{{event}}</strong>. Your ticket is attached.</p><p>Create a portal account here to view your ticket anytime: <a href="{{signup_url}}">{{signup_url}}</a></p>';
-          const replace = (s: string) => s
-            .replace(/\{\{event\}\}/g, form.title)
-            .replace(/\{\{purchaser\}\}/g, purchaserName)
-            .replace(/\{\{name\}\}/g, g.name)
-            .replace(/\{\{signup_url\}\}/g, signupUrl);
+          // Honor a per-form emailOverrides (guest-confirmed) when enabled,
+          // else fall back to the global template, else the inline default —
+          // same precedence the edge P4 confirmation applies.
+          const gcOverrides = form.settings?.emailOverrides;
+          const gcResolved = resolveEmailTemplate({
+            formOverride: gcOverrides?.enabled === true ? gcOverrides.templates?.['guest-confirmed'] : undefined,
+            globalSubject: settings.emailGuestConfirmedSubject,
+            globalBody: settings.emailGuestConfirmedBody,
+            defaultSubject: 'Your ticket for {{event}} is confirmed',
+            defaultBody: '<p>Hi {{name}},</p><p><strong>{{purchaser}}</strong> has registered you for <strong>{{event}}</strong>. Your ticket is attached.</p><p>Create a portal account here to view your ticket anytime: <a href="{{signup_url}}">{{signup_url}}</a></p>',
+          });
+          const subjectTpl = gcResolved.subject;
+          const bodyTpl = gcResolved.body;
+          const replace = (s: string) => applyPlaceholders(s, {
+            event: form.title,
+            purchaser: purchaserName,
+            name: g.name,
+            signup_url: signupUrl,
+            registration_id: g.guestId,
+            qr_image_url: `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(JSON.stringify({ id: g.guestId }))}`,
+          });
           const safeName = g.name.replace(/[^a-zA-Z0-9 ]/g, '_') || 'Guest';
           await sendTicketEmail(settings, {
             to: g.email,
@@ -1766,14 +1783,22 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
               ? `Guest_${idx + 2}`
               : gt.attendee.name.replace(/[^a-zA-Z0-9 ]/g, '_');
             const guestDoc = await generateTicketPDF(gt.attendee, settings, form, gt.registrationUrl);
-            const guestSubject = (settings.emailGuestSubject || 'Your Ticket for {{event}}')
-              .replace(/\{\{event\}\}/g, form.title)
-              .replace(/\{\{purchaser\}\}/g, purchaserName)
-              .replace(/\{\{name\}\}/g, gt.attendee.name);
-            const guestBody = (settings.emailGuestBody || 'Great news! {{purchaser}} has registered you for {{event}}. Your ticket is attached — please bring it with you to the event. You can scan the QR code on your ticket for entry.')
-              .replace(/\{\{event\}\}/g, form.title)
-              .replace(/\{\{purchaser\}\}/g, purchaserName)
-              .replace(/\{\{name\}\}/g, gt.attendee.name);
+            const guestEmailVars = {
+              event: form.title,
+              purchaser: purchaserName,
+              name: gt.attendee.name,
+            };
+            // Per-form emailOverrides (guest) → global → default (edge parity).
+            const gOverrides = form.settings?.emailOverrides;
+            const gResolved = resolveEmailTemplate({
+              formOverride: gOverrides?.enabled === true ? gOverrides.templates?.['guest'] : undefined,
+              globalSubject: settings.emailGuestSubject,
+              globalBody: settings.emailGuestBody,
+              defaultSubject: 'Your Ticket for {{event}}',
+              defaultBody: 'Great news! {{purchaser}} has registered you for {{event}}. Your ticket is attached — please bring it with you to the event. You can scan the QR code on your ticket for entry.',
+            });
+            const guestSubject = applyPlaceholders(gResolved.subject, guestEmailVars);
+            const guestBody = applyPlaceholders(gResolved.body, guestEmailVars);
             await sendTicketEmail(settings, {
               to: gt.attendee.email,
               subject: guestSubject,
