@@ -687,6 +687,52 @@ export interface Profile {
   updatedAt: string;
 }
 
+// ============================================================
+// CMS content
+// ============================================================
+
+export interface RegistrationStep { id: string; number: string; title: string; bodyHtml: string; }
+export interface Faq { id: string; question: string; answerHtml: string; }
+
+export interface FeesPeriod { id: string; label: string; subtitle: string; }
+export interface FeesRow { category: string; [periodId: string]: string | number; }
+export interface FeesTier { id: string; label: string; subtitle: string; rows: FeesRow[]; }
+export interface FeesContent { note: string; periods: FeesPeriod[]; tiers: FeesTier[]; }
+
+export type PromoColorPreset = 'gansid-red' | 'gansid-blue' | 'save-green' | 'amber' | 'custom';
+export interface PricingPromoConfig {
+  enabled: boolean;
+  label: string;
+  colorPreset: PromoColorPreset;
+  customBg?: string;
+  customText?: string;
+  promoPeriodId: string;
+  comparePeriodId: string;
+  categories: 'all' | string[];
+  endDate?: string | null;
+  showCountdown?: boolean;
+}
+
+export interface LandingContent {
+  hero: { eyebrow: string; badge: string; location: string; dates: string; venue: string; introHtml: string; ctaLabel: string; imageUrl?: string | null; };
+  registrationProcess: RegistrationStep[];
+  importantNoticeHtml: string;
+  groupNoteHtml: string;
+  includes: string[];
+  notIncluded: string[];
+  faqs: Faq[];
+  supportEmail: string;
+  fees: FeesContent;
+  pricingPromo: PricingPromoConfig;
+}
+
+export type SidebarLinkMode = 'link' | 'iframe' | 'soon';
+export interface SidebarLink { id: string; label: string; description?: string; icon?: string; mode: SidebarLinkMode; href?: string; }
+export interface PortalContent {
+  intro?: { heading?: string; subheadingHtml?: string };
+  sidebarLinks: SidebarLink[];
+}
+
 export interface Announcement {
   id: string;
   site: 'scago' | 'gansid';
@@ -697,6 +743,13 @@ export interface Announcement {
   publishedAt: string;
   createdAt: string;
   updatedAt: string;
+  ctaLabel?: string | null;
+  ctaUrl?: string | null;
+  ctaMode?: 'none' | 'link' | 'iframe';
+  accentColor?: string | null;
+  style?: 'card' | 'banner';
+  startsAt?: string | null;
+  endsAt?: string | null;
 }
 
 export interface FormStep {
