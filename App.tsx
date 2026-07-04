@@ -21,6 +21,7 @@ import { CURRENT_SITE } from './config/sites';
 import { Landing } from './components/Portal/Landing/Landing';
 import { SponsorExhibitorLandingPage } from './components/SponsorExhibitor/SponsorExhibitorLandingPage';
 import { PortalLayout } from './components/Portal/PortalLayout';
+import { ContentProvider } from './components/Portal/content/ContentProvider';
 import MyTicketsPage from './components/Portal/MyTickets/MyTicketsPage';
 import { PortalDashboard } from './components/Portal/Dashboard/PortalDashboard';
 import { ProfilePage } from './components/Portal/Profile/ProfilePage';
@@ -696,6 +697,12 @@ const ProtectedRoute = ({ children, requireRole, requireSuperAdmin, requirePage 
   return <>{children}</>;
 };
 
+// HashRouter puts query params inside location.hash (e.g. `#/?cmsPreview=1` or
+// `#/portal?cmsPreview=1`), not location.search — so we test the hash here.
+// Computed once at module scope: it only needs to reflect the URL at initial
+// load, and the CMS preview iframe never navigates within itself afterward.
+const isPreview = typeof window !== 'undefined' && /[?&]cmsPreview=1(&|$)/.test(window.location.hash);
+
 export default function App() {
   return (
     <NotificationProvider>
@@ -708,14 +715,16 @@ export default function App() {
             {/* Site-conditional root routes */}
             {CURRENT_SITE.portalEnabled ? (
               <>
-                <Route path="/" element={<Landing />} />
+                <Route path="/" element={<ContentProvider previewMode={isPreview}><Landing /></ContentProvider>} />
                 <Route path="/sponsor-exhibitor" element={<SponsorExhibitorLandingPage />} />
                 <Route path="/reset-password" element={<ResetPasswordPage />} />
                 <Route
                   path="/portal"
                   element={
                     <ProtectedRoute>
-                      <PortalLayout />
+                      <ContentProvider previewMode={isPreview}>
+                        <PortalLayout />
+                      </ContentProvider>
                     </ProtectedRoute>
                   }
                 >
