@@ -10,17 +10,29 @@ import {
 
 export type PreviewDevice = 'desktop' | 'tablet' | 'mobile';
 
-const DEVICE_WIDTH: Record<PreviewDevice, string> = {
-  desktop: '100%',
-  tablet: '768px',
-  mobile: '390px',
-};
+/** Tailwind `lg` — iframe `@media` uses the frame width, not the CMS panel. */
+const DESKTOP_FRAME_MIN_PX = 1024;
 
 const DEVICE_LABEL: Record<PreviewDevice, string> = {
   desktop: 'Desktop',
   tablet: 'Tablet',
   mobile: 'Phone',
 };
+
+function frameStyle(device: PreviewDevice): React.CSSProperties {
+  switch (device) {
+    case 'desktop':
+      return { width: '100%', minWidth: `${DESKTOP_FRAME_MIN_PX}px`, maxWidth: '100%' };
+    case 'tablet':
+      return { width: '768px', maxWidth: '100%' };
+    case 'mobile':
+      return { width: '390px', maxWidth: '100%' };
+    default: {
+      const _exhaustive: never = device;
+      return _exhaustive;
+    }
+  }
+}
 
 export function CmsLivePreview({
   url,
@@ -146,7 +158,7 @@ export function CmsLivePreview({
         </div>
       </div>
 
-      <div className="relative min-h-0 flex-1 overflow-hidden p-3 sm:p-4">
+      <div className="relative min-h-0 flex-1 overflow-x-auto overflow-y-hidden p-3 sm:p-4">
         <div
           className="pointer-events-none absolute inset-0 opacity-[0.07]"
           style={{
@@ -157,13 +169,10 @@ export function CmsLivePreview({
           aria-hidden
         />
 
-        <div className="relative flex h-full items-stretch justify-center">
+        <div className="relative flex h-full min-h-full items-stretch justify-center">
           <div
-            className="flex h-full max-h-full flex-col overflow-hidden rounded-xl bg-white shadow-[0_24px_64px_-16px_rgba(0,0,0,0.55)] ring-1 ring-white/20 transition-[width,max-width] duration-300 ease-out"
-            style={{
-              width: DEVICE_WIDTH[device],
-              maxWidth: '100%',
-            }}
+            className="flex h-full max-h-full flex-col overflow-hidden rounded-xl bg-white shadow-[0_24px_64px_-16px_rgba(0,0,0,0.55)] ring-1 ring-white/20 transition-[width,min-width] duration-300 ease-out"
+            style={frameStyle(device)}
           >
             <div className="flex flex-shrink-0 items-center gap-2 border-b border-slate-200/80 bg-slate-50 px-3 py-2">
               <div className="flex gap-1.5" aria-hidden>
@@ -186,7 +195,7 @@ export function CmsLivePreview({
                 </div>
               )}
               <iframe
-                key={`${url}-${frameKey}`}
+                key={`${url}-${frameKey}-${device}`}
                 src={url}
                 title={`Live preview — ${pageLabel}`}
                 className="h-full w-full border-0 bg-white"
