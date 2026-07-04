@@ -1,7 +1,8 @@
 import React from 'react';
-import type { FeesPeriod, FeesRow, FeesTier, LandingContent, PricingPromoConfig } from '../../types';
+import type { FeesCell, FeesPeriod, FeesRow, FeesTier, LandingContent, PricingPromoConfig } from '../../types';
 import { LANDING_DEFAULTS } from '../Portal/content/landingDefaults';
 import { isPromoActive } from '../../utils/pricingPromo';
+import { parseFeesCell, serializeFeesCell } from '../../utils/feesCells';
 import { PromoPrice } from '../Pricing/PromoPrice';
 import { PlainField } from './fields/PlainField';
 import { RepeaterField } from './fields/RepeaterField';
@@ -12,7 +13,72 @@ import {
   CmsToggle,
   PromoColorPresets,
   SectionCard,
+  cmsInputClass,
 } from './cmsUi';
+
+function PeriodPriceCell({
+  periodLabel,
+  value,
+  onChange,
+}: {
+  periodLabel: string;
+  value: unknown;
+  onChange: (next: FeesCell) => void;
+}) {
+  const cell = parseFeesCell(value);
+  return (
+    <div className="rounded-xl bg-white p-3 ring-1 ring-slate-200/80 space-y-2.5">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{periodLabel}</div>
+      <label className="block">
+        <span className="text-xs font-medium text-slate-600">Display price</span>
+        <input
+          type="number"
+          min={0}
+          step={1}
+          value={cell.price}
+          onChange={(e) => onChange({ ...cell, price: Number(e.target.value) || 0 })}
+          className={`${cmsInputClass} mt-1`}
+        />
+      </label>
+      <CmsToggle
+        checked={!!cell.strikeoutEnabled}
+        onChange={(strikeoutEnabled) =>
+          onChange({
+            ...cell,
+            strikeoutEnabled,
+            strikeout: strikeoutEnabled ? (cell.strikeout ?? cell.price) : cell.strikeout,
+          })
+        }
+        label="Strikeout price"
+        description="Show a “was” amount above the display price"
+      />
+      {cell.strikeoutEnabled && (
+        <label className="block">
+          <span className="text-xs font-medium text-slate-600">Strikeout amount</span>
+          <input
+            type="number"
+            min={0}
+            step={1}
+            value={cell.strikeout ?? ''}
+            onChange={(e) =>
+              onChange({
+                ...cell,
+                strikeout: e.target.value === '' ? null : Number(e.target.value) || 0,
+              })
+            }
+            className={`${cmsInputClass} mt-1`}
+            placeholder="e.g. 200"
+          />
+          {cell.strikeout != null && cell.strikeout <= cell.price && (
+            <p className="mt-1 text-[11px] text-amber-700">
+              Strikeout should be higher than the display price to appear.
+            </p>
+          )}
+        </label>
+      )}
+    </div>
+  );
+}
 
 export function PricingFeesEditor({
   draft,
@@ -32,14 +98,18 @@ export function PricingFeesEditor({
   const previewRow = draft.fees.tiers[0]?.rows[0];
   const promoPeriod = draft.fees.periods.find((p) => p.id === draft.pricingPromo.promoPeriodId);
   const comparePeriod = draft.fees.periods.find((p) => p.id === draft.pricingPromo.comparePeriodId);
-  const previewOld = previewRow && comparePeriod ? Number(previewRow[comparePeriod.id] ?? 0) : undefined;
-  const previewNew = previewRow && promoPeriod ? Number(previewRow[promoPeriod.id] ?? 0) : undefined;
+  const previewOld = previewRow && comparePeriod
+    ? parseFeesCell(previewRow[comparePeriod.id]).price
+    : undefined;
+  const previewNew = previewRow && promoPeriod
+    ? parseFeesCell(previewRow[promoPeriod.id]).price
+    : undefined;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-4">
       <SectionCard
         title="Conference fees table"
-        description="Shown on the landing page — independent from the pricing engine"
+        description="Landing-page prices. Toggle strikeout on any category × column independently."
         accent="blue"
         defaultOpen
         onReset={() => onChange({ ...draft, fees: LANDING_DEFAULTS.fees })}
@@ -86,21 +156,20 @@ export function PricingFeesEditor({
                   return row;
                 }}
                 renderItem={(row, patchRow) => (
-                  <div className="space-y-3 rounded-xl bg-white p-3 ring-1 ring-slate-200/80">
-                    <PlainField label="Category name" value={row.category} onChange={(category) => patchRow({ category })} />
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  <div className="space-y-3 rounded-xl bg-slate-50/80 p-3 ring-1 ring-slate-200/80">
+                    <PlainField
+                      label="Category name"
+                      value={row.category}
+                      onChange={(category) => patchRow({ category })}
+                    />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
                       {draft.fees.periods.map((p) => (
-                        <label key={p.id} className="block">
-                          <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{p.label}</span>
-                          <input
-                            type="number"
-                            min={0}
-                            step={1}
-                            value={Number(row[p.id] ?? 0)}
-                            onChange={(e) => patchRow({ [p.id]: Number(e.target.value) })}
-                            className="mt-1 w-full px-2.5 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-[#2260a1]/25"
-                          />
-                        </label>
+                        <PeriodPriceCell
+                          key={p.id}
+                          periodLabel={p.label}
+                          value={row[p.id]}
+                          onChange={(cell) => patchRow({ [p.id]: serializeFeesCell(cell) })}
+                        />
                       ))}
                     </div>
                   </div>
@@ -112,16 +181,16 @@ export function PricingFeesEditor({
       </SectionCard>
 
       <SectionCard
-        title="Early-bird promo pill"
-        description="Strikethrough + badge on the fees table and checkout category selector"
+        title="Checkout promo badge"
+        description="Optional badge on the registration form only — fees-table strikeouts are set per cell above."
         accent="red"
         onReset={() => onChange({ ...draft, pricingPromo: LANDING_DEFAULTS.pricingPromo })}
       >
         <CmsToggle
           checked={draft.pricingPromo.enabled}
           onChange={(enabled) => patchPromo({ enabled })}
-          label="Show early-bird promo"
-          description="When off, prices display normally with no badge"
+          label="Show promo badge at checkout"
+          description="Does not change the landing fees table (use per-cell strikeout there)"
         />
 
         <PlainField label="Badge label" value={draft.pricingPromo.label} onChange={(label) => patchPromo({ label })} />
@@ -140,11 +209,11 @@ export function PricingFeesEditor({
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <label className="block">
-            <span className="block text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1.5">Promo period (new price)</span>
+            <span className="block text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1.5">Active pricing period</span>
             <select
               value={draft.pricingPromo.promoPeriodId}
               onChange={(e) => patchPromo({ promoPeriodId: e.target.value })}
-              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-[#2260a1]/25"
+              className={cmsInputClass}
             >
               {draft.fees.periods.map((p) => (
                 <option key={p.id} value={p.id}>{p.label}</option>
@@ -152,11 +221,11 @@ export function PricingFeesEditor({
             </select>
           </label>
           <label className="block">
-            <span className="block text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1.5">Compare period (struck-through)</span>
+            <span className="block text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1.5">Compare period (checkout strikeout)</span>
             <select
               value={draft.pricingPromo.comparePeriodId}
               onChange={(e) => patchPromo({ comparePeriodId: e.target.value })}
-              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-[#2260a1]/25"
+              className={cmsInputClass}
             >
               {draft.fees.periods.map((p) => (
                 <option key={p.id} value={p.id}>{p.label}</option>
@@ -168,7 +237,7 @@ export function PricingFeesEditor({
         <div>
           <span className="block text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Category targeting</span>
           <p className="text-xs text-slate-500 mb-2">
-            Names must match pricing-template category names exactly (case-sensitive) for the checkout pill.
+            Names must match pricing-template category names exactly for the checkout pill.
           </p>
           <div className="flex flex-wrap gap-2 mb-3">
             <CmsButton
@@ -228,8 +297,8 @@ export function PricingFeesEditor({
         {draft.pricingPromo.enabled && previewRow && (
           <div className="rounded-2xl bg-slate-50 ring-1 ring-slate-200/80 p-5">
             <CmsPageHeader
-              title="Live preview"
-              description={`Sample: ${previewRow.category} · ${promoPeriod?.label ?? 'promo'} column`}
+              title="Checkout badge preview"
+              description={`Sample: ${previewRow.category} · ${promoPeriod?.label ?? 'promo'} period`}
             />
             <div className="flex justify-center py-4">
               {isPromoActive(draft.pricingPromo, new Date()) && typeof previewNew === 'number' ? (
@@ -239,7 +308,7 @@ export function PricingFeesEditor({
                   config={draft.pricingPromo}
                 />
               ) : (
-                <p className="text-sm text-slate-500">Promo inactive or missing prices — check end date and enabled toggle.</p>
+                <p className="text-sm text-slate-500">Promo inactive — check end date and enabled toggle.</p>
               )}
             </div>
           </div>

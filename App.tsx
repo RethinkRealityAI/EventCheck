@@ -189,6 +189,9 @@ const AdminLayout = () => {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
   const [isSidebarPinned, setIsSidebarPinned] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
+  /** Full-bleed CMS shell — no main padding/scroll chrome that leaves a white footer gap. */
+  const isContentCms = /\/content\/?$/.test(location.pathname);
 
   // Per-page access flags for sidebar rendering.
   const canSeeDashboard = canAccessPage(profile, 'dashboard');
@@ -379,12 +382,12 @@ const AdminLayout = () => {
   }, []);
 
   return (
-    <div className="flex h-screen bg-gradient-to-br from-indigo-50 via-white to-blue-50/80 overflow-hidden relative">
+    <div className="relative flex h-dvh max-h-dvh overflow-hidden bg-gradient-to-br from-indigo-50 via-white to-blue-50/80">
       <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-20 pointer-events-none mix-blend-overlay"></div>
       <div className="absolute top-0 right-0 w-1/2 h-1/2 bg-blue-100/40 rounded-full blur-[120px] pointer-events-none transform translate-x-1/3 -translate-y-1/3"></div>
       <div className="absolute bottom-0 left-0 w-1/2 h-1/2 bg-indigo-100/40 rounded-full blur-[120px] pointer-events-none transform -translate-x-1/3 translate-y-1/3"></div>
-      {/* Mobile Floating Bottom Nav */}
-      <div className="lg:hidden fixed bottom-6 left-1/2 transform -translate-x-1/2 z-50 flex flex-col items-center w-[calc(100vw-1.5rem)] max-w-md">
+      {/* Mobile Floating Bottom Nav — hidden on CMS so it never covers tabs/save bar */}
+      <div className={`lg:hidden fixed bottom-6 left-1/2 transform -translate-x-1/2 z-50 flex flex-col items-center w-[calc(100vw-1.5rem)] max-w-md ${isContentCms ? 'hidden' : ''}`}>
         {isMobileMenuOpen && (
           <div className="bg-slate-900/80 backdrop-blur-2xl p-2 rounded-2xl shadow-2xl shadow-indigo-900/20 border border-slate-700/50 flex flex-wrap items-center justify-center gap-1.5 mb-4 animate-in slide-in-from-bottom-4 zoom-in-95 duration-200 w-full">
             {canSeeDashboard && (
@@ -568,8 +571,16 @@ const AdminLayout = () => {
       </aside>
 
       {/* Main Content */}
-      <main className={`flex-1 overflow-y-auto pb-28 lg:pb-0 pt-4 lg:pt-0 transition-all duration-300 ${(isSidebarCollapsed && !isSidebarPinned) ? 'lg:pl-20' : 'lg:pl-72'}`}>
-        <div className="p-4 lg:p-6 w-full mx-auto">
+      <main
+        className={`relative min-h-0 flex-1 transition-all duration-300 ${(isSidebarCollapsed && !isSidebarPinned) ? 'lg:pl-20' : 'lg:pl-72'} ${
+          isContentCms
+            ? 'overflow-hidden'
+            : 'overflow-y-auto pb-28 pt-4 lg:pb-0 lg:pt-0'
+        }`}
+      >
+        {/* CMS uses absolute fill so header/tabs/save bar stay inside the viewport
+            regardless of React Router’s non-flex route wrappers. */}
+        <div className={isContentCms ? 'absolute inset-0 flex flex-col overflow-hidden' : 'mx-auto w-full p-4 lg:p-6'}>
           <Routes>
             <Route path="/" element={
               <ProtectedRoute requirePage="dashboard">
@@ -620,7 +631,7 @@ const AdminLayout = () => {
               </ProtectedRoute>
             } />
             <Route path="/settings" element={<ProtectedRoute requirePage="settings"><Settings /></ProtectedRoute>} />
-            <Route path="/content" element={<ProtectedRoute requirePage="content"><ContentCms /></ProtectedRoute>} />
+            <Route path="/content" element={<ProtectedRoute requirePage="content"><div className="flex h-full min-h-0 w-full flex-col overflow-hidden"><ContentCms /></div></ProtectedRoute>} />
             <Route path="/seating" element={<ProtectedRoute requirePage="seating"><SeatingConfigurator /></ProtectedRoute>} />
             <Route path="/admins" element={<ProtectedRoute requireSuperAdmin><AdminsManagement /></ProtectedRoute>} />
           </Routes>

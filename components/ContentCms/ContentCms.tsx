@@ -26,10 +26,10 @@ import { CmsButton, CmsSpinner } from './cmsUi';
 
 type TabKey = 'landing' | 'portal' | 'pricing';
 
-const TABS: Array<{ key: TabKey; label: string; icon: React.ReactNode; blurb: string }> = [
-  { key: 'landing', label: 'Landing Page', icon: <Layout className="h-4 w-4" />, blurb: 'Hero, FAQs, registration copy' },
-  { key: 'portal', label: 'Portal & Announcements', icon: <Megaphone className="h-4 w-4" />, blurb: 'Dashboard feed + quick links' },
-  { key: 'pricing', label: 'Pricing & Fees', icon: <Tag className="h-4 w-4" />, blurb: 'Fees table + early-bird pill' },
+const TABS: Array<{ key: TabKey; label: string; shortLabel: string; icon: React.ReactNode; blurb: string }> = [
+  { key: 'landing', label: 'Landing Page', shortLabel: 'Landing', icon: <Layout className="h-4 w-4" />, blurb: 'Hero, FAQs, registration copy' },
+  { key: 'portal', label: 'Portal & Announcements', shortLabel: 'Portal', icon: <Megaphone className="h-4 w-4" />, blurb: 'Dashboard feed + quick links' },
+  { key: 'pricing', label: 'Pricing & Fees', shortLabel: 'Pricing', icon: <Tag className="h-4 w-4" />, blurb: 'Fees table + checkout promo badge' },
 ];
 
 const PREVIEW_OPEN_KEY = 'cms-preview-open';
@@ -108,12 +108,11 @@ export function ContentCms() {
 
   const previewPage = contentPageFor(activeTab);
   const previewContent = activeTab === 'portal' ? portalDraft : landingDraft;
-  const previewVisible = previewOpen;
 
   const { connected: previewConnected, syncKey, disconnect } = useCmsPreviewChannel(
     previewPage,
     previewContent,
-    previewVisible,
+    previewOpen,
   );
 
   useEffect(() => {
@@ -164,13 +163,15 @@ export function ContentCms() {
     try { localStorage.setItem(PREVIEW_DEVICE_KEY, device); } catch { /* ignore */ }
   }, [device]);
 
+  const anyDirty = landingDirty || portalDirty;
+
   const handleDiscard = () => {
     if (activeTab === 'portal') setPortalDraft(publishedPortal);
     else setLandingDraft(publishedLanding);
-    showNotification('Discarded unsaved changes', 'success');
+    showNotification('Undid unsaved changes for this tab', 'success');
   };
 
-  const handlePublish = async () => {
+  const handleSave = async () => {
     setPublishing(true);
     const page = contentPageFor(activeTab);
     const content = page === 'portal' ? portalDraft : landingDraft;
@@ -179,11 +180,21 @@ export function ContentCms() {
     if (ok) {
       if (page === 'portal') setPublishedPortal(portalDraft);
       else setPublishedLanding(landingDraft);
-      showNotification('Published — live site updated', 'success');
+      showNotification('Saved — live site updated', 'success');
     } else {
-      showNotification('Failed to publish — check your connection and try again', 'error');
+      showNotification('Failed to save — check your connection and try again', 'error');
     }
   };
+
+  useEffect(() => {
+    if (!anyDirty) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [anyDirty]);
 
   const onSplitPointerDown = (e: React.PointerEvent) => {
     e.preventDefault();
@@ -217,100 +228,45 @@ export function ContentCms() {
     [landingDirty, portalDirty],
   );
 
-  // Desktop: side-by-side. Narrow: preview replaces the editor (single panel).
   const showDesktopSplit = previewOpen && !narrow;
   const showMobilePreview = previewOpen && narrow;
   const showEditor = !showMobilePreview;
 
-  const editorPane = (
-    <div className="flex h-full min-h-0 min-w-0 flex-col">
-      <div className="flex-shrink-0 overflow-x-auto border-b border-slate-200/80 bg-white px-2 sm:px-4">
-        <div className="flex min-w-max gap-1">
-          {TABS.map((t) => {
-            const active = activeTab === t.key;
-            const dirty = dirtyDots[t.key];
-            return (
-              <button
-                key={t.key}
-                type="button"
-                onClick={() => setActiveTab(t.key)}
-                className={`relative flex items-center gap-2 whitespace-nowrap border-b-2 px-4 py-3.5 text-sm font-semibold transition ${
-                  active
-                    ? 'border-[#2260a1] text-[#1a4880]'
-                    : 'border-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-900'
-                }`}
-              >
-                {t.icon}
-                {t.label}
-                {dirty && (
-                  <span className="h-2 w-2 rounded-full bg-amber-500 ring-2 ring-white" title="Unsaved changes" />
-                )}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 sm:py-6">
-        {loading ? (
-          <CmsSpinner label="Loading published content…" />
-        ) : (
-          <div className="mx-auto max-w-3xl">
-            {activeTab === 'landing' && <LandingEditor draft={landingDraft} onChange={setLandingDraft} />}
-            {activeTab === 'portal' && <PortalEditor draft={portalDraft} onChange={setPortalDraft} />}
-            {activeTab === 'pricing' && <PricingFeesEditor draft={landingDraft} onChange={setLandingDraft} />}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-
-  const previewPane = (
-    <CmsLivePreview
-      url={previewHashUrl}
-      pageLabel={activeTabMeta.label}
-      device={device}
-      onDeviceChange={setDevice}
-      connected={previewConnected}
-      syncKey={syncKey}
-      onIframeUnload={disconnect}
-    />
-  );
-
   return (
     <div
       ref={shellRef}
-      className="-m-4 flex h-[calc(100dvh-7.5rem)] flex-col overflow-hidden bg-[linear-gradient(180deg,#f8fafc_0%,#f1f5f9_100%)] lg:-m-6 lg:h-dvh"
+      className="flex h-full max-h-full min-h-0 w-full flex-col overflow-hidden bg-[linear-gradient(180deg,#f8fafc_0%,#f1f5f9_100%)]"
     >
-      <header className="flex flex-shrink-0 flex-wrap items-center justify-between gap-3 border-b border-slate-200/80 bg-white/95 px-4 py-3 backdrop-blur-md sm:px-5">
-        <div className="flex min-w-0 items-center gap-3">
-          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-gansid-primary-gradient text-white shadow-lg ring-1 ring-white/20">
-            <FileText className="h-5 w-5" />
+      {/* ── Chrome: always visible ── */}
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-200/80 bg-white px-3 py-2.5 sm:gap-3 sm:px-4 sm:py-3">
+        <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-gansid-primary-gradient text-white shadow-md ring-1 ring-white/20 sm:h-10 sm:w-10">
+            <FileText className="h-4 w-4 sm:h-5 sm:w-5" />
           </span>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="font-display text-xl font-bold tracking-tight text-slate-900">Content CMS</h2>
+              <h2 className="font-display text-lg font-bold tracking-tight text-slate-900 sm:text-xl">Content CMS</h2>
               {tabDirty && (
-                <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-amber-800 ring-1 ring-amber-200">
+                <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-800 ring-1 ring-amber-200 sm:text-[11px]">
                   Unsaved
                 </span>
               )}
               {previewOpen && previewConnected && (
-                <span className="hidden items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-emerald-700 ring-1 ring-emerald-200 sm:inline-flex">
+                <span className="hidden items-center gap-1.5 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700 ring-1 ring-emerald-200 sm:inline-flex sm:text-[11px]">
                   <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
-                  Live
+                  Preview
                 </span>
               )}
             </div>
-            <p className="truncate text-xs text-slate-500 sm:text-sm">
+            <p className="hidden truncate text-xs text-slate-500 sm:block">
               {activeTabMeta.blurb}
-              {previewOpen ? ' · preview updates as you edit' : ' · preview hidden'}
+              {previewOpen ? ' · draft-only until Save' : ' · preview hidden'}
             </p>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <CmsButton variant="secondary" onClick={() => setPreviewOpen((o) => !o)} className="!px-3">
+        <div className="flex shrink-0 flex-wrap items-center gap-1.5 sm:gap-2">
+          <CmsButton variant="secondary" onClick={() => setPreviewOpen((o) => !o)} className="!px-2.5 !py-2 sm:!px-3">
             {narrow && previewOpen ? (
               <PanelLeft className="h-4 w-4" />
             ) : previewOpen ? (
@@ -320,28 +276,69 @@ export function ContentCms() {
             )}
             <span className="hidden sm:inline">
               {narrow
-                ? (previewOpen ? 'Back to editor' : 'Preview')
+                ? (previewOpen ? 'Editor' : 'Preview')
                 : (previewOpen ? 'Hide preview' : 'Show preview')}
             </span>
           </CmsButton>
-          <CmsButton variant="secondary" onClick={handleDiscard} disabled={!tabDirty || publishing}>
+          <CmsButton variant="secondary" onClick={handleDiscard} disabled={!tabDirty || publishing} className="!px-2.5 !py-2 sm:!px-3">
             <Undo2 className="h-4 w-4" />
-            <span className="hidden sm:inline">Discard</span>
+            <span className="hidden sm:inline">Undo</span>
           </CmsButton>
-          <CmsButton variant="primary" onClick={handlePublish} disabled={publishing || !tabDirty}>
+          <CmsButton variant="primary" onClick={handleSave} disabled={publishing || !tabDirty} className="!px-2.5 !py-2 sm:!px-3">
             {publishing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-            Publish
+            Save
           </CmsButton>
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1">
+      {/* Tabs — full-width chrome, never scrolls away */}
+      <nav
+        className="flex shrink-0 gap-0.5 overflow-x-auto border-b border-slate-200/80 bg-white px-2 sm:gap-1 sm:px-4"
+        aria-label="Content sections"
+      >
+        {TABS.map((t) => {
+          const active = activeTab === t.key;
+          const dirty = dirtyDots[t.key];
+          return (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setActiveTab(t.key)}
+              className={`relative flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-semibold transition sm:gap-2 sm:px-4 sm:py-3 ${
+                active
+                  ? 'border-[#2260a1] text-[#1a4880]'
+                  : 'border-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-900'
+              }`}
+            >
+              {t.icon}
+              <span className="sm:hidden">{t.shortLabel}</span>
+              <span className="hidden sm:inline">{t.label}</span>
+              {dirty && (
+                <span className="h-2 w-2 rounded-full bg-amber-500 ring-2 ring-white" title="Unsaved changes" />
+              )}
+            </button>
+          );
+        })}
+      </nav>
+
+      {/* Workspace — only this region scrolls / splits */}
+      <div className="flex min-h-0 flex-1 overflow-hidden">
         {showEditor && (
           <div
-            className="flex min-h-0 min-w-0 flex-col"
+            className="flex min-h-0 min-w-0 flex-col overflow-hidden"
             style={showDesktopSplit ? { width: `${editorPct}%` } : { width: '100%' }}
           >
-            {editorPane}
+            <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 py-4 sm:px-5 sm:py-5">
+              {loading ? (
+                <CmsSpinner label="Loading published content…" />
+              ) : (
+                <div className="mx-auto max-w-3xl pb-2">
+                  {activeTab === 'landing' && <LandingEditor draft={landingDraft} onChange={setLandingDraft} />}
+                  {activeTab === 'portal' && <PortalEditor draft={portalDraft} onChange={setPortalDraft} />}
+                  {activeTab === 'pricing' && <PricingFeesEditor draft={landingDraft} onChange={setLandingDraft} />}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -363,19 +360,58 @@ export function ContentCms() {
                 if (e.key === 'ArrowLeft') setEditorPct((p) => Math.max(MIN_EDITOR_PCT, p - 2));
                 if (e.key === 'ArrowRight') setEditorPct((p) => Math.min(MAX_EDITOR_PCT, p + 2));
               }}
-              className="group relative z-10 w-1.5 flex-shrink-0 cursor-col-resize bg-slate-200/90 transition-colors hover:bg-[#2260a1]/45 focus:bg-[#2260a1]/55 focus:outline-none"
+              className="group relative z-10 w-1.5 shrink-0 cursor-col-resize bg-slate-200/90 transition-colors hover:bg-[#2260a1]/45 focus:bg-[#2260a1]/55 focus:outline-none"
             >
               <span className="absolute inset-y-0 -left-1.5 -right-1.5" />
               <span className="absolute left-1/2 top-1/2 h-12 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-slate-400 opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus:opacity-100" />
             </div>
-            <div className="min-h-0 min-w-0 flex-1">{previewPane}</div>
+            <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+              <CmsLivePreview
+                url={previewHashUrl}
+                pageLabel={activeTabMeta.label}
+                device={device}
+                onDeviceChange={setDevice}
+                connected={previewConnected}
+                syncKey={syncKey}
+                onIframeUnload={disconnect}
+              />
+            </div>
           </>
         )}
 
         {showMobilePreview && (
-          <div className="min-h-0 min-w-0 flex-1">{previewPane}</div>
+          <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+            <CmsLivePreview
+              url={previewHashUrl}
+              pageLabel={activeTabMeta.label}
+              device={device}
+              onDeviceChange={setDevice}
+              connected={previewConnected}
+              syncKey={syncKey}
+              onIframeUnload={disconnect}
+            />
+          </div>
         )}
       </div>
+
+      {/* Save bar — always visible, compact */}
+      <footer className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-slate-200/80 bg-white px-3 py-2.5 sm:px-4 sm:py-3">
+        <p className="min-w-0 flex-1 truncate text-xs text-slate-500">
+          {tabDirty
+            ? 'Unsaved on this tab — Save to publish, or Undo to revert.'
+            : 'No unsaved changes on this tab.'}
+        </p>
+        <div className="flex shrink-0 items-center gap-2">
+          <CmsButton variant="secondary" onClick={handleDiscard} disabled={!tabDirty || publishing} className="!px-3 !py-2">
+            <Undo2 className="h-4 w-4" />
+            Undo
+          </CmsButton>
+          <CmsButton variant="primary" onClick={handleSave} disabled={publishing || !tabDirty} className="!px-3 !py-2">
+            {publishing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            Save
+          </CmsButton>
+        </div>
+      </footer>
     </div>
   );
 }

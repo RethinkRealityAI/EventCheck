@@ -1,8 +1,8 @@
 import { ViscousButton } from '../ui/ViscousButton';
-import { PromoPrice } from '../../Pricing/PromoPrice';
 import { useLandingContent } from '../content/ContentProvider';
-import type { FeesPeriod, FeesRow, FeesTier, PricingPromoConfig } from '../../../types';
-import { isPromoActive, shouldShowForCategory } from '../../../utils/pricingPromo';
+import type { FeesPeriod, FeesRow, FeesTier } from '../../../types';
+import { feesCellPrice, feesCellStrikeoutAmount } from '../../../utils/feesCells';
+import { formatPrice } from '../../../utils/pricing';
 
 function scrollToRegister() {
   const targets = document.querySelectorAll<HTMLElement>('[data-register-target]');
@@ -26,48 +26,38 @@ const PERIOD_HEADER_COLORS = [
   'rounded-tr-xl bg-amber-500/15 text-amber-800',
 ];
 
-function cellPrice(
-  row: FeesRow,
-  period: FeesPeriod,
-  promo: PricingPromoConfig,
-  stripe: boolean,
-  colorIdx: number,
-) {
-  const raw = row[period.id];
-  const price = typeof raw === 'number' ? raw : Number(raw);
-  if (Number.isNaN(price)) return '—';
+function formatUsd(amount: number) {
+  return formatPrice(amount * 100, 'USD');
+}
+
+function cellPrice(row: FeesRow, period: FeesPeriod, stripe: boolean, colorIdx: number) {
+  const price = feesCellPrice(row[period.id]);
+  const strikeout = feesCellStrikeoutAmount(row[period.id]);
 
   const colors = PERIOD_CELL_COLORS[colorIdx % PERIOD_CELL_COLORS.length];
   const cellClass = `py-3 md:py-4 px-1 md:px-2 text-center font-display font-bold ${colors.text} ${stripe ? colors.stripe : colors.flat}`;
 
-  const showPromo =
-    isPromoActive(promo, new Date())
-    && period.id === promo.promoPeriodId
-    && shouldShowForCategory(promo, row.category);
-
-  if (showPromo) {
-    const compareRaw = row[promo.comparePeriodId];
-    const oldPrice = typeof compareRaw === 'number' ? compareRaw : Number(compareRaw);
+  if (strikeout != null) {
     return (
       <td key={period.id} className={cellClass}>
-        <PromoPrice
-          oldPrice={Number.isNaN(oldPrice) ? undefined : oldPrice}
-          newPrice={price}
-          config={promo}
-          compact
-        />
+        <span className="inline-flex flex-col items-center gap-0.5 leading-tight">
+          <span className="text-gansid-on-surface/40 line-through decoration-2 text-sm font-semibold">
+            {formatUsd(strikeout)}
+          </span>
+          <span className="text-emerald-700">{formatUsd(price)}</span>
+        </span>
       </td>
     );
   }
 
   return (
     <td key={period.id} className={cellClass}>
-      ${price}
+      {formatUsd(price)}
     </td>
   );
 }
 
-function TierTable({ tier, periods, promo }: { tier: FeesTier; periods: FeesPeriod[]; promo: PricingPromoConfig }) {
+function TierTable({ tier, periods }: { tier: FeesTier; periods: FeesPeriod[] }) {
   return (
     <div className="space-y-3">
       <div className="w-full rounded-full bg-gansid-gradient-reverse shadow-lg px-4 sm:px-6 md:px-8 py-3 md:py-4 text-center">
@@ -100,7 +90,7 @@ function TierTable({ tier, periods, promo }: { tier: FeesTier; periods: FeesPeri
               return (
                 <tr key={row.category}>
                   <td className={`py-3 md:py-4 px-2 md:px-3 font-display font-bold text-sm sm:text-base md:text-lg text-gansid-on-surface ${stripe ? 'bg-gansid-secondary/5' : ''}`}>{row.category}</td>
-                  {periods.map((period, pi) => cellPrice(row, period, promo, stripe, pi))}
+                  {periods.map((period, pi) => cellPrice(row, period, stripe, pi))}
                 </tr>
               );
             })}
@@ -112,7 +102,7 @@ function TierTable({ tier, periods, promo }: { tier: FeesTier; periods: FeesPeri
 }
 
 export function FeesSection() {
-  const { fees, pricingPromo, hero } = useLandingContent();
+  const { fees, hero } = useLandingContent();
 
   return (
     <div className="space-y-6 scroll-mt-8">
@@ -139,7 +129,7 @@ export function FeesSection() {
       </div>
       <div className="space-y-8">
         {fees.tiers.map((tier) => (
-          <TierTable key={tier.id} tier={tier} periods={fees.periods} promo={pricingPromo} />
+          <TierTable key={tier.id} tier={tier} periods={fees.periods} />
         ))}
       </div>
     </div>

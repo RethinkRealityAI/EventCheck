@@ -695,7 +695,17 @@ export interface RegistrationStep { id: string; number: string; title: string; b
 export interface Faq { id: string; question: string; answerHtml: string; }
 
 export interface FeesPeriod { id: string; label: string; subtitle: string; }
-export interface FeesRow { category: string; [periodId: string]: string | number; }
+
+/** Per-cell price on the landing fees table. Legacy rows may store a bare number. */
+export interface FeesCell {
+  price: number;
+  /** Optional struck-through “was” price — independent per category × column. */
+  strikeout?: number | null;
+  strikeoutEnabled?: boolean;
+}
+export type FeesCellValue = number | FeesCell;
+
+export interface FeesRow { category: string; [periodId: string]: string | FeesCellValue; }
 export interface FeesTier { id: string; label: string; subtitle: string; rows: FeesRow[]; }
 export interface FeesContent { note: string; periods: FeesPeriod[]; tiers: FeesTier[]; }
 
