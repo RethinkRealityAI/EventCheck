@@ -101,6 +101,7 @@ export function ContentCms() {
 
   const splitDragRef = useRef<{ startX: number; startPct: number } | null>(null);
   const shellRef = useRef<HTMLDivElement | null>(null);
+  const editorScrollRef = useRef<HTMLDivElement | null>(null);
 
   const landingDirty = !snapshotsEqual(landingDraft, publishedLanding);
   const portalDirty = !snapshotsEqual(portalDraft, publishedPortal);
@@ -162,6 +163,10 @@ export function ContentCms() {
   useEffect(() => {
     try { localStorage.setItem(PREVIEW_DEVICE_KEY, device); } catch { /* ignore */ }
   }, [device]);
+
+  useEffect(() => {
+    editorScrollRef.current?.scrollTo(0, 0);
+  }, [activeTab]);
 
   const anyDirty = landingDirty || portalDirty;
 
@@ -237,8 +242,9 @@ export function ContentCms() {
       ref={shellRef}
       className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[linear-gradient(180deg,#f8fafc_0%,#f1f5f9_100%)]"
     >
-      {/* ── Chrome: always visible ── */}
-      <header className="flex shrink-0 flex-wrap items-center justify-between gap-x-2 gap-y-2 border-b border-slate-200/80 bg-white px-3 py-2.5 sm:gap-3 sm:px-4 sm:py-3">
+      {/* ── Chrome: fixed-height block above the scroll region ── */}
+      <div className="shrink-0 border-b border-slate-200/80 bg-white">
+        <header className="flex flex-wrap items-center justify-between gap-x-2 gap-y-2 px-3 py-2.5 sm:gap-3 sm:px-4 sm:py-3">
         <div className="flex min-w-0 flex-1 items-center gap-2.5 sm:max-w-[min(100%,28rem)] sm:gap-3">
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-gansid-primary-gradient text-white shadow-md ring-1 ring-white/20 sm:h-10 sm:w-10">
             <FileText className="h-4 w-4 sm:h-5 sm:w-5" />
@@ -291,11 +297,10 @@ export function ContentCms() {
         </div>
       </header>
 
-      {/* Tabs — full-width chrome, never scrolls away */}
-      <nav
-        className="flex shrink-0 gap-0.5 overflow-x-auto overscroll-x-contain border-b border-slate-200/80 bg-white px-2 [-ms-overflow-style:none] [scrollbar-width:none] sm:gap-1 sm:px-4 [&::-webkit-scrollbar]:hidden"
-        aria-label="Content sections"
-      >
+        <nav
+          className="flex gap-0.5 overflow-x-auto overscroll-x-contain border-t border-slate-100 px-2 [-ms-overflow-style:none] [scrollbar-width:none] sm:gap-1 sm:px-4 [&::-webkit-scrollbar]:hidden"
+          aria-label="Content sections"
+        >
         {TABS.map((t) => {
           const active = activeTab === t.key;
           const dirty = dirtyDots[t.key];
@@ -319,7 +324,8 @@ export function ContentCms() {
             </button>
           );
         })}
-      </nav>
+        </nav>
+      </div>
 
       {/* Workspace — only this region scrolls / splits */}
       <div className="flex min-h-0 flex-1 overflow-hidden">
@@ -328,11 +334,14 @@ export function ContentCms() {
             className="flex min-h-0 min-w-0 flex-col overflow-hidden"
             style={showDesktopSplit ? { width: `${editorPct}%` } : { width: '100%' }}
           >
-            <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 py-4 sm:px-5 sm:py-5">
+            <div
+              ref={editorScrollRef}
+              className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain px-3 py-4 sm:px-5 sm:py-5"
+            >
               {loading ? (
                 <CmsSpinner label="Loading published content…" />
               ) : (
-                <div className="mx-auto max-w-3xl pb-2">
+                <div className={`mx-auto pb-4 ${activeTab === 'pricing' ? 'max-w-none' : 'max-w-3xl'}`}>
                   {activeTab === 'landing' && <LandingEditor draft={landingDraft} onChange={setLandingDraft} />}
                   {activeTab === 'portal' && <PortalEditor draft={portalDraft} onChange={setPortalDraft} />}
                   {activeTab === 'pricing' && <PricingFeesEditor draft={landingDraft} onChange={setLandingDraft} />}
@@ -393,25 +402,6 @@ export function ContentCms() {
           </div>
         )}
       </div>
-
-      {/* Save bar — always visible, compact */}
-      <footer className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-slate-200/80 bg-white px-3 py-2.5 sm:px-4 sm:py-3">
-        <p className="min-w-0 flex-1 truncate text-xs text-slate-500">
-          {tabDirty
-            ? 'Unsaved on this tab — Save to publish, or Undo to revert.'
-            : 'No unsaved changes on this tab.'}
-        </p>
-        <div className="flex shrink-0 items-center gap-2">
-          <CmsButton variant="secondary" onClick={handleDiscard} disabled={!tabDirty || publishing} className="!px-3 !py-2">
-            <Undo2 className="h-4 w-4" />
-            Undo
-          </CmsButton>
-          <CmsButton variant="primary" onClick={handleSave} disabled={publishing || !tabDirty} className="!px-3 !py-2">
-            {publishing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-            Save
-          </CmsButton>
-        </div>
-      </footer>
     </div>
   );
 }

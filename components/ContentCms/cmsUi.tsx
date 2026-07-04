@@ -137,23 +137,19 @@ export function SectionCard({
         </div>
         <ChevronDown className={`h-5 w-5 shrink-0 text-slate-400 transition-transform duration-300 ${open ? 'rotate-180' : ''}`} />
       </button>
-      <div
-        className={`grid transition-[grid-template-rows] duration-300 ease-out ${open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}
-      >
-        <div className="overflow-hidden">
-          <div className="px-5 pb-5 pl-6 space-y-4 border-t border-slate-100 pt-4">
-            {children}
-            <button
-              type="button"
-              onClick={onReset}
-              className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-[#2260a1] transition-colors"
-            >
-              <RotateCcw className="h-3.5 w-3.5" />
-              Reset section to default
-            </button>
-          </div>
+      {open && (
+        <div className="px-5 pb-5 pl-6 space-y-4 border-t border-slate-100 pt-4">
+          {children}
+          <button
+            type="button"
+            onClick={onReset}
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-[#2260a1] transition-colors"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            Reset section to default
+          </button>
         </div>
-      </div>
+      )}
     </div>
   );
 }
