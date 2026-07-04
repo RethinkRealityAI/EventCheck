@@ -23,10 +23,16 @@ export function PortalLayout() {
       <div className="absolute -bottom-48 -left-32 w-[500px] h-[500px] rounded-full bg-gansid-primary opacity-[0.07] blur-3xl -z-10" />
       <div className="absolute -bottom-48 -right-32 w-[500px] h-[500px] rounded-full bg-gansid-secondary opacity-[0.07] blur-3xl -z-10" />
 
-      <header className="relative bg-[#239DBB] text-white sticky top-0 z-40 px-6 py-4 flex items-center justify-between shadow-lg">
-        <div className="absolute top-0 inset-x-0 h-1 bg-[linear-gradient(90deg,#ba0028_0%,#E0243C_50%,#2260a1_100%)]" />
-        <Link to="/portal" className="font-display font-bold text-xl tracking-tight text-white drop-shadow-sm">
-          GANSID Congress 2026
+      <header className="relative bg-gansid-primary-gradient text-white sticky top-0 z-40 px-5 sm:px-6 py-4 flex items-center justify-between shadow-[0_10px_30px_-12px_rgba(186,0,40,0.55)]">
+        {/* Fine top hairline + soft interior sheen for depth on the gradient */}
+        <div className="pointer-events-none absolute top-0 inset-x-0 h-px bg-white/40" />
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_140%_at_15%_-40%,rgba(255,255,255,0.28),transparent_55%)]" />
+        <Link
+          to="/portal"
+          className="relative font-display font-bold text-lg sm:text-xl tracking-tight text-white drop-shadow-sm flex items-center gap-2.5"
+        >
+          <span className="grid h-8 w-8 place-items-center rounded-xl bg-white/15 ring-1 ring-white/30 backdrop-blur-sm text-sm font-black">G</span>
+          <span>GANSID Congress 2026</span>
         </Link>
         <div className="relative">
           <button
@@ -34,7 +40,8 @@ export function PortalLayout() {
             onClick={() => setMenuOpen((v) => !v)}
             aria-haspopup="menu"
             aria-expanded={menuOpen}
-            className="h-10 w-10 rounded-full bg-gansid-primary-gradient text-white font-display flex items-center justify-center shadow-md ring-2 ring-white/60"
+            aria-label="Open account menu"
+            className="h-10 w-10 rounded-full bg-white text-gansid-primary font-display font-bold flex items-center justify-center shadow-lg ring-2 ring-white/70 transition-transform duration-300 ease-viscous hover:scale-105 focus:outline-none focus-visible:ring-4 focus-visible:ring-white/50"
           >
             {initials}
           </button>

@@ -18,6 +18,7 @@ import { AvailableFormsGrid } from './AvailableFormsGrid';
 import { CredentialCard } from './CredentialCard';
 import { AnnouncementsFeed } from './AnnouncementsFeed';
 import { QuickLinks } from './QuickLinks';
+import { PortalQuickNav } from './PortalQuickNav';
 import { TicketsSummaryTile } from './TicketsSummaryTile';
 import { RegisterModal } from './RegisterModal';
 import TeamTable from '../../SponsorExhibitor/TeamTable';
@@ -171,32 +172,39 @@ export function PortalDashboard() {
 
   return (
     <>
-      <div className="grid grid-cols-1 lg:grid-cols-[1.7fr_1fr] gap-8">
+      {/* pb on mobile keeps content clear of the floating Quick Access bar */}
+      <div className="pb-24 lg:pb-0">
         <VerifyEmailBanner />
-        <div className="space-y-8">
-          <WelcomeBlock profile={profile} latestAttendee={latestAttendee} staffOrg={staffOrg} />
-          {userPrimary && (
-            <TeamTable
-              primary={userPrimary}
-              staff={staffRows}
-              onFillIn={handleFillIn}
+        <div className="grid grid-cols-1 items-start gap-8 lg:grid-cols-[1.7fr_1fr] xl:gap-10">
+          <div className="space-y-8 min-w-0">
+            <WelcomeBlock profile={profile} latestAttendee={latestAttendee} staffOrg={staffOrg} />
+            {userPrimary && (
+              <TeamTable
+                primary={userPrimary}
+                staff={staffRows}
+                onFillIn={handleFillIn}
+              />
+            )}
+            <AvailableFormsGrid
+              forms={forms}
+              userAttendees={attendees}
+              role={profile.role}
+              userId={user.id}
+              onStartRegistration={(id, _opts) => setRegisterFormId(id)}
             />
-          )}
-          <AvailableFormsGrid
-            forms={forms}
-            userAttendees={attendees}
-            role={profile.role}
-            userId={user.id}
-            onStartRegistration={(id, _opts) => setRegisterFormId(id)}
-          />
-          <AnnouncementsFeed />
+            <AnnouncementsFeed />
+          </div>
+          <aside className="space-y-6 lg:sticky lg:top-24">
+            <CredentialCard profile={profile} attendee={latestPaidAttendee} />
+            <TicketsSummaryTile />
+            {/* Desktop sidebar Quick Access; on mobile the floating nav takes over */}
+            <div className="hidden lg:block">
+              <QuickLinks />
+            </div>
+          </aside>
         </div>
-        <aside className="space-y-6">
-          <CredentialCard profile={profile} attendee={latestPaidAttendee} />
-          <TicketsSummaryTile />
-          <QuickLinks />
-        </aside>
       </div>
+      <PortalQuickNav />
       {registerFormId && (
         <RegisterModal formId={registerFormId} onClose={handleModalClose} onSaveAndClose={handleSaveAndClose} />
       )}

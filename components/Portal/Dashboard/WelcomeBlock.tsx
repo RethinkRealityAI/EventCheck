@@ -51,16 +51,20 @@ export function WelcomeBlock({ profile, latestAttendee, staffOrg }: Props) {
           </p>
         )}
       </div>
-      <GlassCard tint="blue">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-xs uppercase tracking-wide text-gansid-on-surface/50 font-display">Up Next</div>
-            <div className="font-display text-xl font-semibold mt-1">GANSID Congress 2026</div>
+      <GlassCard tint="blue" className="relative overflow-hidden">
+        <div className="pointer-events-none absolute -right-6 -top-8 h-28 w-28 rounded-full bg-gansid-secondary/10 blur-2xl" aria-hidden />
+        <div className="relative flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <div className="inline-flex items-center gap-1.5 text-xs uppercase tracking-[0.14em] text-gansid-secondary font-display font-semibold">
+              <span className="h-1.5 w-1.5 rounded-full bg-gansid-secondary" aria-hidden />
+              Up Next
+            </div>
+            <div className="font-display text-xl font-bold mt-1.5">GANSID Congress 2026</div>
             <div className="font-body text-sm text-gansid-on-surface/60 mt-1">Hyderabad, India &middot; Oct 23&ndash;25, 2026</div>
           </div>
-          <div className="text-right">
-            <div className="font-display text-4xl font-bold text-gansid-secondary">{days}</div>
-            <div className="text-xs uppercase tracking-wide text-gansid-on-surface/50 font-display">days to go</div>
+          <div className="text-right shrink-0">
+            <div className="font-display text-5xl font-black leading-none bg-gansid-gradient-reverse bg-clip-text text-transparent tabular-nums">{days}</div>
+            <div className="text-[11px] uppercase tracking-[0.14em] text-gansid-on-surface/50 font-display font-semibold mt-1">days to go</div>
           </div>
         </div>
       </GlassCard>
