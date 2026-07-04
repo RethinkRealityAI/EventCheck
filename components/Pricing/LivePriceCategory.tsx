@@ -2,6 +2,9 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { formatPrice } from '../../utils/pricing';
 import { shouldMaskCategoryPricing } from '../../utils/promoCodes';
+import { isPromoActive, matchBracketToPeriod, shouldShowForCategory } from '../../utils/pricingPromo';
+import { useLandingContent } from '../Portal/content/ContentProvider';
+import { PromoPrice } from './PromoPrice';
 import type { PricingTemplate, PricingTier, DateBracket } from '../../types';
 
 interface Props {
@@ -12,19 +15,50 @@ interface Props {
   onChange: (categoryId: string) => void;
 }
 
-function categoryPriceLabel(
+function categoryPriceDisplay(
   cat: { id: string; name: string; requiresPromoCode?: boolean; prices?: Record<string, Record<string, number>> },
   tier: PricingTier | null,
   bracket: DateBracket | null,
-  currency: string,
-): string | null {
+  template: PricingTemplate,
+  landing: ReturnType<typeof useLandingContent>,
+): React.ReactNode | null {
   if (shouldMaskCategoryPricing(cat)) return 'Free';
-  const price = tier && bracket ? cat.prices?.[tier.id]?.[bracket.id] : undefined;
-  if (typeof price !== 'number') return null;
-  return formatPrice(price, currency);
+  if (!tier || !bracket) return null;
+
+  const priceCents = cat.prices?.[tier.id]?.[bracket.id];
+  if (typeof priceCents !== 'number') return null;
+
+  const promo = landing.pricingPromo;
+  const promoPeriod = landing.fees.periods.find((p) => p.id === promo.promoPeriodId);
+  const comparePeriod = landing.fees.periods.find((p) => p.id === promo.comparePeriodId);
+  const promoBracket = promoPeriod ? matchBracketToPeriod(template.dateBrackets, promoPeriod.label) : null;
+  const compareBracket = comparePeriod ? matchBracketToPeriod(template.dateBrackets, comparePeriod.label) : null;
+
+  const showPromo =
+    isPromoActive(promo, new Date())
+    && promoBracket?.id === bracket.id
+    && shouldShowForCategory(promo, cat.name);
+
+  if (showPromo && compareBracket) {
+    const oldCents = cat.prices?.[tier.id]?.[compareBracket.id];
+    const oldPrice = typeof oldCents === 'number' ? oldCents / 100 : undefined;
+    const newPrice = priceCents / 100;
+    return (
+      <PromoPrice
+        oldPrice={oldPrice}
+        newPrice={newPrice}
+        currency={template.currency}
+        config={promo}
+        compact
+      />
+    );
+  }
+
+  return formatPrice(priceCents, template.currency);
 }
 
 export default function LivePriceCategory({ template, tier, bracket, value, onChange }: Props) {
+  const landing = useLandingContent();
   const [open, setOpen] = useState(false);
   const [dropUp, setDropUp] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -32,10 +66,9 @@ export default function LivePriceCategory({ template, tier, bracket, value, onCh
 
   const selected = template.categories.find(c => c.id === value) || null;
   const selectedSuffix = selected
-    ? categoryPriceLabel(selected, tier, bracket, template.currency)
+    ? categoryPriceDisplay(selected, tier, bracket, template, landing)
     : null;
 
-  // Decide whether to open upward based on available viewport space below the trigger.
   useLayoutEffect(() => {
     if (!open || !triggerRef.current) return;
     const rect = triggerRef.current.getBoundingClientRect();
@@ -71,16 +104,17 @@ export default function LivePriceCategory({ template, tier, bracket, value, onCh
           ref={triggerRef}
           type="button"
           onClick={() => setOpen(o => !o)}
-          className="w-full px-4 py-2.5 rounded-full gradient-border-input focus:outline-none focus:ring-2 focus:ring-gansid-secondary/40 font-body text-sm bg-white flex items-center justify-between text-left"
+          className="w-full px-4 py-2.5 rounded-full gradient-border-input focus:outline-none focus:ring-2 focus:ring-gansid-secondary/40 font-body text-sm bg-white flex items-center justify-between text-left gap-3"
           aria-haspopup="listbox"
           aria-expanded={open}
         >
-          <span className={selected ? 'text-gansid-on-surface' : 'text-gansid-on-surface/50'}>
-            {selected
-              ? `${selected.name}${selectedSuffix ? ` — ${selectedSuffix}` : ''}`
-              : 'Select a category…'}
+          <span className={`min-w-0 flex flex-wrap items-center gap-x-2 gap-y-1 ${selected ? 'text-gansid-on-surface' : 'text-gansid-on-surface/50'}`}>
+            <span>{selected ? selected.name : 'Select a category…'}</span>
+            {selected && selectedSuffix && (
+              <span className="text-xs text-gansid-on-surface/60">{selectedSuffix}</span>
+            )}
           </span>
-          <ChevronDown className={`w-4 h-4 text-gansid-on-surface/60 transition-transform ${open ? 'rotate-180' : ''}`} />
+          <ChevronDown className={`w-4 h-4 shrink-0 text-gansid-on-surface/60 transition-transform ${open ? 'rotate-180' : ''}`} />
         </button>
 
         {open && (
@@ -92,7 +126,7 @@ export default function LivePriceCategory({ template, tier, bracket, value, onCh
             }`}
           >
             {template.categories.map(cat => {
-              const suffix = categoryPriceLabel(cat, tier, bracket, template.currency);
+              const suffix = categoryPriceDisplay(cat, tier, bracket, template, landing);
               const isSelected = cat.id === value;
               return (
                 <button
@@ -109,7 +143,7 @@ export default function LivePriceCategory({ template, tier, bracket, value, onCh
                 >
                   <span>{cat.name}</span>
                   {suffix && (
-                    <span className="text-xs text-gansid-on-surface/60">{suffix}</span>
+                    <span className="text-xs text-gansid-on-surface/60 shrink-0">{suffix}</span>
                   )}
                 </button>
               );

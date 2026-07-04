@@ -22,6 +22,19 @@ export function mapAnnouncementFromDb(row: any): Announcement {
   };
 }
 
+function isWithinSchedule(a: Announcement, now = new Date()): boolean {
+  const t = now.getTime();
+  if (a.startsAt) {
+    const start = new Date(a.startsAt).getTime();
+    if (t < start) return false;
+  }
+  if (a.endsAt) {
+    const end = new Date(a.endsAt).getTime();
+    if (t >= end) return false;
+  }
+  return true;
+}
+
 export async function listAnnouncements(site: 'scago' | 'gansid'): Promise<Announcement[]> {
   const { data, error } = await supabase
     .from('announcements')
@@ -39,21 +52,50 @@ export async function listActiveAnnouncements(site: 'scago' | 'gansid', limit = 
     .eq('site', site)
     .eq('is_active', true)
     .order('published_at', { ascending: false })
-    .limit(limit);
+    .limit(limit * 3);
   if (error) { console.error('listActiveAnnouncements', error); return []; }
-  return (data ?? []).map(mapAnnouncementFromDb);
+  return (data ?? [])
+    .map(mapAnnouncementFromDb)
+    .filter((a) => isWithinSchedule(a))
+    .slice(0, limit);
 }
+
+type AnnouncementInput = {
+  title: string;
+  body: string | null;
+  imageUrl: string | null;
+  isActive: boolean;
+  ctaLabel?: string | null;
+  ctaUrl?: string | null;
+  ctaMode?: Announcement['ctaMode'];
+  accentColor?: string | null;
+  style?: Announcement['style'];
+  startsAt?: string | null;
+  endsAt?: string | null;
+};
 
 export async function createAnnouncement(
   site: 'scago' | 'gansid',
-  data: { title: string; body: string | null; imageUrl: string | null; isActive: boolean },
+  data: AnnouncementInput,
 ): Promise<Announcement | null> {
   const { data: row, error } = await supabase
     .from('announcements')
     .insert({
-      site, title: data.title, body: data.body, image_url: data.imageUrl, is_active: data.isActive,
+      site,
+      title: data.title,
+      body: data.body,
+      image_url: data.imageUrl,
+      is_active: data.isActive,
+      cta_label: data.ctaLabel ?? null,
+      cta_url: data.ctaUrl ?? null,
+      cta_mode: data.ctaMode ?? 'none',
+      accent_color: data.accentColor ?? null,
+      style: data.style ?? 'card',
+      starts_at: data.startsAt ?? null,
+      ends_at: data.endsAt ?? null,
     })
-    .select('*').maybeSingle();
+    .select('*')
+    .maybeSingle();
   if (error) { console.error('createAnnouncement', error); return null; }
   return row ? mapAnnouncementFromDb(row) : null;
 }
@@ -68,6 +110,13 @@ export async function updateAnnouncement(
   if ('imageUrl' in patch) dbPatch.image_url = patch.imageUrl;
   if ('isActive' in patch) dbPatch.is_active = patch.isActive;
   if ('publishedAt' in patch) dbPatch.published_at = patch.publishedAt;
+  if ('ctaLabel' in patch) dbPatch.cta_label = patch.ctaLabel;
+  if ('ctaUrl' in patch) dbPatch.cta_url = patch.ctaUrl;
+  if ('ctaMode' in patch) dbPatch.cta_mode = patch.ctaMode;
+  if ('accentColor' in patch) dbPatch.accent_color = patch.accentColor;
+  if ('style' in patch) dbPatch.style = patch.style;
+  if ('startsAt' in patch) dbPatch.starts_at = patch.startsAt;
+  if ('endsAt' in patch) dbPatch.ends_at = patch.endsAt;
   const { data, error } = await supabase
     .from('announcements').update(dbPatch).eq('id', id).select('*').maybeSingle();
   if (error) { console.error('updateAnnouncement', error); return null; }

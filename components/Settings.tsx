@@ -9,6 +9,7 @@ import { sendTicketEmail } from '../services/smtpService';
 import { supabase } from '../services/supabaseClient';
 import { generateTicketPDF } from '../utils/pdfGenerator';
 import { useNotifications } from './NotificationSystem';
+import { CURRENT_SITE } from '../config/sites';
 
 type TabKey = 'general' | 'email' | 'pdf' | 'diagnostics' | 'pricing-templates' | 'announcements';
 
@@ -169,7 +170,7 @@ const Settings: React.FC = () => {
     { key: 'email', label: 'Email Templates', icon: <Mail className="w-4 h-4" />, show: true },
     { key: 'pdf', label: 'PDF Ticket', icon: <FileText className="w-4 h-4" />, show: true },
     { key: 'pricing-templates', label: 'Pricing Templates', icon: <Tag className="w-4 h-4" />, show: !!settings.feature_pricing_templates },
-    { key: 'announcements', label: 'Announcements', icon: <SendIcon className="w-4 h-4" />, show: true },
+    { key: 'announcements', label: 'Announcements', icon: <SendIcon className="w-4 h-4" />, show: !CURRENT_SITE.portalEnabled },
     { key: 'diagnostics', label: 'System Health', icon: <Activity className="w-4 h-4" />, show: true },
   ];
 

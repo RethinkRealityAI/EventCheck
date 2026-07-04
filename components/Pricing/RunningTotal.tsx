@@ -1,6 +1,8 @@
 import React from 'react';
 import { Sparkles } from 'lucide-react';
 import { formatPrice } from '../../utils/pricing';
+import { isPromoActive, matchBracketToPeriod, promoColors, parseCustomPromoStyle } from '../../utils/pricingPromo';
+import { useLandingContent } from '../Portal/content/ContentProvider';
 import type { PricingTemplate } from '../../types';
 
 export default function RunningTotal({
@@ -8,18 +10,33 @@ export default function RunningTotal({
 }: {
   template: PricingTemplate;
   total: number | null;
-  bracket: { name: string } | null;
+  bracket: { id: string; name: string } | null;
   tier: { name: string } | null;
-  /** Hide the tier pill when the total spans multiple tiers (e.g. mixed-country group). */
   showTier?: boolean;
-  /** Optional override for the "Total" label (e.g. "Group total (4 people)"). */
   label?: string;
-  /** Speaker / promo-required category — show "Free" instead of currency amounts. */
   showAsFree?: boolean;
 }) {
+  const { pricingPromo, fees } = useLandingContent();
+
   if (total == null) return null;
+
+  const promoPeriod = fees.periods.find((p) => p.id === pricingPromo.promoPeriodId);
+  const promoBracket = promoPeriod
+    ? matchBracketToPeriod(template.dateBrackets, promoPeriod.label)
+    : null;
+  const showPromoBadge =
+    isPromoActive(pricingPromo, new Date())
+    && promoBracket?.id === bracket?.id;
+
+  const colorToken = promoColors(pricingPromo);
+  const customStyle = parseCustomPromoStyle(colorToken);
+  const promoClass = customStyle
+    ? 'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-display font-semibold'
+    : `inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-display font-semibold ${colorToken}`;
+
   const bracketName = bracket?.name ?? '';
   const isEarlyBird = /early/i.test(bracketName);
+
   return (
     <div className="sticky bottom-4 mt-6 p-4 bg-white shadow-lg rounded-2xl border border-gansid-outline-variant/30 flex items-center justify-between gap-4">
       <div className="min-w-0">
@@ -30,17 +47,24 @@ export default function RunningTotal({
         {!showAsFree && (
         <div className="flex flex-wrap items-center gap-1.5 mt-2">
           {bracket && (
-            <span
-              className={[
-                'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-display font-semibold',
-                isEarlyBird
-                  ? 'bg-gansid-primary-gradient text-white shadow-sm'
-                  : 'bg-gansid-secondary/10 text-gansid-secondary',
-              ].join(' ')}
-            >
-              {isEarlyBird && <Sparkles className="w-3 h-3" />}
-              {bracket.name}
-            </span>
+            showPromoBadge ? (
+              <span className={promoClass} style={customStyle ?? undefined}>
+                <Sparkles className="w-3 h-3" />
+                {pricingPromo.label}
+              </span>
+            ) : (
+              <span
+                className={[
+                  'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-display font-semibold',
+                  isEarlyBird
+                    ? 'bg-gansid-primary-gradient text-white shadow-sm'
+                    : 'bg-gansid-secondary/10 text-gansid-secondary',
+                ].join(' ')}
+              >
+                {isEarlyBird && <Sparkles className="w-3 h-3" />}
+                {bracket.name}
+              </span>
+            )
           )}
           {showTier && tier && (
             <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-display font-semibold bg-gansid-surface-container-low text-gansid-on-surface/70">

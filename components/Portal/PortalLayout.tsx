@@ -31,25 +31,58 @@ export function PortalLayout() {
 
   const isAdmin = profile?.role === 'admin' || profile?.role === 'super_admin';
 
-  // The initials avatar — a Link to the profile page (NOT a menu toggle).
-  // Frosted glass ring so it reads cleanly against the blue header gradient.
+  // Role → credential label + gradient, mirroring CredentialCard.tsx so the
+  // header pill reads the same standing as the (desktop) credential card.
+  const credentialLabel =
+    profile?.role === 'exhibitor' ? 'Exhibitor'
+    : profile?.role === 'sponsor' ? 'Sponsor'
+    : profile?.role === 'super_admin' ? 'Super Admin'
+    : profile?.role === 'admin' ? 'Admin'
+    : 'Attendee';
+  const credentialGradient =
+    profile?.role === 'exhibitor' ? 'linear-gradient(135deg,#8b2a5e 0%,#5a3575 100%)'
+    : profile?.role === 'sponsor' ? 'linear-gradient(135deg,#2260a1 0%,#1a4880 100%)'
+    : profile?.role === 'super_admin' ? 'linear-gradient(135deg,#78350f 0%,#b45309 100%)'
+    : profile?.role === 'admin' ? 'linear-gradient(135deg,#0f172a 0%,#1a4880 100%)'
+    : 'linear-gradient(135deg,#ba0028 0%,#E0243C 60%,#2260a1 100%)';
+
+  // The initials avatar + a small credential pill beneath it — both link to the
+  // profile page. Frosted glass ring so it reads cleanly against the blue
+  // header gradient. The pill gives mobile a credential presence now that the
+  // dashboard credential card is desktop-only.
   const avatar = (
     <Link
       to="/portal/profile"
-      aria-label="Your profile"
-      className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-white/15 font-display text-sm font-bold text-white shadow-[0_8px_20px_-8px_rgba(0,0,0,0.55)] ring-2 ring-white/45 backdrop-blur-sm transition-transform duration-300 ease-viscous hover:scale-105 focus:outline-none focus-visible:ring-4 focus-visible:ring-white/60"
+      aria-label={`Your profile — ${credentialLabel}`}
+      className="group flex shrink-0 flex-col items-center gap-1 rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
     >
-      {initials}
+      <span className="grid h-10 w-10 place-items-center rounded-full bg-white/15 font-display text-sm font-bold text-white shadow-[0_8px_20px_-8px_rgba(0,0,0,0.55)] ring-2 ring-white/45 backdrop-blur-sm transition-transform duration-300 ease-viscous group-hover:scale-105">
+        {initials}
+      </span>
+      <span
+        className="max-w-[104px] truncate rounded-full px-2.5 py-[3px] text-center font-display text-[9px] font-bold uppercase leading-none tracking-[0.08em] text-white shadow-[0_4px_12px_-4px_rgba(0,0,0,0.5)] ring-1 ring-white/25"
+        style={{ backgroundImage: credentialGradient }}
+      >
+        {credentialLabel}
+      </span>
     </Link>
   );
 
   return (
-    <div className="portal-root min-h-screen relative overflow-hidden">
-      {/* Pure white base */}
-      <div className="absolute inset-0 bg-white -z-10" />
-      {/* Very subtle hue accents tucked into the bottom corners */}
-      <div className="absolute -bottom-48 -left-32 w-[500px] h-[500px] rounded-full bg-gansid-primary opacity-[0.07] blur-3xl -z-10" />
-      <div className="absolute -bottom-48 -right-32 w-[500px] h-[500px] rounded-full bg-gansid-secondary opacity-[0.07] blur-3xl -z-10" />
+    <div className="portal-root relative min-h-screen">
+      {/* Decorative background layer. IMPORTANT: the `overflow-hidden` that clips
+          these blur blobs lives HERE, on a self-contained -z-10 layer — NOT on
+          the page root. Putting overflow-hidden on the scrolling root made the
+          sticky header overlap the first content block (content clipped beneath
+          the header on dashboard / tickets). Isolating the clip keeps the
+          document scroll clean so `position: sticky` reserves space correctly. */}
+      <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
+        {/* Pure white base */}
+        <div className="absolute inset-0 bg-white" />
+        {/* Very subtle hue accents tucked into the bottom corners */}
+        <div className="absolute -bottom-48 -left-32 h-[500px] w-[500px] rounded-full bg-gansid-primary opacity-[0.07] blur-3xl" />
+        <div className="absolute -bottom-48 -right-32 h-[500px] w-[500px] rounded-full bg-gansid-secondary opacity-[0.07] blur-3xl" />
+      </div>
 
       <header
         className="sticky top-0 z-40 shadow-[0_10px_30px_-16px_rgba(18,58,107,0.7)]"
@@ -156,7 +189,10 @@ export function PortalLayout() {
         />
       </header>
 
-      <main className="max-w-7xl mx-auto px-6 py-8">
+      {/* scroll-mt-24 keeps any programmatic scroll-to-top / #anchor target from
+          hiding beneath the sticky header. The content scrolls on the document,
+          so the sticky header now reserves its own space above <main>. */}
+      <main className="mx-auto max-w-7xl scroll-mt-24 px-6 pb-8 pt-6">
         <AuthNoticeBanner className="!px-0 !pt-0 !pb-4" />
         <Outlet />
       </main>

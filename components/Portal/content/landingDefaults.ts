@@ -172,10 +172,12 @@ export const PORTAL_DEFAULTS: PortalContent = {
       mode: 'soon',
     },
     {
-      id: 'venue-info',
-      label: 'Venue Info',
+      id: 'venue',
+      label: 'Venue & Travel',
+      description: 'Host venue & travel info',
       icon: '📍',
-      mode: 'soon',
+      mode: 'iframe',
+      href: 'https://inheritedblooddisorders.world/congress-2026/about-the-gansid-congress-2026/host-venue-travels',
     },
   ],
 };

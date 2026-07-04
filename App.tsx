@@ -746,8 +746,19 @@ export default function App() {
               <Route path="/" element={<Navigate to="/admin" replace />} />
             )}
 
-            {/* Public Form Route */}
-            <Route path="/form/:formId" element={<PublicRegistration />} />
+            {/* Public Form Route — GANSID wraps in ContentProvider so checkout reads CMS promo config */}
+            <Route
+              path="/form/:formId"
+              element={
+                CURRENT_SITE.portalEnabled ? (
+                  <ContentProvider>
+                    <PublicRegistration />
+                  </ContentProvider>
+                ) : (
+                  <PublicRegistration />
+                )
+              }
+            />
 
             {/* Public ticket-download page — opened from the server-sent
                 confirmation email's secure token link. No auth required:

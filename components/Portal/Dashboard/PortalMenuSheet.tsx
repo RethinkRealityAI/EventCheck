@@ -1,30 +1,42 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../AuthContext';
+import { usePortalContent } from '../content/ContentProvider';
+import { IframeViewer } from '../ui/IframeViewer';
+import type { SidebarLink } from '../../../types';
 import { X } from 'lucide-react';
 import {
   UserIcon,
   TicketIcon,
   ShieldIcon,
   LogoutIcon,
+  ClockIcon,
   ChevronRightIcon,
+  iconForSidebarLink,
 } from './navIcons';
 
 /**
  * Premium mobile bottom-sheet menu opened from the floating nav's "Menu" item.
  * Portals to document.body (fixed-position modals must, per repo rule) with a
  * frosted scrim + a rounded, glassy sheet that slides up from the bottom.
- * Holds the account actions that don't fit inline on the bar:
- * Profile, My Tickets, Admin (admins only), Sign Out.
+ *
+ * Comprehensive nav: Profile + My Tickets, then EVERY CMS `sidebarLink`
+ * (Congress website, Program, Venue & Travel, Congress Materials…) so Venue and
+ * the Congress site are reachable here, then Admin (admins only) + Sign Out.
+ * Each Quick Access item keeps its behaviour: external link (`target="_top"`),
+ * iframe (opens {@link IframeViewer}), or a dimmed "soon" placeholder.
  *
  * Styling-only wrapper around existing auth actions — no business logic beyond
  * the same signOut()+navigate('/') the header menu already performs.
  */
 export function PortalMenuSheet({ onClose }: { onClose: () => void }) {
   const { profile, signOut } = useAuth();
+  const { sidebarLinks } = usePortalContent();
   const navigate = useNavigate();
   const isAdmin = profile?.role === 'admin' || profile?.role === 'super_admin';
+  const [iframeLink, setIframeLink] = useState<SidebarLink | null>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -48,9 +60,40 @@ export function PortalMenuSheet({ onClose }: { onClose: () => void }) {
     .toUpperCase();
 
   const rowClass =
-    'group flex items-center gap-3.5 rounded-2xl px-4 py-3.5 text-left transition-colors duration-200 active:bg-black/[0.04]';
+    'group flex w-full items-center gap-3.5 rounded-2xl px-4 py-3.5 text-left transition-colors duration-200 active:bg-black/[0.04]';
   const iconWrap =
     'grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-gansid-primary-gradient text-white shadow-[0_8px_18px_-8px_rgba(186,0,40,0.6)] ring-1 ring-white/25';
+
+  // Shared inner content for a Quick Access row: gradient icon chip + label
+  // (+ optional description) + trailing chevron.
+  const linkRowInner = (link: SidebarLink, Icon: (p: any) => ReactNode, soon: boolean) => (
+    <>
+      <span className={soon ? `${iconWrap} opacity-70` : iconWrap} aria-hidden>
+        {soon ? <ClockIcon className="h-5 w-5" /> : <Icon className="h-5 w-5" />}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-2 font-display text-[15px] font-semibold text-gansid-on-surface">
+          {link.label}
+          {soon && (
+            <span className="rounded-full bg-gansid-on-surface/[0.06] px-1.5 py-0.5 font-body text-[9px] font-bold uppercase tracking-wide text-gansid-on-surface/45">
+              Soon
+            </span>
+          )}
+        </span>
+        {link.description && (
+          <span className="mt-0.5 block truncate font-body text-xs text-gansid-on-surface/50">
+            {link.description}
+          </span>
+        )}
+      </span>
+      {!soon && (
+        <ChevronRightIcon
+          className="h-4.5 w-4.5 shrink-0 text-gansid-on-surface/30 transition-transform duration-300 ease-viscous group-hover:translate-x-0.5"
+          aria-hidden
+        />
+      )}
+    </>
+  );
 
   return createPortal(
     <div
@@ -75,7 +118,7 @@ export function PortalMenuSheet({ onClose }: { onClose: () => void }) {
 
       {/* Sheet */}
       <div
-        className="portal-sheet-up relative w-full rounded-t-[1.75rem] bg-white/95 backdrop-blur-2xl ring-1 ring-black/5 shadow-[0_-24px_60px_-20px_rgba(26,28,28,0.5)] pb-[max(1.25rem,env(safe-area-inset-bottom))]"
+        className="portal-sheet-up relative flex max-h-[88dvh] w-full flex-col rounded-t-[1.75rem] bg-white/95 backdrop-blur-2xl ring-1 ring-black/5 shadow-[0_-24px_60px_-20px_rgba(26,28,28,0.5)] pb-[max(1.25rem,env(safe-area-inset-bottom))]"
       >
         {/* Grabber */}
         <div className="flex justify-center pt-3 pb-1.5">
@@ -112,8 +155,8 @@ export function PortalMenuSheet({ onClose }: { onClose: () => void }) {
 
         <div className="mx-5 h-px bg-gansid-on-surface/[0.07]" />
 
-        {/* Actions */}
-        <nav className="px-2.5 pt-2.5">
+        {/* Actions — scrollable so a long link list never overflows the sheet. */}
+        <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2.5 pt-2.5">
           <Link to="/portal/profile" onClick={onClose} className={rowClass}>
             <span className={iconWrap} aria-hidden>
               <UserIcon className="h-5 w-5" />
@@ -134,6 +177,63 @@ export function PortalMenuSheet({ onClose }: { onClose: () => void }) {
             <ChevronRightIcon className="h-4.5 w-4.5 text-gansid-on-surface/30 transition-transform duration-300 ease-viscous group-hover:translate-x-0.5" aria-hidden />
           </Link>
 
+          {/* CMS Quick Access links — Congress website, Program, Venue & Travel,
+              Congress Materials, etc. */}
+          {(sidebarLinks ?? []).length > 0 && (
+            <div className="my-1.5 px-4">
+              <span className="font-body text-[10px] font-bold uppercase tracking-[0.16em] text-gansid-on-surface/35">
+                Congress
+              </span>
+            </div>
+          )}
+          {(sidebarLinks ?? []).map((link) => {
+            const Icon = iconForSidebarLink(link);
+            const soon = link.mode === 'soon';
+
+            if (soon) {
+              return (
+                <span
+                  key={link.id}
+                  aria-disabled
+                  title={`${link.label} — coming soon`}
+                  className={`${rowClass} cursor-default opacity-50`}
+                >
+                  {linkRowInner(link, Icon, true)}
+                </span>
+              );
+            }
+
+            if (link.mode === 'iframe' && link.href) {
+              return (
+                <button
+                  key={link.id}
+                  type="button"
+                  onClick={() => setIframeLink(link)}
+                  aria-label={`Open ${link.label}`}
+                  className={rowClass}
+                >
+                  {linkRowInner(link, Icon, false)}
+                </button>
+              );
+            }
+
+            return (
+              <a
+                key={link.id}
+                href={link.href}
+                target="_top"
+                rel="noopener noreferrer"
+                aria-label={`${link.label} (opens in a new tab)`}
+                onClick={onClose}
+                className={rowClass}
+              >
+                {linkRowInner(link, Icon, false)}
+              </a>
+            );
+          })}
+
+          <div className="mx-2 my-1.5 h-px bg-gansid-on-surface/[0.07]" />
+
           {isAdmin && (
             <Link to="/admin" onClick={onClose} className={rowClass}>
               <span className={iconWrap} aria-hidden>
@@ -153,7 +253,7 @@ export function PortalMenuSheet({ onClose }: { onClose: () => void }) {
               await signOut();
               navigate('/');
             }}
-            className={`${rowClass} w-full`}
+            className={rowClass}
           >
             <span
               className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-gansid-on-surface/[0.06] text-gansid-primary ring-1 ring-black/[0.04]"
@@ -167,6 +267,14 @@ export function PortalMenuSheet({ onClose }: { onClose: () => void }) {
           </button>
         </nav>
       </div>
+
+      {iframeLink?.href && (
+        <IframeViewer
+          url={iframeLink.href}
+          title={iframeLink.label}
+          onClose={() => setIframeLink(null)}
+        />
+      )}
     </div>,
     document.body,
   );

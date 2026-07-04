@@ -177,7 +177,10 @@ export function PortalDashboard() {
         <VerifyEmailBanner />
         <div className="grid grid-cols-1 items-start gap-8 lg:grid-cols-[1.7fr_1fr] xl:gap-10">
           <div className="space-y-8 min-w-0">
+            {/* Greeting stays at the very top as the first thing. */}
             <WelcomeBlock profile={profile} latestAttendee={latestAttendee} staffOrg={staffOrg} />
+            {/* Announcements right after the greeting — prominent, above the forms. */}
+            <AnnouncementsFeed />
             {userPrimary && (
               <TeamTable
                 primary={userPrimary}
@@ -192,10 +195,14 @@ export function PortalDashboard() {
               userId={user.id}
               onStartRegistration={(id, _opts) => setRegisterFormId(id)}
             />
-            <AnnouncementsFeed />
           </div>
           <aside className="space-y-6 lg:sticky lg:top-24">
-            <CredentialCard profile={profile} attendee={latestPaidAttendee} />
+            {/* Credential card is desktop-only — on mobile the header credential
+                pill (PortalLayout) carries the standing, and the card would push
+                the important content down. */}
+            <div className="hidden lg:block">
+              <CredentialCard profile={profile} attendee={latestPaidAttendee} />
+            </div>
             <TicketsSummaryTile />
             {/* Desktop sidebar Quick Access; on mobile the floating nav takes over */}
             <div className="hidden lg:block">

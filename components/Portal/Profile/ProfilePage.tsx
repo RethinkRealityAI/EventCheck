@@ -70,8 +70,52 @@ export function ProfilePage() {
         <p className="font-body text-sm text-gansid-on-surface/60">Update your details and photo.</p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-6">
-        {/* Left: Personal Details */}
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.6fr] gap-6">
+        {/* Credential / Photo first — the identity block leads the page (above
+            the editable form) on every breakpoint. On desktop it sits in the
+            left column via source order; on mobile it stacks on top. */}
+        <section className="order-first bg-white rounded-gansid-lg p-6 shadow-2xl shadow-gansid-secondary/10 gradient-border flex flex-col items-center text-center">
+          <span className={`${attendeeTypePillGradient} text-white font-display text-[11px] font-bold uppercase tracking-[0.2em] px-4 py-1.5 rounded-full shadow-lg mb-6`}>
+            {attendeeTypeLabel}
+          </span>
+          <div className="relative mb-4">
+            {avatarUrl ? (
+              <img src={avatarUrl} alt="Avatar" className="h-32 w-32 rounded-full object-cover ring-4 ring-white shadow-xl" />
+            ) : (
+              <div className="h-32 w-32 rounded-full bg-gansid-primary-gradient flex items-center justify-center text-white font-display text-3xl shadow-xl ring-4 ring-white">
+                {(profile.fullName ?? profile.email).split(' ').map((s) => s[0]).join('').slice(0, 2).toUpperCase()}
+              </div>
+            )}
+          </div>
+          {profile.fullName && (
+            <div className="font-display text-lg font-bold leading-tight text-gansid-on-surface">{profile.fullName}</div>
+          )}
+          <label className="mt-4 inline-block cursor-pointer px-5 py-2 rounded-full bg-gansid-primary-gradient hover:scale-[1.02] transition-all font-display text-sm font-semibold text-white shadow-lg">
+            {uploadingAvatar ? 'Uploading…' : avatarUrl ? 'Change photo' : 'Upload photo'}
+            <input
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                setUploadingAvatar(true);
+                const url = await uploadAvatar(user.id, file);
+                if (url) {
+                  setAvatarUrl(url);
+                  await updateProfile(user.id, { avatarUrl: url });
+                  await refreshProfile();
+                }
+                setUploadingAvatar(false);
+                e.target.value = '';
+              }}
+            />
+          </label>
+          <p className="text-xs text-gansid-on-surface/50 mt-2">JPG, PNG, or GIF &middot; max ~2MB</p>
+          <p className="text-xs text-gansid-on-surface/40 mt-4">Role changes require support.</p>
+        </section>
+
+        {/* Personal Details */}
         <section className="bg-white rounded-gansid-lg p-6 shadow-2xl shadow-gansid-secondary/10 gradient-border">
           <h2 className="font-display text-lg font-semibold mb-4">Personal Details</h2>
           <form onSubmit={save} className="space-y-3">
@@ -111,45 +155,6 @@ export function ProfilePage() {
               </div>
             </div>
           </form>
-        </section>
-
-        {/* Right: Profile Photo + attendee pill */}
-        <section className="bg-white rounded-gansid-lg p-6 shadow-2xl shadow-gansid-secondary/10 gradient-border flex flex-col items-center text-center">
-          <span className={`${attendeeTypePillGradient} text-white font-display text-[11px] font-bold uppercase tracking-[0.2em] px-4 py-1.5 rounded-full shadow-lg mb-6`}>
-            {attendeeTypeLabel}
-          </span>
-          <div className="relative mb-4">
-            {avatarUrl ? (
-              <img src={avatarUrl} alt="Avatar" className="h-32 w-32 rounded-full object-cover ring-4 ring-white shadow-xl" />
-            ) : (
-              <div className="h-32 w-32 rounded-full bg-gansid-primary-gradient flex items-center justify-center text-white font-display text-3xl shadow-xl ring-4 ring-white">
-                {(profile.fullName ?? profile.email).split(' ').map((s) => s[0]).join('').slice(0, 2).toUpperCase()}
-              </div>
-            )}
-          </div>
-          <label className="inline-block cursor-pointer px-5 py-2 rounded-full bg-gansid-primary-gradient hover:scale-[1.02] transition-all font-display text-sm font-semibold text-white shadow-lg">
-            {uploadingAvatar ? 'Uploading\u2026' : avatarUrl ? 'Change photo' : 'Upload photo'}
-            <input
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={async (e) => {
-                const file = e.target.files?.[0];
-                if (!file) return;
-                setUploadingAvatar(true);
-                const url = await uploadAvatar(user.id, file);
-                if (url) {
-                  setAvatarUrl(url);
-                  await updateProfile(user.id, { avatarUrl: url });
-                  await refreshProfile();
-                }
-                setUploadingAvatar(false);
-                e.target.value = '';
-              }}
-            />
-          </label>
-          <p className="text-xs text-gansid-on-surface/50 mt-2">JPG, PNG, or GIF &middot; max ~2MB</p>
-          <p className="text-xs text-gansid-on-surface/40 mt-4">Role changes require support.</p>
         </section>
       </div>
 

@@ -10,22 +10,28 @@ export function IframeViewer({ url, title, onClose }: { url: string; title?: str
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
   return createPortal(
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div className="relative w-[90vw] h-[90vh] bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-4 py-2 border-b">
-          <span className="font-display font-semibold truncate">{title || url}</span>
-          <div className="flex items-center gap-3">
-            <a href={url} target="_blank" rel="noopener noreferrer" className="text-sm text-gansid-secondary inline-flex items-center gap-1"><ExternalLink className="w-4 h-4" /> Open in new tab</a>
-            <button onClick={onClose} aria-label="Close"><X className="w-5 h-5" /></button>
+    <div className="fixed inset-0 z-[120] bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      {/* Near-full-viewport: fill the screen inset by a small even margin so the
+          embedded content gets essentially all the space. inset-2 ≈ 8px all
+          round. Portaled to document.body; Esc + backdrop close preserved. */}
+      <div
+        className="absolute inset-2 flex flex-col overflow-hidden rounded-xl bg-white shadow-2xl ring-1 ring-black/10 sm:inset-3"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-3 border-b border-black/[0.06] px-3 py-2 sm:px-4">
+          <span className="min-w-0 flex-1 truncate font-display text-sm font-semibold text-gansid-on-surface sm:text-base">{title || url}</span>
+          <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+            <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-gansid-secondary hover:underline sm:text-sm"><ExternalLink className="h-4 w-4" /><span className="hidden sm:inline">Open in new tab</span><span className="sm:hidden">Open</span></a>
+            <button onClick={onClose} aria-label="Close" className="grid h-8 w-8 place-items-center rounded-full text-gansid-on-surface/60 transition-colors hover:bg-black/[0.05] hover:text-gansid-on-surface"><X className="h-5 w-5" /></button>
           </div>
         </div>
         {blocked ? (
-          <div className="flex-1 flex items-center justify-center text-center p-8">
+          <div className="flex flex-1 items-center justify-center p-8 text-center">
             <div><p className="mb-3">This page can't be embedded here.</p>
-              <a href={url} target="_blank" rel="noopener noreferrer" className="px-4 py-2 rounded bg-gansid-primary-gradient text-white inline-flex items-center gap-2"><ExternalLink className="w-4 h-4" /> Open in new tab</a></div>
+              <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 rounded bg-gansid-primary-gradient px-4 py-2 text-white"><ExternalLink className="h-4 w-4" /> Open in new tab</a></div>
           </div>
         ) : (
-          <iframe src={url} title={title || 'preview'} className="flex-1 w-full border-0" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" onError={() => setBlocked(true)} />
+          <iframe src={url} title={title || 'preview'} className="min-h-0 w-full flex-1 border-0" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" onError={() => setBlocked(true)} />
         )}
       </div>
     </div>,

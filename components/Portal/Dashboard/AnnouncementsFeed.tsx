@@ -41,8 +41,8 @@ function AnnouncementCard({
       )}
 
       <div className="p-5 pl-6 sm:p-6 sm:pl-7">
-        <div className="mb-2 inline-flex items-center gap-1.5 rounded-full bg-gansid-surface-container-low px-2.5 py-1 font-body text-[11px] font-semibold uppercase tracking-wide text-gansid-on-surface/55">
-          <Megaphone className="h-3 w-3" />
+        <div className="mb-2.5 inline-flex items-center gap-1.5 rounded-full bg-gansid-primary-gradient px-3.5 py-1.5 font-display text-xs font-bold uppercase tracking-wide text-white shadow-[0_6px_16px_-8px_rgba(186,0,40,0.55)] ring-1 ring-white/15">
+          <Megaphone className="h-3.5 w-3.5 text-white" />
           {new Date(a.publishedAt).toLocaleDateString(undefined, {
             month: 'short',
             day: 'numeric',
