@@ -235,11 +235,11 @@ export function ContentCms() {
   return (
     <div
       ref={shellRef}
-      className="flex h-full max-h-full min-h-0 w-full flex-col overflow-hidden bg-[linear-gradient(180deg,#f8fafc_0%,#f1f5f9_100%)]"
+      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[linear-gradient(180deg,#f8fafc_0%,#f1f5f9_100%)]"
     >
       {/* ── Chrome: always visible ── */}
-      <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-200/80 bg-white px-3 py-2.5 sm:gap-3 sm:px-4 sm:py-3">
-        <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-x-2 gap-y-2 border-b border-slate-200/80 bg-white px-3 py-2.5 sm:gap-3 sm:px-4 sm:py-3">
+        <div className="flex min-w-0 flex-1 items-center gap-2.5 sm:max-w-[min(100%,28rem)] sm:gap-3">
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-gansid-primary-gradient text-white shadow-md ring-1 ring-white/20 sm:h-10 sm:w-10">
             <FileText className="h-4 w-4 sm:h-5 sm:w-5" />
           </span>
@@ -265,7 +265,7 @@ export function ContentCms() {
           </div>
         </div>
 
-        <div className="flex shrink-0 flex-wrap items-center gap-1.5 sm:gap-2">
+        <div className="flex w-full shrink-0 flex-wrap items-center justify-end gap-1.5 sm:w-auto sm:gap-2">
           <CmsButton variant="secondary" onClick={() => setPreviewOpen((o) => !o)} className="!px-2.5 !py-2 sm:!px-3">
             {narrow && previewOpen ? (
               <PanelLeft className="h-4 w-4" />
@@ -293,7 +293,7 @@ export function ContentCms() {
 
       {/* Tabs — full-width chrome, never scrolls away */}
       <nav
-        className="flex shrink-0 gap-0.5 overflow-x-auto border-b border-slate-200/80 bg-white px-2 sm:gap-1 sm:px-4"
+        className="flex shrink-0 gap-0.5 overflow-x-auto overscroll-x-contain border-b border-slate-200/80 bg-white px-2 [-ms-overflow-style:none] [scrollbar-width:none] sm:gap-1 sm:px-4 [&::-webkit-scrollbar]:hidden"
         aria-label="Content sections"
       >
         {TABS.map((t) => {

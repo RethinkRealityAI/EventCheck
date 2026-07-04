@@ -570,17 +570,21 @@ const AdminLayout = () => {
         </div>
       </aside>
 
-      {/* Main Content */}
+      {/* Main Content — flex column so CMS fills remaining width after sidebar padding (never under fixed aside). */}
       <main
-        className={`relative min-h-0 flex-1 transition-all duration-300 ${(isSidebarCollapsed && !isSidebarPinned) ? 'lg:pl-20' : 'lg:pl-72'} ${
+        className={`relative flex min-h-0 min-w-0 flex-1 flex-col transition-all duration-300 ${(isSidebarCollapsed && !isSidebarPinned) ? 'lg:pl-20' : 'lg:pl-72'} ${
           isContentCms
             ? 'overflow-hidden'
             : 'overflow-y-auto pb-28 pt-4 lg:pb-0 lg:pt-0'
         }`}
       >
-        {/* CMS uses absolute fill so header/tabs/save bar stay inside the viewport
-            regardless of React Router’s non-flex route wrappers. */}
-        <div className={isContentCms ? 'absolute inset-0 flex flex-col overflow-hidden' : 'mx-auto w-full p-4 lg:p-6'}>
+        <div
+          className={
+            isContentCms
+              ? 'flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden'
+              : 'mx-auto w-full p-4 lg:p-6'
+          }
+        >
           <Routes>
             <Route path="/" element={
               <ProtectedRoute requirePage="dashboard">
@@ -631,7 +635,14 @@ const AdminLayout = () => {
               </ProtectedRoute>
             } />
             <Route path="/settings" element={<ProtectedRoute requirePage="settings"><Settings /></ProtectedRoute>} />
-            <Route path="/content" element={<ProtectedRoute requirePage="content"><div className="flex h-full min-h-0 w-full flex-col overflow-hidden"><ContentCms /></div></ProtectedRoute>} />
+            <Route
+              path="/content"
+              element={
+                <ProtectedRoute requirePage="content">
+                  <ContentCms />
+                </ProtectedRoute>
+              }
+            />
             <Route path="/seating" element={<ProtectedRoute requirePage="seating"><SeatingConfigurator /></ProtectedRoute>} />
             <Route path="/admins" element={<ProtectedRoute requireSuperAdmin><AdminsManagement /></ProtectedRoute>} />
           </Routes>
