@@ -2,6 +2,18 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, ExternalLink, Loader2 } from 'lucide-react';
 
+/** Admin-curated external embeds (Program, Venue, announcement CTAs). */
+const IFRAME_VIEWER_SANDBOX = [
+  'allow-scripts',
+  'allow-same-origin',
+  'allow-forms',
+  'allow-popups',
+  // Framer/PDF CTAs often open the file in a new tab — without this the popup
+  // inherits the sandbox and the browser blocks the download ("blocked by client").
+  'allow-popups-to-escape-sandbox',
+  'allow-downloads',
+].join(' ');
+
 export function IframeViewer({ url, title, onClose }: { url: string; title?: string; onClose: () => void }) {
   const [blocked, setBlocked] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -58,7 +70,7 @@ export function IframeViewer({ url, title, onClose }: { url: string; title?: str
               src={url}
               title={title || 'preview'}
               className="min-h-0 h-full w-full border-0"
-              sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+              sandbox={IFRAME_VIEWER_SANDBOX}
               onLoad={handleLoad}
               onError={() => setBlocked(true)}
             />
