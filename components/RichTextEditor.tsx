@@ -1,14 +1,21 @@
 import React, { useRef, useEffect } from 'react';
 import { Bold, Italic, Underline, List, AlignLeft, AlignCenter, Type, Link as LinkIcon, Image, Palette } from 'lucide-react';
 
+type ToolbarButtonKey = 'bold' | 'italic' | 'underline' | 'link' | 'list' | 'fontSize' | 'image' | 'color';
+
 interface RichTextEditorProps {
   value: string;
   onChange: (html: string) => void;
   className?: string;
   placeholder?: string;
+  /**
+   * Optional scoped toolbar. When provided, renders ONLY these buttons, in this order.
+   * When omitted, the full default toolbar renders unchanged (backward-compatible).
+   */
+  toolbar?: ToolbarButtonKey[];
 }
 
-const RichTextEditor: React.FC<RichTextEditorProps> = ({ value, onChange, className = '', placeholder }) => {
+const RichTextEditor: React.FC<RichTextEditorProps> = ({ value, onChange, className = '', placeholder, toolbar }) => {
   const editorRef = useRef<HTMLDivElement>(null);
 
   // Sync value to innerHTML only when not focused or empty to prevent cursor jumping
@@ -65,29 +72,51 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({ value, onChange, classN
     </button>
   );
 
+  const fontSizeSelect = (
+    <select
+      key="fontSize"
+      onChange={(e) => changeFontSize(e.target.value)}
+      className="text-xs border-gray-200 rounded px-1 py-1 text-gray-600 focus:outline-none cursor-pointer"
+    >
+      <option value="3">Normal</option>
+      <option value="5">Large</option>
+      <option value="7">Huge</option>
+    </select>
+  );
+
+  const scopedToolbarButtons: Partial<Record<ToolbarButtonKey, React.ReactNode>> = {
+    bold: <ToolbarButton key="bold" icon={Bold} action={() => exec('bold')} title="Bold" />,
+    italic: <ToolbarButton key="italic" icon={Italic} action={() => exec('italic')} title="Italic" />,
+    underline: <ToolbarButton key="underline" icon={Underline} action={() => exec('underline')} title="Underline" />,
+    fontSize: fontSizeSelect,
+    color: <ToolbarButton key="color" icon={Palette} action={changeColor} title="Text Color" />,
+    list: <ToolbarButton key="list" icon={List} action={() => exec('insertUnorderedList')} title="Bullet List" />,
+    link: <ToolbarButton key="link" icon={LinkIcon} action={addLink} title="Insert Link" />,
+    image: <ToolbarButton key="image" icon={Image} action={addImage} title="Insert Image" />,
+  };
+
   return (
     <div className={`border border-gray-300 rounded-lg overflow-hidden flex flex-col bg-white ${className}`}>
       <div className="flex items-center gap-1 p-2 border-b border-gray-100 bg-gray-50 flex-wrap">
-        <ToolbarButton icon={Bold} action={() => exec('bold')} title="Bold" />
-        <ToolbarButton icon={Italic} action={() => exec('italic')} title="Italic" />
-        <ToolbarButton icon={Underline} action={() => exec('underline')} title="Underline" />
-        <div className="w-px h-4 bg-gray-300 mx-1" />
-        <select
-          onChange={(e) => changeFontSize(e.target.value)}
-          className="text-xs border-gray-200 rounded px-1 py-1 text-gray-600 focus:outline-none cursor-pointer"
-        >
-          <option value="3">Normal</option>
-          <option value="5">Large</option>
-          <option value="7">Huge</option>
-        </select>
-        <ToolbarButton icon={Palette} action={changeColor} title="Text Color" />
-        <div className="w-px h-4 bg-gray-300 mx-1" />
-        <ToolbarButton icon={AlignLeft} action={() => exec('justifyLeft')} title="Align Left" />
-        <ToolbarButton icon={AlignCenter} action={() => exec('justifyCenter')} title="Align Center" />
-        <ToolbarButton icon={List} action={() => exec('insertUnorderedList')} title="Bullet List" />
-        <div className="w-px h-4 bg-gray-300 mx-1" />
-        <ToolbarButton icon={LinkIcon} action={addLink} title="Insert Link" />
-        <ToolbarButton icon={Image} action={addImage} title="Insert Image" />
+        {toolbar ? (
+          toolbar.map((key) => scopedToolbarButtons[key] ?? null)
+        ) : (
+          <>
+            <ToolbarButton icon={Bold} action={() => exec('bold')} title="Bold" />
+            <ToolbarButton icon={Italic} action={() => exec('italic')} title="Italic" />
+            <ToolbarButton icon={Underline} action={() => exec('underline')} title="Underline" />
+            <div className="w-px h-4 bg-gray-300 mx-1" />
+            {fontSizeSelect}
+            <ToolbarButton icon={Palette} action={changeColor} title="Text Color" />
+            <div className="w-px h-4 bg-gray-300 mx-1" />
+            <ToolbarButton icon={AlignLeft} action={() => exec('justifyLeft')} title="Align Left" />
+            <ToolbarButton icon={AlignCenter} action={() => exec('justifyCenter')} title="Align Center" />
+            <ToolbarButton icon={List} action={() => exec('insertUnorderedList')} title="Bullet List" />
+            <div className="w-px h-4 bg-gray-300 mx-1" />
+            <ToolbarButton icon={LinkIcon} action={addLink} title="Insert Link" />
+            <ToolbarButton icon={Image} action={addImage} title="Insert Image" />
+          </>
+        )}
       </div>
 
       <div
