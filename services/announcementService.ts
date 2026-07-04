@@ -12,6 +12,13 @@ export function mapAnnouncementFromDb(row: any): Announcement {
     publishedAt: row.published_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    ctaLabel: row.cta_label ?? null,
+    ctaUrl: row.cta_url ?? null,
+    ctaMode: row.cta_mode ?? 'none',
+    accentColor: row.accent_color ?? null,
+    style: row.style ?? 'card',
+    startsAt: row.starts_at ?? null,
+    endsAt: row.ends_at ?? null,
   };
 }
 
