@@ -1,12 +1,18 @@
 import React from 'react';
 import { Sparkles } from 'lucide-react';
 import { formatPrice } from '../../utils/pricing';
-import { isPromoActive, matchBracketToPeriod, promoColors, parseCustomPromoStyle } from '../../utils/pricingPromo';
+import {
+  isPromoActive,
+  matchBracketToPeriod,
+  promoColors,
+  parseCustomPromoStyle,
+  shouldShowForCategory,
+} from '../../utils/pricingPromo';
 import { useLandingContent } from '../Portal/content/ContentProvider';
 import type { PricingTemplate } from '../../types';
 
 export default function RunningTotal({
-  template, total, bracket, tier, showTier = true, label, showAsFree = false,
+  template, total, bracket, tier, showTier = true, label, showAsFree = false, categoryKey,
 }: {
   template: PricingTemplate;
   total: number | null;
@@ -15,6 +21,8 @@ export default function RunningTotal({
   showTier?: boolean;
   label?: string;
   showAsFree?: boolean;
+  /** Pricing-template category name; must match fees-table category strings when promo is scoped. */
+  categoryKey?: string | null;
 }) {
   const { pricingPromo, fees } = useLandingContent();
 
@@ -24,9 +32,14 @@ export default function RunningTotal({
   const promoBracket = promoPeriod
     ? matchBracketToPeriod(template.dateBrackets, promoPeriod.label)
     : null;
+  const categoryOk =
+    categoryKey == null
+      ? pricingPromo.categories === 'all'
+      : shouldShowForCategory(pricingPromo, categoryKey);
   const showPromoBadge =
     isPromoActive(pricingPromo, new Date())
-    && promoBracket?.id === bracket?.id;
+    && promoBracket?.id === bracket?.id
+    && categoryOk;
 
   const colorToken = promoColors(pricingPromo);
   const customStyle = parseCustomPromoStyle(colorToken);

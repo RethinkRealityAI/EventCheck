@@ -94,6 +94,15 @@ export const REQUIRED_APP_COLUMNS = {
     'pricing_bracket',
     'pricing_category_id',
   ],
+  announcements: [
+    'cta_label',
+    'cta_url',
+    'cta_mode',
+    'accent_color',
+    'style',
+    'starts_at',
+    'ends_at',
+  ],
 };
 
 /** Merge migration-derived + app-required columns. */

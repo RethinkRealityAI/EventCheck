@@ -1,19 +1,35 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, ExternalLink } from 'lucide-react';
+import { X, ExternalLink, Loader2 } from 'lucide-react';
 
 export function IframeViewer({ url, title, onClose }: { url: string; title?: string; onClose: () => void }) {
   const [blocked, setBlocked] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const loadedRef = useRef(false);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
+
+  useEffect(() => {
+    loadedRef.current = false;
+    setLoading(true);
+    setBlocked(false);
+    const t = window.setTimeout(() => {
+      if (!loadedRef.current) setBlocked(true);
+    }, 8000);
+    return () => window.clearTimeout(t);
+  }, [url]);
+
+  const handleLoad = () => {
+    loadedRef.current = true;
+    setLoading(false);
+  };
+
   return createPortal(
     <div className="fixed inset-0 z-[120] bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      {/* Near-full-viewport: fill the screen inset by a small even margin so the
-          embedded content gets essentially all the space. inset-2 ≈ 8px all
-          round. Portaled to document.body; Esc + backdrop close preserved. */}
       <div
         className="absolute inset-2 flex flex-col overflow-hidden rounded-xl bg-white shadow-2xl ring-1 ring-black/10 sm:inset-3"
         onClick={(e) => e.stopPropagation()}
@@ -26,12 +42,27 @@ export function IframeViewer({ url, title, onClose }: { url: string; title?: str
           </div>
         </div>
         {blocked ? (
-          <div className="flex flex-1 items-center justify-center p-8 text-center">
-            <div><p className="mb-3">This page can't be embedded here.</p>
-              <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 rounded bg-gansid-primary-gradient px-4 py-2 text-white"><ExternalLink className="h-4 w-4" /> Open in new tab</a></div>
+          <div className="flex flex-1 flex-col items-center justify-center p-8 text-center">
+            <p className="mb-2 font-display font-semibold text-gansid-on-surface">This page can&apos;t be embedded here</p>
+            <p className="mb-5 text-sm text-gansid-on-surface/60 max-w-md">The site may block iframes. Open it in a new tab instead.</p>
+            <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 rounded-full bg-gansid-primary-gradient px-5 py-2.5 font-display text-sm font-bold text-white shadow-lg"><ExternalLink className="h-4 w-4" /> Open in new tab</a>
           </div>
         ) : (
-          <iframe src={url} title={title || 'preview'} className="min-h-0 w-full flex-1 border-0" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" onError={() => setBlocked(true)} />
+          <div className="relative min-h-0 flex-1">
+            {loading && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/80">
+                <Loader2 className="h-8 w-8 animate-spin text-gansid-secondary" />
+              </div>
+            )}
+            <iframe
+              src={url}
+              title={title || 'preview'}
+              className="min-h-0 h-full w-full border-0"
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+              onLoad={handleLoad}
+              onError={() => setBlocked(true)}
+            />
+          </div>
         )}
       </div>
     </div>,

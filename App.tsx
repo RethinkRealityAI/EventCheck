@@ -37,6 +37,7 @@ import {
   type AdminPageKey,
 } from './utils/adminPermissions';
 import { computeDonationPool } from './utils/donationPool';
+import { isCmsPreviewHash } from './utils/cmsPreview';
 
 const NavLink = ({ to, icon: Icon, children, collapsed }: { to: string, icon: any, children?: React.ReactNode, collapsed?: boolean }) => {
   const location = useLocation();
@@ -706,11 +707,10 @@ const ProtectedRoute = ({ children, requireRole, requireSuperAdmin, requirePage 
   return <>{children}</>;
 };
 
-// HashRouter puts query params inside location.hash (e.g. `#/?cmsPreview=1` or
-// `#/portal?cmsPreview=1`), not location.search — so we test the hash here.
-// Computed once at module scope: it only needs to reflect the URL at initial
-// load, and the CMS preview iframe never navigates within itself afterward.
-const isPreview = typeof window !== 'undefined' && /[?&]cmsPreview=1(&|$)/.test(window.location.hash);
+// HashRouter puts query params inside location.hash (e.g. `#/?cmsPreview=1`).
+// Computed once at module scope: the CMS preview iframe boots with this URL and
+// does not client-navigate away from it.
+const isPreview = typeof window !== 'undefined' && isCmsPreviewHash();
 
 export default function App() {
   return (

@@ -1,5 +1,7 @@
 import type { Profile, Attendee } from '../../../types';
 import { CalendarDays } from 'lucide-react';
+import { usePortalContent } from '../content/ContentProvider';
+import { sanitizeHtml } from '../../../utils/sanitizeHtml';
 
 interface Props {
   profile: Profile;
@@ -17,12 +19,15 @@ function daysUntilCongress(): number {
 }
 
 export function WelcomeBlock({ profile, latestAttendee, staffOrg }: Props) {
+  const { intro } = usePortalContent();
   const firstName = (profile.fullName ?? profile.email).split(' ')[0];
-  const subhead = !latestAttendee
+  const defaultSubhead = !latestAttendee
     ? 'Complete your Congress registration to receive your credential.'
     : (latestAttendee as any).paymentStatus === 'paid'
     ? 'Your GANSID 2026 credential is ready.'
     : 'Awaiting payment confirmation for your Congress registration.';
+  const customSubHtml = intro?.subheadingHtml?.trim();
+  const welcomePrefix = intro?.heading?.trim() || 'Welcome back';
 
   const days = daysUntilCongress();
 
@@ -41,10 +46,19 @@ export function WelcomeBlock({ profile, latestAttendee, staffOrg }: Props) {
           )}
         </div>
         <h1 className="font-display font-bold text-4xl md:text-5xl leading-tight">
-          <span className="text-gansid-secondary">Welcome back,</span>{' '}
+          <span className="text-gansid-secondary">{welcomePrefix},</span>{' '}
           <span className="bg-gansid-primary-gradient bg-clip-text text-transparent">{firstName}</span>
         </h1>
-        <p className="font-body text-gansid-on-surface/70 mt-3 text-lg">{subhead}</p>
+        <p className="font-body text-gansid-on-surface/70 mt-3 text-lg">
+          {customSubHtml ? (
+            <span
+              className="[&_p]:inline [&_a]:text-gansid-secondary [&_a]:underline"
+              dangerouslySetInnerHTML={{ __html: sanitizeHtml(customSubHtml) }}
+            />
+          ) : (
+            defaultSubhead
+          )}
+        </p>
         {staffOrg && (
           <p className="font-body text-sm text-gansid-on-surface/70 mt-1">
             Attending with <strong>{staffOrg}</strong>

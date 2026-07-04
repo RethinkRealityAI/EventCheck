@@ -7,17 +7,29 @@ import { FeesSection } from './FeesSection';
 import { RegistrationOverview } from './RegistrationOverview';
 import { useAuth } from '../../AuthContext';
 import { AuthNoticeBanner } from '../../AuthNoticeBanner';
+import { cmsPreviewSection, isCmsPreviewHash } from '../../../utils/cmsPreview';
 
 export function Landing() {
   const navigate = useNavigate();
   const { user, loading: authLoading, authNotice } = useAuth();
+  const preview = isCmsPreviewHash();
 
   // Verified users on the public home page → portal. Skip when showing an auth
   // error (expired link) so they can use Sign In + resend on the landing panel.
+  // Also skip in CMS preview so admins can edit the public landing while signed in.
   useEffect(() => {
-    if (authLoading || authNotice || !user?.email_confirmed_at) return;
+    if (preview || authLoading || authNotice || !user?.email_confirmed_at) return;
     navigate('/portal', { replace: true });
-  }, [authLoading, authNotice, user, navigate]);
+  }, [preview, authLoading, authNotice, user, navigate]);
+
+  // Pricing tab in the CMS scrolls the live preview to the fees block.
+  useEffect(() => {
+    if (!preview || cmsPreviewSection() !== 'fees') return;
+    const t = window.setTimeout(() => {
+      document.getElementById('cms-fees')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 120);
+    return () => window.clearTimeout(t);
+  }, [preview]);
 
   return (
     <div className="portal-root min-h-screen relative overflow-hidden">
@@ -33,7 +45,7 @@ export function Landing() {
           <AuthPanel />
         </div>
       </section>
-      <section className="max-w-7xl mx-auto px-1.5 sm:px-6 pt-8 pb-4 relative">
+      <section id="cms-fees" className="max-w-7xl mx-auto px-1.5 sm:px-6 pt-8 pb-4 relative scroll-mt-6">
         <FeesSection />
       </section>
       <section className="max-w-7xl mx-auto px-6 pt-8 pb-2 relative">

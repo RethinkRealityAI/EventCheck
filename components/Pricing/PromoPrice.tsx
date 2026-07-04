@@ -17,7 +17,7 @@ export function PromoPrice({
   compact?: boolean;
 }) {
   if (!isPromoActive(config, new Date())) {
-    return <span>${newPrice}</span>;
+    return <span>{formatPrice(newPrice * 100, currency)}</span>;
   }
 
   const colorToken = promoColors(config);
@@ -33,11 +33,11 @@ export function PromoPrice({
       <span className="flex flex-wrap items-center justify-center gap-1.5">
         {typeof oldPrice === 'number' && oldPrice > newPrice && (
           <span className="text-gansid-on-surface/45 line-through decoration-2">
-            {currency === 'USD' ? `$${oldPrice}` : formatPrice(oldPrice * 100, currency)}
+            {formatPrice(oldPrice * 100, currency)}
           </span>
         )}
         <span className="font-display font-bold text-emerald-700">
-          {currency === 'USD' ? `$${newPrice}` : formatPrice(newPrice * 100, currency)}
+          {formatPrice(newPrice * 100, currency)}
         </span>
         <span className={pillClass} style={pillStyle}>
           {config.label}

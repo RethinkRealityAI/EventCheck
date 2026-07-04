@@ -40,14 +40,12 @@ export function parseCustomPromoStyle(token: string): { backgroundColor: string;
   return { backgroundColor: bg, color: text ?? '#ffffff' };
 }
 
-/** Match CMS fee period label to a pricing-engine bracket (case-insensitive name). */
+/** Match CMS fee period label to a pricing-engine bracket (exact, case-insensitive). */
 export function matchBracketToPeriod(
   brackets: DateBracket[],
   periodLabel: string,
 ): DateBracket | null {
   const needle = periodLabel.trim().toLowerCase();
   if (!needle) return null;
-  return brackets.find((b) => b.name.trim().toLowerCase() === needle)
-    ?? brackets.find((b) => b.name.trim().toLowerCase().includes(needle))
-    ?? null;
+  return brackets.find((b) => b.name.trim().toLowerCase() === needle) ?? null;
 }

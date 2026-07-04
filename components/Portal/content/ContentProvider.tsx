@@ -14,8 +14,8 @@ export function usePortalContent() { return useContext(ContentContext).portal; }
 // postMessage from the CMS editor parent (live preview). Otherwise fetch the
 // published content from site_content and merge over defaults.
 export function ContentProvider({ children, previewMode = false }: { children: ReactNode; previewMode?: boolean }) {
-  const [landingOv, setLandingOv] = useState<any>({});
-  const [portalOv, setPortalOv] = useState<any>({});
+  const [landingOv, setLandingOv] = useState<Record<string, unknown>>({});
+  const [portalOv, setPortalOv] = useState<Record<string, unknown>>({});
 
   useEffect(() => {
     if (previewMode) return;
@@ -28,8 +28,13 @@ export function ContentProvider({ children, previewMode = false }: { children: R
     const onMsg = (e: MessageEvent) => {
       if (e.origin !== window.location.origin) return; // same-origin only
       if (e.data?.type === 'cms-preview') {
-        if (e.data.page === 'landing') setLandingOv(e.data.content ?? {});
-        if (e.data.page === 'portal') setPortalOv(e.data.content ?? {});
+        const payload = e.data.content;
+        const ov =
+          payload && typeof payload === 'object' && !Array.isArray(payload)
+            ? (payload as Record<string, unknown>)
+            : {};
+        if (e.data.page === 'landing') setLandingOv(ov);
+        if (e.data.page === 'portal') setPortalOv(ov);
       }
     };
     window.addEventListener('message', onMsg);

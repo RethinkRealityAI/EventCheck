@@ -1,5 +1,6 @@
 import React from 'react';
 import { X, ChevronUp, ChevronDown, Plus } from 'lucide-react';
+import { CmsButton, CmsFieldLabel, cmsInputClass } from '../cmsUi';
 
 export function RepeaterField<T>({
   label,
@@ -42,44 +43,44 @@ export function RepeaterField<T>({
     onChange([...items, newItem()]);
   };
 
+  const iconBtn =
+    'p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent';
+
   return (
     <div className="block">
-      <span className="block text-sm font-medium text-slate-700 mb-1">{label}</span>
+      <CmsFieldLabel>{label}</CmsFieldLabel>
       <div className="space-y-3">
         {items.map((item, index) => {
-          const key = (item as any)?.id ?? index;
+          const key = (item as { id?: string })?.id ?? index;
           return (
-            <div key={key} className="border border-slate-200 rounded-xl p-4 bg-slate-50/60">
-              <div className="flex items-start justify-between gap-2 mb-3">
-                <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+            <div
+              key={key}
+              className="rounded-xl border border-slate-200/90 bg-slate-50/50 p-4 shadow-sm ring-1 ring-slate-100"
+            >
+              <div className="mb-3 flex items-start justify-between gap-2">
+                <span className="rounded-full bg-white px-2.5 py-0.5 text-[10px] font-display font-bold uppercase tracking-wider text-slate-400 ring-1 ring-slate-200">
                   Item {index + 1}
                 </span>
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => moveUp(index)}
-                    disabled={index === 0}
-                    className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded disabled:opacity-30 disabled:cursor-not-allowed"
-                    title="Move up"
-                  >
-                    <ChevronUp className="w-4 h-4" />
+                <div className="flex items-center gap-0.5">
+                  <button type="button" onClick={() => moveUp(index)} disabled={index === 0} className={iconBtn} title="Move up">
+                    <ChevronUp className="h-4 w-4" />
                   </button>
                   <button
                     type="button"
                     onClick={() => moveDown(index)}
                     disabled={index === items.length - 1}
-                    className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded disabled:opacity-30 disabled:cursor-not-allowed"
+                    className={iconBtn}
                     title="Move down"
                   >
-                    <ChevronDown className="w-4 h-4" />
+                    <ChevronDown className="h-4 w-4" />
                   </button>
                   <button
                     type="button"
                     onClick={() => removeAt(index)}
-                    className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded"
+                    className="p-1.5 rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50 transition"
                     title="Remove"
                   >
-                    <X className="w-4 h-4" />
+                    <X className="h-4 w-4" />
                   </button>
                 </div>
               </div>
@@ -88,13 +89,9 @@ export function RepeaterField<T>({
           );
         })}
       </div>
-      <button
-        type="button"
-        onClick={addItem}
-        className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded-lg transition"
-      >
-        <Plus className="w-4 h-4" /> Add
-      </button>
+      <CmsButton variant="ghost" onClick={addItem} className="mt-3 !px-3 !py-2 text-[#2260a1]">
+        <Plus className="h-4 w-4" /> Add item
+      </CmsButton>
     </div>
   );
 }

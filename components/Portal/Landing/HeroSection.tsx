@@ -30,6 +30,12 @@ export function HeroSection() {
         className="font-body text-gansid-on-surface/80 text-xl leading-relaxed max-w-xl [&_p]:mb-0"
         dangerouslySetInnerHTML={{ __html: sanitizeHtml(hero.introHtml) }}
       />
+
+      {hero.imageUrl && (
+        <div className="overflow-hidden rounded-2xl shadow-[0_20px_50px_-24px_rgba(26,28,28,0.45)] ring-1 ring-black/5 max-w-xl">
+          <img src={hero.imageUrl} alt="" className="w-full max-h-72 object-cover" />
+        </div>
+      )}
     </div>
   );
 }

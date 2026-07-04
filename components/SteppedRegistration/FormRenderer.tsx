@@ -466,6 +466,11 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                   showTier={registrationMode !== 'group'}
                   showAsFree={maskSpeakerPricing && registrationMode !== 'group'}
                   label={registrationMode === 'group' ? `Total (${1 + groupMembers.length} people — you + ${groupMembers.length} additional)` : undefined}
+                  categoryKey={
+                    registrationMode === 'group'
+                      ? null
+                      : (pricingTemplate.categories.find((c) => c.id === selectedCategoryId)?.name ?? null)
+                  }
                 />
               </div>
             ) : (

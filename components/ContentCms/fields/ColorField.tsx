@@ -1,4 +1,5 @@
 import React from 'react';
+import { CmsFieldLabel, cmsInputClass } from '../cmsUi';
 
 export function ColorField({
   label,
@@ -13,23 +14,23 @@ export function ColorField({
 }) {
   return (
     <div className="block">
-      <span className="block text-sm font-medium text-slate-700 mb-1">{label}</span>
+      <CmsFieldLabel>{label}</CmsFieldLabel>
       {presets && presets.length > 0 && (
-        <div className="flex flex-wrap gap-2 mb-2">
+        <div className="mb-3 flex flex-wrap gap-2">
           {presets.map((preset) => (
             <button
               key={preset.value}
               type="button"
               onClick={() => onChange(preset.value)}
               title={preset.label}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition ${
+              className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-semibold transition-all ${
                 value === preset.value
-                  ? 'border-indigo-500 ring-2 ring-indigo-200 bg-indigo-50 text-indigo-700'
-                  : 'border-slate-300 text-slate-600 hover:bg-slate-50'
+                  ? 'border-[#2260a1] ring-2 ring-[#2260a1]/25 bg-[#2260a1]/5 text-[#1a4880]'
+                  : 'border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50'
               }`}
             >
               <span
-                className="w-3.5 h-3.5 rounded-full border border-black/10 flex-shrink-0"
+                className="h-4 w-4 shrink-0 rounded-full ring-1 ring-black/10"
                 style={{ backgroundColor: preset.value }}
               />
               {preset.label}
@@ -40,16 +41,16 @@ export function ColorField({
       <div className="flex items-center gap-2">
         <input
           type="color"
-          value={/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value) ? value : '#000000'}
+          value={/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value) ? value : '#ba0028'}
           onChange={(e) => onChange(e.target.value)}
-          className="w-10 h-10 p-0.5 border border-slate-300 rounded-lg cursor-pointer bg-white"
+          className="h-11 w-11 cursor-pointer rounded-xl border border-slate-200 bg-white p-1 shadow-sm"
         />
         <input
           type="text"
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder="#RRGGBB"
-          className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+          className={`${cmsInputClass} flex-1 font-mono`}
         />
       </div>
     </div>

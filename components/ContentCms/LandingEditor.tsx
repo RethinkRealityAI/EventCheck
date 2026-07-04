@@ -1,53 +1,12 @@
-import React, { useState } from 'react';
+import React from 'react';
 import type { Faq, LandingContent, RegistrationStep } from '../../types';
 import { LANDING_DEFAULTS } from '../Portal/content/landingDefaults';
 import { PlainField } from './fields/PlainField';
 import { RichField } from './fields/RichField';
 import { StringListField } from './fields/StringListField';
 import { RepeaterField } from './fields/RepeaterField';
-
-function SectionCard({
-  title,
-  description,
-  onReset,
-  children,
-  defaultOpen = false,
-}: {
-  title: string;
-  description?: string;
-  onReset: () => void;
-  children: React.ReactNode;
-  defaultOpen?: boolean;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <div className="border border-slate-200 rounded-xl bg-white shadow-sm overflow-hidden">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center justify-between gap-3 px-5 py-4 text-left hover:bg-slate-50"
-      >
-        <div>
-          <h4 className="font-semibold text-slate-900">{title}</h4>
-          {description && <p className="text-sm text-slate-500 mt-0.5">{description}</p>}
-        </div>
-        <span className="text-slate-400 text-sm">{open ? '−' : '+'}</span>
-      </button>
-      {open && (
-        <div className="px-5 pb-5 space-y-4 border-t border-slate-100 pt-4">
-          {children}
-          <button
-            type="button"
-            onClick={onReset}
-            className="text-sm text-slate-500 hover:text-indigo-600 underline"
-          >
-            Reset section to default
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
+import { ImageUploadField } from './fields/ImageUploadField';
+import { SectionCard } from './cmsUi';
 
 export function LandingEditor({
   draft,
@@ -61,26 +20,35 @@ export function LandingEditor({
   };
 
   return (
-    <div className="max-w-3xl mx-auto space-y-4">
+    <div className="space-y-4">
       <SectionCard
         title="Hero"
-        description="Top banner on the landing page"
+        description="Top banner — badge, dates, intro, and optional hero image"
         defaultOpen
+        accent="red"
         onReset={() => onChange({ ...draft, hero: LANDING_DEFAULTS.hero })}
       >
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <PlainField label="Badge" value={draft.hero.badge} onChange={(v) => patchHero({ badge: v })} />
-          <PlainField label="Eyebrow" value={draft.hero.eyebrow} onChange={(v) => patchHero({ eyebrow: v })} />
+          <PlainField label="Badge" value={draft.hero.badge} onChange={(v) => patchHero({ badge: v })} placeholder="REGISTER ONE, GET ONE FREE!" />
+          <PlainField label="Eyebrow" value={draft.hero.eyebrow} onChange={(v) => patchHero({ eyebrow: v })} placeholder="GANSID Congress 2026" />
           <PlainField label="Location" value={draft.hero.location} onChange={(v) => patchHero({ location: v })} />
           <PlainField label="Dates" value={draft.hero.dates} onChange={(v) => patchHero({ dates: v })} />
           <PlainField label="Venue" value={draft.hero.venue} onChange={(v) => patchHero({ venue: v })} />
-          <PlainField label="CTA Label" value={draft.hero.ctaLabel} onChange={(v) => patchHero({ ctaLabel: v })} />
+          <PlainField label="CTA label" value={draft.hero.ctaLabel} onChange={(v) => patchHero({ ctaLabel: v })} placeholder="Register Now!" />
         </div>
-        <RichField label="Intro" value={draft.hero.introHtml} onChange={(html) => patchHero({ introHtml: html })} />
+        <RichField label="Intro paragraph" value={draft.hero.introHtml} onChange={(html) => patchHero({ introHtml: html })} />
+        <ImageUploadField
+          label="Hero image (optional)"
+          hint="Wide banner shown below the intro. Leave empty for text-only hero."
+          value={draft.hero.imageUrl}
+          onChange={(imageUrl) => patchHero({ imageUrl })}
+        />
       </SectionCard>
 
       <SectionCard
-        title="Registration Process"
+        title="Registration process"
+        description="Three-step cards on the About tab"
+        accent="blue"
         onReset={() => onChange({ ...draft, registrationProcess: LANDING_DEFAULTS.registrationProcess })}
       >
         <RepeaterField<RegistrationStep>
@@ -108,49 +76,33 @@ export function LandingEditor({
       </SectionCard>
 
       <SectionCard
-        title="Important Notice"
+        title="Important notice"
         onReset={() => onChange({ ...draft, importantNoticeHtml: LANDING_DEFAULTS.importantNoticeHtml })}
       >
-        <RichField
-          label="Notice"
-          value={draft.importantNoticeHtml}
-          onChange={(html) => onChange({ ...draft, importantNoticeHtml: html })}
-        />
+        <RichField label="Notice" value={draft.importantNoticeHtml} onChange={(html) => onChange({ ...draft, importantNoticeHtml: html })} />
       </SectionCard>
 
       <SectionCard
-        title="Group Registration"
+        title="Group registration"
         onReset={() => onChange({ ...draft, groupNoteHtml: LANDING_DEFAULTS.groupNoteHtml })}
       >
-        <RichField
-          label="Group note"
-          value={draft.groupNoteHtml}
-          onChange={(html) => onChange({ ...draft, groupNoteHtml: html })}
-        />
+        <RichField label="Group note" value={draft.groupNoteHtml} onChange={(html) => onChange({ ...draft, groupNoteHtml: html })} />
       </SectionCard>
 
       <SectionCard
-        title="What's Included / Not Included"
+        title="What's included / not included"
         onReset={() => onChange({
           ...draft,
           includes: LANDING_DEFAULTS.includes,
           notIncluded: LANDING_DEFAULTS.notIncluded,
         })}
       >
-        <StringListField
-          label="Included"
-          items={draft.includes}
-          onChange={(includes) => onChange({ ...draft, includes })}
-        />
-        <StringListField
-          label="Not included"
-          items={draft.notIncluded}
-          onChange={(notIncluded) => onChange({ ...draft, notIncluded })}
-        />
+        <StringListField label="Included" items={draft.includes} onChange={(includes) => onChange({ ...draft, includes })} />
+        <StringListField label="Not included" items={draft.notIncluded} onChange={(notIncluded) => onChange({ ...draft, notIncluded })} />
       </SectionCard>
 
       <SectionCard
-        title="FAQs"
+        title="FAQs & support"
         onReset={() => onChange({ ...draft, faqs: LANDING_DEFAULTS.faqs, supportEmail: LANDING_DEFAULTS.supportEmail })}
       >
         <RepeaterField<Faq>
@@ -165,11 +117,7 @@ export function LandingEditor({
             </div>
           )}
         />
-        <PlainField
-          label="Support email"
-          value={draft.supportEmail}
-          onChange={(supportEmail) => onChange({ ...draft, supportEmail })}
-        />
+        <PlainField label="Support email" value={draft.supportEmail} onChange={(supportEmail) => onChange({ ...draft, supportEmail })} />
       </SectionCard>
     </div>
   );

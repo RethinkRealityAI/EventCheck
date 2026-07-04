@@ -1,6 +1,19 @@
 import { ViscousButton } from '../ui/ViscousButton';
+import { useLandingContent } from '../content/ContentProvider';
+
+function scrollToRegister() {
+  const targets = document.querySelectorAll<HTMLElement>('[data-register-target]');
+  const visible = Array.from(targets).find((t) => t.offsetParent !== null);
+  if (visible) {
+    visible.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } else {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+}
 
 export function RegistrationOverview() {
+  const { hero } = useLandingContent();
+
   return (
     <div className="text-center space-y-4 max-w-2xl mx-auto">
       <p className="font-display text-base uppercase tracking-[0.25em] text-gansid-secondary font-semibold">
@@ -8,29 +21,21 @@ export function RegistrationOverview() {
       </p>
       <h2 className="font-display text-4xl md:text-5xl font-bold leading-tight">
         <span className="bg-gansid-gradient-reverse bg-clip-text text-transparent">
-          Ready to join us in Hyderabad?
+          Ready to join us in {hero.location}?
         </span>
       </h2>
       <p className="font-body text-gansid-on-surface/80 text-lg md:text-xl">
         Create your account, complete your registration, and secure your spot at the first in-person GANSID
-        Congress. Below you'll find a step-by-step overview, what's included, and answers to common questions.
+        Congress. Below you&apos;ll find a step-by-step overview, what&apos;s included, and answers to common questions.
       </p>
       <div className="flex justify-center pt-2">
         <ViscousButton
           type="button"
           variant="primary"
           className="px-14 text-xl py-4"
-          onClick={() => {
-            const targets = document.querySelectorAll<HTMLElement>('[data-register-target]');
-            const visible = Array.from(targets).find((t) => t.offsetParent !== null);
-            if (visible) {
-              visible.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            } else {
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }
-          }}
+          onClick={scrollToRegister}
         >
-          Register Now
+          {hero.ctaLabel || 'Register Now'}
         </ViscousButton>
       </div>
     </div>
