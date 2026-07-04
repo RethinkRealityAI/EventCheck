@@ -139,7 +139,7 @@ export function ChevronRightIcon(props: IconProps) {
 
 /**
  * Maps a SidebarLink to a themed line icon. Falls back to a generic link glyph.
- * Keyed first on the well-known default `id`s (congress-home, full-itinerary,
+ * Keyed first on the well-known default `id`s (congress-home, program,
  * congress-materials, venue-info), then loosely on label/emoji keywords so
  * CMS-authored links still get a sensible icon instead of the fallback.
  */
@@ -152,7 +152,7 @@ export function iconForSidebarLink(link: {
   const hay = `${link.label || ''} ${link.icon || ''}`.toLowerCase();
 
   if (id.includes('home') || hay.includes('home') || link.icon === '🌐' || hay.includes('congress home')) return GlobeIcon;
-  if (id.includes('itiner') || id.includes('agenda') || id.includes('schedule') || hay.includes('itiner') || hay.includes('agenda') || hay.includes('schedule') || link.icon === '📅') return AgendaIcon;
+  if (id.includes('itiner') || id.includes('agenda') || id.includes('schedule') || id.includes('program') || hay.includes('itiner') || hay.includes('agenda') || hay.includes('schedule') || hay.includes('program') || link.icon === '📅') return AgendaIcon;
   if (id.includes('material') || id.includes('resource') || id.includes('doc') || hay.includes('material') || hay.includes('resource') || link.icon === '📁' || link.icon === '📄') return MaterialsIcon;
   if (id.includes('venue') || id.includes('map') || id.includes('location') || hay.includes('venue') || hay.includes('map') || link.icon === '📍') return VenueIcon;
   if (id.includes('ticket') || hay.includes('ticket') || link.icon === '🎟️' || link.icon === '🎫') return TicketIcon;

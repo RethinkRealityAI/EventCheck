@@ -5,42 +5,52 @@ import { IframeViewer } from '../ui/IframeViewer';
 import type { SidebarLink } from '../../../types';
 
 /**
- * Tasteful gradient rotation for the Quick Access pills. Cycles through the
- * four GANSID brand gradients so the stack reads colourful, not monotone.
- * Mirrors the "step gradient" palette used on the Landing InfoTabs +
- * the Tier pills in FeesSection.
+ * Every Quick Access pill shares ONE fully-opaque GANSID gradient sweeping
+ * blue → red (matching the vivid Tier pills in FeesSection), so the stack reads
+ * as a cohesive brand set rather than a rainbow of one-off colours. To keep the
+ * pills from looking identical, only a faint radial sheen HIGHLIGHT moves to a
+ * different corner per index — the base gradient underneath is uniform.
  */
-const PILL_GRADIENTS = [
-  'linear-gradient(135deg,#ba0028 0%,#E0243C 100%)',          // red
-  'linear-gradient(135deg,#2260a1 0%,#1a4880 100%)',          // blue
-  'linear-gradient(135deg,#8b2a5e 0%,#5a3575 100%)',          // purple/magenta
-  'linear-gradient(120deg,#2260a1 0%,#E0243C 55%,#ba0028 100%)', // reverse sweep
+const BASE_GRADIENT =
+  'linear-gradient(115deg,#2260a1 0%,#1a4880 34%,#8b2a5e 68%,#ba0028 100%)';
+
+// Per-index sheen: a soft white radial highlight anchored to a rotating corner.
+// Layered ON TOP of the shared base gradient (comma-separated background-images),
+// so each pill catches the light from a slightly different place.
+const SHEEN_POSITIONS = [
+  'radial-gradient(120% 90% at 12% 0%, rgba(255,255,255,0.30), transparent 60%)',
+  'radial-gradient(120% 90% at 88% 0%, rgba(255,255,255,0.28), transparent 60%)',
+  'radial-gradient(130% 95% at 92% 100%, rgba(255,255,255,0.22), transparent 62%)',
+  'radial-gradient(130% 95% at 8% 100%, rgba(255,255,255,0.24), transparent 62%)',
 ];
 
-export function gradientForIndex(i: number): string {
-  return PILL_GRADIENTS[i % PILL_GRADIENTS.length];
+export function backgroundForIndex(i: number): string {
+  const sheen = SHEEN_POSITIONS[i % SHEEN_POSITIONS.length];
+  return `${sheen}, ${BASE_GRADIENT}`;
 }
 
 /** A single fully-coloured gradient pill/card — the shared visual for a link. */
 function QuickAccessPill({
   link,
-  gradient,
+  background,
   onOpenIframe,
 }: {
   link: SidebarLink;
-  gradient: string;
+  background: string;
   onOpenIframe: (l: SidebarLink) => void;
 }) {
   const soon = link.mode === 'soon';
 
   const inner = (
     <div
-      className="group relative flex items-center gap-3.5 rounded-2xl px-4 py-3.5 text-white overflow-hidden shadow-[0_10px_24px_-12px_rgba(26,28,28,0.5)] transition-all duration-300 ease-viscous"
-      style={{ backgroundImage: gradient }}
+      className="group relative flex items-center gap-3.5 rounded-2xl px-4 py-3.5 text-white overflow-hidden shadow-[0_10px_24px_-12px_rgba(26,28,28,0.5)] ring-1 ring-white/10 transition-all duration-300 ease-viscous"
+      style={{ backgroundImage: background }}
     >
-      {/* top sheen */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/25 to-transparent opacity-70" />
-      {soon && <div className="pointer-events-none absolute inset-0 bg-white/25 backdrop-saturate-50" />}
+      {/* top sheen — a crisp lit edge across the top of every pill */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/20 to-transparent opacity-70" />
+      {/* `soon` reads as a dimmed version of the SAME gradient (a soft dark
+          veil), never a washed-out translucent panel. */}
+      {soon && <div className="pointer-events-none absolute inset-0 bg-black/25" />}
       <span
         className="relative grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white/20 ring-1 ring-white/30 text-lg backdrop-blur-sm"
         aria-hidden
@@ -69,7 +79,7 @@ function QuickAccessPill({
 
   if (soon) {
     return (
-      <li aria-disabled className="cursor-default select-none opacity-95">
+      <li aria-disabled className="cursor-default select-none">
         {inner}
       </li>
     );
@@ -128,7 +138,7 @@ export function QuickLinks() {
           <QuickAccessPill
             key={link.id}
             link={link}
-            gradient={gradientForIndex(i)}
+            background={backgroundForIndex(i)}
             onOpenIframe={setIframeLink}
           />
         ))}

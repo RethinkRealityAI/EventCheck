@@ -85,20 +85,28 @@ export function PortalQuickNav() {
         className="lg:hidden fixed inset-x-0 bottom-0 z-40 flex justify-center px-3 pt-2 pb-[max(0.6rem,env(safe-area-inset-bottom))] pointer-events-none"
       >
         <div
-          className="pointer-events-auto flex w-full max-w-md items-stretch gap-0.5 rounded-[1.6rem] p-1.5"
+          className="pointer-events-auto relative flex w-full max-w-md items-stretch gap-0.5 overflow-hidden rounded-[1.6rem] p-1.5"
           style={{
-            // Liquid glass: translucent dark gradient + fine white hairline +
-            // layered soft shadow. Inline so the whole treatment ships within
-            // components/Portal (no external stylesheet dependency).
+            // Gradient liquid glass: GANSID brand blue → purple, held translucent
+            // so the glassmorphism (backdrop-blur) reads through it, plus a fine
+            // white hairline + layered soft shadow. Opacity kept high enough
+            // (~0.8–0.9) that the white icons/labels stay legible. Inline so the
+            // whole treatment ships within components/Portal (no external CSS).
             backgroundImage:
-              'linear-gradient(180deg, rgba(24,26,40,0.78) 0%, rgba(17,19,32,0.82) 100%)',
-            backdropFilter: 'blur(22px) saturate(150%)',
-            WebkitBackdropFilter: 'blur(22px) saturate(150%)',
-            border: '1px solid rgba(255,255,255,0.14)',
+              'linear-gradient(120deg, rgba(34,96,161,0.90) 0%, rgba(26,72,128,0.88) 42%, rgba(90,53,117,0.86) 78%, rgba(139,42,94,0.88) 100%)',
+            backdropFilter: 'blur(22px) saturate(160%)',
+            WebkitBackdropFilter: 'blur(22px) saturate(160%)',
+            border: '1px solid rgba(255,255,255,0.20)',
             boxShadow:
-              '0 20px 48px -16px rgba(12,14,24,0.6), inset 0 1px 0 0 rgba(255,255,255,0.14)',
+              '0 20px 48px -16px rgba(18,58,107,0.6), inset 0 1px 0 0 rgba(255,255,255,0.22)',
           }}
         >
+          {/* Subtle inner darkening from the bottom so white icons + labels keep
+              strong contrast over the lighter (translucent) gradient. */}
+          <div
+            className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/25 via-black/5 to-transparent"
+            aria-hidden
+          />
           {/* Home */}
           <Link
             to="/portal"

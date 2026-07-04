@@ -158,10 +158,12 @@ export const PORTAL_DEFAULTS: PortalContent = {
       href: 'https://inheritedblooddisorders.world/congress-2026/',
     },
     {
-      id: 'full-itinerary',
-      label: 'Full Itinerary',
+      id: 'program',
+      label: 'Program',
+      description: 'Congress program & agenda',
       icon: '📅',
-      mode: 'soon',
+      mode: 'iframe',
+      href: 'https://gc2026.framer.website/program',
     },
     {
       id: 'congress-materials',
