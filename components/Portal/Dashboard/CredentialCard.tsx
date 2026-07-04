@@ -37,7 +37,7 @@ export function CredentialCard({ profile, attendee }: Props) {
             </span>
           </div>
         </div>
-        <div className="-mt-10 flex flex-col items-center px-6 pb-6 text-center">
+        <div className="relative z-10 -mt-11 flex flex-col items-center px-6 pb-6 text-center">
           <div className="grid h-24 w-24 place-items-center rounded-full bg-gansid-primary-gradient font-display text-2xl font-bold text-white shadow-lg ring-4 ring-white">
             {initials}
           </div>
@@ -86,8 +86,9 @@ export function CredentialCard({ profile, attendee }: Props) {
           </div>
         </div>
 
-        {/* Overlapping avatar + identity */}
-        <div className="-mt-11 flex flex-col items-center px-6 text-center">
+        {/* Overlapping avatar + identity — `relative z-10` so the (positioned)
+            gradient band + its overlays never paint over / clip the avatar. */}
+        <div className="relative z-10 -mt-12 flex flex-col items-center px-6 text-center">
           <div className="grid h-24 w-24 place-items-center rounded-full bg-gansid-primary-gradient font-display text-2xl font-bold text-white shadow-lg ring-4 ring-white">
             {initials}
           </div>
@@ -108,8 +109,10 @@ export function CredentialCard({ profile, attendee }: Props) {
             <div className="rounded-xl bg-white p-2.5 shadow-sm ring-1 ring-black/[0.04]">
               <img
                 alt="Credential QR"
-                src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrPayload)}`}
-                className="h-40 w-40 rounded-md"
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(qrPayload)}`}
+                width={160}
+                height={160}
+                className="block aspect-square h-auto w-40 max-w-full rounded-md"
               />
             </div>
             <span className="mt-2.5 inline-flex items-center gap-1.5 font-body text-xs font-medium text-gansid-on-surface/55">

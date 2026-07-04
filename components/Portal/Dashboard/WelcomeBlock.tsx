@@ -1,5 +1,5 @@
 import type { Profile, Attendee } from '../../../types';
-import { GlassCard } from '../ui/GlassCard';
+import { CalendarDays } from 'lucide-react';
 
 interface Props {
   profile: Profile;
@@ -51,23 +51,29 @@ export function WelcomeBlock({ profile, latestAttendee, staffOrg }: Props) {
           </p>
         )}
       </div>
-      <GlassCard tint="blue" className="relative overflow-hidden">
-        <div className="pointer-events-none absolute -right-6 -top-8 h-28 w-28 rounded-full bg-gansid-secondary/10 blur-2xl" aria-hidden />
+      {/* Up Next — premium filled gradient tile, matched to TicketsSummaryTile */}
+      <div className="group relative overflow-hidden rounded-2xl bg-[linear-gradient(140deg,#2260a1_0%,#1a4880_55%,#8b2a5e_130%)] p-5 text-white shadow-[0_16px_36px_-16px_rgba(34,96,161,0.7)] ring-1 ring-white/10">
+        {/* interior sheen + soft motif */}
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/15 to-transparent" aria-hidden />
+        <div className="pointer-events-none absolute -right-8 -top-10 h-32 w-32 rounded-full bg-white/10 blur-2xl" aria-hidden />
+
         <div className="relative flex items-center justify-between gap-4">
           <div className="min-w-0">
-            <div className="inline-flex items-center gap-1.5 text-xs uppercase tracking-[0.14em] text-gansid-secondary font-display font-semibold">
-              <span className="h-1.5 w-1.5 rounded-full bg-gansid-secondary" aria-hidden />
+            <div className="inline-flex items-center gap-2 font-display text-[11px] font-semibold uppercase tracking-[0.16em] text-white/85">
+              <span className="grid h-6 w-6 place-items-center rounded-lg bg-white/15 ring-1 ring-white/25 backdrop-blur-sm" aria-hidden>
+                <CalendarDays className="h-3.5 w-3.5" />
+              </span>
               Up Next
             </div>
-            <div className="font-display text-xl font-bold mt-1.5">GANSID Congress 2026</div>
-            <div className="font-body text-sm text-gansid-on-surface/60 mt-1">Hyderabad, India &middot; Oct 23&ndash;25, 2026</div>
+            <div className="mt-2 font-display text-xl font-bold leading-tight">GANSID Congress 2026</div>
+            <div className="mt-1 font-body text-sm text-white/75">Hyderabad, India &middot; Oct 23&ndash;25, 2026</div>
           </div>
-          <div className="text-right shrink-0">
-            <div className="font-display text-5xl font-black leading-none bg-gansid-gradient-reverse bg-clip-text text-transparent tabular-nums">{days}</div>
-            <div className="text-[11px] uppercase tracking-[0.14em] text-gansid-on-surface/50 font-display font-semibold mt-1">days to go</div>
+          <div className="shrink-0 rounded-2xl bg-white/[0.12] px-4 py-3 text-center ring-1 ring-white/20 backdrop-blur-sm">
+            <div className="font-display text-5xl font-black leading-none text-white tabular-nums drop-shadow-sm">{days}</div>
+            <div className="mt-1 font-display text-[10px] font-semibold uppercase tracking-[0.16em] text-white/70">days to go</div>
           </div>
         </div>
-      </GlassCard>
+      </div>
     </div>
   );
 }
