@@ -22,6 +22,7 @@ export const ADMIN_PAGE_KEYS = [
   'seating',
   'generateQr',
   'settings',
+  'content',
 ] as const;
 export type AdminPageKey = typeof ADMIN_PAGE_KEYS[number];
 
@@ -32,6 +33,7 @@ export interface AdminPagePermissions {
   seating: boolean;
   generateQr: boolean;
   settings: boolean;
+  content: boolean;
 }
 
 export interface AdminPermissions {
@@ -46,6 +48,7 @@ export const ADMIN_PAGE_LABELS: Record<AdminPageKey, string> = {
   seating: 'Seating Chart',
   generateQr: 'Generate QR (Manual Ticket Tool)',
   settings: 'Settings',
+  content: 'Content (Landing/Portal CMS)',
 };
 
 // Pre-fill for the "Invite new admin" / "Promote existing user" forms.
@@ -60,6 +63,7 @@ export const DEFAULT_ADMIN_PERMISSIONS: AdminPermissions = {
     seating: false,
     generateQr: false,
     settings: false,
+    content: false,
   },
 };
 
@@ -85,6 +89,7 @@ export const FALLBACK_ADMIN_PERMISSIONS: AdminPermissions = {
     seating: true,
     generateQr: true,
     settings: true,
+    content: true,
   },
 };
 
@@ -127,6 +132,7 @@ export function effectivePagePermissions(profile: Profile | null): AdminPagePerm
       seating: true,
       generateQr: true,
       settings: true,
+      content: true,
     };
   }
   if (!isAdmin(profile)) {
@@ -137,6 +143,7 @@ export function effectivePagePermissions(profile: Profile | null): AdminPagePerm
       seating: false,
       generateQr: false,
       settings: false,
+      content: false,
     };
   }
   // Admin. Merge stored perms onto defaults to absorb schema drift.
@@ -181,6 +188,7 @@ export function allAdminPermissions(): AdminPermissions {
       seating: true,
       generateQr: true,
       settings: true,
+      content: true,
     },
   };
 }

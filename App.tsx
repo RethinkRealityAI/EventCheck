@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { HashRouter, Routes, Route, Link, useLocation, Navigate, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, QrCode, ClipboardList, LogOut, Settings as SettingsIcon, ExternalLink, Menu, X, ChevronLeft, ChevronRight, Loader2, Rows3, Users, Handshake, UserCircle, Shield, KeyRound, ScanLine } from 'lucide-react';
+import { LayoutDashboard, QrCode, ClipboardList, LogOut, Settings as SettingsIcon, ExternalLink, Menu, X, ChevronLeft, ChevronRight, Loader2, Rows3, Users, Handshake, UserCircle, Shield, KeyRound, ScanLine, FileText } from 'lucide-react';
 import ManualTicketTool from './components/ManualTicketTool';
 import AttendeeList from './components/AttendeeList';
 import Scanner from './components/Scanner';
 import FormsManager from './components/FormsManager';
 import FormBuilder from './components/FormBuilder';
 import Settings from './components/Settings';
+import { ContentCms } from './components/ContentCms/ContentCms';
 import PublicRegistration from './components/PublicRegistration';
 import { TicketDownloadPage } from './components/TicketDownload/TicketDownloadPage';
 import SeatingConfigurator from './components/Seating/SeatingConfigurator';
@@ -195,6 +196,7 @@ const AdminLayout = () => {
   const canSeeSeating = canAccessPage(profile, 'seating');
   const canSeeGenerateQr = canAccessPage(profile, 'generateQr');
   const canSeeSettings = canAccessPage(profile, 'settings');
+  const canSeeContent = CURRENT_SITE.portalEnabled && canAccessPage(profile, 'content');
   const canSeeAdmins = canManageAdmins(profile);
 
   const handleLogout = async () => {
@@ -419,6 +421,11 @@ const AdminLayout = () => {
                 <SettingsIcon className="w-6 h-6" />
               </Link>
             )}
+            {canSeeContent && (
+              <Link to="/admin/content" onClick={() => setIsMobileMenuOpen(false)} className="p-3 text-slate-300 hover:text-white hover:bg-slate-800/80 rounded-xl transition-all">
+                <FileText className="w-6 h-6" />
+              </Link>
+            )}
             {canSeeAdmins && (
               <Link to="/admin/admins" onClick={() => setIsMobileMenuOpen(false)} className="p-3 text-amber-300 hover:text-white hover:bg-slate-800/80 rounded-xl transition-all" title="Admin Management">
                 <Shield className="w-6 h-6" />
@@ -499,6 +506,7 @@ const AdminLayout = () => {
           {canSeeSeating && <NavLink to="/admin/seating" icon={Rows3} collapsed={isSidebarCollapsed && !isSidebarPinned}>Seating Chart</NavLink>}
           {canSeeGenerateQr && <NavLink to="/admin/generate-qr" icon={QrCode} collapsed={isSidebarCollapsed && !isSidebarPinned}>Generate QR</NavLink>}
           {canSeeSettings && <NavLink to="/admin/settings" icon={SettingsIcon} collapsed={isSidebarCollapsed && !isSidebarPinned}>Settings</NavLink>}
+          {canSeeContent && <NavLink to="/admin/content" icon={FileText} collapsed={isSidebarCollapsed && !isSidebarPinned}>Content</NavLink>}
 
           {canSeeAdmins && (
             <div className="pt-3 mt-3 border-t border-slate-700/50 mx-2">
@@ -611,6 +619,7 @@ const AdminLayout = () => {
               </ProtectedRoute>
             } />
             <Route path="/settings" element={<ProtectedRoute requirePage="settings"><Settings /></ProtectedRoute>} />
+            <Route path="/content" element={<ProtectedRoute requirePage="content"><ContentCms /></ProtectedRoute>} />
             <Route path="/seating" element={<ProtectedRoute requirePage="seating"><SeatingConfigurator /></ProtectedRoute>} />
             <Route path="/admins" element={<ProtectedRoute requireSuperAdmin><AdminsManagement /></ProtectedRoute>} />
           </Routes>
