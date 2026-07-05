@@ -581,7 +581,7 @@ const AdminLayout = () => {
         <div
           className={
             isContentCms
-              ? 'flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden'
+              ? 'relative flex min-h-0 flex-1 flex-col overflow-hidden'
               : 'mx-auto w-full p-4 lg:p-6'
           }
         >
@@ -639,7 +639,7 @@ const AdminLayout = () => {
               path="/content"
               element={
                 <ProtectedRoute requirePage="content">
-                  <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                  <div className="absolute inset-0 flex flex-col overflow-hidden">
                     <ContentCms />
                   </div>
                 </ProtectedRoute>
