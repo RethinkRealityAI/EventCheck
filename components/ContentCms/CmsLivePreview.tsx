@@ -169,7 +169,7 @@ export function CmsLivePreview({
           aria-hidden
         />
 
-        <div className="relative flex h-full min-h-full items-stretch justify-center">
+        <div className="relative flex h-full items-stretch justify-center">
           <div
             className="flex h-full max-h-full flex-col overflow-hidden rounded-xl bg-white shadow-[0_24px_64px_-16px_rgba(0,0,0,0.55)] ring-1 ring-white/20 transition-[width,min-width] duration-300 ease-out"
             style={frameStyle(device)}

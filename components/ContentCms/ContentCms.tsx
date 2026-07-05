@@ -240,10 +240,10 @@ export function ContentCms() {
   return (
     <div
       ref={shellRef}
-      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[linear-gradient(180deg,#f8fafc_0%,#f1f5f9_100%)]"
+      className="grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[linear-gradient(180deg,#f8fafc_0%,#f1f5f9_100%)]"
     >
-      {/* ── Chrome: fixed-height block above the scroll region ── */}
-      <div className="shrink-0 border-b border-slate-200/80 bg-white">
+      {/* Chrome stays pinned; only the workspace row below scrolls */}
+      <div className="sticky top-0 z-30 shrink-0 border-b border-slate-200/80 bg-white">
         <header className="flex flex-wrap items-center justify-between gap-x-2 gap-y-2 px-3 py-2.5 sm:gap-3 sm:px-4 sm:py-3">
         <div className="flex min-w-0 flex-1 items-center gap-2.5 sm:max-w-[min(100%,28rem)] sm:gap-3">
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-gansid-primary-gradient text-white shadow-md ring-1 ring-white/20 sm:h-10 sm:w-10">
@@ -327,13 +327,18 @@ export function ContentCms() {
         </nav>
       </div>
 
-      {/* Workspace — only this region scrolls / splits */}
-      <div className="flex min-h-0 flex-1 overflow-hidden">
+      {/* Workspace — grid keeps editor + preview height-bounded; only editor pane scrolls */}
+      <div
+        className="grid min-h-0 overflow-hidden"
+        style={{
+          gridTemplateRows: 'minmax(0, 1fr)',
+          ...(showDesktopSplit
+            ? { gridTemplateColumns: `minmax(0, ${editorPct}fr) auto minmax(0, ${100 - editorPct}fr)` }
+            : { gridTemplateColumns: 'minmax(0, 1fr)' }),
+        }}
+      >
         {showEditor && (
-          <div
-            className="flex min-h-0 min-w-0 flex-col overflow-hidden"
-            style={showDesktopSplit ? { width: `${editorPct}%` } : { width: '100%' }}
-          >
+          <div className="flex min-h-0 min-w-0 flex-col overflow-hidden">
             <div
               ref={editorScrollRef}
               className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain px-3 py-4 sm:px-5 sm:py-5"
@@ -369,12 +374,12 @@ export function ContentCms() {
                 if (e.key === 'ArrowLeft') setEditorPct((p) => Math.max(MIN_EDITOR_PCT, p - 2));
                 if (e.key === 'ArrowRight') setEditorPct((p) => Math.min(MAX_EDITOR_PCT, p + 2));
               }}
-              className="group relative z-10 w-1.5 shrink-0 cursor-col-resize bg-slate-200/90 transition-colors hover:bg-[#2260a1]/45 focus:bg-[#2260a1]/55 focus:outline-none"
+              className="group relative z-10 w-1.5 shrink-0 cursor-col-resize self-stretch bg-slate-200/90 transition-colors hover:bg-[#2260a1]/45 focus:bg-[#2260a1]/55 focus:outline-none"
             >
               <span className="absolute inset-y-0 -left-1.5 -right-1.5" />
               <span className="absolute left-1/2 top-1/2 h-12 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-slate-400 opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus:opacity-100" />
             </div>
-            <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+            <div className="min-h-0 min-w-0 overflow-hidden">
               <CmsLivePreview
                 url={previewHashUrl}
                 pageLabel={activeTabMeta.label}
@@ -389,7 +394,7 @@ export function ContentCms() {
         )}
 
         {showMobilePreview && (
-          <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+          <div className="min-h-0 min-w-0 overflow-hidden">
             <CmsLivePreview
               url={previewHashUrl}
               pageLabel={activeTabMeta.label}

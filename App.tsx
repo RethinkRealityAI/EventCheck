@@ -574,14 +574,14 @@ const AdminLayout = () => {
       <main
         className={`relative flex min-h-0 min-w-0 flex-1 flex-col transition-all duration-300 ${(isSidebarCollapsed && !isSidebarPinned) ? 'lg:pl-20' : 'lg:pl-72'} ${
           isContentCms
-            ? 'overflow-hidden'
+            ? 'h-0 overflow-hidden'
             : 'overflow-y-auto pb-28 pt-4 lg:pb-0 lg:pt-0'
         }`}
       >
         <div
           className={
             isContentCms
-              ? 'flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden'
+              ? 'flex min-h-0 flex-1 flex-col overflow-hidden'
               : 'mx-auto w-full p-4 lg:p-6'
           }
         >
@@ -639,7 +639,9 @@ const AdminLayout = () => {
               path="/content"
               element={
                 <ProtectedRoute requirePage="content">
-                  <ContentCms />
+                  <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                    <ContentCms />
+                  </div>
                 </ProtectedRoute>
               }
             />
