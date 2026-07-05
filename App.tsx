@@ -639,7 +639,11 @@ const AdminLayout = () => {
               path="/content"
               element={
                 <ProtectedRoute requirePage="content">
-                  <div className="absolute inset-0 flex flex-col overflow-hidden">
+                  <div
+                    className={`fixed inset-y-0 left-0 right-0 z-20 flex flex-col overflow-hidden transition-[left] duration-300 ${
+                      (isSidebarCollapsed && !isSidebarPinned) ? 'lg:left-20' : 'lg:left-72'
+                    }`}
+                  >
                     <ContentCms />
                   </div>
                 </ProtectedRoute>

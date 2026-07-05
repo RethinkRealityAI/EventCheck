@@ -166,12 +166,14 @@ export function ContentCms() {
 
   useEffect(() => {
     editorScrollRef.current?.scrollTo(0, 0);
+    window.scrollTo(0, 0);
   }, [activeTab]);
 
   /** Keep page scroll on the editor pane only — tall Pricing grids must not scroll the shell. */
   useEffect(() => {
     const prevHtml = document.documentElement.style.overflow;
     const prevBody = document.body.style.overflow;
+    window.scrollTo(0, 0);
     document.documentElement.style.overflow = 'hidden';
     document.body.style.overflow = 'hidden';
     return () => {
