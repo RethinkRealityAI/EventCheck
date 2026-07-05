@@ -240,7 +240,7 @@ export function ContentCms() {
   return (
     <div
       ref={shellRef}
-      className="grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[linear-gradient(180deg,#f8fafc_0%,#f1f5f9_100%)]"
+      className="grid h-full min-h-0 w-full flex-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[linear-gradient(180deg,#f8fafc_0%,#f1f5f9_100%)]"
     >
       {/* Chrome stays pinned; only the workspace row below scrolls */}
       <div className="sticky top-0 z-30 shrink-0 border-b border-slate-200/80 bg-white">
