@@ -169,6 +169,7 @@ async function processBogoClaims(args: {
       guestName: claim.guestName,
       guestEmail: claim.guestEmail,
       guestCategoryId: claim.categoryId,
+      guestCountry: claim.guestCountry,
     });
   });
 
@@ -455,6 +456,8 @@ function sanitizeBogoClaimsForCapture(args: {
     const guestName = typeof claim.guestName === 'string' ? claim.guestName.trim() : '';
     const guestEmail = typeof claim.guestEmail === 'string' ? claim.guestEmail.trim() : '';
     const categoryId = typeof claim.categoryId === 'string' ? claim.categoryId : '';
+    // Documentation-only, optional — never blocks a claim from being kept.
+    const guestCountry = typeof claim.guestCountry === 'string' ? claim.guestCountry.trim().slice(0, 100) : null;
     if (!guestName || !/^.+@.+\..+$/.test(guestEmail) || !categoryId) {
       skipped += 1;
       continue;
@@ -477,6 +480,7 @@ function sanitizeBogoClaimsForCapture(args: {
       guestName,
       guestEmail,
       categoryId,
+      guestCountry,
     });
   }
 

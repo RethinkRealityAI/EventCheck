@@ -18,6 +18,8 @@ const TEMPLATE_SHORT_LABELS: Record<string, string> = {
 interface Props {
   settings: AppSettings;
   forms: Form[];
+  /** Shared page size from the dashboard's overhead control. */
+  itemsPerPage: number;
 }
 
 interface PaginationBarProps {
@@ -81,7 +83,7 @@ function timeAgo(iso: string): string {
   return `${Math.floor(mo / 12)}y ago`;
 }
 
-export default function SignupsTab({ settings, forms }: Props) {
+export default function SignupsTab({ settings, forms, itemsPerPage }: Props) {
   const { profile } = useAuth();
   const { showNotification } = useNotifications();
   const isSuperAdmin = profile?.role === 'super_admin';
@@ -95,19 +97,7 @@ export default function SignupsTab({ settings, forms }: Props) {
   // delete button + show a spinner while the edge function runs).
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
-  // Page size: 10 on mobile, 15 on desktop. Tracks viewport width via the
-  // same breakpoint Tailwind uses for `md:`.
-  const [isDesktop, setIsDesktop] = useState(() =>
-    typeof window !== 'undefined' ? window.matchMedia('(min-width: 768px)').matches : true,
-  );
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const mq = window.matchMedia('(min-width: 768px)');
-    const onChange = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
-  }, []);
-  const pageSize = isDesktop ? 15 : 10;
+  const pageSize = itemsPerPage;
 
   const load = async () => {
     setLoading(true);

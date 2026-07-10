@@ -6,6 +6,8 @@ export type BogoCheckoutSlot = {
   guestName: string;
   guestEmail: string;
   categoryId: string;
+  /** Documentation-only, optional — never required to complete a slot. */
+  guestCountry?: string;
 };
 
 export function isCompleteInlineBogoSlot(slot: BogoCheckoutSlot): boolean {
@@ -49,6 +51,7 @@ export function buildBogoClaimsForCheckout(slots: BogoCheckoutSlot[]): {
       guestName: s.guestName.trim(),
       guestEmail: s.guestEmail.trim(),
       categoryId: s.categoryId,
+      guestCountry: s.guestCountry?.trim() || null,
     });
   }
 

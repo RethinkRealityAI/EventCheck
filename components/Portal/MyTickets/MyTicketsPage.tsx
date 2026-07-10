@@ -5,6 +5,7 @@ import { getAttendeesForUserWithBogoClaims, getFormById } from '../../../service
 import { useAuth } from '../../AuthContext';
 import { useNotifications } from '../../NotificationSystem';
 import { supabase } from '../../../services/supabaseClient';
+import CountryField from '../../FormBuilder/fields/CountryField';
 import {
   BOGO_ADMIN_CONTACT,
   getBogoSlotState,
@@ -382,12 +383,13 @@ function BogoSendForm({ card, pricingTemplate, busy, onCancel, onSubmit }: {
   pricingTemplate?: PricingTemplate | null;
   busy: boolean;
   onCancel: () => void;
-  onSubmit: (vals: { mode: 'inline' | 'claim_link'; guestName?: string; guestEmail?: string; categoryId?: string }) => void;
+  onSubmit: (vals: { mode: 'inline' | 'claim_link'; guestName?: string; guestEmail?: string; categoryId?: string; guestCountry?: string }) => void;
 }) {
   const [mode, setMode] = useState<'inline' | 'claim_link'>('inline');
   const [guestName, setGuestName] = useState('');
   const [guestEmail, setGuestEmail] = useState('');
   const [categoryId, setCategoryId] = useState('');
+  const [guestCountry, setGuestCountry] = useState('');
   const eligibleCats = pricingTemplate
     ? getEligibleBogoCategories(pricingTemplate, {
         pricingCategoryId: card.paid.pricingCategoryId,
@@ -441,6 +443,13 @@ function BogoSendForm({ card, pricingTemplate, busy, onCancel, onSubmit }: {
               <a className="underline" href={`mailto:${BOGO_ADMIN_CONTACT}`}>{BOGO_ADMIN_CONTACT}</a>.
             </p>
           )}
+          <div className="sm:col-span-2">
+            <CountryField
+              label="Guest country (optional, for our records)"
+              value={guestCountry}
+              onChange={setGuestCountry}
+            />
+          </div>
         </div>
       )}
 
@@ -460,7 +469,7 @@ function BogoSendForm({ card, pricingTemplate, busy, onCancel, onSubmit }: {
           disabled={busy || !inlineReady}
           onClick={() => {
             const payload = mode === 'inline'
-              ? { mode, guestName: guestName.trim(), guestEmail: guestEmail.trim(), categoryId }
+              ? { mode, guestName: guestName.trim(), guestEmail: guestEmail.trim(), categoryId, guestCountry: guestCountry.trim() }
               : { mode };
             if (mode === 'inline' && !confirm(`Send free ticket to ${guestEmail.trim()}?\n\nBy sending, you confirm this is the email of the guest attending. Their ticket will be locked to this address once they sign up, claim, or check in.`)) return;
             onSubmit(payload);
@@ -480,11 +489,12 @@ function BogoEditForm({ free, card, pricingTemplate, uncommitted, busy, onCancel
   uncommitted: boolean;
   busy: boolean;
   onCancel: () => void;
-  onSubmit: (vals: { guestName?: string; guestEmail?: string; categoryId?: string }) => void;
+  onSubmit: (vals: { guestName?: string; guestEmail?: string; categoryId?: string; guestCountry?: string }) => void;
 }) {
   const [guestName, setGuestName] = useState(free.name);
   const [guestEmail, setGuestEmail] = useState(free.email);
   const [categoryId, setCategoryId] = useState(free.pricingCategoryId ?? '');
+  const [guestCountry, setGuestCountry] = useState((free.answers as Record<string, unknown> | undefined)?.['_guest_country'] as string ?? '');
   const eligibleCats = pricingTemplate
     ? getEligibleBogoCategories(pricingTemplate, {
         pricingCategoryId: card.paid.pricingCategoryId,
@@ -520,6 +530,13 @@ function BogoEditForm({ free, card, pricingTemplate, uncommitted, busy, onCancel
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
             </select>
+            <div className="sm:col-span-2">
+              <CountryField
+                label="Guest country (optional, for our records)"
+                value={guestCountry}
+                onChange={setGuestCountry}
+              />
+            </div>
           </>
         )}
       </div>
@@ -533,12 +550,13 @@ function BogoEditForm({ free, card, pricingTemplate, uncommitted, busy, onCancel
           type="button"
           disabled={busy || !guestName.trim()}
           onClick={() => {
-            const payload: { guestName?: string; guestEmail?: string; categoryId?: string } = {
+            const payload: { guestName?: string; guestEmail?: string; categoryId?: string; guestCountry?: string } = {
               guestName: guestName.trim(),
             };
             if (uncommitted) {
               payload.guestEmail = guestEmail.trim();
               payload.categoryId = categoryId;
+              payload.guestCountry = guestCountry.trim();
             }
             onSubmit(payload);
           }}

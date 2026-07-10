@@ -31,11 +31,24 @@ function formatUsd(amount: number) {
 }
 
 function cellPrice(row: FeesRow, period: FeesPeriod, stripe: boolean, colorIdx: number) {
-  const price = feesCellPrice(row[period.id]);
-  const strikeout = feesCellStrikeoutAmount(row[period.id]);
-
   const colors = PERIOD_CELL_COLORS[colorIdx % PERIOD_CELL_COLORS.length];
   const cellClass = `py-3 md:py-4 px-1 md:px-2 text-center font-display font-bold ${colors.text} ${stripe ? colors.stripe : colors.flat}`;
+
+  // A plain string cell (e.g. "—") is a literal display value, not a price —
+  // used for categories with no fee in a given period (Abstract Presenters'
+  // Early Bird, added after that window had already lapsed). Every numeric
+  // or strikeout-object cell is unaffected.
+  const raw = row[period.id];
+  if (typeof raw === 'string') {
+    return (
+      <td key={period.id} className={cellClass}>
+        <span className="text-gansid-on-surface/40">{raw}</span>
+      </td>
+    );
+  }
+
+  const price = feesCellPrice(raw);
+  const strikeout = feesCellStrikeoutAmount(raw);
 
   if (strikeout != null) {
     return (

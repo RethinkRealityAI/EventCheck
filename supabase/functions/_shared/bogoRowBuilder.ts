@@ -25,10 +25,14 @@ export interface BuildBogoRowArgs {
   guestName?: string;
   guestEmail?: string;
   guestCategoryId?: string | null;
+  /** Documentation-only — never affects eligibility, ceiling, or pricing.
+   *  Stored as a synthetic `_guest_country` answer key (same convention as
+   *  `_guest_name` elsewhere), not tied to any form field. */
+  guestCountry?: string | null;
 }
 
 export function buildBogoRow(args: BuildBogoRowArgs) {
-  const { paid, formId, invoiceId, mode, guestName, guestEmail, guestCategoryId } = args;
+  const { paid, formId, invoiceId, mode, guestName, guestEmail, guestCategoryId, guestCountry } = args;
   const id = crypto.randomUUID();
   const isInline = mode === 'inline';
 
@@ -58,6 +62,7 @@ export function buildBogoRow(args: BuildBogoRowArgs) {
     is_paid_extra: false,
     is_donated_seat_claim: false,
     is_bogo_claim: true,
+    answers: isInline && guestCountry ? { _guest_country: guestCountry } : null,
     bogo_source_attendee_id: paid.id,
     pricing_template_id: paid.pricing_template_id ?? null,
     pricing_tier: paid.pricing_tier ?? null,

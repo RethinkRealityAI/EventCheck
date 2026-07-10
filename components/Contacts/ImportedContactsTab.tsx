@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Upload, Search, RefreshCw, CheckCircle2, XCircle, AlertTriangle, Circle, Loader2,
-  Send as SendIcon, Trash2, Tag, Users, ChevronDown, Ticket, Plus, Minus, X, TicketCheck,
+  Send as SendIcon, Trash2, Tag, Users, ChevronDown, ChevronLeft, ChevronRight, Ticket, Plus, Minus, X, TicketCheck,
 } from 'lucide-react';
 import type { AppSettings } from '../../types';
 import { supabase } from '../../services/supabaseClient';
@@ -17,6 +17,8 @@ import IssueTicketModal from './IssueTicketModal';
 
 interface Props {
   settings: AppSettings | null;
+  /** Shared page size from the dashboard's overhead control. */
+  itemsPerPage: number;
 }
 
 // 'registered' is a synthetic status (contact has a linked attendee), not an
@@ -56,7 +58,7 @@ type ModalState =
   | { mode: 'resume'; label: string; contacts: ImportedContact[] }
   | { mode: 'invite'; label: string; contacts: ImportedContact[] };
 
-export default function ImportedContactsTab({ settings }: Props) {
+export default function ImportedContactsTab({ settings, itemsPerPage }: Props) {
   const { showNotification } = useNotifications();
   const [batches, setBatches] = useState<ImportBatch[]>([]);
   const [contacts, setContacts] = useState<ImportedContact[]>([]);
@@ -64,6 +66,7 @@ export default function ImportedContactsTab({ settings }: Props) {
   const [batchFilter, setBatchFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
   const [modal, setModal] = useState<ModalState | null>(null);
   const [addContactOpen, setAddContactOpen] = useState(false);
   const [issueTicketOpen, setIssueTicketOpen] = useState(false);
@@ -156,6 +159,12 @@ export default function ImportedContactsTab({ settings }: Props) {
       return true;
     });
   }, [contacts, statusFilter, search, tagFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / itemsPerPage));
+  useEffect(() => { setPage(1); }, [search, statusFilter, tagFilter, batchFilter, itemsPerPage]);
+  const safePage = Math.min(page, totalPages);
+  const startIndex = (safePage - 1) * itemsPerPage;
+  const pagedContacts = filtered.slice(startIndex, startIndex + itemsPerPage);
 
   const counts = useMemo(() => {
     const c = { total: contacts.length, sent: 0, failed: 0, pending: 0, skipped: 0, registered: 0 };
@@ -519,7 +528,7 @@ export default function ImportedContactsTab({ settings }: Props) {
                 {contacts.length === 0 ? 'No imported contacts yet. Click “Bulk import” to upload a CSV.' : 'No contacts match this filter.'}
               </td></tr>
             )}
-            {!loading && filtered.slice(0, 500).map(c => {
+            {!loading && pagedContacts.map(c => {
               const isSel = selected.has(c.id);
               return (
                 <tr key={c.id} className={`hover:bg-indigo-50/30 ${isSel ? 'bg-indigo-50/50' : ''}`}>
@@ -578,9 +587,32 @@ export default function ImportedContactsTab({ settings }: Props) {
             })}
           </tbody>
         </table>
-        {filtered.length > 500 && (
-          <div className="px-4 py-2 text-xs text-gray-500 bg-gray-50 border-t border-gray-100">Showing first 500 of {filtered.length}. Narrow with a filter or search.</div>
-        )}
+        <div className="flex items-center justify-between gap-3 px-4 py-2 text-xs text-gray-500 bg-gray-50 border-t border-gray-100">
+          <div>
+            Showing {filtered.length > 0 ? startIndex + 1 : 0}–{Math.min(startIndex + itemsPerPage, filtered.length)} of {filtered.length}
+          </div>
+          {totalPages > 1 && (
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={safePage === 1}
+                className="p-1.5 rounded bg-white border border-gray-200 disabled:opacity-50 hover:bg-gray-100"
+                aria-label="Previous page"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <span className="px-2 font-medium text-gray-700">Page {safePage} of {totalPages}</span>
+              <button
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                disabled={safePage === totalPages}
+                className="p-1.5 rounded bg-white border border-gray-200 disabled:opacity-50 hover:bg-gray-100"
+                aria-label="Next page"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {modal && settings && (

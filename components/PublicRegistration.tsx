@@ -248,9 +248,11 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
     guestName: string;
     guestEmail: string;
     categoryId: string;
+    /** Documentation-only, optional — never affects eligibility or pricing. */
+    guestCountry: string;
   };
   const [bogoSlots, setBogoSlots] = useState<BogoSlot[]>([
-    { mode: 'inline', guestName: '', guestEmail: '', categoryId: '' },
+    { mode: 'inline', guestName: '', guestEmail: '', categoryId: '', guestCountry: '' },
   ]);
 
   // Derived pricing values — recomputed each render
@@ -372,7 +374,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
         return [
           ...prev,
           ...Array(bogoSlotCount - prev.length).fill(null).map(() => ({
-            mode: 'inline' as const, guestName: '', guestEmail: '', categoryId: '',
+            mode: 'inline' as const, guestName: '', guestEmail: '', categoryId: '', guestCountry: '',
           })),
         ];
       }
@@ -398,6 +400,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
         guestName: '',
         guestEmail: '',
         categoryId: '',
+        guestCountry: '',
       }));
       const unchanged = prev.every(
         (s, i) =>
@@ -2128,6 +2131,13 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                             </option>
                           ))}
                         </select>
+                        <div className="sm:col-span-2">
+                          <CountryField
+                            label="Guest country (optional, for our records)"
+                            value={slot.guestCountry}
+                            onChange={code => update({ guestCountry: code })}
+                          />
+                        </div>
                       </div>
                       {emailDupWarning && (
                         <p className="text-[11px] text-amber-700 mt-2">

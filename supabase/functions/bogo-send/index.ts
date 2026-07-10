@@ -93,7 +93,7 @@ serve(async (req: Request) => {
 
     // ── ACTION: send ──────────────────────────────────────────────────
     if (action === 'send') {
-      const { paidAttendeeId, mode, guestName, guestEmail, categoryId } = body;
+      const { paidAttendeeId, mode, guestName, guestEmail, categoryId, guestCountry } = body;
       if (!paidAttendeeId || typeof paidAttendeeId !== 'string') {
         return jsonResponse({ error: 'paidAttendeeId required' }, 400);
       }
@@ -169,6 +169,7 @@ serve(async (req: Request) => {
         guestName,
         guestEmail,
         guestCategoryId: categoryId,
+        guestCountry: typeof guestCountry === 'string' ? guestCountry.trim().slice(0, 100) : null,
       });
 
       const { error: insertErr } = await supabase.from('attendees').insert([row]);
@@ -277,6 +278,11 @@ serve(async (req: Request) => {
 
       const patch: Record<string, any> = { name: newName, email: newEmail };
       if (categoryChanged) patch.pricing_category_id = newCategoryId;
+      // Documentation-only field — never affects eligibility/ceiling/pricing.
+      if (body.guestCountry !== undefined) {
+        const newCountry = String(body.guestCountry || '').trim().slice(0, 100);
+        patch.answers = newCountry ? { _guest_country: newCountry } : null;
+      }
 
       const { data: updated, error: uErr } = await supabase
         .from('attendees').update(patch).eq('id', free.id).select('id');

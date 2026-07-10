@@ -649,6 +649,8 @@ export interface BogoClaim {
   guestName?: string;
   guestEmail?: string;
   categoryId?: string | null;
+  /** Documentation-only — never affects eligibility, ceiling, or pricing. */
+  guestCountry?: string | null;
 }
 
 // ============================================================

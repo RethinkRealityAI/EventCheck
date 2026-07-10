@@ -9,6 +9,8 @@ import AttendeeModal from './AttendeeModal';
 import AddAttendeeModal from './AddAttendeeModal';
 import ColumnVisibilityDropdown, { ColumnDef } from './ColumnVisibilityDropdown';
 import { CATEGORY_META, resolveAttendeeCategory } from '../utils/attendeeCategories';
+import { resolveAttendeeCountryCode } from '../utils/resolveAttendeeCountry';
+import { getCountryName } from '../utils/countries';
 import ExhibitorsTab from './Exhibitor/ExhibitorsTab';
 import SignupsTab from './Signups/SignupsTab';
 import ImportedContactsTab from './Contacts/ImportedContactsTab';
@@ -120,6 +122,7 @@ interface AttendeeListProps {
 const STANDARD_COLUMNS: ColumnDef[] = [
   { key: 'name', label: 'Name', group: 'standard' },
   { key: 'email', label: 'Email', group: 'standard' },
+  { key: 'country', label: 'Country', group: 'standard' },
   { key: 'formTitle', label: 'Event/Form', group: 'standard' },
   { key: 'ticketType', label: 'Ticket Type', group: 'standard' },
   { key: 'seating', label: 'Seating', group: 'standard' },
@@ -138,15 +141,16 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
   const [showExportModal, setShowExportModal] = useState(false);
   const [showBulkImport, setShowBulkImport] = useState(false);
 
-  // Pagination State. Default page size is 20 (a comfortable scroll on a
-  // dashboard) and the user's choice persists per-browser in localStorage so
-  // they don't have to re-pick it after every refresh. Whitelist the value
-  // before applying so a stale/invalid entry can't break the dropdown.
+  // Pagination State. Default page size is 50 and the user's choice persists
+  // per-browser in localStorage — and across every tab (including Exhibitors/
+  // Signups/Contacts, which each receive `itemsPerPage` as a prop) — so they
+  // don't have to re-pick it after every refresh or tab switch. Whitelist the
+  // value before applying so a stale/invalid entry can't break the dropdown.
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState<number>(() => {
-    if (typeof window === 'undefined') return 20;
+    if (typeof window === 'undefined') return 50;
     const stored = Number(window.localStorage.getItem('attendeeList.itemsPerPage'));
-    return [10, 20, 25, 50, 100].includes(stored) ? stored : 20;
+    return [10, 20, 25, 50, 100].includes(stored) ? stored : 50;
   });
 
   useEffect(() => {
@@ -488,6 +492,8 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     const q = searchTerm.toLowerCase();
     const resolvedCat = resolveAttendeeCategory(a);
     const catMeta = resolvedCat ? CATEGORY_META[resolvedCat] : null;
+    const countryCode = q ? resolveAttendeeCountryCode(a, forms.find(f => f.id === a.formId)) : null;
+    const countryName = countryCode ? getCountryName(countryCode) : '';
     const matchesSearch = !q || (
       a.name.toLowerCase().includes(q) ||
       a.email.toLowerCase().includes(q) ||
@@ -497,6 +503,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
       (a.appliedPromoCode?.toLowerCase().includes(q) ?? false) ||
       (a.sponsorTier?.toLowerCase().includes(q) ?? false) ||
       (a.guestType?.toLowerCase().includes(q) ?? false) ||
+      (countryName.toLowerCase().includes(q)) ||
       !!(catMeta && (
         catMeta.label.toLowerCase().includes(q) ||
         catMeta.shortLabel.toLowerCase().includes(q)
@@ -772,6 +779,24 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                 <Pin className={`w-3.5 h-3.5 transition-transform ${settings?.defaultDashboardFormId === selectedFormId && selectedFormId !== '_all' ? 'fill-blue-500 text-blue-600 -rotate-12 scale-110' : ''}`} />
                 {settings?.defaultDashboardFormId === selectedFormId && selectedFormId !== '_all' ? 'Pinned' : 'Pin'}
               </button>
+              {/* Separator */}
+              <div className="h-5 w-px bg-gray-300/50 mx-1"></div>
+              {/* Rows-per-page — overhead control, always visible regardless of
+                  the active tab (unlike the per-tab controls row below, which
+                  hides on Signups/Contacts). Governs every tab's page size,
+                  including Exhibitors/Signups/Contacts. */}
+              <select
+                value={itemsPerPage}
+                onChange={e => { setItemsPerPage(Number(e.target.value)); setCurrentPage(1); }}
+                className="px-2 py-1 border border-white/40 rounded-md text-xs font-medium bg-white/80 backdrop-blur-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                title="Rows per page (applies to every tab)"
+              >
+                <option value={10}>10 / page</option>
+                <option value={20}>20 / page</option>
+                <option value={25}>25 / page</option>
+                <option value={50}>50 / page</option>
+                <option value={100}>100 / page</option>
+              </select>
             </div>
           </div>
 
@@ -789,18 +814,6 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                   onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }}
                 />
               </div>
-
-              <select
-                value={itemsPerPage}
-                onChange={e => { setItemsPerPage(Number(e.target.value)); setCurrentPage(1); }}
-                className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-indigo-500"
-              >
-                <option value={10}>10 per page</option>
-                <option value={20}>20 per page</option>
-                <option value={25}>25 per page</option>
-                <option value={50}>50 per page</option>
-                <option value={100}>100 per page</option>
-              </select>
 
               <ColumnVisibilityDropdown
                 columns={allColumns}
@@ -1019,7 +1032,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
         {activeTab === 'signups' ? (
           <div className="p-4">
             {settings ? (
-              <SignupsTab settings={settings} forms={forms} />
+              <SignupsTab settings={settings} forms={forms} itemsPerPage={itemsPerPage} />
             ) : (
               <div className="p-12 text-center text-gray-400">
                 <Loader2 className="w-8 h-8 mx-auto mb-2 animate-spin text-indigo-500" />
@@ -1029,11 +1042,11 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
           </div>
         ) : activeTab === 'contacts' ? (
           <div className="p-4">
-            <ImportedContactsTab settings={settings} />
+            <ImportedContactsTab settings={settings} itemsPerPage={itemsPerPage} />
           </div>
         ) : activeTab === 'exhibitors' ? (
           <div className="p-4">
-            <ExhibitorsTab attendees={attendees} forms={forms} onRefresh={onRefresh} />
+            <ExhibitorsTab attendees={attendees} forms={forms} onRefresh={onRefresh} itemsPerPage={itemsPerPage} />
           </div>
         ) : activeTab === 'tables' ? (
           <div className="p-4 space-y-4">
@@ -1279,6 +1292,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
               <tr>
                 {isColumnVisible('name') && <th className="px-4 py-2.5 min-w-[180px] text-xs font-semibold uppercase tracking-wide text-gray-500">Name</th>}
                 {isColumnVisible('email') && <th className="px-4 py-2.5 min-w-[160px] text-xs font-semibold uppercase tracking-wide text-gray-500">Email</th>}
+                {isColumnVisible('country') && <th className="px-4 py-2.5 min-w-[120px] text-xs font-semibold uppercase tracking-wide text-gray-500">Country</th>}
                 {isColumnVisible('formTitle') && <th className="px-4 py-2.5 min-w-[140px] text-xs font-semibold uppercase tracking-wide text-gray-500">Event/Form</th>}
                 {isColumnVisible('ticketType') && <th className="px-4 py-2.5 min-w-[110px] text-xs font-semibold uppercase tracking-wide text-gray-500">Ticket Type</th>}
                 {isColumnVisible('seating') && <th className="px-4 py-2.5 min-w-[120px] text-xs font-semibold uppercase tracking-wide text-gray-500">Seating</th>}
@@ -1465,6 +1479,14 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                       {isColumnVisible('email') && (
                         <td className="px-4 py-3 text-gray-600 text-xs">{attendee.email}</td>
                       )}
+                      {isColumnVisible('country') && (() => {
+                        const countryCode = resolveAttendeeCountryCode(attendee, forms.find(f => f.id === attendee.formId));
+                        return (
+                          <td className="px-4 py-3 text-gray-600 text-xs">
+                            {countryCode ? getCountryName(countryCode) : <span className="text-gray-300">—</span>}
+                          </td>
+                        );
+                      })()}
                       {isColumnVisible('formTitle') && (
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-1.5 text-gray-700">
@@ -1571,7 +1593,11 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
         )}
       </div>
 
-      {/* Pagination Footer */}
+      {/* Pagination Footer — Exhibitors/Signups/Contacts render their own
+          (each fed by the shared `itemsPerPage` above), so this footer
+          (driven by the outer `filtered`/`currentPage`) is hidden there to
+          avoid showing a mismatched/duplicate page count. */}
+      {activeTab !== 'signups' && activeTab !== 'contacts' && activeTab !== 'exhibitors' && (
       <div className="px-4 py-3 border-t border-white/20 bg-white/60 backdrop-blur-sm flex items-center justify-between">
         <div className="text-xs text-gray-500">
           {activeTab === 'tables' ? (
@@ -1601,6 +1627,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
           </div>
         )}
       </div>
+      )}
 
       {/* Detail Modal */}
       {selectedAttendee && (

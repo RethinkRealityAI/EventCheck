@@ -1,6 +1,6 @@
 // components/Exhibitor/ExhibitorsTab.tsx
-import React, { useState } from 'react';
-import { ChevronDown, ChevronRight, Copy, Mail, Check } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { ChevronDown, ChevronRight, ChevronLeft, Copy, Mail, Check } from 'lucide-react';
 import type { Attendee, Form } from '../../types';
 import { supabase } from '../../services/supabaseClient';
 import { getExhibitorTier } from '../../config/formTemplates/buildGansidExhibitor';
@@ -11,10 +11,14 @@ interface Props {
   attendees: Attendee[];
   forms: Form[];
   onRefresh?: () => void;
+  /** Shared page size from the dashboard's overhead control — same value
+   *  used by every other tab, so switching tabs doesn't change page size. */
+  itemsPerPage: number;
 }
 
-export default function ExhibitorsTab({ attendees, forms, onRefresh }: Props) {
+export default function ExhibitorsTab({ attendees, forms, onRefresh, itemsPerPage }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [page, setPage] = useState(1);
   const { showNotification } = useNotifications();
 
   // Include both legacy exhibitor forms AND combined sponsor_exhibitor forms.
@@ -58,6 +62,12 @@ export default function ExhibitorsTab({ attendees, forms, onRefresh }: Props) {
     return next;
   });
 
+  const totalPages = Math.max(1, Math.ceil(orgs.length / itemsPerPage));
+  useEffect(() => { setPage(1); }, [itemsPerPage, orgs.length]);
+  const safePage = Math.min(page, totalPages);
+  const startIndex = (safePage - 1) * itemsPerPage;
+  const pagedOrgs = orgs.slice(startIndex, startIndex + itemsPerPage);
+
   if (orgs.length === 0) {
     return (
       <div className="p-8 text-center text-slate-500 border border-dashed rounded-xl">
@@ -81,7 +91,7 @@ export default function ExhibitorsTab({ attendees, forms, onRefresh }: Props) {
           </tr>
         </thead>
         <tbody>
-          {orgs.map(org => {
+          {pagedOrgs.map(org => {
             const info = (org.companyInfo ?? {}) as any;
             const tier = getExhibitorTier(info.tier);
             const booth = org.exhibitorBoothType ? getBoothType(org.exhibitorBoothType) : undefined;
@@ -165,6 +175,32 @@ export default function ExhibitorsTab({ attendees, forms, onRefresh }: Props) {
           })}
         </tbody>
       </table>
+      <div className="flex items-center justify-between gap-3 px-3 py-2 bg-white text-xs text-gray-600 border-t border-gray-100">
+        <div>
+          Showing {orgs.length > 0 ? startIndex + 1 : 0}–{Math.min(startIndex + itemsPerPage, orgs.length)} of {orgs.length}
+        </div>
+        {totalPages > 1 && (
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              disabled={safePage === 1}
+              className="p-1.5 rounded bg-white border border-gray-200 disabled:opacity-50 hover:bg-gray-50"
+              aria-label="Previous page"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <span className="px-2 font-medium text-gray-700">Page {safePage} of {totalPages}</span>
+            <button
+              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              disabled={safePage === totalPages}
+              className="p-1.5 rounded bg-white border border-gray-200 disabled:opacity-50 hover:bg-gray-50"
+              aria-label="Next page"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

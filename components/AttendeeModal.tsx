@@ -8,6 +8,7 @@ import { updateAttendee, deleteAttendee, getAttendee, getAllSeatingTablesForForm
 import { supabase } from '../services/supabaseClient';
 import { useNotifications } from './NotificationSystem';
 import { resendTicketEmailForAttendee } from '../utils/resendTicketEmail';
+import { getCountryName } from '../utils/countries';
 import { CURRENT_SITE } from '../config/sites';
 import {
   type AttendeeCategory,
@@ -327,7 +328,7 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
   // already surfaces the "Purchaser Filled" pill on these rows, so showing
   // the raw object was both confusing and visually broken (rendered as
   // `[object Object]`).
-  const HIDDEN_ANSWER_KEYS = new Set(['_purchaser_filled']);
+  const HIDDEN_ANSWER_KEYS = new Set(['_purchaser_filled', '_guest_country']);
   const answersEntries = localAttendee.answers
     ? Object.entries(localAttendee.answers).filter(([key]) => !HIDDEN_ANSWER_KEYS.has(key))
     : [];
@@ -859,6 +860,12 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
                           <div className="text-sm text-emerald-900">
                             <div>Source: <strong>{src.name}</strong> ({src.email})</div>
                             {src.ticketType && <div className="text-xs text-emerald-700 mt-0.5">{src.ticketType}</div>}
+                            {(() => {
+                              const guestCountry = (localAttendee.answers as Record<string, unknown> | undefined)?.['_guest_country'];
+                              return typeof guestCountry === 'string' && guestCountry ? (
+                                <div className="text-xs text-emerald-700 mt-0.5">Guest country: {getCountryName(guestCountry)}</div>
+                              ) : null;
+                            })()}
                             <button
                               type="button"
                               onClick={() => onOpenAttendee?.(src)}

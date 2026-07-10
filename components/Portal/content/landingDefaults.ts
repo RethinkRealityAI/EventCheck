@@ -102,6 +102,7 @@ export const LANDING_DEFAULTS: LandingContent = {
         rows: [
           { category: 'Physicians / Researchers', early: 175, regular: 200, onsite: 250 },
           { category: 'Medical Trainees (Residents, Fellows)', early: 150, regular: 175, onsite: 200 },
+          { category: 'Abstract Presenters', early: '—', regular: 100, onsite: 150 },
           { category: 'Undergraduate, Medical, Graduate Students', early: 50, regular: 75, onsite: 100 },
           { category: 'Nurses or Allied Health Professionals', early: 100, regular: 125, onsite: 150 },
           { category: 'Industry Partners', early: 250, regular: 300, onsite: 350 },
@@ -116,6 +117,7 @@ export const LANDING_DEFAULTS: LandingContent = {
         rows: [
           { category: 'Physicians / Researchers', early: 250, regular: 300, onsite: 400 },
           { category: 'Medical Trainees (Residents, Fellows)', early: 200, regular: 250, onsite: 275 },
+          { category: 'Abstract Presenters', early: '—', regular: 150, onsite: 200 },
           { category: 'Undergraduate, Medical, Graduate Students', early: 75, regular: 100, onsite: 125 },
           { category: 'Nurses or Allied Health Professionals', early: 150, regular: 200, onsite: 250 },
           { category: 'Industry Partners', early: 300, regular: 350, onsite: 450 },

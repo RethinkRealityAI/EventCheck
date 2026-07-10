@@ -28,4 +28,26 @@ describe('bogoCheckout', () => {
     expect(claims).toHaveLength(1);
     expect(claims[0].guestEmail).toBe('b@x.com');
   });
+
+  it('passes through a trimmed guestCountry on complete inline slots', () => {
+    const { claims } = buildBogoClaimsForCheckout([
+      { mode: 'inline', guestName: 'A', guestEmail: 'a@x.com', categoryId: 'phys', guestCountry: '  IN  ' },
+    ]);
+    expect(claims[0].guestCountry).toBe('IN');
+  });
+
+  it('defaults guestCountry to null when omitted or blank', () => {
+    const { claims } = buildBogoClaimsForCheckout([
+      { mode: 'inline', guestName: 'A', guestEmail: 'a@x.com', categoryId: 'phys' },
+      { mode: 'inline', guestName: 'B', guestEmail: 'b@x.com', categoryId: 'phys', guestCountry: '   ' },
+    ]);
+    expect(claims[0].guestCountry).toBeNull();
+    expect(claims[1].guestCountry).toBeNull();
+  });
+
+  it('does not require guestCountry to consider an inline slot complete', () => {
+    expect(isCompleteInlineBogoSlot({
+      mode: 'inline', guestName: 'A', guestEmail: 'a@x.com', categoryId: 'phys',
+    })).toBe(true);
+  });
 });
