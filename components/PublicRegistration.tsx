@@ -2597,7 +2597,15 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
           })()}
 
           {paypalClientId && (paymentProvider === 'paypal' || !flwPublicKey) ? (
-            <div key={`${paypalClientId}-${displayTotal}`} className="min-h-[150px] flex flex-col gap-2">
+            // Key on paypalClientId ONLY — not the total. @paypal/react-paypal-js
+            // reads createOrder live through a props proxy (useProxyProps), so the
+            // order is always created at the current displayTotal without needing a
+            // remount. Keying on displayTotal used to hard-remount the whole SDK
+            // subtree whenever the total changed, tearing down an in-progress
+            // "Debit or Credit Card" guest-checkout form mid-entry. We still remount
+            // if the client id itself changes (settings load / sandbox↔live) since
+            // the provider only reads clientId at mount.
+            <div key={paypalClientId} className="min-h-[150px] flex flex-col gap-2">
               <PayPalScriptProvider options={{
                 clientId: paypalClientId,
                 currency: displayCurrency,

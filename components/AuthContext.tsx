@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { supabase } from '../services/supabaseClient';
 import { User, Session } from '@supabase/supabase-js';
 import type { Profile } from '../types';
@@ -35,8 +35,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [profile, setProfile] = useState<Profile | null>(null);
     const [authNotice, setAuthNotice] = useState<string | null>(null);
 
+    // supabase-js re-emits auth events (SIGNED_IN / TOKEN_REFRESHED) when the tab
+    // regains focus/visibility — each carrying the SAME JWT but a fresh session
+    // object. Blindly calling setSession() on every one churned the whole tree under
+    // AuthProvider on every focus change, which mid-checkout can flicker/tear down
+    // payment UI. Only propagate when the access token actually changes; a genuine
+    // refresh (new token), sign-in, and sign-out all still flow through.
+    const lastAccessTokenRef = useRef<string | null | undefined>(undefined);
+
     useEffect(() => {
         let cancelled = false;
+
+        const applySession = (next: Session | null) => {
+            const nextToken = next?.access_token ?? null;
+            if (nextToken === lastAccessTokenRef.current) return;
+            lastAccessTokenRef.current = nextToken;
+            setSession(next);
+            setUser(next?.user ?? null);
+        };
 
         const init = async () => {
             // Email-confirm links land as /#/portal?code=… — exchange before getSession.
@@ -49,16 +65,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
             const { data: { session } } = await supabase.auth.getSession();
             if (cancelled) return;
-            setSession(session);
-            setUser(session?.user ?? null);
+            applySession(session);
             setLoading(false);
         };
 
         void init();
 
         const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-            setSession(session);
-            setUser(session?.user ?? null);
+            applySession(session);
             setLoading(false);
         });
 
