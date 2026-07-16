@@ -672,6 +672,12 @@ export interface AdminPermissions {
     seating: boolean;
     generateQr: boolean;
     settings: boolean;
+    content?: boolean;
+  };
+  // Cross-cutting feature flags (not tied to a page). Optional so legacy
+  // rows that only stored `pages` stay valid. See utils/adminPermissions.ts.
+  features?: {
+    exportAttendees: boolean;
   };
 }
 
