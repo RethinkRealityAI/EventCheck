@@ -7,6 +7,8 @@ import {
   allAdminPermissions,
   canAccessPage,
   canManageAdmins,
+  canUseFeature,
+  effectiveFeaturePermissions,
   effectivePagePermissions,
   firstAccessiblePage,
   hasAdminAccess,
@@ -210,10 +212,65 @@ describe('firstAccessiblePage', () => {
 // allAdminPermissions
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Feature permissions (export)
+// ---------------------------------------------------------------------------
+
+describe('effectiveFeaturePermissions', () => {
+  it('super_admin gets export', () => {
+    expect(effectiveFeaturePermissions(baseProfile({ role: 'super_admin' })).exportAttendees).toBe(true);
+  });
+
+  it('non-admin never gets export', () => {
+    expect(effectiveFeaturePermissions(baseProfile({ role: 'attendee' })).exportAttendees).toBe(false);
+    expect(effectiveFeaturePermissions(null).exportAttendees).toBe(false);
+  });
+
+  it('admin with no features block defaults to export granted (legacy rows)', () => {
+    const p = baseProfile({
+      role: 'admin',
+      adminPermissions: { pages: { dashboard: true, forms: false, sponsors: false, seating: false, generateQr: false, settings: false } } as any,
+    });
+    expect(effectiveFeaturePermissions(p).exportAttendees).toBe(true);
+  });
+
+  it('admin with export explicitly disabled is honoured', () => {
+    const p = baseProfile({
+      role: 'admin',
+      adminPermissions: {
+        pages: { dashboard: true, forms: false, sponsors: false, seating: false, generateQr: false, settings: false },
+        features: { exportAttendees: false },
+      } as any,
+    });
+    expect(effectiveFeaturePermissions(p).exportAttendees).toBe(false);
+    expect(canUseFeature(p, 'exportAttendees')).toBe(false);
+  });
+
+  it('admin with export explicitly enabled can export', () => {
+    const p = baseProfile({
+      role: 'admin',
+      adminPermissions: {
+        pages: { dashboard: true, forms: false, sponsors: false, seating: false, generateQr: false, settings: false },
+        features: { exportAttendees: true },
+      } as any,
+    });
+    expect(canUseFeature(p, 'exportAttendees')).toBe(true);
+  });
+
+  it('DEFAULT and FALLBACK both grant export by default', () => {
+    expect(DEFAULT_ADMIN_PERMISSIONS.features?.exportAttendees).toBe(true);
+    expect(FALLBACK_ADMIN_PERMISSIONS.features?.exportAttendees).toBe(true);
+  });
+});
+
 describe('allAdminPermissions', () => {
   it('returns all-true pages object', () => {
     const all = allAdminPermissions();
     for (const k of ADMIN_PAGE_KEYS) expect(all.pages[k]).toBe(true);
+  });
+
+  it('grants the export feature', () => {
+    expect(allAdminPermissions().features?.exportAttendees).toBe(true);
   });
 
   it('DEFAULT_ADMIN_PERMISSIONS grants dashboard only', () => {

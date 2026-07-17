@@ -19,10 +19,15 @@ import {
 import {
   ADMIN_PAGE_KEYS,
   ADMIN_PAGE_LABELS,
+  ADMIN_FEATURE_KEYS,
+  ADMIN_FEATURE_LABELS,
+  ADMIN_FEATURE_DESCRIPTIONS,
   DEFAULT_ADMIN_PERMISSIONS,
   FALLBACK_ADMIN_PERMISSIONS,
+  effectiveFeaturePermissions,
   isSuperAdmin,
   type AdminPageKey,
+  type AdminFeatureKey,
 } from '../../utils/adminPermissions';
 import { useAuth } from '../AuthContext';
 import { useNotifications } from '../NotificationSystem';
@@ -46,10 +51,27 @@ function PermissionsGrid({
       pages: { ...value.pages, [key]: !value.pages[key] },
     });
   };
+  // A stored perms object may predate the `features` block (legacy rows).
+  // Treat any missing flag as granted so the checkbox reflects the effective
+  // state — the same "unset means on for admins" rule the resolver applies.
+  const featureValue = (key: AdminFeatureKey): boolean =>
+    value.features?.[key] ?? true;
+  const toggleFeature = (key: AdminFeatureKey) => {
+    const current: AdminPermissions['features'] = {
+      exportAttendees: featureValue('exportAttendees'),
+    };
+    onChange({
+      ...value,
+      features: { ...current, [key]: !featureValue(key) },
+    });
+  };
   const setAll = (v: boolean) => {
     const pages = Object.fromEntries(ADMIN_PAGE_KEYS.map((k) => [k, v])) as AdminPermissions['pages'];
     pages.dashboard = true; // always on
-    onChange({ pages });
+    const features = Object.fromEntries(
+      ADMIN_FEATURE_KEYS.map((k) => [k, v]),
+    ) as AdminPermissions['features'];
+    onChange({ pages, features });
   };
   return (
     <div className="space-y-3">
@@ -98,6 +120,39 @@ function PermissionsGrid({
             </span>
           </label>
         ))}
+      </div>
+
+      {/* Feature privileges — capabilities that aren't dashboard pages. */}
+      <div className="pt-1">
+        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">
+          Feature privileges
+        </div>
+        <div className="grid grid-cols-1 gap-2">
+          {ADMIN_FEATURE_KEYS.map((key) => (
+            <label
+              key={key}
+              className={`flex items-start gap-3 p-3 rounded-lg border ${
+                featureValue(key)
+                  ? 'border-emerald-300 bg-emerald-50'
+                  : 'border-slate-200 bg-white hover:bg-slate-50'
+              } ${disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
+            >
+              <input
+                type="checkbox"
+                checked={featureValue(key)}
+                disabled={disabled}
+                onChange={() => toggleFeature(key)}
+                className="w-4 h-4 mt-0.5 accent-emerald-600"
+              />
+              <span className="text-sm font-medium text-slate-700">
+                {ADMIN_FEATURE_LABELS[key]}
+                <span className="block text-[11px] font-normal text-slate-400">
+                  {ADMIN_FEATURE_DESCRIPTIONS[key]}
+                </span>
+              </span>
+            </label>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -529,10 +584,17 @@ export default function AdminsManagement() {
   const summarisePages = (p: Profile): string => {
     if (p.role === 'super_admin') return 'All pages';
     const perms = p.adminPermissions?.pages;
-    if (!perms) return 'Dashboard only';
-    const active = ADMIN_PAGE_KEYS.filter((k) => perms[k]);
-    if (active.length === ADMIN_PAGE_KEYS.length) return 'All pages';
-    return active.map((k) => ADMIN_PAGE_LABELS[k].split(' (')[0]).join(', ');
+    const pagesText = !perms
+      ? 'Dashboard only'
+      : (() => {
+          const active = ADMIN_PAGE_KEYS.filter((k) => perms[k]);
+          if (active.length === ADMIN_PAGE_KEYS.length) return 'All pages';
+          return active.map((k) => ADMIN_PAGE_LABELS[k].split(' (')[0]).join(', ');
+        })();
+    // Only call out the export privilege when it's been revoked — the default
+    // is granted, so surfacing "+ Export" on every row would be noise.
+    const canExport = effectiveFeaturePermissions(p).exportAttendees;
+    return canExport ? pagesText : `${pagesText} · Export off`;
   };
 
   return (

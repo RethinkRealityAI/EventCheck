@@ -8,9 +8,12 @@ import { useNotifications } from './NotificationSystem';
 import AttendeeModal from './AttendeeModal';
 import AddAttendeeModal from './AddAttendeeModal';
 import ColumnVisibilityDropdown, { ColumnDef } from './ColumnVisibilityDropdown';
-import { CATEGORY_META, resolveAttendeeCategory } from '../utils/attendeeCategories';
+import { CATEGORY_META, ATTENDEE_CATEGORIES, resolveAttendeeCategory } from '../utils/attendeeCategories';
 import { resolveAttendeeCountryCode } from '../utils/resolveAttendeeCountry';
 import { getCountryName } from '../utils/countries';
+import { useAuth } from './AuthContext';
+import { canUseFeature } from '../utils/adminPermissions';
+import { generateAttendeeListPDF } from '../utils/pdfGenerator';
 import ExhibitorsTab from './Exhibitor/ExhibitorsTab';
 import SignupsTab from './Signups/SignupsTab';
 import ImportedContactsTab from './Contacts/ImportedContactsTab';
@@ -138,7 +141,13 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
   const [tabsConfigOpen, setTabsConfigOpen] = useState(false);
   const [selectedAttendee, setSelectedAttendee] = useState<Attendee | null>(null);
   const { showNotification } = useNotifications();
+  const { profile } = useAuth();
+  // Export is a per-admin privilege (super admins always have it). Gate both
+  // the toolbar button and the modal on it. Defaults to granted for admins —
+  // see utils/adminPermissions.effectiveFeaturePermissions.
+  const canExport = canUseFeature(profile, 'exportAttendees');
   const [showExportModal, setShowExportModal] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [showBulkImport, setShowBulkImport] = useState(false);
 
   // Pagination State. Default page size is 50 and the user's choice persists
@@ -199,7 +208,10 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     id: true,
     name: true,
     email: true,
+    country: true,
+    category: true,
     ticketType: true,
+    checkInStatus: true,
     registeredAt: true,
     checkedInAt: true,
     paymentStatus: true,
@@ -218,7 +230,10 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     id: 'Registration ID',
     name: 'Full Name',
     email: 'Email Address',
+    country: 'Country',
+    category: 'Category',
     ticketType: 'Ticket Type',
+    checkInStatus: 'Check-in Status',
     registeredAt: 'Registered Date',
     checkedInAt: 'Check-in Time',
     paymentStatus: 'Payment Status',
@@ -231,6 +246,32 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     donationType: 'Donation Type',
     dietaryPreferences: 'Dietary Preferences',
     isPrimary: 'Primary / Guest'
+  };
+
+  // ── Export scope/filter state ──────────────────────────────────────────────
+  // The export modal carries its OWN filters (independent of the dashboard
+  // view) so an admin can export any slice — a specific event ("space"),
+  // speakers, a country, just-registered vs everyone, or a particular tab —
+  // without first navigating the dashboard to that view.
+  type ExportScope =
+    | 'all' | 'live' | 'test' | 'donated' | 'tables'
+    | 'sponsor-tickets' | 'exhibitors' | 'groups' | 'speakers';
+  const [exportScope, setExportScope] = useState<ExportScope>('all');
+  const [exportFormId, setExportFormId] = useState<string>('_all');
+  const [exportCategory, setExportCategory] = useState<string>('all');
+  const [exportCountry, setExportCountry] = useState<string>('all');
+  const [exportRegistration, setExportRegistration] = useState<'all' | 'registered' | 'checked-in'>('all');
+
+  const EXPORT_SCOPE_LABELS: Record<ExportScope, string> = {
+    all: 'All attendees',
+    live: 'Live (registered attendees)',
+    test: 'Test registrations',
+    donated: 'Donated seats / tables',
+    tables: 'Tables',
+    'sponsor-tickets': 'Sponsor tickets',
+    exhibitors: 'Exhibitors',
+    groups: 'Groups',
+    speakers: 'Speakers',
   };
 
   // Load settings on mount
@@ -679,29 +720,126 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     setExportFields(prev => ({ ...prev, [field]: !prev[field] }));
   };
 
-  const handleExportCSV = () => {
-    const selectedKeys = Object.entries(exportFields)
-      .filter(([_, enabled]) => enabled)
-      .map(([key]) => key);
+  // Open the export modal, seeding its filters from the current dashboard view
+  // so the common case ("export what I'm looking at") is one click, while the
+  // admin can still widen/narrow scope from inside the modal.
+  const openExportModal = () => {
+    const seedScope: ExportScope = ([
+      'live', 'test', 'donated', 'tables', 'sponsor-tickets', 'exhibitors', 'groups', 'speakers',
+    ] as ExportScope[]).includes(activeTab as ExportScope)
+      ? (activeTab as ExportScope)
+      : 'all';
+    setExportScope(seedScope);
+    setExportFormId(selectedFormId);
+    setExportCategory('all');
+    setExportCountry('all');
+    setExportRegistration('all');
+    setShowExportModal(true);
+  };
 
+  // Rows an export will contain, driven purely by the export modal's own
+  // filters. Mirrors the tab-matching rules used by the dashboard list so a
+  // scope of e.g. "speakers" yields the same rows the Speakers tab shows.
+  const exportRows = useMemo(() => {
+    return attendees.filter(a => {
+      const isTest = !!a.isTest;
+      const isStaffRow = a.guestType === 'staff-pending'
+        || a.guestType === 'staff-claimed'
+        || a.guestType === 'exhibitor-staff-pending'
+        || a.guestType === 'exhibitor-staff-claimed';
+
+      let matchesScope = true;
+      switch (exportScope) {
+        case 'all': matchesScope = !isStaffRow; break;
+        case 'live': matchesScope = !isTest && !isStaffRow; break;
+        case 'test': matchesScope = isTest; break;
+        case 'donated': matchesScope = !isTest && ((a.donatedSeats || 0) > 0 || (a.donatedTables || 0) > 0); break;
+        case 'tables': matchesScope = !isTest && !isStaffRow; break;
+        case 'sponsor-tickets': matchesScope = !a.isPrimary && !!a.primaryAttendeeId && sponsorPrimaryIds.has(a.primaryAttendeeId); break;
+        case 'exhibitors': matchesScope = a.ticketType === 'Exhibitor'
+          || a.guestType === 'exhibitor-staff-pending'
+          || a.guestType === 'exhibitor-staff-claimed'; break;
+        case 'groups': matchesScope = !isTest && !isStaffRow
+          && (groupPrimaryIds.has(a.id) || (!!a.primaryAttendeeId && groupPrimaryIds.has(a.primaryAttendeeId))); break;
+        case 'speakers': matchesScope = !isTest && a.guestType === 'speaker'; break;
+      }
+
+      const matchesForm = exportFormId === '_all' || a.formId === exportFormId;
+
+      const cat = resolveAttendeeCategory(a);
+      const matchesCategory = exportCategory === 'all' || cat === exportCategory;
+
+      const countryCode = resolveAttendeeCountryCode(a, forms.find(f => f.id === a.formId));
+      const matchesCountry = exportCountry === 'all' || countryCode === exportCountry;
+
+      const matchesReg = exportRegistration === 'all'
+        ? true
+        : exportRegistration === 'checked-in' ? !!a.checkedInAt : !a.checkedInAt;
+
+      return matchesScope && matchesForm && matchesCategory && matchesCountry && matchesReg;
+    });
+  }, [attendees, exportScope, exportFormId, exportCategory, exportCountry, exportRegistration, forms, sponsorPrimaryIds, groupPrimaryIds]);
+
+  // Distinct countries present in the data — powers the export country filter
+  // so admins only see countries that actually have attendees.
+  const exportCountryOptions = useMemo(() => {
+    const codes = new Set<string>();
+    for (const a of attendees) {
+      const code = resolveAttendeeCountryCode(a, forms.find(f => f.id === a.formId));
+      if (code) codes.add(code);
+    }
+    return [...codes]
+      .map(code => ({ code, name: getCountryName(code) || code }))
+      .sort((x, y) => x.name.localeCompare(y.name));
+  }, [attendees, forms]);
+
+  // Resolve a single export cell, including the computed columns (country,
+  // category, check-in status) that aren't plain attendee properties.
+  const resolveExportValue = useCallback((attendee: Attendee, key: string): string => {
+    if (key === 'country') {
+      const code = resolveAttendeeCountryCode(attendee, forms.find(f => f.id === attendee.formId));
+      return code ? (getCountryName(code) || code) : '';
+    }
+    if (key === 'category') {
+      const cat = resolveAttendeeCategory(attendee);
+      return cat ? CATEGORY_META[cat].label : '';
+    }
+    if (key === 'checkInStatus') {
+      return attendee.checkedInAt ? 'Checked in' : 'Registered';
+    }
+    if (key === 'isPrimary') {
+      return attendee.isPrimary === false ? 'Guest' : 'Primary';
+    }
+    let val = (attendee as any)[key];
+    if (val && (key === 'registeredAt' || key === 'checkedInAt')) {
+      val = format(new Date(val), 'yyyy-MM-dd HH:mm:ss');
+    }
+    if (val === undefined || val === null) return '';
+    return String(val);
+  }, [forms]);
+
+  const selectedExportKeys = () => Object.entries(exportFields)
+    .filter(([_, enabled]) => enabled)
+    .map(([key]) => key);
+
+  const handleExportCSV = () => {
+    const selectedKeys = selectedExportKeys();
     if (selectedKeys.length === 0) {
       showNotification("Please select at least one field to export.", 'warning');
       return;
     }
+    if (exportRows.length === 0) {
+      showNotification("No attendees match the selected filters.", 'warning');
+      return;
+    }
 
     const headers = selectedKeys.map(key => fieldLabels[key] || key).join(',');
-
-    const rows = filtered.map(attendee => {
-      return selectedKeys.map(key => {
-        let val = (attendee as any)[key];
-        if (val && (key === 'registeredAt' || key === 'checkedInAt')) {
-          val = format(new Date(val), 'yyyy-MM-dd HH:mm:ss');
-        }
-        if (val === undefined || val === null) val = '';
-        const strVal = String(val).replace(/"/g, '""');
+    const rows = exportRows.map(attendee =>
+      selectedKeys.map(key => {
+        const strVal = resolveExportValue(attendee, key).replace(/"/g, '""');
         return `"${strVal}"`;
-      }).join(',');
-    });
+      }).join(','),
+    );
 
     const csvContent = [headers, ...rows].join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -712,7 +850,47 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    showNotification(`Exported ${exportRows.length} attendee${exportRows.length !== 1 ? 's' : ''} to CSV`, 'success');
     setShowExportModal(false);
+  };
+
+  const handleExportPDF = async () => {
+    const selectedKeys = selectedExportKeys();
+    if (selectedKeys.length === 0) {
+      showNotification("Please select at least one field to export.", 'warning');
+      return;
+    }
+    if (exportRows.length === 0) {
+      showNotification("No attendees match the selected filters.", 'warning');
+      return;
+    }
+
+    setExporting(true);
+    try {
+      const columns = selectedKeys.map(key => ({ key, label: fieldLabels[key] || key }));
+      const data = exportRows.map(a => {
+        const row: Record<string, string> = {};
+        for (const key of selectedKeys) row[key] = resolveExportValue(a, key);
+        return row;
+      });
+      const spaceLabel = exportFormId === '_all'
+        ? 'All events'
+        : (forms.find(f => f.id === exportFormId)?.title || 'Event');
+      const doc = generateAttendeeListPDF(data, columns, {
+        title: 'Attendee Export',
+        subtitle: `${EXPORT_SCOPE_LABELS[exportScope]} · ${spaceLabel}`,
+        generatedAt: format(new Date(), 'yyyy-MM-dd HH:mm'),
+        total: exportRows.length,
+      });
+      doc.save(`attendees_${format(new Date(), 'yyyyMMdd_HHmm')}.pdf`);
+      showNotification(`Exported ${exportRows.length} attendee${exportRows.length !== 1 ? 's' : ''} to PDF`, 'success');
+      setShowExportModal(false);
+    } catch (e: any) {
+      showNotification(`PDF export failed: ${e?.message || 'unknown error'}`, 'error');
+    } finally {
+      setExporting(false);
+    }
   };
 
   return (
@@ -832,14 +1010,16 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                 <span className="hidden sm:inline">Add</span>
               </button>
 
-              <button
-                onClick={() => setShowExportModal(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition shadow-sm"
-                title="Export as CSV"
-              >
-                <Download className="w-4 h-4" />
-                <span className="hidden sm:inline">Export</span>
-              </button>
+              {canExport && (
+                <button
+                  onClick={openExportModal}
+                  className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition shadow-sm"
+                  title="Export attendees (CSV / PDF)"
+                >
+                  <Download className="w-4 h-4" />
+                  <span className="hidden sm:inline">Export</span>
+                </button>
+              )}
 
               <button
                 onClick={() => setShowBulkImport(true)}
@@ -1682,17 +1862,20 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
       )}
 
       {/* Export Selection Modal */}
-      {showExportModal && (
+      {showExportModal && canExport && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col">
-            <div className="p-6 border-b border-gray-100 flex justify-between items-center">
+          {/* max-h + flex column so the body scrolls and the footer stays
+              pinned/visible — previously the modal had no height cap and its
+              action buttons could be pushed off-screen on shorter viewports. */}
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="p-5 sm:p-6 border-b border-gray-100 flex justify-between items-center flex-shrink-0">
               <div className="flex items-center gap-3">
                 <div className="bg-indigo-50 p-2 rounded-lg">
                   <FileSpreadsheet className="w-6 h-6 text-indigo-600" />
                 </div>
                 <div>
                   <h3 className="text-xl font-bold text-gray-900">Export Attendees</h3>
-                  <p className="text-sm text-gray-500">Choose which fields to include in your CSV.</p>
+                  <p className="text-sm text-gray-500">Filter the audience, then pick fields and a format.</p>
                 </div>
               </div>
               <button
@@ -1703,41 +1886,151 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
               </button>
             </div>
 
-            <div className="p-6">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {Object.entries(fieldLabels).map(([key, label]) => (
-                  <button
-                    key={key}
-                    onClick={() => toggleField(key)}
-                    className={`flex items-center justify-between p-3 rounded-lg border transition-all text-sm ${exportFields[key]
-                      ? 'border-indigo-200 bg-indigo-50/50 text-indigo-700 font-medium'
-                      : 'border-gray-100 bg-gray-50 text-gray-500 hover:border-gray-200'
-                      }`}
-                  >
-                    <span>{label}</span>
-                    {exportFields[key] ? (
-                      <Check className="w-4 h-4" />
-                    ) : (
-                      <div className="w-4 h-4 rounded-full border border-gray-300" />
-                    )}
-                  </button>
-                ))}
+            {/* Scrollable body */}
+            <div className="p-5 sm:p-6 overflow-y-auto flex-1 custom-scrollbar space-y-6">
+              {/* Filters */}
+              <div>
+                <div className="flex items-center gap-2 mb-3 text-slate-600">
+                  <Filter className="w-4 h-4" />
+                  <h4 className="text-sm font-bold uppercase tracking-wide">Who to export</h4>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <label className="flex flex-col gap-1">
+                    <span className="text-xs font-semibold text-slate-500">Tab / segment</span>
+                    <select
+                      value={exportScope}
+                      onChange={e => setExportScope(e.target.value as ExportScope)}
+                      className="px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-indigo-500"
+                    >
+                      {(Object.keys(EXPORT_SCOPE_LABELS) as ExportScope[]).map(k => (
+                        <option key={k} value={k}>{EXPORT_SCOPE_LABELS[k]}</option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="flex flex-col gap-1">
+                    <span className="text-xs font-semibold text-slate-500">Event / space</span>
+                    <select
+                      value={exportFormId}
+                      onChange={e => setExportFormId(e.target.value)}
+                      className="px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-indigo-500"
+                    >
+                      <option value="_all">All events</option>
+                      {forms.map(f => (
+                        <option key={f.id} value={f.id}>{f.title}</option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="flex flex-col gap-1">
+                    <span className="text-xs font-semibold text-slate-500">Category</span>
+                    <select
+                      value={exportCategory}
+                      onChange={e => setExportCategory(e.target.value)}
+                      className="px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-indigo-500"
+                    >
+                      <option value="all">All categories</option>
+                      {ATTENDEE_CATEGORIES.map(c => (
+                        <option key={c.id} value={c.id}>{c.icon} {c.label}</option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="flex flex-col gap-1">
+                    <span className="text-xs font-semibold text-slate-500">Country</span>
+                    <select
+                      value={exportCountry}
+                      onChange={e => setExportCountry(e.target.value)}
+                      className="px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-indigo-500"
+                    >
+                      <option value="all">All countries</option>
+                      {exportCountryOptions.map(c => (
+                        <option key={c.code} value={c.code}>{c.name}</option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="flex flex-col gap-1 sm:col-span-2">
+                    <span className="text-xs font-semibold text-slate-500">Registration status</span>
+                    <select
+                      value={exportRegistration}
+                      onChange={e => setExportRegistration(e.target.value as any)}
+                      className="px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-indigo-500"
+                    >
+                      <option value="all">Everyone</option>
+                      <option value="registered">Just registered (not checked in)</option>
+                      <option value="checked-in">Checked in</option>
+                    </select>
+                  </label>
+                </div>
+                <div className="mt-3 text-xs font-medium text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2">
+                  {exportRows.length} attendee{exportRows.length !== 1 ? 's' : ''} match{exportRows.length === 1 ? 'es' : ''} these filters.
+                </div>
               </div>
 
-              <div className="mt-8 flex gap-3">
-                <button
-                  onClick={() => setShowExportModal(false)}
-                  className="flex-1 py-3 border border-gray-200 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleExportCSV}
-                  className="flex-1 py-3 bg-indigo-600 text-white rounded-lg font-bold hover:bg-indigo-700 transition shadow-lg shadow-indigo-900/20 flex items-center justify-center gap-2"
-                >
-                  <Download className="w-5 h-5" /> Download CSV
-                </button>
+              {/* Fields */}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-sm font-bold uppercase tracking-wide text-slate-600">Fields to include</h4>
+                  <div className="flex gap-2 text-xs">
+                    <button
+                      onClick={() => setExportFields(Object.fromEntries(Object.keys(fieldLabels).map(k => [k, true])))}
+                      className="px-2 py-1 bg-slate-100 hover:bg-slate-200 rounded"
+                    >
+                      Select all
+                    </button>
+                    <button
+                      onClick={() => setExportFields(Object.fromEntries(Object.keys(fieldLabels).map(k => [k, false])))}
+                      className="px-2 py-1 bg-slate-100 hover:bg-slate-200 rounded"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {Object.entries(fieldLabels).map(([key, label]) => (
+                    <button
+                      key={key}
+                      onClick={() => toggleField(key)}
+                      className={`flex items-center justify-between p-3 rounded-lg border transition-all text-sm ${exportFields[key]
+                        ? 'border-indigo-200 bg-indigo-50/50 text-indigo-700 font-medium'
+                        : 'border-gray-100 bg-gray-50 text-gray-500 hover:border-gray-200'
+                        }`}
+                    >
+                      <span>{label}</span>
+                      {exportFields[key] ? (
+                        <Check className="w-4 h-4" />
+                      ) : (
+                        <div className="w-4 h-4 rounded-full border border-gray-300" />
+                      )}
+                    </button>
+                  ))}
+                </div>
               </div>
+            </div>
+
+            {/* Pinned footer */}
+            <div className="p-5 sm:p-6 border-t border-gray-100 flex flex-col sm:flex-row gap-3 flex-shrink-0 bg-white">
+              <button
+                onClick={() => setShowExportModal(false)}
+                className="sm:flex-1 py-3 px-4 border border-gray-200 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleExportPDF}
+                disabled={exporting || exportRows.length === 0}
+                className="sm:flex-1 py-3 px-4 border-2 border-indigo-600 text-indigo-700 rounded-lg font-bold hover:bg-indigo-50 transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {exporting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5" />} PDF
+              </button>
+              <button
+                onClick={handleExportCSV}
+                disabled={exporting || exportRows.length === 0}
+                className="sm:flex-1 py-3 px-4 bg-indigo-600 text-white rounded-lg font-bold hover:bg-indigo-700 transition shadow-lg shadow-indigo-900/20 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <FileSpreadsheet className="w-5 h-5" /> CSV
+              </button>
             </div>
           </div>
         </div>

@@ -36,8 +36,25 @@ export interface AdminPagePermissions {
   content: boolean;
 }
 
+// Feature keys are cross-cutting privileges that aren't tied to a single
+// dashboard page/route. Unlike pages, an unset feature defaults to GRANTED
+// for admins (see effectiveFeaturePermissions) so existing admins keep the
+// capability they had before the feature flag was introduced.
+export const ADMIN_FEATURE_KEYS = [
+  'exportAttendees',
+] as const;
+export type AdminFeatureKey = typeof ADMIN_FEATURE_KEYS[number];
+
+export interface AdminFeaturePermissions {
+  exportAttendees: boolean;
+}
+
 export interface AdminPermissions {
   pages: AdminPagePermissions;
+  // Optional so legacy rows (which only ever stored `pages`) stay valid.
+  // Resolution treats a missing `features` as "all features granted" for
+  // admins — see effectiveFeaturePermissions.
+  features?: AdminFeaturePermissions;
 }
 
 // Labels used in the admin-management UI.
@@ -49,6 +66,15 @@ export const ADMIN_PAGE_LABELS: Record<AdminPageKey, string> = {
   generateQr: 'Generate QR (Manual Ticket Tool)',
   settings: 'Settings',
   content: 'Content (Landing/Portal CMS)',
+};
+
+// Labels + helper copy for the feature toggles in the admin-management UI.
+export const ADMIN_FEATURE_LABELS: Record<AdminFeatureKey, string> = {
+  exportAttendees: 'Export attendees (CSV / PDF)',
+};
+
+export const ADMIN_FEATURE_DESCRIPTIONS: Record<AdminFeatureKey, string> = {
+  exportAttendees: 'Download attendee lists from the dashboard with filters.',
 };
 
 // Pre-fill for the "Invite new admin" / "Promote existing user" forms.
@@ -64,6 +90,12 @@ export const DEFAULT_ADMIN_PERMISSIONS: AdminPermissions = {
     generateQr: false,
     settings: false,
     content: false,
+  },
+  // Export is a dashboard capability every admin gets out of the box — it's
+  // the whole point of "admins should have that feature available by default".
+  // A super admin can still uncheck it per-admin from the management UI.
+  features: {
+    exportAttendees: true,
   },
 };
 
@@ -90,6 +122,9 @@ export const FALLBACK_ADMIN_PERMISSIONS: AdminPermissions = {
     generateQr: true,
     settings: true,
     content: true,
+  },
+  features: {
+    exportAttendees: true,
   },
 };
 
@@ -160,6 +195,35 @@ export function canAccessPage(profile: Profile | null, page: AdminPageKey): bool
   return effectivePagePermissions(profile)[page];
 }
 
+/**
+ * Returns the effective feature permissions for a profile.
+ * - super_admin → all true
+ * - admin → stored feature flags, but a MISSING flag defaults to `true`.
+ *   This is deliberately the opposite of pages: features gate an existing,
+ *   already-shipped capability, so legacy admins (whose stored perms predate
+ *   the flag) must keep it. A super admin explicitly setting the flag to
+ *   `false` is honoured.
+ * - anyone else → all false
+ */
+export function effectiveFeaturePermissions(profile: Profile | null): AdminFeaturePermissions {
+  if (isSuperAdmin(profile)) {
+    return { exportAttendees: true };
+  }
+  if (!isAdmin(profile)) {
+    return { exportAttendees: false };
+  }
+  const stored = profile?.adminPermissions?.features ?? null;
+  return {
+    // `?? true` — unset means granted for admins (see docstring).
+    exportAttendees: stored?.exportAttendees ?? true,
+  };
+}
+
+/** True if the profile can use the named admin feature. */
+export function canUseFeature(profile: Profile | null, feature: AdminFeatureKey): boolean {
+  return effectiveFeaturePermissions(profile)[feature];
+}
+
 /** True if the profile can open the Admin Management page (super_admin only). */
 export function canManageAdmins(profile: Profile | null): boolean {
   return isSuperAdmin(profile);
@@ -189,6 +253,9 @@ export function allAdminPermissions(): AdminPermissions {
       generateQr: true,
       settings: true,
       content: true,
+    },
+    features: {
+      exportAttendees: true,
     },
   };
 }
