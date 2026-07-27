@@ -8,6 +8,8 @@ import { generateTicketPDF } from '../../utils/pdfGenerator';
 import { sendTicketEmail, arrayBufferToBase64 } from '../../services/smtpService';
 import { buildSponsorEmailContext, mergeTemplate, renderGuestClaimLinksHtml } from '../../utils/sponsorEmailTemplates';
 import { buildSponsorExtras } from '../../utils/paypalOrderMeta';
+import { describePayPalError, payPalErrorReference } from '../../utils/paypalPayer';
+import { logPaymentFailure } from '../../services/paymentDiagnosticsService';
 import { CURRENT_SITE } from '../../config/sites';
 
 // ---------------------------------------------------------------------------
@@ -721,8 +723,20 @@ const PublicSponsorForm: React.FC<Props> = ({ form, settings }) => {
                     }
                     onError={(err) => {
                       console.error('PayPal error', err);
+                      const info = describePayPalError(err);
+                      const reference = payPalErrorReference(info);
+                      logPaymentFailure({
+                        provider: 'paypal',
+                        stage: 'sponsor-paypal-onerror',
+                        formId: form.id,
+                        amount: totalWithHst.toFixed(2),
+                        currency,
+                        reference,
+                        message: info.message,
+                      });
                       setSubmitError(
                         'Something went wrong with PayPal. Please try again or contact us.'
+                        + (reference ? ` (Reference: ${reference})` : '')
                       );
                     }}
                   />

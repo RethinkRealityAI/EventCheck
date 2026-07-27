@@ -33,6 +33,8 @@ import { getCountryName } from '../utils/countries';
 import GroupPersonRow from './Group/GroupPersonRow';
 import GroupShortcutsToggle from './Group/GroupShortcutsToggle';
 import { supabase } from '../services/supabaseClient';
+import { logPaymentFailure } from '../services/paymentDiagnosticsService';
+import { buildPayPalPayer, describePayPalError, payPalErrorReference } from '../utils/paypalPayer';
 import { Loader2, Check, AlertCircle, Download, Calendar, Tag, CreditCard, ArrowRight, X, Eye, EyeOff, MapPin, UserPlus, Info, Copy } from 'lucide-react';
 import { useNotifications } from './NotificationSystem';
 import { useParams, useLocation } from 'react-router-dom';
@@ -121,6 +123,10 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   // to Flutterwave (card / mobile money — works for African cards that PayPal
   // rejects) when both providers are configured.
   const [paymentProvider, setPaymentProvider] = useState<'paypal' | 'flutterwave'>('paypal');
+  // Set when PayPal's SDK reports an error. Drives the one-tap offer to finish
+  // on the other provider — a PayPal failure is frequently the buyer's card or
+  // country rather than anything a retry on PayPal will fix.
+  const [paypalFailed, setPaypalFailed] = useState(false);
 
   // Donation State (seat-based — donating extra tickets for others)
   const [donateOption, setDonateOption] = useState<'no' | 'table' | 'seats'>('no');
@@ -2512,9 +2518,24 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
           <p className="text-gray-500 mb-8">Complete your purchase to receive your ticket.</p>
 
           {error && (
-            <div className="p-3 bg-red-50 text-red-600 rounded-lg text-sm flex items-start gap-2 mb-6 text-left">
-              <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
-              <span>{error}</span>
+            <div className="p-3 bg-red-50 text-red-600 rounded-lg text-sm flex flex-col gap-2 mb-6 text-left">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                <span>{error}</span>
+              </div>
+              {/* PayPal declines a lot of non-US/EU cards outright, so retrying
+                  PayPal is often the one thing that can't work. Put the
+                  alternative provider one tap away instead of leaving the buyer
+                  to find the toggle above the summary. */}
+              {paypalFailed && flwPublicKey && paymentProvider === 'paypal' && (
+                <button
+                  type="button"
+                  onClick={() => { setPaymentProvider('flutterwave'); setPaypalFailed(false); setError(''); }}
+                  className="self-start rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700 transition"
+                >
+                  Pay by card / bank transfer / mobile money instead
+                </button>
+              )}
             </div>
           )}
 
@@ -2561,7 +2582,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
               </button>
               <button
                 type="button"
-                onClick={() => setPaymentProvider('flutterwave')}
+                onClick={() => { setPaymentProvider('flutterwave'); setPaypalFailed(false); setError(''); }}
                 className={`flex-1 rounded-lg border px-3 py-2 text-sm font-semibold transition ${paymentProvider === 'flutterwave' ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'}`}
               >
                 Card / Mobile Money
@@ -2588,7 +2609,17 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                   description="Event Registration"
                   disabled={loading}
                   onSuccess={onFlutterwaveSuccess}
-                  onError={(msg) => setError(msg)}
+                  onError={(msg) => {
+                    logPaymentFailure({
+                      provider: 'flutterwave',
+                      stage: 'flutterwave-onerror',
+                      formId: form.id,
+                      amount: displayTotal.toFixed(2),
+                      currency: displayCurrency,
+                      message: msg,
+                    });
+                    setError(msg);
+                  }}
                   onClose={() => { /* user dismissed the modal — no-op */ }}
                 />
                 <p className="text-[11px] text-gray-400 italic">Cards, bank transfer, mobile money & USSD — works across Africa.</p>
@@ -2620,16 +2651,20 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                   createOrder={(data, actions) => {
                     // Build payer object so PayPal merchant dashboard shows the
                     // registrant's name and email instead of a blank guest entry.
+                    // Everything here is raw form input, so it goes through
+                    // buildPayPalPayer — Orders v2 validates these fields strictly
+                    // and rejects the whole order (surfacing as a generic
+                    // "Something went wrong") over something as small as an
+                    // untrimmed address or a dotless domain the browser allowed.
                     const _emailF = form.fields.find(f => f.type === 'email' || f.label.toLowerCase().includes('email'));
                     const _firstF = form.fields.find(f => f.type === 'text' && /first\s*name|given\s*name/i.test(f.label));
                     const _lastF  = form.fields.find(f => f.type === 'text' && /last\s*name|surname|family\s*name/i.test(f.label));
-                    const _payerEmail = _emailF ? (answers[_emailF.id] || '') : '';
-                    const _givenName  = _firstF ? (answers[_firstF.id] || '') : resolveDisplayName(form.fields, answers);
-                    const _surname    = _lastF  ? (answers[_lastF.id]  || '') : '';
-                    const _payer: Record<string, any> = {};
-                    if (_givenName) _payer.name = { given_name: _givenName, ...(_surname ? { surname: _surname } : {}) };
-                    if (_payerEmail) _payer.email_address = _payerEmail;
-                    const _hasPayer = Object.keys(_payer).length > 0;
+                    const _payer = buildPayPalPayer({
+                      email: _emailF ? answers[_emailF.id] : '',
+                      givenName: _firstF ? answers[_firstF.id] : resolveDisplayName(form.fields, answers),
+                      surname: _lastF ? answers[_lastF.id] : '',
+                    });
+                    const _hasPayer = _payer !== null;
 
                     if (pricingTemplate && registrationMode === 'group' && displayGroupTotal != null) {
                       const groupDiscountCents = (groupTotal ?? displayGroupTotal) - displayGroupTotal;
@@ -2666,6 +2701,12 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                           ...(groupExtras.items ? { items: groupExtras.items } : {}),
                         }],
                         intent: 'CAPTURE',
+                        // Registrations are digital goods — without this PayPal
+                        // defaults to GET_FROM_FILE and the guest "Debit or
+                        // Credit Card" flow demands a shipping address it then
+                        // has to validate, a step that fails outright for some
+                        // countries. Every other checkout in this app sets it.
+                        application_context: { shipping_preference: 'NO_SHIPPING' },
                         ...(_hasPayer ? { payer: _payer } : {}),
                       });
                     }
@@ -2693,6 +2734,9 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                           ...(dynExtras.items ? { items: dynExtras.items } : {}),
                         }],
                         intent: 'CAPTURE',
+                        // See the group branch: NO_SHIPPING keeps the guest card
+                        // flow off PayPal's address-collection path.
+                        application_context: { shipping_preference: 'NO_SHIPPING' },
                         ...(_hasPayer ? { payer: _payer } : {}),
                       });
                     }
@@ -2746,7 +2790,33 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                   }}
                   onError={(err) => {
                     console.error("PayPal Error:", err);
-                    setError("Something went wrong with PayPal. Please try again or contact the event organizer.");
+                    // Decode what PayPal actually said, post it to the edge
+                    // function log, and put the reference in front of the buyer
+                    // so a "PayPal isn't working" report is traceable to one
+                    // order instead of being a dead end.
+                    const info = describePayPalError(err);
+                    const reference = payPalErrorReference(info);
+                    logPaymentFailure({
+                      provider: 'paypal',
+                      stage: 'paypal-onerror',
+                      formId: form.id,
+                      amount: displayTotal.toFixed(2),
+                      currency: displayCurrency,
+                      reference,
+                      message: info.message,
+                    });
+                    setPaypalFailed(true);
+                    // With a second provider configured, the useful advice is
+                    // "use the other rail". Without one, "please try again" on
+                    // its own strands anyone whose card PayPal simply won't
+                    // take — so name the two things that actually change the
+                    // outcome: a different card, or the PayPal-account path
+                    // rather than guest card entry.
+                    const advice = flwPublicKey
+                      ? 'Something went wrong with PayPal. Please try again, or pay by card, bank transfer or mobile money instead.'
+                      : 'PayPal could not complete this payment. Please try again — or use a different card, or pay with a '
+                        + 'PayPal account instead of the "Debit or Credit Card" option. If it keeps failing, contact the event organizer.';
+                    setError(reference ? `${advice} Reference: ${reference}` : advice);
                   }}
                 />
               </PayPalScriptProvider>

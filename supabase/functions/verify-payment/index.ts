@@ -575,6 +575,33 @@ serve(async (req: Request) => {
       }
     }
 
+    // ── CLIENT PAYMENT-FAILURE LOG ────────────────────────────────────────
+    // Checkout failures that happen inside the provider's own UI (a rejected
+    // PayPal order-create, a card flow the buyer couldn't complete) never
+    // reach this function, so they used to leave no trace anywhere. The client
+    // posts them here purely so they land in the edge function logs next to
+    // the capture-side failures. No DB write, no value given, no auth needed —
+    // and every field is truncated so this can't be used to flood the logs.
+    if (body.mode === 'log-payment-error') {
+      const cap = (v: unknown, n: number) =>
+        typeof v === 'string' ? v.slice(0, n) : (v === null || v === undefined ? null : String(v).slice(0, n));
+      console.error('[verify-payment client-failure]', JSON.stringify({
+        provider: cap(body.provider, 32),
+        stage: cap(body.stage, 64),
+        formId: cap(body.formId, 64),
+        amount: cap(body.amount, 32),
+        currency: cap(body.currency, 8),
+        reference: cap(body.reference, 64),
+        message: cap(body.message, 500),
+        embedded: body.embedded === true ? true : body.embedded === false ? false : null,
+        pageUrl: cap(body.pageUrl, 300),
+        userAgent: cap(body.userAgent, 300),
+        origin: (req.headers.get('origin') || '').slice(0, 200),
+        at: new Date().toISOString(),
+      }));
+      return jsonResponse({ ok: true });
+    }
+
     // ── PROMO VALIDATION (usage limits + category scope preview on Apply) ──
     if (body.mode === 'validate-promo') {
       const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
