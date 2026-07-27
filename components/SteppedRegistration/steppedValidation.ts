@@ -24,6 +24,14 @@ const GUEST_INLINE_EXCLUDED_IDS: ReadonlySet<string> = new Set([
 ]);
 const GUEST_INLINE_EXCLUDED_ID_SUFFIX = /_fname$|_lname$|_email$|_country$/;
 
+// Deliberately the same shape PayPal's Orders API enforces on
+// `payer.email_address` and the server enforces on staff/guest emails: a
+// dotted domain is required. `<input type="email">` alone is NOT enough —
+// the HTML spec happily accepts `ade@yahoo`, which PayPal then rejects,
+// killing checkout with an unexplained "Something went wrong", and which
+// bounces the ticket email even when payment succeeds.
+export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export function validateRequired(
   fields: FormField[],
   answers: Record<string, any>,
@@ -31,6 +39,14 @@ export function validateRequired(
 ): ValidateResult {
   for (const field of fields) {
     if (!isVisible(field)) continue;
+    // Format-check any email field that has a value, required or not — an
+    // optional address still ends up on the order and on the ticket.
+    if (field.type === 'email') {
+      const raw = answers[field.id];
+      if (typeof raw === 'string' && raw.trim() && !EMAIL_RE.test(raw.trim())) {
+        return { ok: false, error: `Please enter a valid email address for ${field.label}.` };
+      }
+    }
     if (!field.required) continue;
     if (NON_ANSWER_FIELD_TYPES.has(field.type)) continue;
     if (!answers[field.id]) {
@@ -117,6 +133,9 @@ export function validateGroupMembers(
     }
     if (!m.email?.trim()) {
       return { ok: false, error: 'Please provide an email for every additional registrant.' };
+    }
+    if (!EMAIL_RE.test(m.email.trim())) {
+      return { ok: false, error: `"${m.email.trim()}" is not a valid email address. Please correct it for every additional registrant.` };
     }
     if (requireCountryAndCategory) {
       if (!m.countryCode) return { ok: false, error: 'Please select a country for every additional registrant.' };

@@ -23,6 +23,8 @@ import {
   type ExtraStaffEntry,
 } from './validation';
 import { supabase } from '../../services/supabaseClient';
+import { describePayPalError, payPalErrorReference } from '../../utils/paypalPayer';
+import { logPaymentFailure } from '../../services/paymentDiagnosticsService';
 import { CURRENT_SITE } from '../../config/sites';
 
 interface Props {
@@ -577,7 +579,19 @@ export default function PublicSponsorExhibitorForm({ form, settings, isEmbedded 
                         onCancel={() => setError('Payment was cancelled. You can try again when ready.')}
                         onError={(err) => {
                           console.error('PayPal error', err);
-                          setError('Something went wrong with PayPal. Please try again or contact the event organizers.');
+                          const info = describePayPalError(err);
+                          const reference = payPalErrorReference(info);
+                          logPaymentFailure({
+                            provider: 'paypal',
+                            stage: 'sponsor-exhibitor-paypal-onerror',
+                            formId: form.id,
+                            amount: (extras.length * EXTRA_STAFF_UNIT_PRICE_USD).toFixed(2),
+                            currency: 'USD',
+                            reference,
+                            message: info.message,
+                          });
+                          setError('Something went wrong with PayPal. Please try again or contact the event organizers.'
+                            + (reference ? ` (Reference: ${reference})` : ''));
                         }}
                       />
                     </PayPalScriptProvider>
