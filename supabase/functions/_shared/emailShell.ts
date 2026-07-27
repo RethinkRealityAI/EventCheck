@@ -72,6 +72,37 @@ function escapeHtml(s: string): string {
     .replace(/'/g, '&#39;');
 }
 
+/**
+ * Last line of defence against dead links. An `<a>` whose href resolved to
+ * nothing — an empty string, a bare '#', or a relative path an inbox can't
+ * resolve — is unwrapped to its own text, and dropped entirely when that text
+ * is itself empty (the `<a href="{{signup_url}}">{{signup_url}}</a>` shape,
+ * which collapses to an invisible link once the placeholder resolves empty).
+ *
+ * Recipients then see a sentence with no link rather than a button that looks
+ * clickable and goes nowhere — and the missing link shows up in the logs via
+ * applyPlaceholders' warning rather than in a support email a week later.
+ *
+ * `mailto:` and `tel:` are left alone; so is any absolute http(s) URL.
+ */
+export function stripDeadLinks(html: string): string {
+  if (!html) return html;
+  return html.replace(
+    /<a\b([^>]*)>([\s\S]*?)<\/a>/gi,
+    (whole: string, attrs: string, inner: string): string => {
+      const hrefMatch = /\shref\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(attrs);
+      const href = (hrefMatch ? (hrefMatch[2] ?? hrefMatch[3] ?? hrefMatch[4] ?? '') : '').trim();
+      // No href at all: an anchor used as a target/name — leave it be.
+      if (!hrefMatch) return whole;
+      const isUsable = /^(https?:\/\/|mailto:|tel:)/i.test(href)
+        // Unresolved placeholders are intentional in admin template previews.
+        || /\{\{/.test(href);
+      if (isUsable) return whole;
+      return inner.replace(/<[^>]+>/g, '').trim() ? inner : '';
+    },
+  );
+}
+
 export function renderEmailShell(opts: EmailShellOptions): string {
   const palette = EMAIL_PALETTES[opts.site];
   const previewCss = opts.previewMode
@@ -127,7 +158,7 @@ export function renderEmailShell(opts: EmailShellOptions): string {
   <div class="container">
     <div class="header">${headerContent}</div>
     <div class="body">
-      ${opts.content}
+      ${stripDeadLinks(opts.content)}
     </div>
     <div class="footer">
       <div class="footer-brand">${escapeHtml(palette.footerBrandLabel)}</div>
@@ -172,8 +203,32 @@ export function plainTextToHtml(plain: string): string {
 export function applyPlaceholders(
   template: string,
   vars: Record<string, string | number | undefined | null>,
+  /** Names the send (e.g. 'bogo-claim-link') in the unresolved-token warning. */
+  context?: string,
 ): string {
   const resolved = mergePlaceholders(template, vars);
-  // Scrub any leftover {{token}} (letters, digits, _, -, ., optional spaces) to empty.
-  return resolved.replace(/\{\{\s*[\w.-]+\s*\}\}/g, '');
+  // Scrub any leftover {{token}} (letters, digits, _, -, ., optional spaces) to
+  // empty so recipients never see raw template syntax.
+  //
+  // Scrubbing silently is how "the email arrived with no link" happens: a
+  // template referencing a token this mode doesn't supply — or one supplied as
+  // '' because an env var was unset — loses the link with no trace. Log what
+  // was dropped so the next report is one grep away, and let stripDeadLinks
+  // clean up the empty <a> the scrub leaves behind.
+  const unresolved = new Set<string>();
+  const out = resolved.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (_m: string, token: string) => {
+    unresolved.add(token);
+    return '';
+  });
+  const emptied = Object.entries(vars)
+    .filter(([, v]) => v === null || v === undefined || String(v).trim() === '')
+    .map(([k]) => k);
+  if (unresolved.size > 0 || emptied.length > 0) {
+    console.warn('[email] placeholders resolved to nothing', JSON.stringify({
+      context: context ?? 'unknown',
+      unknownTokens: [...unresolved],
+      emptyValues: emptied,
+    }));
+  }
+  return out;
 }

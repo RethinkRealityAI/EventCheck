@@ -20,6 +20,7 @@
 
 // @deno-types="npm:@supabase/supabase-js"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.46.1';
+import { buildAppUrl, resolveOrigin } from '../_shared/emailLinks.ts';
 
 // supabase-js v2.45+ silently injects `x-supabase-api-version` on every
 // functions.invoke() call. Browsers will block the preflight (and the user
@@ -174,9 +175,11 @@ Deno.serve(async (req: Request) => {
   }
 
   // Build a login URL for the super admin to share alongside the temp
-  // password. Origin is trusted — it was validated by the gateway CORS.
-  const origin = req.headers.get('Origin') || '';
-  const loginUrl = origin ? `${origin}/#/login` : '/#/login';
+  // password. Origin is trusted — it was validated by the gateway CORS — but
+  // fall back to PUBLIC_SITE_URL so a stripped header can't hand the admin a
+  // relative '/#/login' to paste into a message.
+  const origin = resolveOrigin(req.headers.get('Origin'), Deno.env.get('PUBLIC_SITE_URL'));
+  const loginUrl = buildAppUrl(origin, '/#/login');
 
   return json({
     success: true,

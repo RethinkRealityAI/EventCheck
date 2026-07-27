@@ -22,6 +22,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { verifyInviteToken, signRegistrationToken } from '../_shared/registrationToken.ts';
+import { buildAppUrl, resolveOrigin } from '../_shared/emailLinks.ts';
 
 // supabase-js v2.45+ injects x-supabase-client-platform + x-supabase-api-version
 // on every functions.invoke(); both MUST be in the allow-list or the browser
@@ -127,9 +128,15 @@ serve(async (req: Request) => {
       // Reuse the P4 registration-confirmed email (download link). Best-effort —
       // never fail the registration on an email hiccup.
       try {
-        const origin = (body.origin ?? req.headers.get('origin') ?? Deno.env.get('PUBLIC_SITE_URL') ?? '').toString();
+        // `??` only falls through on null/undefined, so an empty-string
+        // body.origin used to win and PUBLIC_SITE_URL was never consulted —
+        // producing a relative, dead ticket link. resolveOrigin skips any
+        // candidate that isn't an absolute http(s) URL.
+        const origin = resolveOrigin(body.origin, req.headers.get('origin'), Deno.env.get('PUBLIC_SITE_URL'));
         const dlToken = await signRegistrationToken(id, v.formId, serviceKey, Date.now(), DOWNLOAD_TTL_MS);
-        const downloadUrl = `${origin}/#/tickets?token=${encodeURIComponent(dlToken)}`;
+        // '' when no absolute origin resolved — send-ticket-email then omits
+        // the download block rather than rendering a dead button.
+        const downloadUrl = buildAppUrl(origin, `/#/tickets?token=${encodeURIComponent(dlToken)}`);
         await fetch(`${url}/functions/v1/send-ticket-email`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${serviceKey}` },

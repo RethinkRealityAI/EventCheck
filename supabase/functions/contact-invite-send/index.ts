@@ -13,6 +13,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { signInviteToken } from '../_shared/registrationToken.ts';
+import { buildAppUrl, resolveOrigin } from '../_shared/emailLinks.ts';
 
 // supabase-js v2.45+ injects x-supabase-client-platform + x-supabase-api-version
 // on every functions.invoke(); both MUST be in the allow-list or the browser
@@ -48,14 +49,23 @@ serve(async (req: Request) => {
 
     const { contactId, formId, origin, subject, html } = await req.json();
     if (!contactId || !formId || !origin || !subject || !html) return json({ error: 'missing-fields' }, 400);
+    // The invite IS the link — a relative origin would email a dead button.
+    const inviteOrigin = resolveOrigin(origin, req.headers.get('origin'), Deno.env.get('PUBLIC_SITE_URL'));
+    if (!inviteOrigin) return json({ error: 'origin must be an absolute http(s) URL (or set PUBLIC_SITE_URL)' }, 400);
 
     const { data: contact } = await svc.from('imported_contacts').select('id, email').eq('id', contactId).maybeSingle();
     if (!contact || !(contact as any).email) return json({ error: 'contact-not-found' }, 404);
 
     // Mint the invite link and inject it as {{registration_link}}.
     const token = await signInviteToken(contactId, formId, serviceKey, Date.now(), TTL_MS);
-    const link = `${origin}/#/form/${formId}?invite=${encodeURIComponent(token)}`;
-    const renderedHtml = String(html).replace(/\{\{registration_link\}\}/g, link);
+    const link = buildAppUrl(inviteOrigin, `/#/form/${formId}?invite=${encodeURIComponent(token)}`);
+    // Whitespace-tolerant, matching mergePlaceholders elsewhere: a template
+    // saved as `{{ registration_link }}` used to ship the literal token.
+    const tokenRe = /\{\{\s*registration_link\s*\}\}/g;
+    if (!tokenRe.test(String(html))) {
+      console.warn('[contact-invite-send] template has no {{registration_link}} token — invite will have no link', JSON.stringify({ contactId, formId }));
+    }
+    const renderedHtml = String(html).replace(/\{\{\s*registration_link\s*\}\}/g, link);
     const renderedSubject = String(subject);
 
     // Send via send-ticket-email's pre-rendered mode.

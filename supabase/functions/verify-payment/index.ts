@@ -7,6 +7,7 @@ import {
 } from '../_shared/bogoRowBuilder.ts';
 import { signRegistrationToken } from '../_shared/registrationToken.ts';
 import { verifyFlutterwaveTransaction } from '../_shared/flutterwaveVerify.ts';
+import { buildAppUrl, resolveOrigin } from '../_shared/emailLinks.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -231,11 +232,17 @@ async function sendRegistrationConfirmedEmail(
     // the PayPal-capture note below). Fall back to the per-project PUBLIC_SITE_URL
     // env so the emailed link is never host-relative (which is unclickable from
     // an inbox). If both are absent we still send — the link works in-app.
-    const base = origin || Deno.env.get('PUBLIC_SITE_URL') || '';
+    const base = resolveOrigin(origin, Deno.env.get('PUBLIC_SITE_URL'));
     if (!base) {
-      console.warn('[verify-payment] registration-confirmed: no origin and no PUBLIC_SITE_URL — link will be host-relative');
+      // Send the confirmation anyway — it's still proof of registration — but
+      // with NO download link rather than a relative one that renders as a
+      // dead button. Loud, because it means PUBLIC_SITE_URL is unset on this
+      // project and every origin-less send loses its ticket link.
+      console.error('[verify-payment] registration-confirmed: no absolute origin and no PUBLIC_SITE_URL — sending without a download link', JSON.stringify({
+        primaryAttendeeId, formId,
+      }));
     }
-    const downloadUrl = `${base}/#/tickets?token=${encodeURIComponent(token)}`;
+    const downloadUrl = base ? buildAppUrl(base, `/#/tickets?token=${encodeURIComponent(token)}`) : '';
     const emailFnUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/send-ticket-email`;
     const resp = await fetch(emailFnUrl, {
       method: 'POST',
