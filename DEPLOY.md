@@ -264,3 +264,52 @@ supabase functions deploy verify-payment   # run for both project refs
 - **Recommended follow-up:** a `flutterwave-webhook` function (validating the
   `verif-hash` header, then re-querying `/verify`) to record payments whose
   client callback was lost — same exposure PayPal has today.
+
+---
+
+## 5. `PUBLIC_SITE_URL` — the link backstop (set on **both** project refs)
+
+Every emailed link (ticket download, invitations, claim links, portal signup,
+the admin login URL) is built from an origin resolved in this order:
+
+1. the origin the caller passed in the request body,
+2. the request's own `Origin` header,
+3. **`PUBLIC_SITE_URL`** — this secret.
+
+Steps 1 and 2 cover the normal browser path, so a project with no
+`PUBLIC_SITE_URL` looks healthy for most recipients. It breaks for the
+minority whose `Origin` header never arrives — privacy extensions and in-app
+webviews strip it — and for server-to-server sends that have no browser
+context at all.
+
+Set it and that whole class disappears:
+
+```bash
+# Run once per project ref. No trailing slash.
+supabase secrets set PUBLIC_SITE_URL="https://gansid.netlify.app"     # GANSID
+supabase secrets set PUBLIC_SITE_URL="https://qreventcheck.netlify.app"  # SCAGO
+```
+
+Use the **public site origin** (the custom domain if one is bound), not the
+Supabase project URL.
+
+### What happens when it's unset
+
+Since the link hardening, nothing renders a dead link — the failure is loud
+instead of silent, but it is still a failure:
+
+| Send | Without `PUBLIC_SITE_URL` and without an `Origin` header |
+| --- | --- |
+| `group-invite`, `exhibitor-staff-invite`, `bogo-claim-link`, `staff-invite` | **400, email not sent** — an invitation with no link is worse than none. Logged as `no absolute origin — refusing to send a link-less email`. |
+| `registration-confirmed` | Sent **without** the download button; logged as `sending without a download link`. |
+| `bogo-ticket` portal link, `guest-claim-completed` signup link | Optional link omitted; the ticket still sends. |
+
+### Verifying
+
+```bash
+supabase secrets list | grep PUBLIC_SITE_URL
+```
+
+Then grep the function logs for `no absolute origin` and
+`[email] placeholders resolved to nothing` — both should be absent in steady
+state. Either one appearing means a send lost a link and names the mode.
