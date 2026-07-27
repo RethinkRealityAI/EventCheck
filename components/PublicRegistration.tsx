@@ -2806,11 +2806,17 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                       message: info.message,
                     });
                     setPaypalFailed(true);
-                    setError(
-                      'Something went wrong with PayPal. Please try again or contact the event organizer.'
-                      + (flwPublicKey ? ' You can also pay by card, bank transfer or mobile money instead.' : '')
-                      + (reference ? ` (Reference: ${reference})` : '')
-                    );
+                    // With a second provider configured, the useful advice is
+                    // "use the other rail". Without one, "please try again" on
+                    // its own strands anyone whose card PayPal simply won't
+                    // take — so name the two things that actually change the
+                    // outcome: a different card, or the PayPal-account path
+                    // rather than guest card entry.
+                    const advice = flwPublicKey
+                      ? 'Something went wrong with PayPal. Please try again, or pay by card, bank transfer or mobile money instead.'
+                      : 'PayPal could not complete this payment. Please try again — or use a different card, or pay with a '
+                        + 'PayPal account instead of the "Debit or Credit Card" option. If it keeps failing, contact the event organizer.';
+                    setError(reference ? `${advice} Reference: ${reference}` : advice);
                   }}
                 />
               </PayPalScriptProvider>
