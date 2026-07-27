@@ -7,6 +7,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import nodemailer from 'npm:nodemailer';
 import { renderEmailShell, applyPlaceholders } from '../_shared/emailShell.ts';
 import { resolveEmailTemplate } from '../_shared/emailTemplates.ts';
+import { buildAppUrl, isAbsoluteHttpUrl, resolveOrigin } from '../_shared/emailLinks.ts';
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -20,6 +21,37 @@ function jsonResponse(body: Record<string, any>, status = 200) {
         status,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
+}
+
+/**
+ * The origin every link in this send is built from: what the caller passed,
+ * else the request's own Origin header, else the project's PUBLIC_SITE_URL.
+ * Returns '' only when none of the three is an absolute http(s) URL.
+ *
+ * Callers used to reach for `body.origin || ''` individually, which shipped
+ * relative hrefs — dead buttons in an inbox — whenever Origin was stripped.
+ */
+function sendOrigin(body: any, req: Request): string {
+    return resolveOrigin(
+        body?.origin,
+        req.headers.get('origin'),
+        Deno.env.get('PUBLIC_SITE_URL'),
+    );
+}
+
+/**
+ * For sends whose entire purpose is the link (invitations, claim links): refuse
+ * rather than deliver an email the recipient can't act on. The 400 surfaces to
+ * the admin who triggered it and lands in the function logs; a link-less invite
+ * would surface days later as "I never got a link".
+ */
+function missingOriginResponse(mode: string) {
+    console.error(`[send-ticket-email ${mode}] no absolute origin — refusing to send a link-less email`, JSON.stringify({
+        hasPublicSiteUrl: !!Deno.env.get('PUBLIC_SITE_URL'),
+    }));
+    return jsonResponse({
+        error: `${mode}: could not build an absolute link. Pass body.origin, or set the PUBLIC_SITE_URL secret on this project.`,
+    }, 400);
 }
 
 /**
@@ -156,9 +188,10 @@ serve(async (req: Request) => {
                 ? { host: appSettings.smtp_host, port: Number(appSettings.smtp_port || 587), user: appSettings.smtp_user, pass: appSettings.smtp_pass, fromName: (appSettings as any).email_from_name || 'SCAGO' }
                 : undefined;
 
-            const origin = body.origin || '';
-            const completeUrl = `${origin}/#/form/${guest.form_id}?ref=${guest.id}`;
-            const signupUrl = `${origin}/#/`;
+            const origin = sendOrigin(body, req);
+            if (!origin) return missingOriginResponse('group-invite');
+            const completeUrl = buildAppUrl(origin, `/#/form/${guest.form_id}?ref=${guest.id}`);
+            const signupUrl = buildAppUrl(origin, '/#/');
 
             const overrideOn = formEmailOverrides?.enabled === true;
             const tpl = resolveEmailTemplate({
@@ -179,8 +212,8 @@ serve(async (req: Request) => {
                 complete_url: completeUrl,
                 signup_url: signupUrl,
             };
-            const subject = applyPlaceholders(tpl.subject, vars);
-            const body_html = applyPlaceholders(tpl.body, vars);
+            const subject = applyPlaceholders(tpl.subject, vars, body.mode);
+            const body_html = applyPlaceholders(tpl.body, vars, body.mode);
             const html = generateEmailTemplate({
                 title: eventName,
                 content: body_html,
@@ -262,7 +295,17 @@ serve(async (req: Request) => {
                 globalFooterText: s.email_footer_text,
             });
 
-            const downloadUrl = body.downloadUrl || '';
+            // A relative downloadUrl (caller had no origin) renders as a button
+            // that does nothing from an inbox. Drop it to '' so the block is
+            // omitted entirely, and log it — the confirmation itself is still
+            // worth sending, and the recipient can re-request the ticket.
+            const rawDownloadUrl = body.downloadUrl || '';
+            if (rawDownloadUrl && !isAbsoluteHttpUrl(rawDownloadUrl)) {
+                console.error('[send-ticket-email registration-confirmed] dropping non-absolute downloadUrl', JSON.stringify({
+                    rawDownloadUrl, primaryAttendeeId: body.primaryAttendeeId,
+                }));
+            }
+            const downloadUrl = isAbsoluteHttpUrl(rawDownloadUrl) ? rawDownloadUrl : '';
             const downloadBlock = downloadUrl
                 ? `<div style="margin-top:20px;padding:16px 18px;background:#f0f7ff;border-left:3px solid #1E4A8C;border-radius:6px;">
                      <p style="margin:0 0 10px;font-weight:600;">Your tickets</p>
@@ -279,8 +322,8 @@ serve(async (req: Request) => {
                 amount: primary.payment_amount || '',
                 download_url: downloadUrl,
             };
-            const subject = applyPlaceholders(tpl.subject, vars);
-            const contentHtml = applyPlaceholders(tpl.body, vars) + downloadBlock;
+            const subject = applyPlaceholders(tpl.subject, vars, body.mode);
+            const contentHtml = applyPlaceholders(tpl.body, vars, body.mode) + downloadBlock;
             const html = generateEmailTemplate({
                 title: eventName,
                 content: contentHtml,
@@ -361,7 +404,11 @@ serve(async (req: Request) => {
                     globalFooterText: (appSettings as any)?.email_footer_text,
                 });
 
-                const publicSiteUrl = (Deno.env.get('PUBLIC_SITE_URL') || '').trim().replace(/\/+$/, '');
+                // Was PUBLIC_SITE_URL-only: if that secret was unset the portal
+                // link silently rendered as an empty <a>, which is what "the
+                // email arrived with no link" looked like. Now the caller's
+                // origin and the request header back it up.
+                const publicSiteUrl = sendOrigin(body, req);
                 const vars = {
                     name: attendee.name || 'there',
                     event: eventName,
@@ -370,8 +417,8 @@ serve(async (req: Request) => {
                     purchaser: primary?.name || 'The purchaser',
                     signup_url: publicSiteUrl ? `${publicSiteUrl}/#/` : '',
                 };
-                const subject = applyPlaceholders(tpl.subject, vars);
-                const body_html = applyPlaceholders(tpl.body, vars);
+                const subject = applyPlaceholders(tpl.subject, vars, body.mode);
+                const body_html = applyPlaceholders(tpl.body, vars, body.mode);
                 const html = generateEmailTemplate({
                     title: eventName,
                     content: body_html,
@@ -496,7 +543,7 @@ serve(async (req: Request) => {
                     .maybeSingle();
                 formEmailOverrides = (form as any)?.settings?.emailOverrides;
 
-                const origin = body.origin || '';
+                const origin = sendOrigin(body, req);
                 const staffCategory = (staff.answers as any)?.staffCategory;
                 const categoryLabel =
                     staffCategory === 'hall_only' ? 'Hall-Only'
@@ -515,8 +562,8 @@ serve(async (req: Request) => {
                 if (!purchaser) purchaser = (org?.company_info as any)?.contactName || org?.name || 'A colleague';
                 if (!orgName) orgName = (org?.company_info as any)?.orgName || '';
                 if (!category) category = categoryLabel;
-                if (!completeUrl) completeUrl = `${origin}/#/form/${staff.form_id}?ref=${staff.id}`;
-                if (!signupUrl) signupUrl = `${origin}/#/`;
+                if (!completeUrl) completeUrl = buildAppUrl(origin, `/#/form/${staff.form_id}?ref=${staff.id}`);
+                if (!signupUrl) signupUrl = buildAppUrl(origin, '/#/');
                 if (!eventName) eventName = form?.title || 'the event';
             }
 
@@ -525,7 +572,7 @@ serve(async (req: Request) => {
             // completeUrl must be absolute — relative URLs render as dead links in
             // email clients. This catches a missing `body.origin` in the hydrate path
             // before we silently send a broken invitation.
-            if (!/^https?:\/\//i.test(completeUrl)) {
+            if (!isAbsoluteHttpUrl(completeUrl)) {
                 return jsonResponse({ error: `staff-invite: completeUrl must be absolute (got: ${completeUrl}). Caller must supply body.origin or a fully-qualified completeUrl.` }, 400);
             }
 
@@ -556,8 +603,8 @@ serve(async (req: Request) => {
                 signup_url: signupUrl || '',
                 event: eventName || 'the event',
             };
-            const subject = applyPlaceholders(tpl.subject, vars);
-            const body_html = applyPlaceholders(tpl.body, vars);
+            const subject = applyPlaceholders(tpl.subject, vars, body.mode);
+            const body_html = applyPlaceholders(tpl.body, vars, body.mode);
             const html = generateEmailTemplate({
                 title: eventName || 'the event',
                 content: body_html,
@@ -600,8 +647,8 @@ serve(async (req: Request) => {
                 org_name: body.orgName || '',
                 event: body.eventName || 'the event',
             };
-            const subject = applyPlaceholders(tpl.subject, vars);
-            const body_html = applyPlaceholders(tpl.body, vars);
+            const subject = applyPlaceholders(tpl.subject, vars, body.mode);
+            const body_html = applyPlaceholders(tpl.body, vars, body.mode);
             const hasAttachments = Array.isArray(body.attachments) && body.attachments.length > 0;
             const html = generateEmailTemplate({
                 title: body.eventName || 'the event',
@@ -695,9 +742,10 @@ serve(async (req: Request) => {
                 ? { host: appSettings.smtp_host, port: Number(appSettings.smtp_port || 587), user: appSettings.smtp_user, pass: appSettings.smtp_pass, fromName: (appSettings as any).email_from_name || 'GANSID Congress' }
                 : undefined;
 
-            const origin = body.origin || '';
-            const registrationLink = `${origin}/#/form/${staff.form_id}?ref=${staff.id}`;
-            const signupUrl = `${origin}/#/`;
+            const origin = sendOrigin(body, req);
+            if (!origin) return missingOriginResponse('exhibitor-staff-invite');
+            const registrationLink = buildAppUrl(origin, `/#/form/${staff.form_id}?ref=${staff.id}`);
+            const signupUrl = buildAppUrl(origin, '/#/');
 
             const overrideOn = formEmailOverrides?.enabled === true;
             const tpl = resolveEmailTemplate({
@@ -720,8 +768,8 @@ serve(async (req: Request) => {
                 signup_url: signupUrl,
                 event: eventName,
             };
-            const subject = applyPlaceholders(tpl.subject, vars);
-            const body_html = applyPlaceholders(tpl.body, vars);
+            const subject = applyPlaceholders(tpl.subject, vars, body.mode);
+            const body_html = applyPlaceholders(tpl.body, vars, body.mode);
             const html = generateEmailTemplate({
                 title: eventName,
                 content: body_html,
@@ -799,8 +847,8 @@ serve(async (req: Request) => {
                 console.error('exhibitor-staff-claim-completed: staff has no email', { staffId: staff.id });
             } else {
                 try {
-                    const subject = applyPlaceholders(tpl.subject, vars);
-                    const body_html = applyPlaceholders(tpl.body, vars);
+                    const subject = applyPlaceholders(tpl.subject, vars, body.mode);
+                    const body_html = applyPlaceholders(tpl.body, vars, body.mode);
                     const html = generateEmailTemplate({
                         title: eventName,
                         content: body_html,
@@ -902,8 +950,10 @@ serve(async (req: Request) => {
             if (!free.email) return jsonResponse({ error: 'Free attendee has no email' }, 400);
 
             const eventName = form?.title || 'the event';
-            const origin = body.origin || '';
-            const signupUrl = `${origin}/#/`;
+            // Optional link — an unresolvable origin drops it (stripDeadLinks
+            // removes the empty anchor) rather than blocking the ticket itself.
+            const origin = sendOrigin(body, req);
+            const signupUrl = buildAppUrl(origin, '/#/');
             const qrData = free.qr_payload || free.id;
             const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(qrData)}`;
 
@@ -950,8 +1000,8 @@ serve(async (req: Request) => {
                 admin_contact: BOGO_ADMIN_CONTACT,
                 free_category_name: freeCategoryName,
             };
-            const subject = applyPlaceholders(tpl.subject, vars);
-            const body_html = applyPlaceholders(tpl.body, vars);
+            const subject = applyPlaceholders(tpl.subject, vars, body.mode);
+            const body_html = applyPlaceholders(tpl.body, vars, body.mode);
             const html = generateEmailTemplate({
                 title: eventName,
                 content: body_html,
@@ -986,9 +1036,10 @@ serve(async (req: Request) => {
             if (!payerEmail) return jsonResponse({ error: 'Source attendee has no email' }, 400);
 
             const eventName = form?.title || 'the event';
-            const origin = body.origin || '';
-            const claimUrl = `${origin}/#/form/${free.form_id}?ref=${free.id}`;
-            const portalTicketsUrl = `${origin}/#/portal/tickets`;
+            const origin = sendOrigin(body, req);
+            if (!origin) return missingOriginResponse('bogo-claim-link');
+            const claimUrl = buildAppUrl(origin, `/#/form/${free.form_id}?ref=${free.id}`);
+            const portalTicketsUrl = buildAppUrl(origin, '/#/portal/tickets');
 
             const formEmailOverrides = (form as any)?.settings?.emailOverrides;
             const overrideOn = formEmailOverrides?.enabled === true;
@@ -1015,8 +1066,8 @@ serve(async (req: Request) => {
                 portal_tickets_url: portalTicketsUrl,
                 admin_contact: BOGO_ADMIN_CONTACT,
             };
-            const subject = applyPlaceholders(tpl.subject, vars);
-            const body_html = applyPlaceholders(tpl.body, vars);
+            const subject = applyPlaceholders(tpl.subject, vars, body.mode);
+            const body_html = applyPlaceholders(tpl.body, vars, body.mode);
             const html = generateEmailTemplate({
                 title: eventName,
                 content: body_html,
@@ -1072,8 +1123,8 @@ serve(async (req: Request) => {
                 qr_image_url: qrImageUrl,
                 admin_contact: BOGO_ADMIN_CONTACT,
             };
-            const subject = applyPlaceholders(tpl.subject, vars);
-            const body_html = applyPlaceholders(tpl.body, vars);
+            const subject = applyPlaceholders(tpl.subject, vars, body.mode);
+            const body_html = applyPlaceholders(tpl.body, vars, body.mode);
             const html = generateEmailTemplate({
                 title: eventName,
                 content: body_html,
@@ -1134,8 +1185,8 @@ serve(async (req: Request) => {
                 event: eventName,
                 admin_contact: BOGO_ADMIN_CONTACT,
             };
-            const subject = applyPlaceholders(tpl.subject, vars);
-            const body_html = applyPlaceholders(tpl.body, vars);
+            const subject = applyPlaceholders(tpl.subject, vars, body.mode);
+            const body_html = applyPlaceholders(tpl.body, vars, body.mode);
             const html = generateEmailTemplate({
                 title: eventName,
                 content: body_html,
