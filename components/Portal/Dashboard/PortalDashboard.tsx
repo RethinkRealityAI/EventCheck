@@ -22,6 +22,7 @@ import { PortalQuickNav } from './PortalQuickNav';
 import { TicketsSummaryTile } from './TicketsSummaryTile';
 import { RegisterModal } from './RegisterModal';
 import TeamTable from '../../SponsorExhibitor/TeamTable';
+import { isCompletedPaymentStatus } from '../../../utils/portalUserStatus';
 
 export function PortalDashboard() {
   const { profile, user } = useAuth();
@@ -83,7 +84,7 @@ export function PortalDashboard() {
   const staffOrg = useMemo<string | null>(() => {
     if (userPrimary) return null; // user IS a primary, not staff
     const paid = attendees
-      .filter((a) => a.paymentStatus === 'paid')
+      .filter((a) => isCompletedPaymentStatus(a.paymentStatus))
       .slice()
       .sort((a, b) =>
         (b.registeredAt || '').localeCompare(a.registeredAt || '')
@@ -167,7 +168,10 @@ export function PortalDashboard() {
 
   if (!profile || !user) return null;
 
-  const latestPaidAttendee = attendees.find((a) => a.paymentStatus === 'paid') ?? null;
+  // Completed means paid OR free. Matching only 'paid' left invited contacts,
+  // BOGO guests and comped speakers looking at an empty CredentialCard — no QR,
+  // no ticket — despite holding a valid registration.
+  const latestPaidAttendee = attendees.find((a) => isCompletedPaymentStatus(a.paymentStatus)) ?? null;
   const latestAttendee = attendees[0] ?? null;
 
   return (

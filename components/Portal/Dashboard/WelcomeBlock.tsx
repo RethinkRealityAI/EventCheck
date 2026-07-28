@@ -2,6 +2,7 @@ import type { Profile, Attendee } from '../../../types';
 import { CalendarDays } from 'lucide-react';
 import { usePortalContent } from '../content/ContentProvider';
 import { sanitizeHtml } from '../../../utils/sanitizeHtml';
+import { isCompletedPaymentStatus } from '../../../utils/portalUserStatus';
 
 interface Props {
   profile: Profile;
@@ -23,7 +24,9 @@ export function WelcomeBlock({ profile, latestAttendee, staffOrg }: Props) {
   const firstName = (profile.fullName ?? profile.email).split(' ')[0];
   const defaultSubhead = !latestAttendee
     ? 'Complete your Congress registration to receive your credential.'
-    : (latestAttendee as any).paymentStatus === 'paid'
+    // Free registrations are complete registrations — telling a comped or
+    // invited delegate we're "awaiting payment" is both wrong and alarming.
+    : isCompletedPaymentStatus((latestAttendee as any).paymentStatus)
     ? 'Your GANSID 2026 credential is ready.'
     : 'Awaiting payment confirmation for your Congress registration.';
   const customSubHtml = intro?.subheadingHtml?.trim();

@@ -565,7 +565,9 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     if (activeTab === 'test') matchesTab = isTest;
     else if (activeTab === 'donated') matchesTab = !isTest && ((a.donatedSeats || 0) > 0 || (a.donatedTables || 0) > 0);
     else if (activeTab === 'tables') matchesTab = !isTest && !isStaffRow;
-    else if (activeTab === 'sponsor-tickets') matchesTab = !a.isPrimary && !!a.primaryAttendeeId && sponsorPrimaryIds.has(a.primaryAttendeeId);
+    // `!isTest` matches every other tab — without it, form-preview submissions
+    // leaked into Sponsor Tickets and would be emailed as real guests.
+    else if (activeTab === 'sponsor-tickets') matchesTab = !isTest && !a.isPrimary && !!a.primaryAttendeeId && sponsorPrimaryIds.has(a.primaryAttendeeId);
     else if (activeTab === 'groups') {
       // Show group primaries + their guests, so admins can see whole groups at a glance
       matchesTab = !isTest && !isStaffRow && (groupPrimaryIds.has(a.id) || (!!a.primaryAttendeeId && groupPrimaryIds.has(a.primaryAttendeeId)));
