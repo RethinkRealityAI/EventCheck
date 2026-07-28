@@ -1,0 +1,124 @@
+# Deploy Supabase edge functions.
+#
+# Netlify only ships the frontend, so every merge that touched
+# supabase/functions/** used to sit undeployed until someone ran the CLI by
+# hand. That gap is how PR #20's payment logging and PR #21's email link fixes
+# ended up merged but inert. This closes it, and gives a button that works from
+# a phone.
+#
+# Setup (one time, all doable from a browser):
+#   1. Supabase dashboard → account menu → Access Tokens → Generate new token.
+#   2. GitHub → this repo → Settings → Secrets and variables → Actions →
+#      New repository secret → name: SUPABASE_ACCESS_TOKEN, value: the token.
+#
+# Then: Actions → "Deploy edge functions" → Run workflow → pick a target.
+#
+# Project refs are not secrets — they're already public in the client bundle
+# (VITE_SUPABASE_URL), so they live here in plain sight for legibility.
+
+name: Deploy edge functions
+
+on:
+  # Manual run — pick which tenant to deploy to.
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Which project to deploy to
+        required: true
+        default: both
+        type: choice
+        options: [both, gansid, scago]
+  # Automatic on merge to main, but ONLY when a function actually changed.
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/functions/**'
+      - '.github/workflows/deploy-edge-functions.yml'
+
+concurrency:
+  group: deploy-edge-functions
+  cancel-in-progress: false
+
+env:
+  GANSID_REF: gticuvgclbvhwvpzkuez
+  SCAGO_REF: iigbgbgakevcgilucvbs
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Verify the access token is configured
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          if [ -z "$SUPABASE_ACCESS_TOKEN" ]; then
+            echo "::error::SUPABASE_ACCESS_TOKEN is not set. Add it under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+
+      - name: Deploy
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          # A push to main deploys both tenants; a manual run honours the choice.
+          TARGET: ${{ github.event.inputs.target || 'both' }}
+        run: |
+          set -euo pipefail
+
+          # Every function in the repo. `supabase functions deploy <name>` reads
+          # supabase/config.toml, so each one keeps its intended verify_jwt
+          # setting — deploying verify-payment with the gateway JWT check left on
+          # would break public checkout, and this is what prevents that.
+          FUNCTIONS=$(find supabase/functions -mindepth 1 -maxdepth 1 -type d \
+            ! -name '_shared' -printf '%f\n' | sort)
+          echo "Functions: $(echo "$FUNCTIONS" | tr '\n' ' ')"
+
+          deploy_to() {
+            local ref="$1" label="$2"
+            echo "::group::Deploying to $label ($ref)"
+            for fn in $FUNCTIONS; do
+              echo "→ $fn"
+              supabase functions deploy "$fn" --project-ref "$ref"
+            done
+            echo "::endgroup::"
+          }
+
+          case "$TARGET" in
+            gansid) deploy_to "$GANSID_REF" GANSID ;;
+            scago)  deploy_to "$SCAGO_REF" SCAGO ;;
+            both)   deploy_to "$GANSID_REF" GANSID; deploy_to "$SCAGO_REF" SCAGO ;;
+            *) echo "::error::Unknown target: $TARGET"; exit 1 ;;
+          esac
+
+      - name: Smoke test — confirm the new code is live
+        env:
+          TARGET: ${{ github.event.inputs.target || 'both' }}
+        run: |
+          set -uo pipefail
+          # `log-payment-error` only exists in the post-PR-#20 verify-payment, so
+          # a 200 here proves the deploy replaced the old version rather than
+          # silently no-opping.
+          check() {
+            local ref="$1" label="$2"
+            local body
+            body=$(curl -sS -X POST "https://${ref}.supabase.co/functions/v1/verify-payment" \
+              -H "Content-Type: application/json" \
+              -d '{"mode":"log-payment-error","provider":"paypal","stage":"ci-smoke","message":"deploy smoke test"}' || true)
+            echo "$label: $body"
+            case "$body" in
+              *'"ok":true'*) echo "  ✓ new code is live" ;;
+              *) echo "::error::$label smoke test failed — old code may still be running. Response: $body"; return 1 ;;
+            esac
+          }
+          rc=0
+          case "$TARGET" in
+            gansid) check "$GANSID_REF" GANSID || rc=1 ;;
+            scago)  check "$SCAGO_REF" SCAGO || rc=1 ;;
+            both)   check "$GANSID_REF" GANSID || rc=1; check "$SCAGO_REF" SCAGO || rc=1 ;;
+          esac
+          exit $rc
