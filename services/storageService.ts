@@ -2,6 +2,7 @@ import { Attendee, Form, AppSettings, DEFAULT_SETTINGS, FormField, PdfSettings, 
 import { supabase } from './supabaseClient';
 import { Database } from './database.types';
 import { checkTableGuestCapacity } from '../utils/tableSeats';
+import { isCompletedPaymentStatus, isPendingPaymentStatus } from '../utils/portalUserStatus';
 
 type AttendeeRow = Database['public']['Tables']['attendees']['Row'];
 type AttendeeInsert = Database['public']['Tables']['attendees']['Insert'];
@@ -1580,8 +1581,19 @@ export interface PortalUser {
   fullName: string;
   role: 'attendee' | 'exhibitor' | 'sponsor' | 'admin';
   signupDate: string;            // profile.created_at ISO
-  hasPaidTicket: boolean;
+  /** True when the user completed a registration — PAID **or** FREE. Free rows
+   *  (invited contacts, BOGO guests, 100%-off speaker promos, comped seats) are
+   *  real registrations; treating only 'paid' as a ticket put every one of
+   *  those people in the "Not started" tab and sent them invitation emails. */
+  hasTicket: boolean;
+  /** Completed rows only (paid + free). Excludes 'pending'. */
   ticketCount: number;
+  paidTicketCount: number;
+  freeTicketCount: number;
+  /** An attendee row exists with payment_status='pending' — payment was
+   *  started and never completed. Counts as In progress, not Not started,
+   *  even when no draft was saved. */
+  hasPendingPayment: boolean;
   mostRecentTicketFormId: string | null;
   mostRecentTicketFormTitle: string | null;
   /** Latest in-progress draft (if any) — only populated while the user has
@@ -1627,10 +1639,14 @@ export async function getPortalUsers(): Promise<PortalUser[]> {
 
   // Index attendees by user_id and by lowercased email so legacy email-only
   // rows still attach to the matching profile.
+  // Index BOTH completed (paid|free) and pending rows. The old code did
+  // `if (a.payment_status !== 'paid') continue`, which discarded every free
+  // registration — ~35% of rows on a live project — so those users showed as
+  // "Not started" despite holding a ticket.
   const attendeesByUser = new Map<string, any[]>();
   const attendeesByEmail = new Map<string, any[]>();
   for (const a of attendees) {
-    if (a.payment_status !== 'paid') continue;
+    if (!isCompletedPaymentStatus(a.payment_status) && !isPendingPaymentStatus(a.payment_status)) continue;
     if (a.user_id) {
       const arr = attendeesByUser.get(a.user_id) ?? [];
       arr.push(a);
@@ -1662,10 +1678,13 @@ export async function getPortalUsers(): Promise<PortalUser[]> {
       return true;
     });
 
-    userTickets.sort((a: any, b: any) =>
+    const completedTickets = userTickets.filter((a: any) => isCompletedPaymentStatus(a.payment_status));
+    const hasPendingPayment = userTickets.some((a: any) => isPendingPaymentStatus(a.payment_status));
+
+    completedTickets.sort((a: any, b: any) =>
       new Date(b.registered_at).getTime() - new Date(a.registered_at).getTime(),
     );
-    const mostRecentTicket = userTickets[0];
+    const mostRecentTicket = completedTickets[0];
 
     // Latest in-progress draft. We intentionally surface it even if the user
     // now has a paid ticket (they may have started registering for a DIFFERENT
@@ -1699,8 +1718,11 @@ export async function getPortalUsers(): Promise<PortalUser[]> {
       fullName: p.full_name ?? '',
       role: (p.role as PortalUser['role']) ?? 'attendee',
       signupDate: p.created_at,
-      hasPaidTicket: userTickets.length > 0,
-      ticketCount: userTickets.length,
+      hasTicket: completedTickets.length > 0,
+      ticketCount: completedTickets.length,
+      paidTicketCount: completedTickets.filter((a: any) => a.payment_status === 'paid').length,
+      freeTicketCount: completedTickets.filter((a: any) => a.payment_status === 'free').length,
+      hasPendingPayment,
       mostRecentTicketFormId: mostRecentTicket?.form_id ?? null,
       mostRecentTicketFormTitle: mostRecentTicket?.form_id
         ? (formTitleById.get(mostRecentTicket.form_id) ?? null)

@@ -7,6 +7,11 @@ import { useAuth } from '../AuthContext';
 import { useNotifications } from '../NotificationSystem';
 import type { AppSettings, Form } from '../../types';
 import SendUserEmailModal from './SendUserEmailModal';
+import {
+  classifyPortalUser,
+  matchesPortalUserFilter,
+  type PortalUserFilterKey,
+} from '../../utils/portalUserStatus';
 
 const TEMPLATE_SHORT_LABELS: Record<string, string> = {
   reminder: 'Reminder',
@@ -65,7 +70,10 @@ function PaginationBar({ startIndex, pageSize, totalRows, page, totalPages, onPr
   );
 }
 
-type FilterKey = 'all' | 'not_started' | 'in_progress' | 'has_ticket';
+// Status derivation lives in utils/portalUserStatus so the filter, the counts,
+// the badge and the email-template picker can't drift apart — which is exactly
+// how registered users ended up listed under "Not started".
+type FilterKey = PortalUserFilterKey;
 
 function timeAgo(iso: string): string {
   if (!iso) return '';
@@ -173,10 +181,7 @@ export default function SignupsTab({ settings, forms, itemsPerPage }: Props) {
           || (u.fullName || '').toLowerCase().includes(s);
         if (!match) return false;
       }
-      if (filter === 'has_ticket') return u.hasPaidTicket;
-      if (filter === 'in_progress') return !u.hasPaidTicket && !!u.draft;
-      if (filter === 'not_started') return !u.hasPaidTicket && !u.draft;
-      return true;
+      return matchesPortalUserFilter(u, filter);
     });
     filtered.sort((a, b) =>
       new Date(b.lastActivityAt).getTime() - new Date(a.lastActivityAt).getTime(),
@@ -186,9 +191,9 @@ export default function SignupsTab({ settings, forms, itemsPerPage }: Props) {
 
   const counts = useMemo(() => ({
     all: users.length,
-    has_ticket: users.filter(u => u.hasPaidTicket).length,
-    in_progress: users.filter(u => !u.hasPaidTicket && u.draft).length,
-    not_started: users.filter(u => !u.hasPaidTicket && !u.draft).length,
+    has_ticket: users.filter(u => classifyPortalUser(u) === 'registered').length,
+    in_progress: users.filter(u => classifyPortalUser(u) === 'in_progress').length,
+    not_started: users.filter(u => classifyPortalUser(u) === 'not_started').length,
   }), [users]);
 
   const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
@@ -198,11 +203,21 @@ export default function SignupsTab({ settings, forms, itemsPerPage }: Props) {
   const pagedRows = rows.slice(startIndex, startIndex + pageSize);
 
   const statusBadge = (u: PortalUser) => {
-    if (u.hasPaidTicket) {
+    const status = classifyPortalUser(u);
+    if (status === 'registered') {
       return (
         <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
           <CheckCircle2 className="w-3 h-3" />
           Registered
+        </span>
+      );
+    }
+    if (status === 'in_progress' && !u.draft) {
+      // Payment started, never completed, and no draft to describe a step.
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+          <Clock className="w-3 h-3" />
+          Payment not completed
         </span>
       );
     }

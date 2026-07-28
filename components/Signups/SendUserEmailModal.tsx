@@ -15,6 +15,7 @@ import {
 import { supabase } from '../../services/supabaseClient';
 import { CURRENT_SITE } from '../../config/sites';
 import { renderEmailShell, mergePlaceholders, plainTextToHtml } from '../../utils/emailShell';
+import { classifyPortalUser } from '../../utils/portalUserStatus';
 
 type TemplateKey = 'reminder' | 'invitation' | 'blank';
 type View = 'compose' | 'analytics';
@@ -352,7 +353,11 @@ const PLACEHOLDER_LABELS: Record<string, string> = {
 const PLACEHOLDER_ORDER = ['name', 'email', 'event', 'resume_url', 'signup_url', 'step', 'total_steps', 'link'];
 
 export default function SendUserEmailModal({ user, settings, forms, onClose, onSent }: Props) {
-  const initialTemplate: TemplateKey = user.draft ? 'reminder' : user.hasPaidTicket ? 'blank' : 'invitation';
+  // Registered means paid OR free — a comped/invited registrant must not be
+  // offered the "invitation" (come and register) template.
+  const initialTemplate: TemplateKey = user.draft
+    ? 'reminder'
+    : classifyPortalUser(user) === 'registered' ? 'blank' : 'invitation';
   const [view, setView] = useState<View>('compose');
   const [template, setTemplate] = useState<TemplateKey>(initialTemplate);
   const [subject, setSubject] = useState<string>(DEFAULTS[initialTemplate].subject);
