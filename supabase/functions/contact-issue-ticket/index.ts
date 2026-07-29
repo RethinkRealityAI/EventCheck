@@ -15,6 +15,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { signRegistrationToken } from '../_shared/registrationToken.ts';
 import { buildIssuedAttendeeRow } from '../_shared/issuedTicket.ts';
 import { pickAttendeeForContact } from '../_shared/attendeeIdentity.ts';
+import { wrapClickUrl } from '../_shared/emailTracking.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -47,7 +48,7 @@ Deno.serve(async (req: Request) => {
       return json({ error: 'forbidden' }, 403);
     }
 
-    const { contactId, formId, origin } = await req.json();
+    const { contactId, formId, origin, trackingId: rawTrackingId } = await req.json();
     if (!contactId || !formId) return json({ error: 'missing-fields' }, 400);
 
     const { data: contact } = await svc
@@ -59,22 +60,61 @@ Deno.serve(async (req: Request) => {
 
     // Best-effort P4 confirmation email for a given attendee (token minted IN-runtime
     // → the /#/tickets link is valid because registration-download uses the same secret).
+    // Tracking id for this send. Issued tickets were previously invisible in
+    // the Contacts tab — no email_sends row, no open/click data — so an admin
+    // could not tell whether a ticket email had gone out at all.
+    const trackingId = typeof rawTrackingId === 'string' && rawTrackingId.trim()
+      ? rawTrackingId.trim()
+      : crypto.randomUUID().replace(/-/g, '').slice(0, 24);
+
     const sendTicket = async (attendeeId: string): Promise<boolean> => {
+      let ok = false;
+      let subject = 'Your ticket';
       try {
         const base = String(origin || Deno.env.get('PUBLIC_SITE_URL') || '');
         const token = await signRegistrationToken(attendeeId, formId, serviceKey, Date.now(), DOWNLOAD_TTL_MS);
-        const downloadUrl = `${base}/#/tickets?token=${encodeURIComponent(token)}`;
+        // The download link is the one actionable URL in this email — wrap it
+        // so clicks register, exactly like a campaign CTA.
+        const rawDownloadUrl = `${base}/#/tickets?token=${encodeURIComponent(token)}`;
+        const downloadUrl = wrapClickUrl(url, trackingId, rawDownloadUrl);
         const resp = await fetch(`${url}/functions/v1/send-ticket-email`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${serviceKey}` },
-          body: JSON.stringify({ mode: 'registration-confirmed', primaryAttendeeId: attendeeId, downloadUrl }),
+          body: JSON.stringify({
+            mode: 'registration-confirmed',
+            primaryAttendeeId: attendeeId,
+            downloadUrl,
+            // send-ticket-email appends the 1×1 open pixel to the rendered shell.
+            trackingId,
+          }),
         });
+        ok = resp.ok;
         if (!resp.ok) console.error('contact-issue-ticket: email non-2xx', resp.status, await resp.text());
-        return resp.ok;
+        else {
+          try { subject = (await resp.clone().json())?.subject || subject; } catch { /* not JSON */ }
+        }
       } catch (e) {
         console.error('contact-issue-ticket: email threw', String(e));
-        return false;
+        ok = false;
       }
+      // Log to email_sends so the Contacts tab can show WHAT was sent and
+      // surface opens/clicks. recipient_attendee_id keys it to this specific
+      // attendee — `email` is not an identity (CLAUDE.md §18). Best-effort:
+      // analytics must never fail the issue.
+      if (ok) {
+        try {
+          await svc.from('email_sends').insert({
+            tracking_id: trackingId,
+            recipient_email: email,
+            recipient_attendee_id: attendeeId,
+            subject,
+            template_key: 'contact-issued-ticket',
+            form_id: formId,
+            metadata: { source: 'contact-issue-ticket', contactId },
+          });
+        } catch (e) { console.error('contact-issue-ticket: email_sends log failed', String(e)); }
+      }
+      return ok;
     };
 
     // 1. Contact already linked to an attendee → RESEND that ticket (no dupe).

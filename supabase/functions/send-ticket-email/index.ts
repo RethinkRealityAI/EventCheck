@@ -8,6 +8,7 @@ import nodemailer from 'npm:nodemailer';
 import { renderEmailShell, applyPlaceholders } from '../_shared/emailShell.ts';
 import { resolveEmailTemplate } from '../_shared/emailTemplates.ts';
 import { buildAppUrl, isAbsoluteHttpUrl, resolveOrigin } from '../_shared/emailLinks.ts';
+import { buildOpenPixelUrl, appendTrackingPixel } from '../_shared/emailTracking.ts';
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -75,6 +76,8 @@ function generateEmailTemplate(data: {
     fromName?: string;
     headerImageUrl?: string;
     footerText?: string;
+    /** When set, the rendered shell carries a track-email open pixel. */
+    trackingId?: string;
 }) {
     const projectUrl = Deno.env.get('SUPABASE_URL') || '';
     const site = projectUrl.includes('gticuvgclbvhwvpzkuez') ? 'gansid'
@@ -88,6 +91,12 @@ function generateEmailTemplate(data: {
         content: data.content + attachHtml,
         headerImageUrl: data.headerImageUrl && data.headerImageUrl.trim() ? data.headerImageUrl : undefined,
         footerText: data.footerText && data.footerText.trim() ? data.footerText : undefined,
+        // Open tracking. Any caller passing `trackingId` gets the 1×1 pixel in
+        // the rendered shell, so server-originated sends (issued tickets,
+        // invites) report opens like client-rendered campaigns do.
+        trackingPixelUrl: data.trackingId
+            ? buildOpenPixelUrl(Deno.env.get('SUPABASE_URL') || '', data.trackingId)
+            : undefined,
     });
 }
 
@@ -153,11 +162,17 @@ serve(async (req: Request) => {
                 return jsonResponse({ error: 'Missing to/subject/html' }, 400);
             }
             const { transporter, fromName, fromAddress } = buildTransporter(smtpConfig);
+            // Callers that render their own HTML usually embed the pixel
+            // themselves; `trackingId` lets a caller that DIDN'T (admin
+            // one-off sends) still get open tracking without re-rendering.
+            const rawHtml = body.trackingId
+                ? appendTrackingPixel(html, buildOpenPixelUrl(Deno.env.get('SUPABASE_URL') || '', String(body.trackingId)))
+                : html;
             await transporter.sendMail({
                 from: `"${fromName}" <${fromAddress}>`,
                 to,
                 subject,
-                html,
+                html: rawHtml,
             });
             return jsonResponse({ ok: true });
         }
@@ -330,6 +345,7 @@ serve(async (req: Request) => {
                 fromName: smtpConfig?.fromName,
                 headerImageUrl: tpl.headerImageUrl,
                 footerText: tpl.footerText,
+                trackingId: typeof body.trackingId === 'string' ? body.trackingId : undefined,
             });
 
             await sendSimpleEmail({ to: primary.email, subject, html, smtpConfig });
@@ -339,7 +355,10 @@ serve(async (req: Request) => {
                 .update({ last_ticket_email_at: new Date().toISOString() })
                 .eq('id', primary.id);
 
-            return jsonResponse({ ok: true });
+            // Return the resolved subject so callers that log to `email_sends`
+            // (contact-issue-ticket) record what was actually sent rather than
+            // a guess.
+            return jsonResponse({ ok: true, subject });
         }
 
         // ── GUEST CLAIM COMPLETED: send ticket to the now-claimed guest + notify primary ──

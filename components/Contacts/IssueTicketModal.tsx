@@ -5,6 +5,7 @@ import { getForms } from '../../services/storageService';
 import { supabase } from '../../services/supabaseClient';
 import type { Form } from '../../types';
 import type { ImportedContact } from '../../services/importedContactsService';
+import { generateTrackingId } from '../../services/emailSendsService';
 
 const DEFAULT_FORM_ID = 'gansid-congress-2026-invite';
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
@@ -72,8 +73,10 @@ const IssueTicketModal: React.FC<Props> = ({ open, contacts, onClose, onComplete
     for (const c of withEmail) {
       setStatuses(prev => ({ ...prev, [c.id]: 'sending' }));
       try {
+        // Tracking id so the send shows up in the Contacts tab's email history
+        // with open/click data, like a campaign send.
         const { data, error } = await supabase.functions.invoke('contact-issue-ticket', {
-          body: { contactId: c.id, formId, origin: window.location.origin },
+          body: { contactId: c.id, formId, origin: window.location.origin, trackingId: generateTrackingId() },
         });
         if (error || (data as any)?.error) throw new Error((data as any)?.error || error?.message || 'failed');
         // The ticket is created even if the confirmation email fails (best-effort

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Upload, Search, RefreshCw, CheckCircle2, XCircle, AlertTriangle, Circle, Loader2,
   Send as SendIcon, Trash2, Tag, Users, ChevronDown, ChevronLeft, ChevronRight, Ticket, Plus, Minus, X, TicketCheck,
+  Eye, MousePointerClick,
 } from 'lucide-react';
 import type { AppSettings } from '../../types';
 import { supabase } from '../../services/supabaseClient';
@@ -10,6 +11,7 @@ import {
   listDistinctTags, addTagsToContacts, removeTagFromContacts, contactMatchesTags,
   type ImportBatch, type ImportedContact, type ContactEmailStatus,
 } from '../../services/importedContactsService';
+import { getLatestEmailSends, type EmailSend } from '../../services/emailSendsService';
 import { useNotifications } from '../NotificationSystem';
 import BulkImportModal from '../BulkImport/BulkImportModal';
 import AddContactModal from './AddContactModal';
@@ -24,6 +26,14 @@ interface Props {
 // 'registered' is a synthetic status (contact has a linked attendee), not an
 // email_status value — handled separately in the filter.
 type StatusFilter = 'all' | ContactEmailStatus | 'registered';
+
+// Human labels for the template_key values that reach a contact, so the column
+// says "Ticket" rather than "contact-issued-ticket".
+const CONTACT_TEMPLATE_LABELS: Record<string, string> = {
+  'bulk': 'Campaign',
+  'contact-invite': 'Registration invite',
+  'contact-issued-ticket': 'Ticket',
+};
 
 function timeAgo(iso: string | null): string {
   if (!iso) return '—';
@@ -73,6 +83,10 @@ export default function ImportedContactsTab({ settings, itemsPerPage }: Props) {
 
   // Tagging + multi-select
   const [allTags, setAllTags] = useState<string[]>([]);
+  // Last email per contact address — subject + open/click, for the same
+  // visibility the Signups tab already had. Covers EVERY send type that logs
+  // to email_sends: campaigns, free-registration invites, and issued tickets.
+  const [emailSendsByEmail, setEmailSendsByEmail] = useState<Map<string, EmailSend>>(new Map());
   const [tagFilter, setTagFilter] = useState<string[]>([]);   // OR-semantics
   const [tagMenuOpen, setTagMenuOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -81,14 +95,19 @@ export default function ImportedContactsTab({ settings, itemsPerPage }: Props) {
   const load = async () => {
     setLoading(true);
     try {
-      const [b, c, tags] = await Promise.all([
+      const [b, c, tags, sends] = await Promise.all([
         getImportBatches(),
         getImportedContacts(batchFilter === 'all' ? {} : { batchId: batchFilter }),
         listDistinctTags(),
+        // Email history for the "Last email" column. Contacts are deduped by
+        // address, so the byEmail index is the right key here (unlike
+        // attendees, where several people can share an inbox).
+        getLatestEmailSends(),
       ]);
       setBatches(b);
       setContacts(c);
       setAllTags(tags);
+      setEmailSendsByEmail(sends.byEmail);
       // Drop any selections that no longer exist after a reload.
       setSelected(prev => {
         const present = new Set(c.map(x => x.id));
@@ -514,6 +533,7 @@ export default function ImportedContactsTab({ settings, itemsPerPage }: Props) {
               <th className="text-left px-4 py-2 font-semibold">Email</th>
               <th className="text-left px-4 py-2 font-semibold">Tags</th>
               <th className="text-left px-4 py-2 font-semibold">Email status</th>
+              <th className="text-left px-4 py-2 font-semibold">Last email</th>
               <th className="text-left px-4 py-2 font-semibold">Sent</th>
               <th className="text-right px-4 py-2 font-semibold">Actions</th>
             </tr>
@@ -575,6 +595,41 @@ export default function ImportedContactsTab({ settings, itemsPerPage }: Props) {
                     {c.emailStatus === 'failed' && c.emailError && (
                       <div className="text-[10px] text-red-500 mt-0.5 truncate max-w-[200px]" title={c.emailError}>{c.emailError}</div>
                     )}
+                  </td>
+                  {/* What we actually sent them, and whether it landed. Covers
+                      campaigns, free-registration invites and issued tickets —
+                      anything that writes an email_sends row. */}
+                  <td className="px-4 py-2">
+                    {(() => {
+                      const last = emailSendsByEmail.get(c.email.toLowerCase());
+                      if (!last) return <span className="text-gray-300 text-xs">—</span>;
+                      return (
+                        <div className="flex flex-col gap-0.5 max-w-[260px]">
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200 shrink-0"
+                              title={`Template: ${last.templateKey || 'custom'}`}
+                            >
+                              {CONTACT_TEMPLATE_LABELS[last.templateKey || ''] || last.templateKey || 'custom'}
+                            </span>
+                            {last.openedAt && (
+                              <span title={`Opened ${new Date(last.openedAt).toLocaleString()}`}>
+                                <Eye className="w-3 h-3 text-emerald-600" />
+                              </span>
+                            )}
+                            {last.clickCount > 0 && (
+                              <span
+                                className="inline-flex items-center gap-0.5 text-[10px] text-indigo-700"
+                                title={`${last.clickCount} click${last.clickCount > 1 ? 's' : ''}`}
+                              >
+                                <MousePointerClick className="w-3 h-3" />{last.clickCount}
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[11px] text-gray-500 truncate" title={last.subject}>{last.subject}</span>
+                        </div>
+                      );
+                    })()}
                   </td>
                   <td className="px-4 py-2 text-gray-500 text-xs" title={c.emailSentAt || ''}>{c.emailSentAt ? timeAgo(c.emailSentAt) : '—'}</td>
                   <td className="px-4 py-2 text-right">

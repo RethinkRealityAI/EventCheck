@@ -479,6 +479,9 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume,
     const subjectResolved = mergePlaceholders(subject, vars);
     // Invite: render the admin-managed template body (registration_link survives
     // to the server). Campaign: render the structured compose fields.
+    // Invites: the open pixel is appended server-side and the registration
+    // link is click-wrapped there too — the token doesn't exist client-side, so
+    // `wrapClickUrl` can't be applied here (contact-invite-send does both).
     const html = isInvite
       ? renderEmailShell({ content: mergePlaceholders(inviteBody, vars), site: CURRENT_SITE.key })
       : renderHtml(fields, vars, { trackingId });
@@ -491,6 +494,7 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume,
               origin: window.location.origin,
               subject: subjectResolved,
               html,
+              trackingId,
             },
           })
         : await supabase.functions.invoke('send-ticket-email', {
