@@ -114,7 +114,7 @@ const AddAttendeeModal: React.FC<AddAttendeeModalProps> = ({ forms, selectedForm
       const dup = attendees.some(a => a.formId === formId && !a.isTest && (a.email || '').trim().toLowerCase() === resolvedEmail.toLowerCase());
       if (dup) {
         setDupConfirmedEmail(resolvedEmail.toLowerCase());
-        showNotification('An attendee with this email already exists on this form — click "Add Attendee" again to add anyway.', 'warning');
+        showNotification('An attendee with this email already exists on this form. Sharing an address is supported (each attendee keeps their own ticket and QR) — click "Add Attendee" again to add anyway.', 'warning');
         return;
       }
     }

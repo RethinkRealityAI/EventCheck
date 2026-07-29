@@ -23,6 +23,7 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { verifyInviteToken, signRegistrationToken } from '../_shared/registrationToken.ts';
 import { buildAppUrl, resolveOrigin } from '../_shared/emailLinks.ts';
+import { pickAttendeeForContact } from '../_shared/attendeeIdentity.ts';
 
 // supabase-js v2.45+ injects x-supabase-client-platform + x-supabase-api-version
 // on every functions.invoke(); both MUST be in the allow-list or the browser
@@ -75,12 +76,29 @@ serve(async (req: Request) => {
 
       // Dedup guard: if an attendee already exists for this email+form (e.g. they
       // registered through the normal public form, or a different invite for the
-      // same address), do NOT mint a second free ticket. Atomically link THIS
-      // contact to the existing attendee and return it. Case-insensitive match.
-      const { data: existing } = await svc.from('attendees')
-        .select('id').eq('form_id', v.formId).ilike('email', email).limit(1);
-      if (existing && existing.length) {
-        const existingId = (existing[0] as any).id as string;
+      // same address), do NOT mint a second free ticket.
+      //
+      // BUT `email` is NOT an identity key — partners/colleagues legitimately
+      // share one inbox (see _shared/attendeeIdentity.ts). Reuse a same-email row
+      // ONLY when it plausibly belongs to THIS person (name match, and not
+      // already claimed by a different imported contact); otherwise they get
+      // their own row so the ticket, QR and answers are theirs.
+      const { data: sameEmail } = await svc.from('attendees')
+        .select('id, name, email').eq('form_id', v.formId).ilike('email', email);
+      const candidates = (sameEmail ?? []) as Array<{ id: string; name: string | null }>;
+      let claimedByOtherContact: string[] = [];
+      if (candidates.length > 0) {
+        const { data: otherLinks } = await svc.from('imported_contacts')
+          .select('attendee_id')
+          .in('attendee_id', candidates.map(c => c.id))
+          .neq('id', v.contactId);
+        claimedByOtherContact = (otherLinks ?? [])
+          .map((r: any) => r.attendee_id)
+          .filter((id: unknown): id is string => typeof id === 'string');
+      }
+      const decision = pickAttendeeForContact({ contactName: name, candidates, claimedByOtherContact });
+      if (decision.action === 'reuse') {
+        const existingId = decision.attendeeId;
         // Only claim if the contact is still unlinked (idempotent / race-safe).
         await svc.from('imported_contacts')
           .update({ attendee_id: existingId, registered_at: new Date().toISOString() })

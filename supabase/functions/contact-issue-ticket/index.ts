@@ -14,6 +14,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { signRegistrationToken } from '../_shared/registrationToken.ts';
 import { buildIssuedAttendeeRow } from '../_shared/issuedTicket.ts';
+import { pickAttendeeForContact } from '../_shared/attendeeIdentity.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -83,11 +84,27 @@ Deno.serve(async (req: Request) => {
     }
 
     // 2. An attendee already exists for this email+form (registered elsewhere) →
-    //    link this contact to it + resend (case-insensitive match).
-    const { data: existing } = await svc.from('attendees')
-      .select('id').eq('form_id', formId).ilike('email', email).neq('is_test', true).limit(1);
-    if (existing && existing.length) {
-      const existingId = (existing[0] as any).id as string;
+    //    link this contact to it + resend. `email` is NOT an identity key —
+    //    partners/colleagues share one inbox — so only reuse a row that
+    //    plausibly belongs to THIS contact (name match, and not already claimed
+    //    by another contact). Otherwise fall through and mint their own row,
+    //    keyed by its own attendee id. See _shared/attendeeIdentity.ts.
+    const { data: sameEmail } = await svc.from('attendees')
+      .select('id, name, email').eq('form_id', formId).ilike('email', email).neq('is_test', true);
+    const candidates = (sameEmail ?? []) as Array<{ id: string; name: string | null }>;
+    let claimedByOtherContact: string[] = [];
+    if (candidates.length > 0) {
+      const { data: otherLinks } = await svc.from('imported_contacts')
+        .select('attendee_id')
+        .in('attendee_id', candidates.map(c => c.id))
+        .neq('id', contactId);
+      claimedByOtherContact = (otherLinks ?? [])
+        .map((r: any) => r.attendee_id)
+        .filter((id: unknown): id is string => typeof id === 'string');
+    }
+    const decision = pickAttendeeForContact({ contactName: name, candidates, claimedByOtherContact });
+    if (decision.action === 'reuse') {
+      const existingId = decision.attendeeId;
       await svc.from('imported_contacts')
         .update({ attendee_id: existingId, registered_at: new Date().toISOString() })
         .eq('id', contactId).is('attendee_id', null);
