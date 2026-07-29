@@ -12,13 +12,9 @@ import AddonsList from '../Pricing/AddonsList';
 import RunningTotal from '../Pricing/RunningTotal';
 import { formatPrice } from '../../utils/pricing';
 import { Check, Tag, Info, AlertCircle, MapPin } from 'lucide-react';
-
-const EXHIBITOR_STAFF_HIDDEN_FIELD_IDS = new Set([
-  'f_present',
-  'f_emerg_name',
-  'f_emerg_phone',
-  'f_emerg_rel',
-]);
+// Shared with SteppedFormShell's claim-mode step filtering — the hide rules
+// here and `fieldRenderableForClaim` must stay in agreement.
+import { EXHIBITOR_STAFF_HIDDEN_FIELD_IDS } from './steppedValidation';
 
 export interface FormRendererProps {
   form: Form;
@@ -349,8 +345,11 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
         const isSteppedMode = form.settings?.renderMode === 'stepped';
         if (!isSteppedMode && rmsField && registrationMode === null) return null;
 
-        // Pending-claim: render usedForPricing country field as read-only (locked post-payment)
-        if (isPendingClaim && field.type === 'country' && field.usedForPricing) {
+        // Pending-claim: render usedForPricing country field as read-only (locked
+        // post-payment) — but ONLY when a value was actually fixed at purchase.
+        // BOGO claim-link rows arrive with NO answers; locking an empty required
+        // country would strand the guest ("Please fill in Country" with no input).
+        if (isPendingClaim && field.type === 'country' && field.usedForPricing && ((answers[field.id] as string) ?? '') !== '') {
           const currentCode = (answers[field.id] as string) ?? '';
           return (
             <div key={field.id} className="py-2">

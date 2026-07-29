@@ -10,6 +10,43 @@ const NON_ANSWER_FIELD_TYPES: ReadonlySet<string> = new Set([
   'registration-mode-selector',
 ]);
 
+// Fields FormRenderer hides for exhibitor-staff pending claims. Single source
+// of truth — FormRenderer imports this set, and claim-mode step filtering below
+// must agree with FormRenderer's hide rules or a step can render zero fields.
+export const EXHIBITOR_STAFF_HIDDEN_FIELD_IDS: ReadonlySet<string> = new Set([
+  'f_present',
+  'f_emerg_name',
+  'f_emerg_phone',
+  'f_emerg_rel',
+]);
+
+/** Mirrors FormRenderer's pending-claim hide rules: claim guests never see the
+ *  ticket field or the registration-mode selector (their registration is
+ *  already paid), and exhibitor staff additionally skip a fixed id set. */
+export function fieldRenderableForClaim(
+  field: FormField,
+  opts: { isExhibitorStaffPending?: boolean } = {},
+): boolean {
+  if (field.type === 'ticket' || field.type === 'registration-mode-selector') return false;
+  if (opts.isExhibitorStaffPending && EXHIBITOR_STAFF_HIDDEN_FIELD_IDS.has(field.id)) return false;
+  return true;
+}
+
+/** Drops steps that would render ZERO fields for a pending-claim guest —
+ *  e.g. a "Registration Type" step holding only the mode selector. Without
+ *  this, claim links on stepped forms land on an empty step and the hidden
+ *  required selector strands the guest behind validation (GANSID BOGO
+ *  claim-link incident, 2026-07-29). */
+export function filterStepsForClaim(
+  steps: FormStep[],
+  fieldsByStep: Record<string, FormField[]>,
+  opts: { isExhibitorStaffPending?: boolean } = {},
+): FormStep[] {
+  return steps.filter(step =>
+    (fieldsByStep[step.id] ?? []).some(f => fieldRenderableForClaim(f, opts)),
+  );
+}
+
 // Fields the per-guest "full details" accordion excludes because they're already
 // captured at the top of each row or aren't a per-guest concern. Must stay in
 // sync with GuestFullDetailsInline's filter so inline-mode required validation

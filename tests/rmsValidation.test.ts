@@ -297,3 +297,88 @@ describe('groupFieldsBySection', () => {
     expect(result.two).toHaveLength(0);
   });
 });
+
+// ── Claim-mode step filtering (GANSID BOGO claim-link incident, 2026-07-29) ──
+// A stepped form whose first step holds ONLY the mode selector rendered zero
+// fields for pending-claim guests and stranded them behind rms validation.
+import { fieldRenderableForClaim, filterStepsForClaim, EXHIBITOR_STAFF_HIDDEN_FIELD_IDS } from '../components/SteppedRegistration/steppedValidation';
+import type { FormStep } from '../types';
+
+const f = (id: string, type: string): FormField => ({ id, type, label: id, required: false } as any);
+
+describe('fieldRenderableForClaim', () => {
+  it('hides ticket and registration-mode-selector fields for claim guests', () => {
+    expect(fieldRenderableForClaim(f('f_ticket', 'ticket'))).toBe(false);
+    expect(fieldRenderableForClaim(f('f_mode', 'registration-mode-selector'))).toBe(false);
+  });
+
+  it('keeps ordinary answer fields', () => {
+    expect(fieldRenderableForClaim(f('f_fname', 'text'))).toBe(true);
+    expect(fieldRenderableForClaim(f('f_email', 'email'))).toBe(true);
+    expect(fieldRenderableForClaim(f('f_consent', 'boolean'))).toBe(true);
+  });
+
+  it('additionally hides the exhibitor-staff id set only when isExhibitorStaffPending', () => {
+    for (const id of EXHIBITOR_STAFF_HIDDEN_FIELD_IDS) {
+      expect(fieldRenderableForClaim(f(id, 'text'), { isExhibitorStaffPending: true })).toBe(false);
+      expect(fieldRenderableForClaim(f(id, 'text'), { isExhibitorStaffPending: false })).toBe(true);
+    }
+  });
+});
+
+describe('filterStepsForClaim', () => {
+  const steps: FormStep[] = [
+    { id: 'registration', label: 'Registration Type' },
+    { id: 'personal', label: 'Personal Details' },
+    { id: 'consent', label: 'Consent & Payment' },
+  ] as any;
+
+  it('drops a step that only holds claim-hidden fields (the empty step 1 bug)', () => {
+    const fieldsByStep = {
+      registration: [f('f_mode', 'registration-mode-selector')],
+      personal: [f('f_fname', 'text'), f('f_email', 'email')],
+      consent: [f('f_consent', 'boolean'), f('f_ticket', 'ticket')],
+    };
+    const visible = filterStepsForClaim(steps, fieldsByStep);
+    expect(visible.map(s => s.id)).toEqual(['personal', 'consent']);
+  });
+
+  it('keeps a step when at least one field survives the claim filter', () => {
+    const fieldsByStep = {
+      registration: [f('f_mode', 'registration-mode-selector'), f('f_note', 'text')],
+      personal: [f('f_fname', 'text')],
+      consent: [f('f_consent', 'boolean')],
+    };
+    const visible = filterStepsForClaim(steps, fieldsByStep);
+    expect(visible.map(s => s.id)).toEqual(['registration', 'personal', 'consent']);
+  });
+
+  it('drops steps with no fields at all and honors exhibitor-staff hidden ids', () => {
+    const fieldsByStep = {
+      registration: [],
+      personal: [f('f_fname', 'text')],
+      consent: [f('f_present', 'radio'), f('f_emerg_name', 'text')],
+    };
+    const visible = filterStepsForClaim(steps, fieldsByStep, { isExhibitorStaffPending: true });
+    expect(visible.map(s => s.id)).toEqual(['personal']);
+  });
+
+  it('matches the live GANSID Congress 2026 shape — claim guests see 4 of 5 steps', () => {
+    const gansidSteps: FormStep[] = [
+      { id: 'registration', label: 'Registration Type' },
+      { id: 'personal', label: 'Personal Details' },
+      { id: 'affiliation', label: 'Affiliation & Role' },
+      { id: 'needs', label: 'Needs & Preferences' },
+      { id: 'consent', label: 'Consent & Payment' },
+    ] as any;
+    const fieldsByStep = {
+      registration: [f('f_mode', 'registration-mode-selector')],
+      personal: [f('f_fname', 'text'), f('f_lname', 'text'), f('f_email', 'email'), f('f_country', 'country')],
+      affiliation: [f('f_org', 'text'), f('f_role', 'text')],
+      needs: [f('f_days', 'checkbox'), f('f_diet', 'textarea')],
+      consent: [f('f_consent_photo', 'boolean'), f('f_consent_terms', 'boolean'), f('f_ticket', 'ticket')],
+    };
+    const visible = filterStepsForClaim(gansidSteps, fieldsByStep);
+    expect(visible.map(s => s.id)).toEqual(['personal', 'affiliation', 'needs', 'consent']);
+  });
+});

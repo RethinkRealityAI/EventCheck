@@ -501,7 +501,16 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   const prefilledRef = useRef(false);
   useEffect(() => {
     if (prefilledRef.current) return;
-    if (!profile || !form || mode !== 'purchaser') return;
+    if (!profile || !form) return;
+    // Purchasers prefill immediately. Pending-claim guests (e.g. a signed-in
+    // BOGO recipient) also prefill from their account — but ONLY when the row
+    // carries no stored answers (the blank BOGO claim-link state). Rows the
+    // purchaser already filled keep their snapshot untouched.
+    if (mode !== 'purchaser') {
+      if (!isAnyPendingClaim || !loadedRefAttendee) return;
+      const rowAnswers = loadedRefAttendee.answers as Record<string, any> | undefined;
+      if (rowAnswers && Object.keys(rowAnswers).length > 0) return;
+    }
 
     const nameParts = (profile.fullName ?? '').trim().split(/\s+/);
     const firstName = nameParts.slice(0, 1).join(' ');
@@ -524,7 +533,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
       if (profile.countryCode) setSelectedCountryCode(profile.countryCode);
     }
     prefilledRef.current = true;
-  }, [profile, form, mode]);
+  }, [profile, form, mode, isAnyPendingClaim, loadedRefAttendee]);
 
   // ── Free invite (`?invite=<token>`) resolve + prefill ──
   // Mirrors the `?ref=` effect: when an invite token is present, resolve it via
@@ -912,21 +921,26 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
       return false;
     }
 
-    const rmsCheck = validateRms(rmsField, registrationMode);
-    if (!rmsCheck.ok) {
-      setError(rmsCheck.error!);
-      return false;
-    }
+    // Pending-claim guests never see the registration-mode selector (their
+    // slot is already paid) — validating it would block their submit on a
+    // question they cannot answer.
+    if (!isAnyPendingClaim) {
+      const rmsCheck = validateRms(rmsField, registrationMode);
+      if (!rmsCheck.ok) {
+        setError(rmsCheck.error!);
+        return false;
+      }
 
-    const groupCheck = validateGroupMembers(
-      registrationMode,
-      groupMembers,
-      Boolean(pricingTemplate),
-      { hasAllInfo: groupHasAllInfo, formFields: form.fields },
-    );
-    if (!groupCheck.ok) {
-      setError(groupCheck.error!);
-      return false;
+      const groupCheck = validateGroupMembers(
+        registrationMode,
+        groupMembers,
+        Boolean(pricingTemplate),
+        { hasAllInfo: groupHasAllInfo, formFields: form.fields },
+      );
+      if (!groupCheck.ok) {
+        setError(groupCheck.error!);
+        return false;
+      }
     }
 
     if (mode === 'purchaser') {
@@ -998,9 +1012,10 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
         // claim. The guest's edits still win for any field they touch.
         const purchaserSnapshot = (loadedRefAttendee.answers as Record<string, any> | undefined) ?? {};
         const mergedAnswers = { ...purchaserSnapshot, ...answers };
-        const claimNameField = form?.fields.find(f => f.type === 'text' || f.label.toLowerCase().includes('name'));
         const claimEmailField = form?.fields.find(f => f.type === 'email' || f.label.toLowerCase().includes('email'));
-        const claimedName = claimNameField ? String(mergedAnswers[claimNameField.id] || '').trim() : '';
+        // Full display name — handles split First/Last name forms (GANSID
+        // Congress) instead of grabbing only the first text field's value.
+        const claimedName = form ? resolveNameFromFormFields(form.fields, mergedAnswers).trim() : '';
         const claimedEmail = claimEmailField ? String(mergedAnswers[claimEmailField.id] || '').trim() : '';
         const claimUpdate: Record<string, any> = {
           answers: mergedAnswers,
@@ -1008,14 +1023,18 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
         };
         if (claimedName) claimUpdate.name = claimedName;
         if (claimedEmail) claimUpdate.email = claimedEmail;
-        if (
-          !isExhibitorStaffPending
-          && user?.id
-          && user.email
-          && loadedRefAttendee.email
-          && user.email.toLowerCase() === loadedRefAttendee.email.toLowerCase()
-          && !(loadedRefAttendee as any).userId
-        ) {
+        const authEmail = (user?.email ?? '').toLowerCase();
+        const canLinkByRowEmail = !!loadedRefAttendee.email
+          && authEmail === loadedRefAttendee.email.toLowerCase()
+          && !(loadedRefAttendee as any).userId;
+        // BOGO claim-link rows are seeded with the PAYER's email + user_id as
+        // placeholders — the guest's identity is unknown until they claim. When
+        // the signed-in GUEST claims with their own auth-matching email,
+        // transfer the row so the ticket shows under THEIR portal account.
+        const canTakeOverBogoRow = (loadedRefAttendee as any).isBogoClaim === true
+          && !!claimedEmail
+          && authEmail === claimedEmail.toLowerCase();
+        if (!isExhibitorStaffPending && user?.id && authEmail && (canLinkByRowEmail || canTakeOverBogoRow)) {
           claimUpdate.user_id = user.id;
         }
         const { error: updateError } = await supabase
@@ -1036,14 +1055,18 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
         // email sent" for a genuinely-new account: Supabase anti-enumeration
         // returns success with identities=[] for an already-existing email, and
         // signUp can error. The claim already succeeded — never block on signup.
-        if (claimSignupOptIn && !user && loadedRefAttendee.email && claimSignupPassword.length >= 8) {
+        // Sign up with the CLAIMED identity — BOGO claim-link rows carry the
+        // payer's email as a placeholder, so row.email would create the
+        // account under the wrong (payer's) address.
+        const signupEmail = claimedEmail || loadedRefAttendee.email;
+        if (claimSignupOptIn && !user && signupEmail && claimSignupPassword.length >= 8) {
           try {
             const { data: suData, error: suErr } = await supabase.auth.signUp({
-              email: loadedRefAttendee.email,
+              email: signupEmail,
               password: claimSignupPassword,
               options: {
                 data: {
-                  full_name: loadedRefAttendee.name ?? '',
+                  full_name: claimedName || loadedRefAttendee.name || '',
                   role: 'attendee',
                 },
                 emailRedirectTo: portalEmailRedirectTo(),
@@ -1077,7 +1100,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
             if (settings && form) {
               try {
                 const ticketDoc = await generateTicketPDF(
-                  { ...loadedRefAttendee, answers } as Attendee,
+                  { ...loadedRefAttendee, answers: mergedAnswers } as Attendee,
                   settings,
                   form,
                 );
@@ -1113,7 +1136,14 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
           }).catch(() => {/* ignore — email is best-effort */});
         }
 
-        setGeneratedTicket({ ...loadedRefAttendee, answers });
+        // Success screen + downloadable PDF must reflect the CLAIMED identity,
+        // not the placeholder row (BOGO rows carry the payer's name/email).
+        setGeneratedTicket({
+          ...loadedRefAttendee,
+          ...(claimedName ? { name: claimedName } : {}),
+          ...(claimedEmail ? { email: claimedEmail } : {}),
+          answers: mergedAnswers,
+        });
         // Confirmed success — wipe any cross-device draft so portal stops showing "Resume".
         if (form) clearAllProgress(form.id, user?.id ?? null);
         setStep('success');
@@ -2280,7 +2310,9 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                   );
                 })() : isExhibitorStaffPending
                   ? 'Your organization has registered you for the GANSID Congress. Please complete your personal details below.'
-                  : 'Your registration has been paid for as part of a group. Please complete your personal details below.'}
+                  : (loadedRefAttendee as any)?.isBogoClaim
+                    ? 'A complimentary guest ticket has been reserved for you. Please complete your personal details below to claim it.'
+                    : 'Your registration has been paid for as part of a group. Please complete your personal details below.'}
               </div>
             )}
 
@@ -2444,7 +2476,11 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                   <span>
                     <strong>Create a portal account</strong> so you can view your ticket and event updates anytime.
                     <br />
-                    <span className="text-xs text-indigo-700">Uses your ticket email ({loadedRefAttendee.email}). Recommended.</span>
+                    <span className="text-xs text-indigo-700">
+                      {(loadedRefAttendee as any)?.isBogoClaim
+                        ? 'Uses the email address you enter above. Recommended.'
+                        : `Uses your ticket email (${loadedRefAttendee.email}). Recommended.`}
+                    </span>
                   </span>
                 </label>
                 {claimSignupOptIn && (

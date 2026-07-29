@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, type ReactNode } from 'react';
 import { FormRenderer, type FormRendererProps } from './FormRenderer';
 import { StepperSidebar } from '../Portal/ui/StepperSidebar';
-import { groupFieldsBySection, validateRequired, validateRms, validateGroupMembers, type GroupMember } from './steppedValidation';
+import { groupFieldsBySection, validateRequired, validateRms, validateGroupMembers, filterStepsForClaim, type GroupMember } from './steppedValidation';
 import { loadDraft, saveDraft, clearDraft } from '../../services/registrationDraftService';
 
 interface SteppedFormShellProps extends Omit<FormRendererProps, 'filteredFields'> {
@@ -16,7 +16,21 @@ interface SteppedFormShellProps extends Omit<FormRendererProps, 'filteredFields'
 }
 
 export function SteppedFormShell(props: SteppedFormShellProps) {
-  const steps = props.form.settings?.steps ?? [];
+  const allSteps = props.form.settings?.steps ?? [];
+  // Pending-claim guests (group/BOGO/staff) never see the mode-selector or
+  // ticket fields, so any step containing ONLY those (e.g. "Registration
+  // Type") must be dropped — otherwise the claim link opens on an empty step
+  // whose hidden required selector blocks Next (form appears to have no
+  // fields). Filter uses a grouping over ALL steps, then fields are regrouped
+  // over the surviving steps so unknown-section fields land on a visible step.
+  const steps = useMemo(() => {
+    if (!props.isAnyPendingClaim) return allSteps;
+    const byAll = groupFieldsBySection(props.form.fields, allSteps);
+    return filterStepsForClaim(allSteps, byAll, {
+      isExhibitorStaffPending: props.isExhibitorStaffPending,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.form.fields, allSteps, props.isAnyPendingClaim, props.isExhibitorStaffPending]);
   const fieldsByStep = useMemo(
     () => groupFieldsBySection(props.form.fields, steps),
     [props.form.fields, steps],
@@ -54,7 +68,15 @@ export function SteppedFormShell(props: SteppedFormShellProps) {
     }
   };
 
+  // Drafts are keyed by (form id, user id) for the payer's OWN registration.
+  // A pending-claim guest shares that key — restoring would clobber the
+  // purchaser-filled claim answers (or resurrect the payer's draft in the same
+  // browser), and persisting would leave a phantom "Resume" draft for a form
+  // the guest never purchases. Claim mode therefore skips ALL persistence.
+  const persistenceEnabled = !props.isAnyPendingClaim;
+
   useEffect(() => {
+    if (!persistenceEnabled) return;
     let cancelled = false;
     (async () => {
       let local: any = null;
@@ -78,11 +100,12 @@ export function SteppedFormShell(props: SteppedFormShellProps) {
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storageKey, props.form.id, props.userId]);
+  }, [storageKey, props.form.id, props.userId, persistenceEnabled]);
 
   // Persist answers + currentIndex + RMS group state whenever they change.
   // `savedAt` lets the portal show "resumed from [time]" context without re-parsing the full payload.
   useEffect(() => {
+    if (!persistenceEnabled) return;
     try {
       localStorage.setItem(
         storageKey,
@@ -99,7 +122,7 @@ export function SteppedFormShell(props: SteppedFormShellProps) {
     } catch {
       /* ignore quota errors */
     }
-  }, [props.answers, currentIndex, props.registrationMode, props.groupSize, props.groupHasAllInfo, props.groupMembers, storageKey]);
+  }, [props.answers, currentIndex, props.registrationMode, props.groupSize, props.groupHasAllInfo, props.groupMembers, storageKey, persistenceEnabled]);
 
   // Debounced DB-side draft persistence. Mirrors localStorage to the
   // `registration_drafts` table so the admin Signups tab can flip a user from
@@ -107,6 +130,7 @@ export function SteppedFormShell(props: SteppedFormShellProps) {
   // not just on explicit Save & Close. Only runs when the user is signed in
   // and has produced at least one non-empty answer.
   useEffect(() => {
+    if (!persistenceEnabled) return;
     if (!props.userId) return;
     const hasAnyAnswer = Object.values(props.answers || {}).some((v) => {
       if (v == null) return false;
@@ -128,7 +152,7 @@ export function SteppedFormShell(props: SteppedFormShellProps) {
       }).catch(() => {/* swallow — localStorage still has the truth */});
     }, 1500);
     return () => window.clearTimeout(handle);
-  }, [props.answers, currentIndex, props.registrationMode, props.groupSize, props.groupHasAllInfo, props.groupMembers, props.userId, props.form.id]);
+  }, [props.answers, currentIndex, props.registrationMode, props.groupSize, props.groupHasAllInfo, props.groupMembers, props.userId, props.form.id, persistenceEnabled]);
 
   const clearPersistence = () => {
     try { localStorage.removeItem(storageKey); } catch {}
@@ -165,7 +189,11 @@ export function SteppedFormShell(props: SteppedFormShellProps) {
     const req = validateRequired(currentFields, props.answers, props.isVisible);
     if (!req.ok) { setStepError(req.error!); return false; }
 
-    const rmsField = currentFields.find(f => f.type === 'registration-mode-selector') ?? null;
+    // Claim guests never render the mode selector — validating it would strand
+    // them behind a question they cannot see (their slot is already paid).
+    const rmsField = props.isAnyPendingClaim
+      ? null
+      : currentFields.find(f => f.type === 'registration-mode-selector') ?? null;
     if (rmsField) {
       const rms = validateRms(rmsField, props.registrationMode);
       if (!rms.ok) { setStepError(rms.error!); return false; }
