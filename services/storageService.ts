@@ -3,6 +3,7 @@ import { supabase } from './supabaseClient';
 import { Database } from './database.types';
 import { checkTableGuestCapacity } from '../utils/tableSeats';
 import { isCompletedPaymentStatus, isPendingPaymentStatus } from '../utils/portalUserStatus';
+import { emailIlikePattern } from '../utils/emailMatch';
 
 type AttendeeRow = Database['public']['Tables']['attendees']['Row'];
 type AttendeeInsert = Database['public']['Tables']['attendees']['Insert'];
@@ -1435,7 +1436,13 @@ export async function getAttendeesForUser(userId: string, email: string): Promis
   // with special chars (@, +, .) can confuse the parser and return 400s.
   const [byUserId, byEmail] = await Promise.all([
     supabase.from('attendees').select('*').eq('user_id', userId).order('registered_at', { ascending: false }),
-    email ? supabase.from('attendees').select('*').eq('email', email).order('registered_at', { ascending: false }) : Promise.resolve({ data: [], error: null } as any),
+    // ILIKE, not EQ: Supabase lowercases auth emails while an attendee row
+    // keeps whatever was typed into the form, so `Sikha.Singh@x.org` would
+    // never match `sikha.singh@x.org` and the owner's portal showed no ticket.
+    // The pattern is wildcard-escaped — `_` is common in real addresses.
+    email
+      ? supabase.from('attendees').select('*').ilike('email', emailIlikePattern(email)).order('registered_at', { ascending: false })
+      : Promise.resolve({ data: [], error: null } as any),
   ]);
   if (byUserId.error) console.error('getAttendeesForUser byUserId', byUserId.error);
   if (byEmail.error) console.error('getAttendeesForUser byEmail', byEmail.error);

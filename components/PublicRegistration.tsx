@@ -173,6 +173,9 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   const [isTableFull, setIsTableFull] = useState(false);
   // Pending-claim: the specific guest record referenced by the ?ref link
   const [loadedRefAttendee, setLoadedRefAttendee] = useState<Attendee | null>(null);
+  // True when a `?ref=` claim link points at a row that has ALREADY been
+  // completed — renders an explanatory panel instead of a broken form.
+  const [claimAlreadyCompleted, setClaimAlreadyCompleted] = useState(false);
 
   // Dynamic Pricing Engine state
   const pricingTemplate: PricingTemplate | null = (form as any)?.pricingTemplate ?? null;
@@ -631,6 +634,21 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
         // Pending-claim: group guest with guest_type='pending-claim' OR exhibitor staff with
         // guest_type='exhibitor-staff-pending' OR sponsor-exhibitor combined staff with
         // guest_type='staff-pending' completes their own details
+        // Already completed. Claim links get forwarded and re-opened, so this
+        // WILL happen. Without an explicit branch the row falls through to the
+        // "resolve up to primary" path below — a BOGO row has is_primary=true,
+        // so the visitor got a table-guest form reporting "this table is
+        // currently full". Show them what actually happened instead.
+        const claimedTypes = ['claimed', 'exhibitor-staff-claimed', 'staff-claimed'];
+        if (refAttendee && claimedTypes.includes((refAttendee as any).guestType) && refAttendee.formId === formId) {
+          setLoadedRefAttendee(refAttendee);
+          setClaimAlreadyCompleted(true);
+          setMode('guest');
+          setLoading(false);
+          setInitialLoadComplete(true);
+          return;
+        }
+
         const pendingClaimTypes = ['pending-claim', 'exhibitor-staff-pending', 'staff-pending'];
         if (refAttendee && pendingClaimTypes.includes((refAttendee as any).guestType) && refAttendee.formId === formId) {
           setLoadedRefAttendee(refAttendee);
@@ -1985,6 +2003,34 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   // Invited contact already registered (detected at resolve time). Show a
   // friendly done panel instead of the blank form so they don't fill it out
   // and hit a 409 on submit. Skip if a ticket was just generated this session.
+  // A `?ref=` claim link whose row is already completed. These links get
+  // forwarded and re-opened, so this is a normal state, not an error.
+  if (claimAlreadyCompleted && !generatedTicket) return (
+    <div className="min-h-screen flex items-center justify-center bg-gansid-surface-container-lowest p-4">
+      <div className="bg-white p-8 rounded-gansid-xl shadow-md text-center max-w-md">
+        <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-3">
+          <Check className="w-7 h-7" />
+        </div>
+        <h1 className="font-display text-xl font-bold text-gansid-on-surface mb-2">This registration is already complete</h1>
+        <p className="font-body text-sm text-gansid-on-surface/70">
+          This ticket has already been claimed
+          {loadedRefAttendee?.name ? <> by <strong>{loadedRefAttendee.name}</strong></> : null}
+          . Check your email for the ticket and its QR code
+          {loadedRefAttendee?.email ? <> — it was sent to <strong>{loadedRefAttendee.email}</strong></> : null}.
+        </p>
+        {CURRENT_SITE.portalEnabled && (
+          <a
+            href={user ? '#/portal/tickets' : '#/'}
+            className={`inline-block mt-5 px-6 py-2.5 rounded-xl text-white font-bold text-sm shadow hover:scale-[1.02] transition ${brandGradientClass}`}
+            style={brandDefaultStyle}
+          >
+            {user ? 'View my ticket →' : 'Sign in to view your ticket →'}
+          </a>
+        )}
+      </div>
+    </div>
+  );
+
   if (inviteAlreadyRegistered && !generatedTicket) return (
     <div className="min-h-screen flex items-center justify-center bg-gansid-surface-container-lowest p-4">
       <div className="bg-white p-8 rounded-gansid-xl shadow-md text-center max-w-md">
@@ -2916,13 +2962,29 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                 survives a tab close after PayPal. We still surface an immediate
                 in-browser download here so the buyer never has to wait on email
                 — the QR code is required for entry. */}
+            {/* The purchaser gets a server-sent P4 email carrying a tokenised
+                /#/tickets download link. A CLAIM guest gets the
+                `guest-claim-completed` email with their ticket instead — no
+                download token — so don't promise them a "secure link". */}
             <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900 text-left">
-              <p className="font-semibold mb-1">Your ticket{guestTicketsData.length > 0 ? 's are' : ' is'} on the way</p>
-              <p>
-                We've sent a confirmation email with a secure link to download your
-                ticket{guestTicketsData.length > 0 ? 's' : ''} — keep that email so you can re-download {guestTicketsData.length > 0 ? 'them' : 'it'} anytime
-                through the event. You can also download {guestTicketsData.length > 0 ? 'them' : 'it'} right now below.
-              </p>
+              {isAnyPendingClaim ? (
+                <>
+                  <p className="font-semibold mb-1">Your ticket is confirmed</p>
+                  <p>
+                    We've emailed your ticket to you. Download it below and keep the QR
+                    code handy — you'll need it to check in at the event.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="font-semibold mb-1">Your ticket{guestTicketsData.length > 0 ? 's are' : ' is'} on the way</p>
+                  <p>
+                    We've sent a confirmation email with a secure link to download your
+                    ticket{guestTicketsData.length > 0 ? 's' : ''} — keep that email so you can re-download {guestTicketsData.length > 0 ? 'them' : 'it'} anytime
+                    through the event. You can also download {guestTicketsData.length > 0 ? 'them' : 'it'} right now below.
+                  </p>
+                </>
+              )}
             </div>
 
             {bogoSuccessNotice && (
@@ -2963,6 +3025,40 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                     </button>
                   )}
                 </div>
+              </div>
+            )}
+
+            {/* ── Claim path: somewhere to go next ──
+                The `?ref=` claim success screen used to end at the download
+                button — no link back into the Congress app at all. Signed-in
+                guests go straight to their tickets; signed-out guests are told
+                where their ticket lives (their row is linked to their account
+                by the relink-on-email-change trigger, so signing in shows it). */}
+            {isAnyPendingClaim && CURRENT_SITE.portalEnabled && (
+              <div className="mb-6 max-w-sm mx-auto">
+                {user ? (
+                  <a
+                    href="#/portal/tickets"
+                    className={`block w-full text-center px-6 py-3 rounded-xl text-white font-bold shadow hover:scale-[1.02] transition ${brandGradientClass}`}
+                    style={brandDefaultStyle}
+                  >
+                    View my ticket in the portal →
+                  </a>
+                ) : (
+                  <>
+                    <a
+                      href="#/"
+                      className={`block w-full text-center px-6 py-3 rounded-xl text-white font-bold shadow hover:scale-[1.02] transition ${brandGradientClass}`}
+                      style={brandDefaultStyle}
+                    >
+                      Sign in to view your ticket →
+                    </a>
+                    <p className="text-xs text-gray-500 mt-2 text-center">
+                      Your ticket is saved to your account. Sign in any time with this
+                      email to download it again or see Congress updates.
+                    </p>
+                  </>
+                )}
               </div>
             )}
 
