@@ -16,6 +16,8 @@ import {
   CATEGORY_META,
   resolveAttendeeCategory,
 } from '../utils/attendeeCategories';
+import { resolveAttendeeDisplayName } from '../utils/resolveAttendeeDisplayName';
+import AccountActionsPanel from './Admins/AccountActionsPanel';
 
 interface AttendeeModalProps {
   attendee: Attendee;
@@ -722,6 +724,14 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
                     );
                   })()}
                 </div>
+
+                {/* Portal account management — reset / magic link / create.
+                    Renders nothing unless the admin holds `manageUsers`. */}
+                <AccountActionsPanel
+                  email={localAttendee.email}
+                  fullName={resolveAttendeeDisplayName(localAttendee, form)}
+                  dense
+                />
               </div>
 
               {/* Right Column - Details */}

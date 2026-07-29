@@ -94,6 +94,9 @@ export const REQUIRED_APP_COLUMNS = {
     'pricing_bracket',
     'pricing_category_id',
   ],
+  email_sends: [
+    'recipient_attendee_id',
+  ],
   announcements: [
     'cta_label',
     'cta_url',

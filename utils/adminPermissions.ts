@@ -42,11 +42,18 @@ export interface AdminPagePermissions {
 // capability they had before the feature flag was introduced.
 export const ADMIN_FEATURE_KEYS = [
   'exportAttendees',
+  'manageUsers',
 ] as const;
 export type AdminFeatureKey = typeof ADMIN_FEATURE_KEYS[number];
 
 export interface AdminFeaturePermissions {
   exportAttendees: boolean;
+  /** Send password-reset / magic links, confirm addresses, create portal
+   *  accounts. Unlike exportAttendees this defaults to DENIED for admins —
+   *  it can hand over access to someone else's account, so a super_admin must
+   *  grant it explicitly. (Setting a password outright stays super_admin-only
+   *  and is enforced server-side in _shared/adminUserActions.ts.) */
+  manageUsers: boolean;
 }
 
 export interface AdminPermissions {
@@ -71,10 +78,12 @@ export const ADMIN_PAGE_LABELS: Record<AdminPageKey, string> = {
 // Labels + helper copy for the feature toggles in the admin-management UI.
 export const ADMIN_FEATURE_LABELS: Record<AdminFeatureKey, string> = {
   exportAttendees: 'Export attendees (CSV / PDF)',
+  manageUsers: 'Manage portal accounts (reset / magic link / create)',
 };
 
 export const ADMIN_FEATURE_DESCRIPTIONS: Record<AdminFeatureKey, string> = {
   exportAttendees: 'Download attendee lists from the dashboard with filters.',
+  manageUsers: 'Send password-reset and sign-in links, confirm email addresses, and create portal accounts for attendees. Setting a password directly stays super-admin only.',
 };
 
 // Pre-fill for the "Invite new admin" / "Promote existing user" forms.
@@ -96,6 +105,8 @@ export const DEFAULT_ADMIN_PERMISSIONS: AdminPermissions = {
   // A super admin can still uncheck it per-admin from the management UI.
   features: {
     exportAttendees: true,
+    // Denied by default — see AdminFeaturePermissions.manageUsers.
+    manageUsers: false,
   },
 };
 
@@ -125,6 +136,7 @@ export const FALLBACK_ADMIN_PERMISSIONS: AdminPermissions = {
   },
   features: {
     exportAttendees: true,
+    manageUsers: true,
   },
 };
 
@@ -207,15 +219,20 @@ export function canAccessPage(profile: Profile | null, page: AdminPageKey): bool
  */
 export function effectiveFeaturePermissions(profile: Profile | null): AdminFeaturePermissions {
   if (isSuperAdmin(profile)) {
-    return { exportAttendees: true };
+    return { exportAttendees: true, manageUsers: true };
   }
   if (!isAdmin(profile)) {
-    return { exportAttendees: false };
+    return { exportAttendees: false, manageUsers: false };
   }
   const stored = profile?.adminPermissions?.features ?? null;
   return {
     // `?? true` — unset means granted for admins (see docstring).
     exportAttendees: stored?.exportAttendees ?? true,
+    // `?? false` — the EXCEPTION to that rule. Account management can hand over
+    // access to someone else's account, so it is opt-in per admin rather than
+    // grandfathered. Server-side enforcement lives in
+    // supabase/functions/_shared/adminUserActions.ts — this only gates the UI.
+    manageUsers: stored?.manageUsers ?? false,
   };
 }
 
@@ -256,6 +273,7 @@ export function allAdminPermissions(): AdminPermissions {
     },
     features: {
       exportAttendees: true,
+      manageUsers: true,
     },
   };
 }

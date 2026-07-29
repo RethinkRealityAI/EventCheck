@@ -678,6 +678,10 @@ export interface AdminPermissions {
   // rows that only stored `pages` stay valid. See utils/adminPermissions.ts.
   features?: {
     exportAttendees: boolean;
+    /** Dashboard-side portal-account management (password reset / magic link /
+     *  confirm email / create account). Optional + defaults to DENIED for
+     *  admins — see utils/adminPermissions.ts. */
+    manageUsers?: boolean;
   };
 }
 

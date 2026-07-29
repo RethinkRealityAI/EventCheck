@@ -1,5 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Mail, Search, RefreshCw, CheckCircle2, Clock, Circle, Eye, MousePointerClick, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Mail, Search, RefreshCw, CheckCircle2, Clock, Circle, Eye, MousePointerClick, ChevronLeft, ChevronRight, Trash2, KeyRound, X } from 'lucide-react';
+import AccountActionsPanel from '../Admins/AccountActionsPanel';
+import { canUseFeature } from '../../utils/adminPermissions';
 import { getPortalUsers, type PortalUser } from '../../services/storageService';
 import { getLatestEmailSendPerRecipient, type EmailSend } from '../../services/emailSendsService';
 import { supabase } from '../../services/supabaseClient';
@@ -95,12 +98,15 @@ export default function SignupsTab({ settings, forms, itemsPerPage }: Props) {
   const { profile } = useAuth();
   const { showNotification } = useNotifications();
   const isSuperAdmin = profile?.role === 'super_admin';
+  const canManageUsers = canUseFeature(profile, 'manageUsers');
   const [users, setUsers] = useState<PortalUser[]>([]);
   const [emailSendsByEmail, setEmailSendsByEmail] = useState<Map<string, EmailSend>>(new Map());
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<FilterKey>('all');
   const [selected, setSelected] = useState<PortalUser | null>(null);
+  // Portal-account management (reset / magic link / confirm / set password).
+  const [accountUser, setAccountUser] = useState<PortalUser | null>(null);
   // Tracks which user row is currently being deleted (so we can disable the
   // delete button + show a spinner while the edge function runs).
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
@@ -360,6 +366,16 @@ export default function SignupsTab({ settings, forms, itemsPerPage }: Props) {
                 >
                   Direct mail
                 </a>
+                {canManageUsers && (
+                  <button
+                    onClick={() => setAccountUser(u)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-300 text-gray-700 rounded-md text-xs font-semibold hover:bg-gray-50 transition"
+                    title="Password reset, sign-in link, or create their portal account"
+                  >
+                    <KeyRound className="w-3.5 h-3.5" />
+                    Account
+                  </button>
+                )}
                 {isSuperAdmin && (
                   <button
                     onClick={() => deleteUser(u)}
@@ -448,6 +464,16 @@ export default function SignupsTab({ settings, forms, itemsPerPage }: Props) {
                         <Mail className="w-3.5 h-3.5" />
                         Email
                       </button>
+                      {canManageUsers && (
+                        <button
+                          onClick={() => setAccountUser(u)}
+                          className="inline-flex items-center gap-1 px-2 py-1 bg-white border border-gray-300 text-gray-700 rounded-md text-xs font-semibold hover:bg-gray-50 transition"
+                          title="Password reset, sign-in link, or create their portal account"
+                        >
+                          <KeyRound className="w-3.5 h-3.5" />
+                          Account
+                        </button>
+                      )}
                       {isSuperAdmin && (
                         <button
                           onClick={() => deleteUser(u)}
@@ -489,6 +515,36 @@ export default function SignupsTab({ settings, forms, itemsPerPage }: Props) {
           onClose={() => setSelected(null)}
           onSent={reloadEmailSends}
         />
+      )}
+
+      {accountUser && createPortal(
+        // Portalled to document.body — the dashboard's backdrop-blur ancestors
+        // clip position:fixed children (CLAUDE.md §16 rule #7).
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+          onClick={() => setAccountUser(null)}
+        >
+          <div
+            className="w-full max-w-lg bg-white rounded-2xl shadow-2xl p-5 space-y-4 max-h-[90vh] overflow-y-auto"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="font-bold text-gray-900">Manage account</h3>
+                <p className="text-xs text-gray-500">{accountUser.fullName || accountUser.email}</p>
+              </div>
+              <button
+                onClick={() => setAccountUser(null)}
+                className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500"
+                aria-label="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <AccountActionsPanel email={accountUser.email} fullName={accountUser.fullName} />
+          </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

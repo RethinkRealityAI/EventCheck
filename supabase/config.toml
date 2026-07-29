@@ -69,3 +69,10 @@ verify_jwt = false
 # asserts the caller is an admin/super_admin.
 [functions.contact-issue-ticket]
 verify_jwt = true
+
+# Admin-only account management from the dashboard (password reset / magic link /
+# set password / confirm email / create account). Gateway requires a JWT; the
+# function additionally asserts admin|super_admin AND the `manageUsers` feature,
+# refuses to touch super_admin targets, and restricts set-password to super_admin.
+[functions.admin-user-actions]
+verify_jwt = true

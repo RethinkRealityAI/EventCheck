@@ -20,6 +20,13 @@ import ImportedContactsTab from './Contacts/ImportedContactsTab';
 import BulkImportModal from './BulkImport/BulkImportModal';
 import { CURRENT_SITE } from '../config/sites';
 import DashboardTabsConfig, { resolveVisibleTabs, type DashboardTabId } from './DashboardTabsConfig';
+import {
+  ACCOUNT_FILTERS,
+  ACCOUNT_FILTER_LABELS,
+  matchesAccountFilter,
+  describeActiveFilters,
+  type AccountFilter,
+} from '../utils/attendeeQuickFilters';
 import { Settings as SettingsIcon } from 'lucide-react';
 
 // ── Group-registration helpers ──────────────────────────────────────────────
@@ -130,6 +137,7 @@ const STANDARD_COLUMNS: ColumnDef[] = [
   { key: 'ticketType', label: 'Ticket Type', group: 'standard' },
   { key: 'seating', label: 'Seating', group: 'standard' },
   { key: 'status', label: 'Check-in Status', group: 'standard' },
+  { key: 'account', label: 'Portal Account', group: 'standard' },
   { key: 'registered', label: 'Registered', group: 'standard' },
   { key: 'ticketSent', label: 'Ticket Sent', group: 'standard' },
   { key: 'actions', label: 'Actions', group: 'standard' },
@@ -137,6 +145,8 @@ const STANDARD_COLUMNS: ColumnDef[] = [
 
 const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading = false, onRefresh }) => {
   const [searchTerm, setSearchTerm] = useState('');
+  // "Who can't sign in?" — the dimension the account-management tools act on.
+  const [accountFilter, setAccountFilter] = useState<AccountFilter>('all');
   const [activeTab, setActiveTab] = useState<'live' | 'test' | 'donated' | 'tables' | 'sponsor-tickets' | 'exhibitors' | 'groups' | 'signups' | 'speakers' | 'contacts'>('live');
   const [tabsConfigOpen, setTabsConfigOpen] = useState(false);
   const [selectedAttendee, setSelectedAttendee] = useState<Attendee | null>(null);
@@ -585,6 +595,8 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
       ? true
       : a.paymentStatus === paymentFilter;
 
+    const matchesAccount = matchesAccountFilter(a, accountFilter);
+
     const matchesResponseFilters = responseFilters.every(rf => {
       const answer = a.answers?.[rf.fieldId];
       if (rf.value === '__has_response__') {
@@ -596,7 +608,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
       return String(answer || '') === rf.value;
     });
 
-    return matchesSearch && matchesForm && matchesTab && matchesStatus && matchesPayment && matchesResponseFilters;
+    return matchesSearch && matchesForm && matchesTab && matchesStatus && matchesPayment && matchesAccount && matchesResponseFilters;
   });
 
   // Count donated seats for badge
@@ -1090,6 +1102,21 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
               </select>
             </div>
 
+            {/* Portal login — the dimension the account tools act on ("who
+                can't sign in to see their ticket?"). */}
+            <div className="flex items-center gap-2">
+              <span className="text-slate-400">Portal login:</span>
+              <select
+                value={accountFilter}
+                onChange={e => { setAccountFilter(e.target.value as AccountFilter); setCurrentPage(1); }}
+                className="bg-transparent font-medium text-slate-700 outline-none cursor-pointer"
+              >
+                {ACCOUNT_FILTERS.map(f => (
+                  <option key={f} value={f}>{ACCOUNT_FILTER_LABELS[f]}</option>
+                ))}
+              </select>
+            </div>
+
             {/* Response Filters */}
             {selectedFormId !== '_all' && selectedForm && (
               <>
@@ -1207,6 +1234,49 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
             )}
           </div>
         )}
+
+        {/* Active-filter summary. With four independent controls it was easy to
+            leave one set and read an empty table as missing data — this states
+            what is narrowing the list and resets everything in one click. */}
+        {(() => {
+          const chips = describeActiveFilters({
+            search: searchTerm,
+            status: statusFilter,
+            payment: paymentFilter,
+            account: accountFilter,
+            responseFilterCount: responseFilters.length,
+          });
+          if (chips.length === 0) return null;
+          return (
+            <div className="flex flex-wrap items-center gap-2 px-1 text-xs">
+              <span className="text-slate-400 font-medium">
+                Showing {filtered.length} of {attendees.filter(a => !a.isTest).length}
+              </span>
+              {chips.map(c => (
+                <span
+                  key={c.key}
+                  className="inline-flex items-center px-2.5 py-1 rounded-full bg-indigo-50/80 text-indigo-700 border border-indigo-200/50 font-medium max-w-[220px] truncate"
+                  title={c.label}
+                >
+                  {c.label}
+                </span>
+              ))}
+              <button
+                onClick={() => {
+                  setSearchTerm('');
+                  setStatusFilter('all');
+                  setPaymentFilter('all');
+                  setAccountFilter('all');
+                  setResponseFilters([]);
+                  setCurrentPage(1);
+                }}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-dashed border-slate-300 text-slate-500 hover:text-indigo-600 hover:border-indigo-300 transition font-medium"
+              >
+                <X className="w-3 h-3" /> Clear all
+              </button>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Table Content */}
@@ -1479,6 +1549,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                 {isColumnVisible('ticketType') && <th className="px-4 py-2.5 min-w-[110px] text-xs font-semibold uppercase tracking-wide text-gray-500">Ticket Type</th>}
                 {isColumnVisible('seating') && <th className="px-4 py-2.5 min-w-[120px] text-xs font-semibold uppercase tracking-wide text-gray-500">Seating</th>}
                 {isColumnVisible('status') && <th className="px-4 py-2.5 min-w-[120px] text-xs font-semibold uppercase tracking-wide text-gray-500">Check-in Status</th>}
+                {isColumnVisible('account') && <th className="px-4 py-2.5 min-w-[110px] text-xs font-semibold uppercase tracking-wide text-gray-500">Portal Account</th>}
                 {isColumnVisible('registered') && <th className="px-4 py-2.5 min-w-[100px] text-xs font-semibold uppercase tracking-wide text-gray-500">Registered</th>}
                 {isColumnVisible('ticketSent') && <th className="px-4 py-2.5 min-w-[100px] text-xs font-semibold uppercase tracking-wide text-gray-500">Ticket Sent</th>}
                 {dynamicColumns.map(col =>
@@ -1705,6 +1776,19 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                           ) : (
                             <span className="flex items-center gap-1.5 text-gray-400">
                               <Clock className="w-4 h-4" /> Pending
+                            </span>
+                          )}
+                        </td>
+                      )}
+                      {isColumnVisible('account') && (
+                        <td className="px-4 py-3 text-xs">
+                          {attendee.userId ? (
+                            <span className="inline-flex items-center gap-1 text-emerald-700 font-semibold" title="Linked to a portal login — they can sign in to see their ticket">
+                              <CheckCircle className="w-3.5 h-3.5" /> Linked
+                            </span>
+                          ) : (
+                            <span className="text-gray-400" title="No portal login — open this attendee to send a sign-in link or create their account">
+                              None
                             </span>
                           )}
                         </td>
