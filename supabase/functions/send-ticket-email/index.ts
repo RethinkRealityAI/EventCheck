@@ -1044,11 +1044,25 @@ serve(async (req: Request) => {
 <div style="text-align:center;margin:24px 0;"><img src="{{qr_image_url}}" alt="Check-in QR code" width="240" height="240" style="border:1px solid #e5e7eb;border-radius:8px;padding:8px;background:#fff;" /></div>
 <p style="color:#666;font-size:13px;">Registration ID: {{registration_id}}</p>
 <p style="margin-top:20px;padding:12px;background:#f9fafb;border-left:3px solid #e5e7eb;font-size:14px;">This ticket is issued to your email address and cannot be transferred to another person. If you have questions or issues, contact <a href="mailto:{{admin_contact}}">{{admin_contact}}</a>.</p>
-<p style="margin-top:16px;font-size:14px;">Optional: <a href="{{signup_url}}">create a profile</a> to manage your ticket and access event resources.</p>`,
+{{account_cta}}`,
                 formHeaderImageUrl: overrideOn ? formEmailOverrides?.headerImageUrl : undefined,
                 globalHeaderImageUrl: (appSettings as any)?.email_header_logo,
                 globalFooterText: (appSettings as any)?.email_footer_text,
             });
+
+            // ONE account line, chosen by whether they already have a profile.
+            // Telling an existing user to "create a profile" is confusing and
+            // was previously unavoidable — the line was hardcoded in the
+            // template body, so it went to everyone regardless.
+            let hasAccount = false;
+            try {
+                const { data: prof } = await supabase
+                    .from('profiles').select('id').ilike('email', free.email).maybeSingle();
+                hasAccount = !!prof;
+            } catch { /* unknown → the neutral "sign in or create" copy below */ }
+            const accountCta = hasAccount
+                ? `<p style="margin-top:16px;font-size:14px;">You already have an account on the GANSID Congress app. <a href="${signupUrl}">Sign in</a> with <strong>${free.email}</strong> to manage your ticket and access event resources.</p>`
+                : `<p style="margin-top:16px;font-size:14px;">If you don't have an account on the GANSID Congress app yet, you can <a href="${signupUrl}">create one here</a> using <strong>${free.email}</strong> — your ticket links to it automatically, so you can manage it and access event resources any time.</p>`;
 
             const vars = {
                 name: free.name || 'there',
@@ -1059,6 +1073,7 @@ serve(async (req: Request) => {
                 signup_url: signupUrl,
                 admin_contact: BOGO_ADMIN_CONTACT,
                 free_category_name: freeCategoryName,
+                account_cta: accountCta,
             };
             const subject = applyPlaceholders(tpl.subject, vars, body.mode);
             let body_html = applyPlaceholders(tpl.body, vars, body.mode);
@@ -1078,17 +1093,6 @@ serve(async (req: Request) => {
             if (dlUrl) {
                 body_html += `<p style="margin-top:18px;font-size:14px;">Prefer a PDF? <a href="${dlUrl}">Download your ticket here</a> — the link keeps working through the event.</p>`;
             }
-
-            // Account guidance — only for guests who don't already have one, so
-            // we never tell an existing user to "sign up".
-            let hasAccount = false;
-            try {
-                const { data: prof } = await supabase.from('profiles').select('id').ilike('email', free.email).maybeSingle();
-                hasAccount = !!prof;
-            } catch { /* unknown → fall through to the neutral copy below */ }
-            body_html += hasAccount
-                ? `<p style="margin-top:8px;font-size:14px;">You can also <a href="${signupUrl}">sign in</a> with <strong>${free.email}</strong> to view this ticket any time.</p>`
-                : `<p style="margin-top:8px;font-size:14px;">No account yet? <a href="${signupUrl}">Create one here</a> using <strong>${free.email}</strong> and choose a password — your ticket will be waiting in your portal.</p>`;
 
             const html = generateEmailTemplate({
                 title: eventName,
