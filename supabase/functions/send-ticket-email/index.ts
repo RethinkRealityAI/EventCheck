@@ -9,6 +9,7 @@ import { renderEmailShell, applyPlaceholders } from '../_shared/emailShell.ts';
 import { resolveEmailTemplate } from '../_shared/emailTemplates.ts';
 import { buildAppUrl, isAbsoluteHttpUrl, resolveOrigin } from '../_shared/emailLinks.ts';
 import { buildOpenPixelUrl, appendTrackingPixel } from '../_shared/emailTracking.ts';
+import { buildQrImageUrl, fetchQrPng, inlineQrSrc } from '../_shared/qrEmbed.ts';
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -131,14 +132,39 @@ function buildTransporter(smtpConfig?: any) {
  * Send a simple HTML email (no attachments).
  * Reads SMTP config from environment variables.
  */
-async function sendSimpleEmail({ to, subject, html, smtpConfig }: { to: string; subject: string; html: string; smtpConfig?: any }) {
+async function sendSimpleEmail({ to, subject, html, smtpConfig, attachments }: { to: string; subject: string; html: string; smtpConfig?: any; attachments?: any[] }) {
     const { transporter, fromName, fromAddress } = buildTransporter(smtpConfig);
     await transporter.sendMail({
         from: `"${fromName}" <${fromAddress}>`,
         to,
         subject,
         html,
+        // Inline (cid:) attachments — the check-in QR rides here rather than as
+        // a hotlinked remote image, which most clients block by default.
+        ...(attachments && attachments.length ? { attachments } : {}),
     });
+}
+
+/**
+ * Resolve a QR into (html, attachments) for a ticket email.
+ *
+ * Rewrites the remote QR URL in the rendered HTML to `cid:` and returns the
+ * PNG as an inline attachment. Falls back to leaving the remote <img> in place
+ * if the PNG can't be fetched, so a QR outage can never block a ticket.
+ */
+async function embedQrForEmail(html: string, qrData: string, remoteUrl: string): Promise<{ html: string; attachments: any[] }> {
+    const qr = await fetchQrPng(qrData);
+    if (!qr) return { html, attachments: [] };
+    return {
+        html: inlineQrSrc(html, remoteUrl),
+        attachments: [{
+            filename: qr.filename,
+            content: qr.content,
+            cid: qr.cid,
+            contentType: qr.contentType,
+            contentDisposition: 'inline',
+        }],
+    };
 }
 
 serve(async (req: Request) => {
@@ -410,7 +436,7 @@ serve(async (req: Request) => {
             let ticketOk = true;
             try {
                 const qrData = attendee.qr_payload || attendee.id;
-                const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(qrData)}`;
+                const qrImageUrl = buildQrImageUrl(qrData);
 
                 const tpl = resolveEmailTemplate({
                     formOverride: overrideOn ? formEmailOverrides?.templates?.['guest-confirmed'] : undefined,
@@ -445,7 +471,8 @@ serve(async (req: Request) => {
                     headerImageUrl: tpl.headerImageUrl,
                     footerText: tpl.footerText,
                 });
-                await sendSimpleEmail({ to: attendee.email, subject, html, smtpConfig });
+                const embedded = await embedQrForEmail(html, qrData, qrImageUrl);
+                await sendSimpleEmail({ to: attendee.email, subject, html: embedded.html, smtpConfig, attachments: embedded.attachments });
             } catch (e) {
                 console.warn('Failed to send personal ticket on claim-completion', e);
                 ticketOk = false;
@@ -974,7 +1001,7 @@ serve(async (req: Request) => {
             const origin = sendOrigin(body, req);
             const signupUrl = buildAppUrl(origin, '/#/');
             const qrData = free.qr_payload || free.id;
-            const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(qrData)}`;
+            const qrImageUrl = buildQrImageUrl(qrData);
 
             // Human label for the free guest's pricing category (advertised as {{free_category_name}}).
             // categories live in the pricing_templates TABLE (jsonb), keyed by `name`.
@@ -1030,7 +1057,10 @@ serve(async (req: Request) => {
             });
 
             try {
-                await sendSimpleEmail({ to: free.email, subject, html, smtpConfig });
+                // The BOGO email carries NO PDF — the QR image IS the ticket —
+                // so a blocked remote image left the guest with nothing.
+                const embedded = await embedQrForEmail(html, qrData, qrImageUrl);
+                await sendSimpleEmail({ to: free.email, subject, html: embedded.html, smtpConfig, attachments: embedded.attachments });
                 // Stamp last_ticket_email_at so dashboards show "Sent".
                 await supabase.from('attendees')
                     .update({ last_ticket_email_at: new Date().toISOString() })
@@ -1117,7 +1147,7 @@ serve(async (req: Request) => {
 
             const eventName = form?.title || 'the event';
             const qrData = free.qr_payload || free.id;
-            const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(qrData)}`;
+            const qrImageUrl = buildQrImageUrl(qrData);
 
             const formEmailOverrides = (form as any)?.settings?.emailOverrides;
             const overrideOn = formEmailOverrides?.enabled === true;
@@ -1153,7 +1183,8 @@ serve(async (req: Request) => {
             });
 
             try {
-                await sendSimpleEmail({ to: free.email, subject, html, smtpConfig });
+                const embedded = await embedQrForEmail(html, qrData, qrImageUrl);
+                await sendSimpleEmail({ to: free.email, subject, html: embedded.html, smtpConfig, attachments: embedded.attachments });
                 await supabase.from('attendees')
                     .update({ last_ticket_email_at: new Date().toISOString() })
                     .eq('id', free.id);

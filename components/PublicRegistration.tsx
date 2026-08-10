@@ -1329,6 +1329,19 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
     }
   };
 
+  // Best-effort buyer email for a failure diagnostic — the form's email answer,
+  // falling back to the signed-in account. Never throws: a diagnostic must not
+  // be the thing that breaks an already-failing path.
+  const resolvedEmailForDiagnostics = (): string | null => {
+    try {
+      const field = form?.fields.find(f => f.type === 'email' || f.label.toLowerCase().includes('email'));
+      const fromAnswers = field ? String(answers[field.id] || '').trim() : '';
+      return fromAnswers || user?.email || null;
+    } catch {
+      return user?.email || null;
+    }
+  };
+
   const finalizeRegistration = async (
     paymentStatus: 'paid' | 'free',
     transactionId?: string,
@@ -1897,7 +1910,35 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
     }
     } catch (registrationError: any) {
       console.error('Registration failed:', registrationError);
-      setError(registrationError.message || 'An unexpected error occurred. Please try again.');
+      const baseMessage = registrationError.message || 'An unexpected error occurred. Please try again.';
+
+      // A failure on the PAID path means the buyer already approved the payment
+      // — PayPal has shown them a confirmation — and our capture or insert then
+      // failed. Previously this reported NOTHING anywhere: no attendee row, no
+      // diagnostic, no trace, and the buyer reasonably believed they had paid
+      // (reported 2026-08-04). Record it with the order reference so an admin
+      // can find the order in PayPal and capture or void it, and put that same
+      // reference in front of the buyer so their support message is actionable.
+      if (paymentStatus === 'paid' && transactionId) {
+        logPaymentFailure({
+          provider: paymentMeta?.provider === 'flutterwave' ? 'flutterwave' : 'paypal',
+          stage: 'capture-failed',
+          formId: form?.id ?? null,
+          amount: paymentAmount ?? null,
+          currency: pricingTemplate?.currency || ticketField?.ticketConfig?.currency || null,
+          orderRef: transactionId,
+          message: baseMessage,
+          email: resolvedEmailForDiagnostics(),
+          attendeeName: form ? resolveDisplayName(form.fields, answers) : null,
+        });
+        setError(
+          `${baseMessage} Your payment was NOT completed, so you have not been charged — `
+          + `if a charge does appear, quote reference ${transactionId} to ${BOGO_ADMIN_CONTACT} and it will be refunded. `
+          + `You can safely try again.`,
+        );
+      } else {
+        setError(baseMessage);
+      }
       setLoading(false);
       // Stay on payment step so user can retry PayPal — don't bounce back to form
       if (step !== 'payment') {

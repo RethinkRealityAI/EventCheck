@@ -606,6 +606,32 @@ serve(async (req: Request) => {
         origin: (req.headers.get('origin') || '').slice(0, 200),
         at: new Date().toISOString(),
       }));
+      // Persist it. Edge logs age out and nobody reads them, which is exactly
+      // why a "PayPal said thank you but nothing happened" report had no trail.
+      // Service role → bypasses RLS (the table has no anon insert policy by
+      // design, so this endpoint is the only writer). Best-effort: a failed
+      // diagnostic must never surface an error of its own.
+      try {
+        const sbUrl = Deno.env.get('SUPABASE_URL')!;
+        const sbKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+        await createClient(sbUrl, sbKey).from('payment_failures').insert({
+          provider: cap(body.provider, 32),
+          stage: cap(body.stage, 64),
+          form_id: cap(body.formId, 64),
+          order_ref: cap(body.orderRef, 128),
+          amount: cap(body.amount, 32),
+          currency: cap(body.currency, 8),
+          reference: cap(body.reference, 64),
+          message: cap(body.message, 500),
+          email: cap(body.email, 320),
+          attendee_name: cap(body.attendeeName, 200),
+          page_url: cap(body.pageUrl, 300),
+          user_agent: cap(body.userAgent, 300),
+          embedded: body.embedded === true ? true : body.embedded === false ? false : null,
+        });
+      } catch (e) {
+        console.error('[verify-payment] payment_failures insert failed', String(e));
+      }
       return jsonResponse({ ok: true });
     }
 
