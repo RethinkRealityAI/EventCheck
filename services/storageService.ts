@@ -1739,3 +1739,55 @@ export async function getPortalUsers(): Promise<PortalUser[]> {
     };
   });
 }
+/**
+ * Sponsor / exhibitor accounts that signed up but have NO attendee row yet.
+ *
+ * The Exhibitors and Sponsors tabs both derive their lists from `attendees`, so
+ * an organisation that created an account and never finished the form was
+ * invisible to admins — no way to see them, chase them, or even know they
+ * existed. On GANSID that was 9 of 10 sponsor/exhibitor accounts (Hemex Health
+ * among them), which is exactly the reported "they have the tag but don't show
+ * up in the tab".
+ *
+ * `hasDraft` distinguishes "started the form and stalled" from "signed up and
+ * never began" — different follow-ups.
+ */
+export interface PendingOrgAccount {
+  userId: string;
+  email: string;
+  fullName: string;
+  organization: string | null;
+  role: 'sponsor' | 'exhibitor';
+  signupDate: string;
+  hasDraft: boolean;
+}
+
+export async function getPendingSponsorExhibitorAccounts(): Promise<PendingOrgAccount[]> {
+  const [profilesRes, attendeesRes, draftsRes] = await Promise.all([
+    supabase.from('profiles').select('*').in('role', ['sponsor', 'exhibitor']),
+    supabase.from('attendees').select('user_id, email'),
+    supabase.from('registration_drafts').select('user_id'),
+  ]);
+  if (profilesRes.error) {
+    console.error('getPendingSponsorExhibitorAccounts', profilesRes.error);
+    return [];
+  }
+  const attendees = attendeesRes.data ?? [];
+  const byUser = new Set(attendees.map((a: any) => a.user_id).filter(Boolean));
+  // Email match is case-insensitive — see utils/emailMatch.ts for why.
+  const byEmail = new Set(attendees.map((a: any) => String(a.email ?? '').trim().toLowerCase()).filter(Boolean));
+  const draftUsers = new Set((draftsRes.data ?? []).map((d: any) => d.user_id));
+
+  return (profilesRes.data ?? [])
+    .filter((p: any) => !byUser.has(p.id) && !byEmail.has(String(p.email ?? '').trim().toLowerCase()))
+    .map((p: any): PendingOrgAccount => ({
+      userId: p.id,
+      email: p.email,
+      fullName: p.full_name || '',
+      organization: p.organization || null,
+      role: p.role,
+      signupDate: p.created_at,
+      hasDraft: draftUsers.has(p.id),
+    }))
+    .sort((a, b) => new Date(b.signupDate).getTime() - new Date(a.signupDate).getTime());
+}

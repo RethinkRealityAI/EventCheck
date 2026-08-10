@@ -80,3 +80,19 @@ export function inlineQrSrc(html: string, remoteUrl: string): string {
   // Split/join avoids building a RegExp from a URL full of regex metacharacters.
   return String(html).split(remoteUrl).join(`cid:${QR_CID}`);
 }
+
+/**
+ * Build BOTH attachment entries for a QR: the inline copy the HTML references,
+ * and a second, plainly-named downloadable copy.
+ *
+ * Why both — a guest must be able to get through the door even if their client
+ * refuses to render anything. Inline alone still fails on clients that strip
+ * ALL images including cid:, and on plain-text views. The duplicate is ~500
+ * bytes, so redundancy is essentially free.
+ */
+export function qrAttachments(qr: QrAttachment, downloadName = 'GANSID-Congress-check-in-QR.png'): any[] {
+  return [
+    { filename: qr.filename, content: qr.content, cid: qr.cid, contentType: qr.contentType, contentDisposition: 'inline' },
+    { filename: downloadName, content: qr.content, contentType: qr.contentType, contentDisposition: 'attachment' },
+  ];
+}

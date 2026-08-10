@@ -9,7 +9,8 @@ import { renderEmailShell, applyPlaceholders } from '../_shared/emailShell.ts';
 import { resolveEmailTemplate } from '../_shared/emailTemplates.ts';
 import { buildAppUrl, isAbsoluteHttpUrl, resolveOrigin } from '../_shared/emailLinks.ts';
 import { buildOpenPixelUrl, appendTrackingPixel } from '../_shared/emailTracking.ts';
-import { buildQrImageUrl, fetchQrPng, inlineQrSrc } from '../_shared/qrEmbed.ts';
+import { buildQrImageUrl, fetchQrPng, inlineQrSrc, qrAttachments } from '../_shared/qrEmbed.ts';
+import { signRegistrationToken } from '../_shared/registrationToken.ts';
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -155,16 +156,29 @@ async function sendSimpleEmail({ to, subject, html, smtpConfig, attachments }: {
 async function embedQrForEmail(html: string, qrData: string, remoteUrl: string): Promise<{ html: string; attachments: any[] }> {
     const qr = await fetchQrPng(qrData);
     if (!qr) return { html, attachments: [] };
-    return {
-        html: inlineQrSrc(html, remoteUrl),
-        attachments: [{
-            filename: qr.filename,
-            content: qr.content,
-            cid: qr.cid,
-            contentType: qr.contentType,
-            contentDisposition: 'inline',
-        }],
-    };
+    // Inline copy (what the HTML shows) PLUS a downloadable copy, so a guest
+    // whose client strips images entirely still holds a scannable file.
+    return { html: inlineQrSrc(html, remoteUrl), attachments: qrAttachments(qr) };
+}
+
+/**
+ * Tokenised link to the public /#/tickets page, which rebuilds the full branded
+ * ticket PDF in the browser. The third independent route to a ticket, after the
+ * inline QR and the attached PNG — and the only one that still works if the
+ * whole email is forwarded as plain text.
+ *
+ * Best-effort: any failure returns '' and the caller simply omits the block.
+ */
+async function buildTicketDownloadUrl(attendeeId: string, formId: string, origin: string): Promise<string> {
+    try {
+        if (!origin || !attendeeId || !formId) return '';
+        const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+        const token = await signRegistrationToken(attendeeId, formId, serviceKey, Date.now(), 180 * 24 * 60 * 60 * 1000);
+        return buildAppUrl(origin, `/#/tickets?token=${encodeURIComponent(token)}`);
+    } catch (e) {
+        console.error('[send-ticket-email] download token failed', String(e));
+        return '';
+    }
 }
 
 serve(async (req: Request) => {
@@ -1047,7 +1061,35 @@ serve(async (req: Request) => {
                 free_category_name: freeCategoryName,
             };
             const subject = applyPlaceholders(tpl.subject, vars, body.mode);
-            const body_html = applyPlaceholders(tpl.body, vars, body.mode);
+            let body_html = applyPlaceholders(tpl.body, vars, body.mode);
+
+            // Re-issue: prepend an explanation when we're resending because the
+            // original email's QR didn't display. Opt-in via `reissue: true` so
+            // ordinary sends are untouched.
+            if (body.reissue === true) {
+                body_html = `<div style="margin:0 0 20px;padding:12px 16px;background:#fffbeb;border-left:3px solid #f59e0b;border-radius:4px;font-size:14px;">
+<strong>We're resending your ticket.</strong> Some earlier emails showed a blank space where the check-in QR code should be. That's fixed — your QR code is below, attached as an image, and downloadable from the link further down. Your registration was never affected.
+</div>` + body_html;
+            }
+
+            // Route 3 to a ticket: the tokenised download page rebuilds the full
+            // branded PDF. Survives forwarding and image-stripping alike.
+            const dlUrl = await buildTicketDownloadUrl(free.id, free.form_id, origin);
+            if (dlUrl) {
+                body_html += `<p style="margin-top:18px;font-size:14px;">Prefer a PDF? <a href="${dlUrl}">Download your ticket here</a> — the link keeps working through the event.</p>`;
+            }
+
+            // Account guidance — only for guests who don't already have one, so
+            // we never tell an existing user to "sign up".
+            let hasAccount = false;
+            try {
+                const { data: prof } = await supabase.from('profiles').select('id').ilike('email', free.email).maybeSingle();
+                hasAccount = !!prof;
+            } catch { /* unknown → fall through to the neutral copy below */ }
+            body_html += hasAccount
+                ? `<p style="margin-top:8px;font-size:14px;">You can also <a href="${signupUrl}">sign in</a> with <strong>${free.email}</strong> to view this ticket any time.</p>`
+                : `<p style="margin-top:8px;font-size:14px;">No account yet? <a href="${signupUrl}">Create one here</a> using <strong>${free.email}</strong> and choose a password — your ticket will be waiting in your portal.</p>`;
+
             const html = generateEmailTemplate({
                 title: eventName,
                 content: body_html,

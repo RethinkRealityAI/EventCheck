@@ -6,6 +6,7 @@ import { supabase } from '../../services/supabaseClient';
 import { getExhibitorTier } from '../../config/formTemplates/buildGansidExhibitor';
 import { getBoothType } from '../../config/formTemplates/boothTypes';
 import { useNotifications } from '../NotificationSystem';
+import { getPendingSponsorExhibitorAccounts, type PendingOrgAccount } from '../../services/storageService';
 
 interface Props {
   attendees: Attendee[];
@@ -20,6 +21,82 @@ export default function ExhibitorsTab({ attendees, forms, onRefresh, itemsPerPag
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(1);
   const { showNotification } = useNotifications();
+
+  // Organisations that created a sponsor/exhibitor account but never submitted
+  // the form. They have no attendee row, so the list below can't show them —
+  // and they were previously invisible everywhere in the dashboard.
+  const [pendingOrgs, setPendingOrgs] = useState<PendingOrgAccount[]>([]);
+  const [showPending, setShowPending] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    getPendingSponsorExhibitorAccounts()
+      .then(rows => { if (!cancelled) setPendingOrgs(rows); })
+      .catch(() => { /* non-critical panel — never break the tab */ });
+    return () => { cancelled = true; };
+  }, [attendees.length]);
+
+  // Rendered in BOTH the populated and empty states — on a tenant where no
+  // exhibitor has completed the form yet, the empty state is exactly where
+  // these accounts most need to be visible.
+  const pendingPanel = pendingOrgs.length === 0 ? null : (
+    <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50/70 p-3">
+      <button
+        type="button"
+        onClick={() => setShowPending(v => !v)}
+        className="w-full flex items-center justify-between gap-2 text-left"
+      >
+        <span className="text-sm font-semibold text-amber-900">
+          {pendingOrgs.length} account{pendingOrgs.length === 1 ? '' : 's'} signed up but haven’t submitted the form
+        </span>
+        {showPending ? <ChevronDown className="w-4 h-4 text-amber-700" /> : <ChevronRight className="w-4 h-4 text-amber-700" />}
+      </button>
+      {showPending && (
+        <>
+          <p className="text-xs text-amber-800/80 mt-1 mb-2">
+            These created a sponsor/exhibitor account but have no registration yet, so they don’t appear in the list below.
+          </p>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-xs">
+              <thead className="text-left text-amber-900/70 uppercase">
+                <tr>
+                  <th className="px-2 py-1">Name</th>
+                  <th className="px-2 py-1">Email</th>
+                  <th className="px-2 py-1">Organization</th>
+                  <th className="px-2 py-1">Role</th>
+                  <th className="px-2 py-1">Progress</th>
+                  <th className="px-2 py-1">Signed up</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pendingOrgs.map(o => (
+                  <tr key={o.userId} className="border-t border-amber-200/60">
+                    <td className="px-2 py-1.5 font-medium text-slate-800">{o.fullName || '—'}</td>
+                    <td className="px-2 py-1.5">
+                      <a href={`mailto:${o.email}`} className="text-amber-900 underline">{o.email}</a>
+                    </td>
+                    <td className="px-2 py-1.5 text-slate-600">{o.organization || '—'}</td>
+                    <td className="px-2 py-1.5">
+                      <span className="px-1.5 py-0.5 rounded-full bg-white border border-amber-200 text-amber-800 font-semibold uppercase text-[10px]">
+                        {o.role}
+                      </span>
+                    </td>
+                    <td className="px-2 py-1.5">
+                      {o.hasDraft
+                        ? <span className="text-amber-800 font-medium">Started, not finished</span>
+                        : <span className="text-slate-500">Never started</span>}
+                    </td>
+                    <td className="px-2 py-1.5 text-slate-500">
+                      {o.signupDate ? new Date(o.signupDate).toLocaleDateString() : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
 
   // Include both legacy exhibitor forms AND combined sponsor_exhibitor forms.
   // Primaries on sponsor_exhibitor forms always carry either `exhibitorBoothType`
@@ -70,14 +147,18 @@ export default function ExhibitorsTab({ attendees, forms, onRefresh, itemsPerPag
 
   if (orgs.length === 0) {
     return (
-      <div className="p-8 text-center text-slate-500 border border-dashed rounded-xl">
-        No exhibitor registrations yet.
+      <div className="space-y-4">
+        {pendingPanel}
+        <div className="p-8 text-center text-slate-500 border border-dashed rounded-xl">
+          No exhibitor registrations yet.
+        </div>
       </div>
     );
   }
 
   return (
     <div className="overflow-x-auto">
+      {pendingPanel}
       <table className="min-w-full text-sm">
         <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
           <tr>
