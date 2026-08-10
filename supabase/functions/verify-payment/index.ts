@@ -606,6 +606,15 @@ serve(async (req: Request) => {
         origin: (req.headers.get('origin') || '').slice(0, 200),
         at: new Date().toISOString(),
       }));
+      // The deploy workflow smoke-tests THIS endpoint (stage 'ci-smoke') to
+      // prove the new code is live. Persisting those would write a phantom
+      // failure on every deploy and bury real ones in noise — which defeats
+      // the table. Acknowledge (so the deploy gate still passes) and log, but
+      // never store a synthetic probe.
+      const SYNTHETIC_STAGES = new Set(['ci-smoke']);
+      if (SYNTHETIC_STAGES.has(String(body.stage || ''))) {
+        return jsonResponse({ ok: true, persisted: false });
+      }
       // Persist it. Edge logs age out and nobody reads them, which is exactly
       // why a "PayPal said thank you but nothing happened" report had no trail.
       // Service role → bypasses RLS (the table has no anon insert policy by
