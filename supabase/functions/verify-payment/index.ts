@@ -265,6 +265,48 @@ async function sendRegistrationConfirmedEmail(
 // never trusts the client's pre-discounted total. The legacy static-ticket
 // branch still has its own promo lookup against ticketConfig.promoCodes;
 // this helper drives the dynamic-pricing branches via form.settings.promoCodes.
+/**
+ * Record a post-capture failure so it is never invisible.
+ *
+ * Every "payment captured but the insert failed" branch used to end at a
+ * console.error — into edge logs that age out and that nobody reads. That is
+ * the worst failure in the system: money has moved, the registrant has no
+ * ticket, and there is nothing for an admin to reconcile from. Persist it with
+ * the provider reference so the order can be found and captured or refunded.
+ *
+ * Strictly best-effort — a diagnostic must never mask the original failure.
+ */
+async function recordPostCaptureFailure(
+  supabase: any,
+  args: {
+    stage: string;
+    orderRef?: string | null;
+    formId?: string | null;
+    email?: string | null;
+    name?: string | null;
+    amount?: string | null;
+    currency?: string | null;
+    dbError?: string | null;
+    extra?: string | null;
+  },
+): Promise<void> {
+  try {
+    await supabase.from('payment_failures').insert({
+      provider: 'paypal',
+      stage: args.stage,
+      order_ref: args.orderRef ?? null,
+      form_id: args.formId ?? null,
+      email: args.email ?? null,
+      attendee_name: args.name ?? null,
+      amount: args.amount ?? null,
+      currency: args.currency ?? null,
+      message: `${args.extra ? args.extra + ' — ' : ''}${args.dbError ?? 'unknown'}`.slice(0, 500),
+    });
+  } catch (e) {
+    console.error('[verify-payment] recordPostCaptureFailure failed', String(e));
+  }
+}
+
 function resolveFormPromoCode(formData: any, rawCode: any): any | null {
   if (!rawCode || typeof rawCode !== 'string') return null;
   const needle = rawCode.trim().toLowerCase();
@@ -1177,6 +1219,15 @@ serve(async (req: Request) => {
             extrasCount: extrasArr.length,
             dbError: extrasErr.message,
           }));
+          await recordPostCaptureFailure(supabase, {
+            stage: 'extras-insert-failed',
+            orderRef: extrasTransactionId,
+            formId: body.formId ?? null,
+            email: (primaryRow as any)?.email ?? null,
+            name: (primaryRow as any)?.name ?? null,
+            dbError: extrasErr.message,
+            extra: `sponsor_exhibitor extras (${extrasArr.length})`,
+          });
           return jsonResponse({
             error: `Your payment was processed but we encountered a database error saving the additional staff. Please contact the event organizers with this reference: ${extrasTransactionId}`,
           }, 500);
@@ -1451,6 +1502,17 @@ serve(async (req: Request) => {
           email: primary.email,
           dbError: error.message,
         }));
+        await recordPostCaptureFailure(supabase, {
+          stage: 'sponsor-insert-failed',
+          orderRef: capture.id,
+          formId: body.formId ?? null,
+          email: primary.email ?? null,
+          name: primary.company_info?.orgName ?? primary.name ?? null,
+          amount: String(capturedAmount ?? ''),
+          currency: capture.amount?.currency_code ?? null,
+          dbError: error.message,
+          extra: `sponsor tier ${sponsorMeta.tier}`,
+        });
         return jsonResponse({
           error: `Your payment was processed but we encountered a database error saving your sponsorship. Please contact SCAGO with this reference: ${capture.id}`,
         }, 500);
@@ -1927,10 +1989,20 @@ serve(async (req: Request) => {
           if ((insertErr.message || '').includes('PROMO_USAGE_LIMIT_EXCEEDED')) {
             return jsonResponse({ error: 'PROMO_USAGE_LIMIT_EXCEEDED' }, 422);
           }
+          await recordPostCaptureFailure(supabase, {
+            stage: 'single-insert-failed',
+            orderRef: soloTxId ?? null,
+            formId: body.formId ?? null,
+            email: primary.email ?? null,
+            name: primary.name ?? null,
+            dbError: insertErr.message,
+            extra: `dynamic single, promo=${soloIsFreeViaPromo ? 'free-via-promo' : 'none/paid'}`,
+          });
           return jsonResponse({
             error: soloTxId
-              ? `Your payment was processed but we encountered a database error. Please contact the event organizer with this reference: ${soloTxId}`
-              : 'We encountered a database error completing your free registration. Please try again or contact the event organizer.',
+              ? `Your payment was processed but we could not save your registration. Please contact the event organizer with this reference: ${soloTxId}`
+              : 'We could not complete your free registration. This is usually a promo code that does not cover your selected category, or one that has run out of uses. Please check your promo code, or remove it to pay the standard rate.',
+            details: { dbError: insertErr.message },
           }, 500);
         }
 
@@ -2208,6 +2280,17 @@ serve(async (req: Request) => {
         primaryEmail: stampedAttendees[0]?.email,
         dbError: insertError.message,
       }));
+      await recordPostCaptureFailure(supabase, {
+        stage: 'static-insert-failed',
+        orderRef: transactionId ?? null,
+        formId: formId ?? null,
+        email: stampedAttendees[0]?.email ?? null,
+        name: stampedAttendees[0]?.name ?? null,
+        amount: String(capturedAmount ?? ''),
+        currency: capturedCurrency ?? null,
+        dbError: insertError.message,
+        extra: `static event (${stampedAttendees.length} rows)`,
+      });
       return jsonResponse({
         error: `Your payment was processed but we encountered a database error saving your registration. Please contact the event organizer with this reference: ${transactionId}`,
       }, 500);
