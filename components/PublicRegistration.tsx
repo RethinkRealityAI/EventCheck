@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { getFormById, getSettings, saveAttendee, getAttendee, getGuestsByPrimaryId, mapAttendeeToDb, updateAttendee } from '../services/storageService';
 import { FormField, AppSettings, Attendee, Form, DynamicPricingSelection, PromoCode } from '../types';
 import type { PricingTemplate } from '../types';
@@ -15,6 +15,8 @@ import {
   getPromoTotalUsageLimit,
   PROMO_USAGE_LIMIT_MESSAGE,
   formHasEnabledPromoCodes,
+  checkPromoCoversCategories,
+  promoCoverageMessage,
 } from '../utils/promoCodes';
 import { resolveNameFromFormFields } from '../utils/resolveAttendeeDisplayName';
 import { portalEmailRedirectTo } from '../utils/authHashCallback';
@@ -423,12 +425,27 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   }, [bogoBlockedByPromo]);
 
   // Changing category can invalidate a scoped promo — drop it so totals stay honest.
+  // Drop a promo the moment ANY selected category stops being covered — the
+  // buyer's OR a group member's. Watching only the buyer's category let a
+  // stale 100%-off discount survive a member being switched to an uncovered
+  // category: the total kept showing $0, and the mismatch only surfaced as a
+  // server rejection after the buyer had committed to paying.
+  const allSelectedCategoryIds = useMemo(
+    () => [selectedCategoryId, ...groupMembers.map(m => m.categoryId)],
+    [selectedCategoryId, groupMembers],
+  );
   useEffect(() => {
-    if (!appliedPromo || !selectedCategoryId) return;
-    if (!isPromoAllowedForCategory(appliedPromo, selectedCategoryId)) {
+    if (!appliedPromo) return;
+    // Nothing chosen yet ⇒ nothing to contradict; don't clear prematurely.
+    if (!allSelectedCategoryIds.some(id => !!id)) return;
+    if (!checkPromoCoversCategories(appliedPromo, allSelectedCategoryIds).ok) {
       setAppliedPromo(null);
+      showNotification(
+        `Promo code ${appliedPromo.code} was removed — it doesn't cover every category you've selected. Re-apply it once the categories match.`,
+        'warning',
+      );
     }
-  }, [selectedCategoryId, appliedPromo]);
+  }, [allSelectedCategoryIds, appliedPromo]);
 
   // Per-payer pricing info for BOGO — used to drive each slot's category
   // dropdown and to flag a slot as un-fillable (payer hasn't picked a
@@ -957,6 +974,22 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
       );
       if (!groupCheck.ok) {
         setError(groupCheck.error!);
+        return false;
+      }
+    }
+
+    // A promo that doesn't cover every selected category must never reach the
+    // payment step. The server rejects it anyway, but only AFTER the buyer has
+    // gone through PayPal — which is how a category mismatch surfaced as an
+    // opaque "database error" at the end of checkout.
+    if (appliedPromo && pricingTemplate) {
+      const coverage = checkPromoCoversCategories(appliedPromo, allSelectedCategoryIds);
+      if (!coverage.ok) {
+        setError(promoCoverageMessage(
+          appliedPromo,
+          coverage.uncoveredIds,
+          (id) => pricingTemplate.categories.find(c => c.id === id)?.name ?? id,
+        ));
         return false;
       }
     }

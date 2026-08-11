@@ -186,3 +186,90 @@ export function describePromo(promo: PromoCode, currency = 'USD'): string {
   const amount = (promo.value / 100).toFixed(2);
   return `${amount} ${currency} off`;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Group registrations vs category-scoped promos
+//
+// A promo can be applied while it's valid (the buyer's own category is covered)
+// and then silently go stale when a GROUP MEMBER is given a category the code
+// doesn't cover. The clearing effect only watched the buyer's category, so the
+// running total kept showing the discount, the buyer reached PayPal expecting
+// $0, and the server rejected the submission — surfacing as an opaque
+// "database error" after they'd already committed to paying.
+//
+// These helpers make the mismatch explicit BEFORE payment, and say what the
+// code actually covers so the buyer knows what to change.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface PromoCoverageResult {
+  /** True when the promo covers every selected category. */
+  ok: boolean;
+  /** Selected category ids the promo does NOT cover (deduped, order preserved). */
+  uncoveredIds: string[];
+}
+
+/**
+ * Check a promo against EVERY selected category (buyer + group members).
+ * Blank/missing ids are ignored — those are "not chosen yet", not violations.
+ */
+export function checkPromoCoversCategories(
+  promo: PromoCode | null | undefined,
+  categoryIds: Array<string | null | undefined>,
+): PromoCoverageResult {
+  if (!promo) return { ok: true, uncoveredIds: [] };
+  const seen = new Set<string>();
+  const uncoveredIds: string[] = [];
+  for (const raw of categoryIds) {
+    const id = (raw ?? '').trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    if (!isPromoAllowedForCategory(promo, id)) uncoveredIds.push(id);
+  }
+  return { ok: uncoveredIds.length === 0, uncoveredIds };
+}
+
+/**
+ * Buyer-facing explanation of a coverage failure. Names the offending
+ * categories AND what the code does cover, so the fix is obvious rather than
+ * "this code is invalid, good luck".
+ */
+export function promoCoverageMessage(
+  promo: PromoCode,
+  uncoveredIds: string[],
+  categoryNameById: (id: string) => string,
+): string {
+  const bad = uncoveredIds.map(categoryNameById).filter(Boolean);
+  const allowed = isPromoGlobal(promo)
+    ? []
+    : (promo.allowedCategoryIds ?? []).map(categoryNameById).filter(Boolean);
+  const badList = bad.length ? bad.join(', ') : 'one or more selected categories';
+  const base = `Promo code ${promo.code} doesn't apply to ${badList}.`;
+  const allowedPart = allowed.length
+    ? ` It can only be used for: ${allowed.join(', ')}.`
+    : '';
+  return `${base}${allowedPart} Change those registrations to a covered category, or remove the promo code to pay the standard rate.`;
+}
+
+/**
+ * Does this promo have enough remaining uses for `quantity` registrations?
+ *
+ * A group of N consumes N uses. Checking only "limit reached" (count >= limit)
+ * passes a group of 5 when 3 uses remain, then fails at insert time — after
+ * payment intent. Returns null when the promo is unlimited.
+ */
+export function promoUsesRemaining(
+  promo: PromoCode,
+  currentTotalCount: number,
+): number | null {
+  const limit = getPromoTotalUsageLimit(promo);
+  if (limit == null) return null;
+  return Math.max(0, limit - Math.max(0, currentTotalCount));
+}
+
+/** Buyer-facing message when a group is larger than the promo's remaining uses. */
+export function promoQuantityMessage(promo: PromoCode, remaining: number, requested: number): string {
+  if (remaining <= 0) return PROMO_USAGE_LIMIT_MESSAGE;
+  return `Promo code ${promo.code} has ${remaining} use${remaining === 1 ? '' : 's'} left, `
+    + `but you're registering ${requested} people. Reduce the group to ${remaining} `
+    + `or fewer to use this code, or remove it to pay the standard rate.`;
+}

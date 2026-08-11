@@ -1669,10 +1669,26 @@ serve(async (req: Request) => {
           if ((insertErr.message || '').includes('PROMO_USAGE_LIMIT_EXCEEDED')) {
             return jsonResponse({ error: 'PROMO_USAGE_LIMIT_EXCEEDED' }, 422);
           }
+          // Persist the REAL database error. This branch previously only
+          // console.error'd into edge logs that age out unread, so a group
+          // registration failing here surfaced to the buyer as an opaque
+          // "database error" with nothing for an admin to diagnose from.
+          try {
+            await supabase.from('payment_failures').insert({
+              provider: 'paypal',
+              stage: 'group-insert-failed',
+              form_id: body.formId ?? null,
+              order_ref: groupTxId ?? null,
+              email: (rows[0] as any)?.email ?? null,
+              attendee_name: (rows[0] as any)?.name ?? null,
+              message: `group insert failed (${rows.length} rows, promo=${groupAppliedPromoCode ?? 'none'}): ${insertErr.message}`.slice(0, 500),
+            });
+          } catch (e) { console.error('[verify-payment] payment_failures insert failed', String(e)); }
           return jsonResponse({
             error: groupTxId
-              ? `Your payment was processed but we encountered a database error. Please contact the event organizer with this reference: ${groupTxId}`
-              : 'We encountered a database error completing your free registration. Please try again or contact the event organizer.',
+              ? `Your payment was processed but we could not save the registration. Please contact the event organizer with this reference: ${groupTxId}`
+              : 'We could not complete your group registration. This is usually a promo code that does not cover every category in your group, or one that has run out of uses. Please check your promo code, or remove it to pay the standard rate.',
+            details: { dbError: insertErr.message, rowCount: rows.length },
           }, 500);
         }
 
