@@ -6,6 +6,7 @@ import {
   isCategoryAtOrBelowCeiling,
 } from '../_shared/bogoRowBuilder.ts';
 import { signRegistrationToken } from '../_shared/registrationToken.ts';
+import { normalizeAttendeeRows, escapeLikePattern } from '../_shared/attendeeRows.ts';
 import { verifyFlutterwaveTransaction } from '../_shared/flutterwaveVerify.ts';
 import { buildAppUrl, resolveOrigin } from '../_shared/emailLinks.ts';
 
@@ -265,37 +266,6 @@ async function sendRegistrationConfirmedEmail(
 // never trusts the client's pre-discounted total. The legacy static-ticket
 // branch still has its own promo lookup against ticketConfig.promoCodes;
 // this helper drives the dynamic-pricing branches via form.settings.promoCodes.
-/**
- * Make every row in a multi-row attendee insert column-consistent.
- *
- * PostgREST normalises columns across a batch: if ANY row omits a key, every
- * other row is sent NULL for it. `attendees` has seven NOT NULL columns that
- * carry a DEFAULT — safe to omit on a single-row insert, fatal on a batch where
- * only some rows have them. That is what broke group registrations with
- *   `null value in column "is_test" ... violates not-null constraint`
- * while identical solo registrations succeeded. Pinning one column just moves
- * the failure to the next, so all seven are filled here.
- *
- * Only fills what is MISSING — an explicit value from the caller always wins.
- */
-function normalizeAttendeeRows(rows: any[]): any[] {
-  const DEFAULTS: Record<string, (r: any) => unknown> = {
-    is_test: (r) => r.is_test === true,
-    is_primary: (r) => r.is_primary !== false,
-    is_bogo_claim: (r) => r.is_bogo_claim === true,
-    is_donated_seat_claim: (r) => r.is_donated_seat_claim === true,
-    is_paid_extra: (r) => r.is_paid_extra === true,
-    donation_amount: (r) => (typeof r.donation_amount === 'number' ? r.donation_amount : 0),
-    registered_at: (r) => r.registered_at ?? new Date().toISOString(),
-  };
-  return rows.map((row) => {
-    const out = { ...row };
-    for (const [col, fill] of Object.entries(DEFAULTS)) {
-      if (out[col] === undefined || out[col] === null) out[col] = fill(row);
-    }
-    return out;
-  });
-}
 
 /**
  * Record a post-capture failure so it is never invisible.
@@ -455,7 +425,7 @@ async function assertPromoCheckoutAllowed(args: {
       .from('attendees')
       .select('id', { count: 'exact', head: true })
       .eq('form_id', formId)
-      .ilike('applied_promo_code', promo.code)
+      .ilike('applied_promo_code', escapeLikePattern(promo.code))
       .eq('pricing_category_id', categoryId);
     if (!allTest) {
       q = q.or('is_test.is.null,is_test.eq.false');
@@ -478,7 +448,7 @@ async function assertPromoCheckoutAllowed(args: {
       .from('attendees')
       .select('id', { count: 'exact', head: true })
       .eq('form_id', formId)
-      .ilike('applied_promo_code', promo.code);
+      .ilike('applied_promo_code', escapeLikePattern(promo.code));
     if (!allTest) {
       tq = tq.or('is_test.is.null,is_test.eq.false');
     }
@@ -774,7 +744,7 @@ serve(async (req: Request) => {
           .from('attendees')
           .select('id', { count: 'exact', head: true })
           .eq('form_id', validateFormId)
-          .ilike('applied_promo_code', validatePromo.code)
+          .ilike('applied_promo_code', escapeLikePattern(validatePromo.code))
           .eq('pricing_category_id', categoryId);
         if (!validateAllTest) {
           q = q.or('is_test.is.null,is_test.eq.false');
@@ -797,7 +767,7 @@ serve(async (req: Request) => {
           .from('attendees')
           .select('id', { count: 'exact', head: true })
           .eq('form_id', validateFormId)
-          .ilike('applied_promo_code', validatePromo.code);
+          .ilike('applied_promo_code', escapeLikePattern(validatePromo.code));
         if (!validateAllTest) {
           tq = tq.or('is_test.is.null,is_test.eq.false');
         }
