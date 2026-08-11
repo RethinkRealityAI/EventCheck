@@ -266,6 +266,38 @@ async function sendRegistrationConfirmedEmail(
 // branch still has its own promo lookup against ticketConfig.promoCodes;
 // this helper drives the dynamic-pricing branches via form.settings.promoCodes.
 /**
+ * Make every row in a multi-row attendee insert column-consistent.
+ *
+ * PostgREST normalises columns across a batch: if ANY row omits a key, every
+ * other row is sent NULL for it. `attendees` has seven NOT NULL columns that
+ * carry a DEFAULT — safe to omit on a single-row insert, fatal on a batch where
+ * only some rows have them. That is what broke group registrations with
+ *   `null value in column "is_test" ... violates not-null constraint`
+ * while identical solo registrations succeeded. Pinning one column just moves
+ * the failure to the next, so all seven are filled here.
+ *
+ * Only fills what is MISSING — an explicit value from the caller always wins.
+ */
+function normalizeAttendeeRows(rows: any[]): any[] {
+  const DEFAULTS: Record<string, (r: any) => unknown> = {
+    is_test: (r) => r.is_test === true,
+    is_primary: (r) => r.is_primary !== false,
+    is_bogo_claim: (r) => r.is_bogo_claim === true,
+    is_donated_seat_claim: (r) => r.is_donated_seat_claim === true,
+    is_paid_extra: (r) => r.is_paid_extra === true,
+    donation_amount: (r) => (typeof r.donation_amount === 'number' ? r.donation_amount : 0),
+    registered_at: (r) => r.registered_at ?? new Date().toISOString(),
+  };
+  return rows.map((row) => {
+    const out = { ...row };
+    for (const [col, fill] of Object.entries(DEFAULTS)) {
+      if (out[col] === undefined || out[col] === null) out[col] = fill(row);
+    }
+    return out;
+  });
+}
+
+/**
  * Record a post-capture failure so it is never invisible.
  *
  * Every "payment captured but the insert failed" branch used to end at a
@@ -848,7 +880,7 @@ serve(async (req: Request) => {
         };
       });
 
-      const { error: staffErr } = await supabase.from('attendees').insert(staffRows);
+      const { error: staffErr } = await supabase.from('attendees').insert(normalizeAttendeeRows(staffRows));
       if (staffErr) {
         // Roll back the org row so retries don't create duplicate orgs
         // and we don't leave behind an orphaned 'paid' row with no staff.
@@ -1490,7 +1522,7 @@ serve(async (req: Request) => {
         });
       }
 
-      const { error } = await supabase.from('attendees').upsert([primary, ...guestRows]);
+      const { error } = await supabase.from('attendees').upsert(normalizeAttendeeRows([primary, ...guestRows]));
       if (error) {
         // CRITICAL: PayPal captured but DB insert failed. Log for manual recovery.
         console.error('CRITICAL: Sponsor PayPal captured but DB insert failed!', JSON.stringify({
@@ -1702,6 +1734,21 @@ serve(async (req: Request) => {
             ...attendeeDraft,
             id: i === 0 ? primaryId : (attendeeDraft.id ?? crypto.randomUUID()),
             form_id: formId,
+            // ── NOT NULL columns, set explicitly on EVERY row ──
+            // PostgREST normalises columns across a multi-row insert: if ANY row
+            // in the batch omits a key, every other row gets NULL for it. All of
+            // these are NOT NULL with a DEFAULT, so they are safe when omitted by
+            // a SINGLE-row insert but blow up on a group one — which is why solo
+            // registrations worked and a group of 5 failed with
+            // `null value in column "is_test" ... violates not-null constraint`.
+            // Setting only is_test would just move the error to the next column,
+            // so every defaulted NOT NULL column is pinned here.
+            is_test: attendeeDraft.is_test === true,
+            is_bogo_claim: attendeeDraft.is_bogo_claim === true,
+            is_donated_seat_claim: attendeeDraft.is_donated_seat_claim === true,
+            is_paid_extra: attendeeDraft.is_paid_extra === true,
+            donation_amount: typeof attendeeDraft.donation_amount === 'number' ? attendeeDraft.donation_amount : 0,
+            registered_at: attendeeDraft.registered_at ?? new Date().toISOString(),
             is_primary: i === 0,
             primary_attendee_id: i === 0 ? null : primaryId,
             payment_status: groupIsFreeViaPromo ? 'free' : 'paid',
@@ -1722,7 +1769,7 @@ serve(async (req: Request) => {
           };
         });
 
-        const { error: insertErr } = await supabase.from('attendees').upsert(rows);
+        const { error: insertErr } = await supabase.from('attendees').upsert(normalizeAttendeeRows(rows));
         if (insertErr) {
           console.error('CRITICAL: group insert failed', JSON.stringify({
             transactionId: groupTxId, expectedCents, discountedCents: groupDiscountedCents, isFreeViaPromo: groupIsFreeViaPromo, rowCount: rows.length, dbError: insertErr.message,
@@ -2180,7 +2227,7 @@ serve(async (req: Request) => {
 
       const { error: insertError } = await supabase
         .from('attendees')
-        .upsert(stampedAttendees);
+        .upsert(normalizeAttendeeRows(stampedAttendees));
 
       if (insertError) {
         console.error('Failed to save attendees:', insertError);
@@ -2265,7 +2312,7 @@ serve(async (req: Request) => {
 
     const { error: insertError } = await supabase
       .from('attendees')
-      .upsert(stampedAttendees);
+      .upsert(normalizeAttendeeRows(stampedAttendees));
 
     if (insertError) {
       // CRITICAL: Payment was captured but attendees failed to save.
