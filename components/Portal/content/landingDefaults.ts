@@ -89,10 +89,15 @@ export const LANDING_DEFAULTS: LandingContent = {
 
   fees: {
     note: 'All prices are in USD; you will be able to pay with your local currency.',
+    // Keep these in step with the `pricing_templates` date_brackets — the
+    // landing table is marketing copy, but a mismatch tells registrants a price
+    // changes on a date the pricing engine does not honour. The CMS row in
+    // `site_content` overrides this; these values only show if that row is
+    // missing, so they must not be allowed to drift.
     periods: [
-      { id: 'early', label: 'Early Bird', subtitle: 'Ends June 30, 2026' },
-      { id: 'regular', label: 'Regular', subtitle: 'July 1 – September 15, 2026' },
-      { id: 'onsite', label: 'On-site', subtitle: 'September 16 – October 25, 2026' },
+      { id: 'early', label: 'Promo', subtitle: 'Ends August 31st, 2026' },
+      { id: 'regular', label: 'Regular', subtitle: 'September 1st – 30th, 2026' },
+      { id: 'onsite', label: 'On-site', subtitle: 'October 1st – 25th, 2026' },
     ],
     tiers: [
       {
@@ -100,12 +105,12 @@ export const LANDING_DEFAULTS: LandingContent = {
         label: 'Tier 1',
         subtitle: 'Asia, Africa, South America, Central America, Mexico',
         rows: [
-          { category: 'Physicians / Researchers', early: 175, regular: 200, onsite: 250 },
-          { category: 'Medical Trainees (Residents, Fellows)', early: 150, regular: 175, onsite: 200 },
-          { category: 'Abstract Presenters', early: '—', regular: 100, onsite: 150 },
-          { category: 'Undergraduate, Medical, Graduate Students', early: 50, regular: 75, onsite: 100 },
-          { category: 'Nurses or Allied Health Professionals', early: 100, regular: 125, onsite: 150 },
-          { category: 'Industry Partners', early: 250, regular: 300, onsite: 350 },
+          { category: 'Physicians / Researchers', early: 150, regular: 200, onsite: 250 },
+          { category: 'Medical Trainees (Residents, Fellows)', early: 100, regular: 175, onsite: 200 },
+          { category: 'Abstract Presenters', early: 75, regular: 100, onsite: 150 },
+          { category: 'Undergraduate, Medical, Graduate Students', early: 25, regular: 50, onsite: 100 },
+          { category: 'Nurses or Allied Health Professionals', early: 75, regular: 100, onsite: 150 },
+          { category: 'Industry Partners', early: 200, regular: 300, onsite: 350 },
           { category: 'Patient Organizations', early: 50, regular: 75, onsite: 100 },
           { category: 'Patients or Family Members', early: 25, regular: 40, onsite: 50 },
         ],
@@ -115,11 +120,11 @@ export const LANDING_DEFAULTS: LandingContent = {
         label: 'Tier 2',
         subtitle: 'United States, Canada, Europe, Australia, New Zealand',
         rows: [
-          { category: 'Physicians / Researchers', early: 250, regular: 300, onsite: 400 },
-          { category: 'Medical Trainees (Residents, Fellows)', early: 200, regular: 250, onsite: 275 },
-          { category: 'Abstract Presenters', early: '—', regular: 150, onsite: 200 },
+          { category: 'Physicians / Researchers', early: 200, regular: 300, onsite: 400 },
+          { category: 'Medical Trainees (Residents, Fellows)', early: 150, regular: 250, onsite: 275 },
+          { category: 'Abstract Presenters', early: 125, regular: 150, onsite: 200 },
           { category: 'Undergraduate, Medical, Graduate Students', early: 75, regular: 100, onsite: 125 },
-          { category: 'Nurses or Allied Health Professionals', early: 150, regular: 200, onsite: 250 },
+          { category: 'Nurses or Allied Health Professionals', early: 125, regular: 200, onsite: 250 },
           { category: 'Industry Partners', early: 300, regular: 350, onsite: 450 },
           { category: 'Patient Organizations', early: 75, regular: 100, onsite: 125 },
           { category: 'Patients or Family Members', early: 35, regular: 50, onsite: 60 },
