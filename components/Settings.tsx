@@ -182,13 +182,26 @@ const Settings: React.FC = () => {
           <h2 className="text-xl font-bold text-gray-900 tracking-tight">Platform Settings</h2>
           <p className="text-gray-500 text-xs">Configure branding, payments, and communication.</p>
         </div>
-        <button
-          onClick={handleSave}
-          className="flex items-center gap-2 px-5 py-2 rounded-lg text-white text-sm font-semibold transition shadow-sm bg-gray-900 hover:bg-gray-800"
-        >
-          <Save className="w-4 h-4" />
-          Save Changes
-        </button>
+        {/* This button saves app_settings ONLY. The Pricing Templates tab
+            writes to its own table via its own "Save template" button, so
+            showing this here actively misleads: an admin edits prices, clicks
+            the prominent header Save, gets a success toast for a completely
+            different record, and loses their pricing edits on navigate. That
+            is exactly how a set of price changes was reported as "saved" but
+            never persisted. Hide it where it cannot do the expected thing. */}
+        {activeTab === 'pricing-templates' ? (
+          <span className="text-xs text-gray-500 max-w-[22rem] text-right">
+            Pricing templates save separately — use <strong>Save template</strong> inside the editor.
+          </span>
+        ) : (
+          <button
+            onClick={handleSave}
+            className="flex items-center gap-2 px-5 py-2 rounded-lg text-white text-sm font-semibold transition shadow-sm bg-gray-900 hover:bg-gray-800"
+          >
+            <Save className="w-4 h-4" />
+            Save Changes
+          </button>
+        )}
       </header>
 
       {/* Top tab bar */}

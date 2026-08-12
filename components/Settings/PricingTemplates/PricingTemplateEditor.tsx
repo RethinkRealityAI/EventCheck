@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { ArrowLeft, Save } from 'lucide-react';
 import {
   createPricingTemplate,
   updatePricingTemplate,
 } from '../../../services/storageService';
 import type { PricingTemplate } from '../../../types';
+import { useNotifications } from '../../NotificationSystem';
 import BasicsSection from './sections/BasicsSection';
 import TiersSection from './sections/TiersSection';
 import DateBracketsSection from './sections/DateBracketsSection';
@@ -44,22 +45,46 @@ export default function PricingTemplateEditor({ template, onClose, onSaved }: Pr
       : EMPTY
   );
   const [saving, setSaving] = useState(false);
+  const { showNotification } = useNotifications();
+
+  // Snapshot of what was loaded, so "Back to list" can tell whether there are
+  // unsaved edits. Prices live only in local state until Save is pressed.
+  const initialRef = useRef(JSON.stringify(draft));
+  const isDirty = JSON.stringify(draft) !== initialRef.current;
 
   const save = async () => {
     setSaving(true);
     try {
       if (template) await updatePricingTemplate(template.id, draft);
       else await createPricingTemplate(draft);
+      // Confirm explicitly. Previously a successful save just closed the editor
+      // with no message, which is indistinguishable from a save that silently
+      // did nothing — and a FAILED save was worse still: there was no catch, so
+      // the rejection was swallowed, the button reset, and the admin was left
+      // believing their prices had been stored.
+      initialRef.current = JSON.stringify(draft);
+      showNotification('Pricing template saved.', 'success');
       onSaved();
+    } catch (err: any) {
+      console.error('Pricing template save failed', err);
+      showNotification(
+        `Could not save the pricing template: ${err?.message || 'unknown error'}. Your changes are still here — try again.`,
+        'error',
+      );
     } finally {
       setSaving(false);
     }
   };
 
+  const handleClose = () => {
+    if (isDirty && !window.confirm('You have unsaved pricing changes. Leave without saving?')) return;
+    onClose();
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <button onClick={onClose} className="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-slate-800">
+        <button onClick={handleClose} className="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-slate-800">
           <ArrowLeft className="w-4 h-4" /> Back to list
         </button>
         <button
