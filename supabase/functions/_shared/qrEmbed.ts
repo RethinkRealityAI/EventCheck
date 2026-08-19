@@ -21,6 +21,9 @@
 //
 // Pure except for the fetch; the URL builder and the HTML rewrite are unit-tested.
 
+import { fetchRemoteImage, inlineImageSrc } from './imageEmbed.ts';
+export type { InlineAttachment } from './imageEmbed.ts';
+
 /** Content-ID used for the embedded QR. Referenced as `cid:<QR_CID>` in HTML. */
 export const QR_CID = 'checkin-qr';
 
@@ -45,26 +48,12 @@ export interface QrAttachment {
  */
 export async function fetchQrPng(qrData: string, size = 240, timeoutMs = 8000): Promise<QrAttachment | null> {
   if (!qrData) return null;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const resp = await fetch(buildQrImageUrl(qrData, size), { signal: controller.signal });
-    if (!resp.ok) {
-      console.error('[qrEmbed] QR fetch non-200', resp.status);
-      return null;
-    }
-    const buf = new Uint8Array(await resp.arrayBuffer());
-    if (buf.byteLength === 0) {
-      console.error('[qrEmbed] QR fetch returned an empty body');
-      return null;
-    }
-    return { filename: 'checkin-qr.png', content: buf, cid: QR_CID, contentType: 'image/png' };
-  } catch (e) {
-    console.error('[qrEmbed] QR fetch failed', String(e));
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
+  return await fetchRemoteImage(
+    buildQrImageUrl(qrData, size),
+    QR_CID,
+    'checkin-qr.png',
+    timeoutMs,
+  );
 }
 
 /**
@@ -76,9 +65,7 @@ export async function fetchQrPng(qrData: string, size = 240, timeoutMs = 8000): 
  * working without asking admins to re-author them.
  */
 export function inlineQrSrc(html: string, remoteUrl: string): string {
-  if (!html || !remoteUrl) return html;
-  // Split/join avoids building a RegExp from a URL full of regex metacharacters.
-  return String(html).split(remoteUrl).join(`cid:${QR_CID}`);
+  return inlineImageSrc(html, remoteUrl, QR_CID);
 }
 
 /**

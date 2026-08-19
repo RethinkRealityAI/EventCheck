@@ -34,3 +34,4 @@ AGENTS.md
 *.sw?
 .env
 .env.smoke
+.tmp-preview/

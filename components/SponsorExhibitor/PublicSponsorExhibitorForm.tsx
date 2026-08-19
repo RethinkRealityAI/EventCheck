@@ -343,6 +343,11 @@ export default function PublicSponsorExhibitorForm({ form, settings, isEmbedded 
         // Failures are swallowed per row so one SMTP hiccup doesn't block the success UI.
         try {
           if (hasAllDetails) {
+            // The ticket PDF is built SERVER-SIDE by send-ticket-email (it draws
+            // the same shared layout via npm:jspdf), so nothing is generated
+            // here. Doing it client-side would tie the attendee's ticket to
+            // this tab staying open, which is the fragility that made the
+            // original client-only confirmation email unreliable.
             await supabase.functions.invoke('send-ticket-email', {
               body: {
                 mode: 'staff-claim-completed',
@@ -350,10 +355,11 @@ export default function PublicSponsorExhibitorForm({ form, settings, isEmbedded 
                 name: entry.name,
                 orgName: org.orgName,
                 eventName,
-                attachments: [],
+                origin: window.location.origin,
                 // Let the edge function stamp `last_ticket_email_at` so
                 // the dashboard reflects that we sent this staff member
-                // their confirmation.
+                // their confirmation, and hydrate the QR + download link
+                // from the row.
                 attendeeId: id,
               },
             });

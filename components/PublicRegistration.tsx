@@ -1147,34 +1147,21 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
           try {
             const orgName = fetchedPrimaryAttendee?.companyInfo?.orgName || 'the organization';
             const eventName = CURRENT_SITE.displayName || form?.title || 'the Congress';
-            const attachments: Array<{ filename: string; content: string; contentType?: string }> = [];
-            if (settings && form) {
-              try {
-                const ticketDoc = await generateTicketPDF(
-                  { ...loadedRefAttendee, answers: mergedAnswers } as Attendee,
-                  settings,
-                  form,
-                );
-                attachments.push({
-                  filename: `${(loadedRefAttendee.name || 'Staff').replace(/[^a-z0-9]/gi, '_')}_Ticket.pdf`,
-                  content: arrayBufferToBase64(ticketDoc.output('arraybuffer') as ArrayBuffer),
-                  contentType: 'application/pdf',
-                });
-              } catch (pdfErr) {
-                // PDF generation is non-critical — still send the confirmation email.
-                console.warn('Staff ticket PDF generation failed (sending without attachment):', pdfErr);
-              }
-            }
+            // No client-side PDF: send-ticket-email builds the branded ticket
+            // server-side from the row we just updated. That matters here —
+            // `loadedRefAttendee` is the PRE-claim snapshot, so a client PDF
+            // would carry the placeholder name while the email greeting used
+            // the claimed one. Building server-side keeps them in agreement and
+            // means the ticket no longer depends on this tab staying open.
             supabase.functions.invoke('send-ticket-email', {
               body: {
                 mode: emailMode,
-                to: loadedRefAttendee.email,
-                name: loadedRefAttendee.name,
+                to: claimedEmail || loadedRefAttendee.email,
                 orgName,
                 eventName,
-                attachments,
-                // attendeeId lets the edge function stamp
-                // `last_ticket_email_at` so the dashboard reflects "Sent".
+                origin: window.location.origin,
+                // attendeeId lets the edge function hydrate the QR + download
+                // link and stamp `last_ticket_email_at`.
                 attendeeId: loadedRefAttendee.id,
               },
             }).catch(() => {/* ignore — email is best-effort */});
@@ -1183,7 +1170,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
           }
         } else {
           supabase.functions.invoke('send-ticket-email', {
-            body: { mode: emailMode, attendeeId: loadedRefAttendee.id },
+            body: { mode: emailMode, attendeeId: loadedRefAttendee.id, origin: window.location.origin },
           }).catch(() => {/* ignore — email is best-effort */});
         }
 
