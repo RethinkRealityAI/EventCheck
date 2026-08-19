@@ -8,6 +8,7 @@ import {
   ensureTicketBlocks,
   prependReissueNotice,
   buildReissueNoticeHtml,
+  attachmentNoteFor,
 } from '../supabase/functions/_shared/ticketBlock';
 import { applyPlaceholders } from '../supabase/functions/_shared/emailShell';
 
@@ -104,8 +105,16 @@ describe('ticket blocks resolve to a real image and link', () => {
     expect(html).not.toContain('href=""');
   });
 
-  it('mentions the PNG attachment so a reader with images off knows to look', () => {
-    expect(buildQrBlockHtml()).toContain('GANSID-Congress-check-in-QR.png');
+  it('makes no attachment claim when no note is supplied', () => {
+    // Silence beats an inaccurate promise — the whole incident was an email
+    // asserting an attachment that did not exist.
+    const html = buildQrBlockHtml();
+    expect(html).toContain('{{qr_image_url}}');
+    expect(html.toLowerCase()).not.toContain('attached');
+  });
+
+  it('renders the supplied note verbatim', () => {
+    expect(buildQrBlockHtml('CUSTOM NOTE')).toContain('CUSTOM NOTE');
   });
 
   it('download block is a real anchor', () => {
@@ -135,5 +144,43 @@ describe('prependReissueNotice', () => {
   it('handles a null body', () => {
     expect(prependReissueNotice(null as any, false)).toBe('');
     expect(prependReissueNotice(null as any, true)).toContain('resending your ticket');
+  });
+});
+
+describe('attachmentNoteFor', () => {
+  it('describes a PDF when one is attached', () => {
+    const note = attachmentNoteFor(true);
+    expect(note).toContain('PDF');
+    // Must NOT promise a loose image — when the PDF is attached the PNG is not.
+    expect(note.toLowerCase()).not.toContain('.png');
+  });
+
+  it('describes the image copy when there is no PDF', () => {
+    const note = attachmentNoteFor(false);
+    expect(note.toLowerCase()).toContain('image');
+    expect(note).not.toContain('PDF');
+  });
+
+  it('flows through ensureTicketBlocks into the rendered body', () => {
+    const withPdf = ensureTicketBlocks('<p>Hi</p>', {
+      includeQr: true,
+      attachmentNote: attachmentNoteFor(true),
+    });
+    expect(withPdf).toContain('PDF');
+    expect(withPdf).not.toContain('.png');
+
+    const withoutPdf = ensureTicketBlocks('<p>Hi</p>', {
+      includeQr: true,
+      attachmentNote: attachmentNoteFor(false),
+    });
+    expect(withoutPdf.toLowerCase()).toContain('image');
+  });
+
+  it('adds no note when the template already carries its own QR markup', () => {
+    // The note lives inside the appended block; a template that supplies its
+    // own QR must not gain a claim about an attachment it never mentions.
+    const custom = '<img src="{{qr_image_url}}">';
+    const out = ensureTicketBlocks(custom, { includeQr: true, attachmentNote: attachmentNoteFor(true) });
+    expect(out).toBe(custom);
   });
 });

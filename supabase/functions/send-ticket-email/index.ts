@@ -11,7 +11,7 @@ import { buildAppUrl, isAbsoluteHttpUrl, resolveOrigin } from '../_shared/emailL
 import { buildOpenPixelUrl, appendTrackingPixel } from '../_shared/emailTracking.ts';
 import { buildQrImageUrl, fetchQrPng, inlineQrSrc, qrAttachments } from '../_shared/qrEmbed.ts';
 import { HEADER_LOGO_CID, fetchRemoteImage, inlineImageSrc, inlineAttachmentEntry } from '../_shared/imageEmbed.ts';
-import { ensureTicketBlocks, prependReissueNotice } from '../_shared/ticketBlock.ts';
+import { ensureTicketBlocks, prependReissueNotice, attachmentNoteFor } from '../_shared/ticketBlock.ts';
 import { jsPDF } from 'npm:jspdf@2.5.1';
 import { drawTicketPdf, ticketFromAttendeeRow, ticketPdfFilename, bytesToBase64 } from '../_shared/ticketPdf.ts';
 import { resolveAttendeeDisplayName } from '../_shared/attendeeDisplayName.ts';
@@ -190,7 +190,16 @@ async function embedQrForEmail(html: string, qrData: string, remoteUrl: string, 
 // npm:jspdf bundles through --use-api and runs in the edge runtime. That lets
 // every server-initiated send attach the SAME ticket the /#/tickets page
 // produces, instead of a bare QR PNG that scans but looks like a screenshot.
+// Caches the BRANDING images only (logo, background) — those repeat on every
+// ticket and are the expensive fetch. QR URLs are unique per attendee and
+// single-use, so caching them would grow this map by one entry per ticket ever
+// sent from a warm isolate. Bounded regardless, as a backstop.
 const pdfImageCache = new Map<string, string>();
+const PDF_IMAGE_CACHE_MAX = 8;
+
+function isSingleUseImage(src: string): boolean {
+    return src.includes('api.qrserver.com');
+}
 
 async function edgeToDataUrl(src: string | undefined): Promise<string | undefined> {
     if (!src) return undefined;
@@ -198,8 +207,11 @@ async function edgeToDataUrl(src: string | undefined): Promise<string | undefine
     // Relative paths (e.g. '/branding/gansid/mark.svg') can't be fetched from
     // the edge — they only mean something in a browser on the site origin.
     if (!isFetchableImageUrl(src)) return undefined;
-    const cached = pdfImageCache.get(src);
-    if (cached) return cached;
+    const cacheable = !isSingleUseImage(src);
+    if (cacheable) {
+        const cached = pdfImageCache.get(src);
+        if (cached) return cached;
+    }
     try {
         const resp = await fetch(src);
         if (!resp.ok) { console.error('[ticketPdf] image non-200', src, resp.status); return undefined; }
@@ -207,7 +219,13 @@ async function edgeToDataUrl(src: string | undefined): Promise<string | undefine
         if (!bytes.byteLength) return undefined;
         const ct = resp.headers.get('content-type') || guessImageContentType(src);
         const dataUrl = `data:${ct};base64,${bytesToBase64(bytes)}`;
-        pdfImageCache.set(src, dataUrl);
+        if (cacheable) {
+            if (pdfImageCache.size >= PDF_IMAGE_CACHE_MAX) {
+                const oldest = pdfImageCache.keys().next().value;
+                if (oldest !== undefined) pdfImageCache.delete(oldest);
+            }
+            pdfImageCache.set(src, dataUrl);
+        }
         return dataUrl;
     } catch (e) {
         console.error('[ticketPdf] image fetch failed', src, String(e));
@@ -508,7 +526,7 @@ serve(async (req: Request) => {
 
             const { data: form } = await supabase
                 .from('forms')
-                .select('title, settings')
+                .select('title, settings, fields')
                 .eq('id', attendee.form_id)
                 .maybeSingle();
             const eventName = form?.title || 'the event';
@@ -558,16 +576,36 @@ serve(async (req: Request) => {
                 // email arrived with no link" looked like. Now the caller's
                 // origin and the request header back it up.
                 const publicSiteUrl = sendOrigin(body, req);
+
+                // Same three routes as the staff modes: branded PDF, inline
+                // cid: QR, tokenised download link. Built BEFORE the copy so
+                // the attachment note is accurate.
+                const ticketPdf = await buildTicketPdfAttachment(attendee, form, appSettings);
+                const downloadUrl = await buildTicketDownloadUrl(attendee.id, attendee.form_id, publicSiteUrl);
+
+                // The live GANSID guest template is an admin override reading
+                // "Your ticket is attached; please present the QR code at the
+                // entrance" — with NO {{qr_image_url}} anywhere in it. That is
+                // the Novartis defect in the main group-guest flow: the body
+                // points at a QR that was never rendered. Appending the block
+                // makes the promise true no matter how the template is edited.
+                const bodyTemplate = ensureTicketBlocks(tpl.body, {
+                    includeQr: true,
+                    includeDownload: !!downloadUrl,
+                    attachmentNote: attachmentNoteFor(!!ticketPdf),
+                });
+
                 const vars = {
                     name: attendee.name || 'there',
                     event: eventName,
                     registration_id: attendee.id,
                     qr_image_url: qrImageUrl,
+                    ticket_download_url: downloadUrl,
                     purchaser: primary?.name || 'The purchaser',
                     signup_url: publicSiteUrl ? `${publicSiteUrl}/#/` : '',
                 };
                 const subject = applyPlaceholders(tpl.subject, vars, body.mode);
-                const body_html = applyPlaceholders(tpl.body, vars, body.mode);
+                const body_html = applyPlaceholders(bodyTemplate, vars, body.mode);
                 const html = generateEmailTemplate({
                     title: eventName,
                     content: body_html,
@@ -575,8 +613,15 @@ serve(async (req: Request) => {
                     headerImageUrl: tpl.headerImageUrl,
                     footerText: tpl.footerText,
                 });
-                const embedded = await embedQrForEmail(html, qrData, qrImageUrl);
-                await sendSimpleEmail({ to: attendee.email, subject, html: embedded.html, smtpConfig, attachments: embedded.attachments, headerImageUrl: tpl.headerImageUrl });
+                const embedded = await embedQrForEmail(html, qrData, qrImageUrl, !ticketPdf);
+                await sendSimpleEmail({
+                    to: attendee.email,
+                    subject,
+                    html: embedded.html,
+                    smtpConfig,
+                    attachments: ticketPdf ? [...embedded.attachments, ticketPdf] : embedded.attachments,
+                    headerImageUrl: tpl.headerImageUrl,
+                });
             } catch (e) {
                 console.warn('Failed to send personal ticket on claim-completion', e);
                 ticketOk = false;
@@ -825,27 +870,10 @@ serve(async (req: Request) => {
                 ? await buildTicketDownloadUrl(staffRow.id, staffRow.form_id, sendOrigin(body, req))
                 : '';
 
-            // Append whatever the (admin-editable) template is missing, so an
-            // edit in Settings can never silently delete the ticket again.
-            const bodyTemplate = ensureTicketBlocks(tpl.body, {
-                includeQr: !!qrImageUrl,
-                includeDownload: !!downloadUrl,
-            });
-
-            const vars = {
-                name: body.name || staffRow?.name || 'there',
-                org_name: body.orgName || '',
-                event: body.eventName || (formSettings as any)?.title || 'the event',
-                registration_id: staffRow?.id || '',
-                qr_image_url: qrImageUrl,
-                ticket_download_url: downloadUrl,
-            };
-            const subject = applyPlaceholders(tpl.subject, vars, body.mode);
-            const body_html = prependReissueNotice(applyPlaceholders(bodyTemplate, vars, body.mode), body.reissue);
-
+            // Build the ticket BEFORE the copy that describes it — the body
+            // states what is attached, and that claim has to be true.
             // Caller-supplied attachments win (a client that already rendered
-            // the ticket shouldn't produce a second one); otherwise the server
-            // draws the branded PDF itself.
+            // the ticket shouldn't produce a second one).
             let pdfAttachments = (body.attachments || []).map((att: { filename: string; content: string; contentType?: string }) => ({
                 filename: att.filename,
                 content: att.content,
@@ -856,6 +884,35 @@ serve(async (req: Request) => {
                 const built = await buildTicketPdfAttachment(staffRow, formSettings, appSettings);
                 if (built) pdfAttachments = [built];
             }
+
+            // Append whatever the (admin-editable) template is missing, so an
+            // edit in Settings can never silently delete the ticket again.
+            const bodyTemplate = ensureTicketBlocks(tpl.body, {
+                includeQr: !!qrImageUrl,
+                includeDownload: !!downloadUrl,
+                attachmentNote: attachmentNoteFor(pdfAttachments.length > 0),
+            });
+
+            const staffDisplayName = staffRow
+                ? resolveAttendeeDisplayName(
+                    ticketFromAttendeeRow(staffRow, (formSettings as any)?.title),
+                    { fields: (formSettings as any)?.fields } as any,
+                  )
+                : '';
+            const vars = {
+                // Fresh row FIRST: on the claim path the caller passes the
+                // pre-claim placeholder name, which would disagree with the
+                // name printed on the attached ticket.
+                name: staffDisplayName || body.name || 'there',
+                org_name: body.orgName || '',
+                event: body.eventName || (formSettings as any)?.title || 'the event',
+                registration_id: staffRow?.id || '',
+                qr_image_url: qrImageUrl,
+                ticket_download_url: downloadUrl,
+            };
+            const subject = applyPlaceholders(tpl.subject, vars, body.mode);
+            const body_html = prependReissueNotice(applyPlaceholders(bodyTemplate, vars, body.mode), body.reissue);
+
             const html = generateEmailTemplate({
                 title: vars.event,
                 content: body_html,
@@ -1060,9 +1117,12 @@ serve(async (req: Request) => {
                     const qrData = staff.qr_payload || staff.id;
                     const qrImageUrl = buildQrImageUrl(qrData);
                     const downloadUrl = await buildTicketDownloadUrl(staff.id, staff.form_id, sendOrigin(body, req));
+                    // Built before the copy that describes it — see staff-claim-completed.
+                    const ticketPdf = await buildTicketPdfAttachment(staff, form, appSettings);
                     const bodyTemplate = ensureTicketBlocks(tpl.body, {
                         includeQr: true,
                         includeDownload: !!downloadUrl,
+                        attachmentNote: attachmentNoteFor(!!ticketPdf),
                     });
                     const ticketVars = {
                         ...vars,
@@ -1079,7 +1139,6 @@ serve(async (req: Request) => {
                         headerImageUrl: tpl.headerImageUrl,
                         footerText: tpl.footerText,
                     });
-                    const ticketPdf = await buildTicketPdfAttachment(staff, form, appSettings);
                     const embedded = await embedQrForEmail(html, qrData, qrImageUrl, !ticketPdf);
                     await sendSimpleEmail({
                         to: staff.email,
@@ -1158,7 +1217,7 @@ serve(async (req: Request) => {
                     .eq('id', free.bogo_source_attendee_id).maybeSingle()
                 : { data: null };
             const { data: form } = await supabase
-                .from('forms').select('title, settings').eq('id', free.form_id).maybeSingle();
+                .from('forms').select('title, settings, fields').eq('id', free.form_id).maybeSingle();
             const { data: appSettings } = await supabase
                 .from('app_settings').select('*').eq('id', 1).maybeSingle();
             const smtpConfig = appSettings
@@ -1247,8 +1306,17 @@ serve(async (req: Request) => {
                 free_category_name: freeCategoryName,
                 account_cta: accountCta,
             };
+            // Guard the QR against an admin template edit. The hardcoded
+            // default carries {{qr_image_url}}, but a Settings override would
+            // not — which is exactly how the staff and guest templates lost
+            // their QR. The BOGO overrides are empty today; this keeps them
+            // safe if that changes.
+            const guardedBogoBody = ensureTicketBlocks(tpl.body, {
+                includeQr: true,
+                attachmentNote: attachmentNoteFor(true),
+            });
             const subject = applyPlaceholders(tpl.subject, vars, body.mode);
-            let body_html = prependReissueNotice(applyPlaceholders(tpl.body, vars, body.mode), body.reissue);
+            let body_html = prependReissueNotice(applyPlaceholders(guardedBogoBody, vars, body.mode), body.reissue);
 
             // Route 3 to a ticket: the tokenised download page rebuilds the full
             // branded PDF. Survives forwarding and image-stripping alike.
@@ -1266,10 +1334,21 @@ serve(async (req: Request) => {
             });
 
             try {
-                // The BOGO email carries NO PDF — the QR image IS the ticket —
-                // so a blocked remote image left the guest with nothing.
-                const embedded = await embedQrForEmail(html, qrData, qrImageUrl);
-                await sendSimpleEmail({ to: free.email, subject, html: embedded.html, smtpConfig, attachments: embedded.attachments, headerImageUrl: tpl.headerImageUrl });
+                // The BOGO email used to carry NO PDF — the QR image WAS the
+                // ticket — so a blocked remote image left the guest with
+                // nothing. It now carries the same branded PDF as every other
+                // ticket. Build it FIRST: whether the loose QR PNG is also
+                // attached depends on whether the PDF succeeded.
+                const bogoPdf = await buildTicketPdfAttachment(free, form, appSettings);
+                const embedded = await embedQrForEmail(html, qrData, qrImageUrl, !bogoPdf);
+                await sendSimpleEmail({
+                    to: free.email,
+                    subject,
+                    html: embedded.html,
+                    smtpConfig,
+                    attachments: bogoPdf ? [...embedded.attachments, bogoPdf] : embedded.attachments,
+                    headerImageUrl: tpl.headerImageUrl,
+                });
                 // Stamp last_ticket_email_at so dashboards show "Sent".
                 await supabase.from('attendees')
                     .update({ last_ticket_email_at: new Date().toISOString() })
@@ -1381,8 +1460,14 @@ serve(async (req: Request) => {
                 qr_image_url: qrImageUrl,
                 admin_contact: BOGO_ADMIN_CONTACT,
             };
+            // Same QR guard as bogo-ticket — a Settings override that dropped
+            // {{qr_image_url}} would otherwise ship a ticket with no ticket.
+            const guardedUpdatedBody = ensureTicketBlocks(tpl.body, {
+                includeQr: true,
+                attachmentNote: attachmentNoteFor(true),
+            });
             const subject = applyPlaceholders(tpl.subject, vars, body.mode);
-            const body_html = applyPlaceholders(tpl.body, vars, body.mode);
+            const body_html = applyPlaceholders(guardedUpdatedBody, vars, body.mode);
             const html = generateEmailTemplate({
                 title: eventName,
                 content: body_html,
@@ -1392,8 +1477,16 @@ serve(async (req: Request) => {
             });
 
             try {
-                const embedded = await embedQrForEmail(html, qrData, qrImageUrl);
-                await sendSimpleEmail({ to: free.email, subject, html: embedded.html, smtpConfig, attachments: embedded.attachments, headerImageUrl: tpl.headerImageUrl });
+                const bogoPdf = await buildTicketPdfAttachment(free, form, appSettings);
+                const embedded = await embedQrForEmail(html, qrData, qrImageUrl, !bogoPdf);
+                await sendSimpleEmail({
+                    to: free.email,
+                    subject,
+                    html: embedded.html,
+                    smtpConfig,
+                    attachments: bogoPdf ? [...embedded.attachments, bogoPdf] : embedded.attachments,
+                    headerImageUrl: tpl.headerImageUrl,
+                });
                 await supabase.from('attendees')
                     .update({ last_ticket_email_at: new Date().toISOString() })
                     .eq('id', free.id);

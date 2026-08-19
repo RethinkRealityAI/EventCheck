@@ -43,16 +43,33 @@ export function templateReferencesToken(template: string, token: string): boolea
   return normalized.includes(`{{${token}}}`);
 }
 
-/** Standard QR markup. Uses the token so `applyPlaceholders` resolves it. */
-export function buildQrBlockHtml(): string {
+/**
+ * Copy describing what is actually attached alongside the inline QR.
+ *
+ * MUST match reality. The whole incident this module exists for was an email
+ * asserting "your ticket QR is attached" when nothing was — so this text is
+ * derived from what the caller really built, never assumed.
+ */
+export function attachmentNoteFor(hasPdf: boolean): string {
+  return hasPdf
+    ? 'Your full ticket is attached to this email as a PDF — print it or show it on your phone.'
+    : 'A copy of this QR code is also attached as an image, in case your email client blocks pictures.';
+}
+
+/**
+ * Standard QR markup. Uses the token so `applyPlaceholders` resolves it.
+ * Pass the note describing the real attachment; omit it to render no claim at
+ * all, which is always safer than an inaccurate one.
+ */
+export function buildQrBlockHtml(attachmentNote?: string): string {
   return `<p style="margin:24px 0 8px;font-weight:600;">Your check-in QR code</p>`
     + `<div style="text-align:center;margin:8px 0 24px;">`
     + `<img src="{{${QR_TOKEN}}}" alt="Check-in QR code" width="240" height="240" `
     + `style="border:1px solid #e5e7eb;border-radius:8px;padding:8px;background:#fff;" />`
     + `</div>`
-    + `<p style="color:#666;font-size:13px;margin:0 0 16px;">`
-    + `A copy is also attached to this email as <strong>GANSID-Congress-check-in-QR.png</strong> `
-    + `in case your email client blocks images.</p>`;
+    + (attachmentNote
+      ? `<p style="color:#666;font-size:13px;margin:0 0 16px;">${attachmentNote}</p>`
+      : '');
 }
 
 /** Standard download CTA. Survives full image stripping and plain-text forwarding. */
@@ -68,6 +85,12 @@ export interface EnsureTicketBlocksOptions {
   includeQr?: boolean;
   /** Append the download block when the template doesn't reference {{ticket_download_url}}. */
   includeDownload?: boolean;
+  /**
+   * Sentence describing what is really attached. Build it with
+   * `attachmentNoteFor(hasPdf)` AFTER the attachment exists — never guess,
+   * or the email makes a claim the recipient can disprove by looking.
+   */
+  attachmentNote?: string;
 }
 
 /**
@@ -79,7 +102,7 @@ export interface EnsureTicketBlocksOptions {
 export function ensureTicketBlocks(template: string, opts: EnsureTicketBlocksOptions = {}): string {
   let out = String(template ?? '');
   if (opts.includeQr && !templateReferencesToken(out, QR_TOKEN)) {
-    out += buildQrBlockHtml();
+    out += buildQrBlockHtml(opts.attachmentNote);
   }
   if (opts.includeDownload && !templateReferencesToken(out, DOWNLOAD_TOKEN)) {
     out += buildDownloadBlockHtml();

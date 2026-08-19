@@ -386,7 +386,10 @@ export async function drawTicketPdf(
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(150, 150, 150);
   doc.setFontSize(10);
-  doc.text('DATE', labelX, currentY);
+  // "REGISTERED", not "DATE": this is when they signed up, and the header now
+  // carries the actual event dates. A bare "DATE" next to those reads as the
+  // day they are meant to turn up.
+  doc.text('REGISTERED', labelX, currentY);
 
   currentY += 6;
   doc.setTextColor(30, 30, 30);
