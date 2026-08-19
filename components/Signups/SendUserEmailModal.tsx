@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import type { PortalUser } from '../../services/storageService';
 import type { AppSettings, Form } from '../../types';
+import { classifyEmailFailure, extractInvokeError } from '../../utils/emailSendErrors';
 import {
   generateTrackingId,
   logEmailSend,
