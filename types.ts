@@ -317,6 +317,14 @@ export interface PdfSettings {
   enabled: boolean;
   logoUrl: string;
   eventTitle?: string;
+  /**
+   * Draw the event title text next to the logo. Defaults to true.
+   * Set false when the logo is a wordmark that already spells the event name
+   * out (GANSID's does) — otherwise the header reads it twice.
+   * Must live on this interface: Settings saves `pdfSettings` wholesale, so a
+   * key missing from the type would be dropped on the next admin save.
+   */
+  showEventTitle?: boolean;
   organizationName: string;
   organizationInfo: string; // Tax ID, Address, etc.
   primaryColor: string;

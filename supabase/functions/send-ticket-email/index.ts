@@ -12,6 +12,10 @@ import { buildOpenPixelUrl, appendTrackingPixel } from '../_shared/emailTracking
 import { buildQrImageUrl, fetchQrPng, inlineQrSrc, qrAttachments } from '../_shared/qrEmbed.ts';
 import { HEADER_LOGO_CID, fetchRemoteImage, inlineImageSrc, inlineAttachmentEntry } from '../_shared/imageEmbed.ts';
 import { ensureTicketBlocks, prependReissueNotice } from '../_shared/ticketBlock.ts';
+import { jsPDF } from 'npm:jspdf@2.5.1';
+import { drawTicketPdf, ticketFromAttendeeRow, ticketPdfFilename, bytesToBase64 } from '../_shared/ticketPdf.ts';
+import { resolveAttendeeDisplayName } from '../_shared/attendeeDisplayName.ts';
+import { guessImageContentType, isFetchableImageUrl } from '../_shared/imageEmbed.ts';
 import { signRegistrationToken } from '../_shared/registrationToken.ts';
 
 const corsHeaders = {
@@ -169,12 +173,82 @@ async function sendSimpleEmail({ to, subject, html, smtpConfig, attachments, hea
  * PNG as an inline attachment. Falls back to leaving the remote <img> in place
  * if the PNG can't be fetched, so a QR outage can never block a ticket.
  */
-async function embedQrForEmail(html: string, qrData: string, remoteUrl: string): Promise<{ html: string; attachments: any[] }> {
+async function embedQrForEmail(html: string, qrData: string, remoteUrl: string, includeDownloadCopy = true): Promise<{ html: string; attachments: any[] }> {
     const qr = await fetchQrPng(qrData);
     if (!qr) return { html, attachments: [] };
-    // Inline copy (what the HTML shows) PLUS a downloadable copy, so a guest
-    // whose client strips images entirely still holds a scannable file.
-    return { html: inlineQrSrc(html, remoteUrl), attachments: qrAttachments(qr) };
+    // Inline copy (what the HTML shows) PLUS, by default, a separately
+    // downloadable copy so a guest whose client strips images entirely still
+    // holds a scannable file. When a full branded ticket PDF is attached the
+    // loose PNG is just clutter — the PDF is the presentable artefact — so
+    // callers pass includeDownloadCopy=false.
+    const attachments = includeDownloadCopy ? qrAttachments(qr) : [inlineAttachmentEntry(qr)];
+    return { html: inlineQrSrc(html, remoteUrl), attachments };
+}
+
+// ── Server-side branded ticket PDF ───────────────────────────────────────────
+// Long assumed impossible (jsPDF is browser-oriented), re-tested 2026-08-18:
+// npm:jspdf bundles through --use-api and runs in the edge runtime. That lets
+// every server-initiated send attach the SAME ticket the /#/tickets page
+// produces, instead of a bare QR PNG that scans but looks like a screenshot.
+const pdfImageCache = new Map<string, string>();
+
+async function edgeToDataUrl(src: string | undefined): Promise<string | undefined> {
+    if (!src) return undefined;
+    if (src.startsWith('data:')) return src;
+    // Relative paths (e.g. '/branding/gansid/mark.svg') can't be fetched from
+    // the edge — they only mean something in a browser on the site origin.
+    if (!isFetchableImageUrl(src)) return undefined;
+    const cached = pdfImageCache.get(src);
+    if (cached) return cached;
+    try {
+        const resp = await fetch(src);
+        if (!resp.ok) { console.error('[ticketPdf] image non-200', src, resp.status); return undefined; }
+        const bytes = new Uint8Array(await resp.arrayBuffer());
+        if (!bytes.byteLength) return undefined;
+        const ct = resp.headers.get('content-type') || guessImageContentType(src);
+        const dataUrl = `data:${ct};base64,${bytesToBase64(bytes)}`;
+        pdfImageCache.set(src, dataUrl);
+        return dataUrl;
+    } catch (e) {
+        console.error('[ticketPdf] image fetch failed', src, String(e));
+        return undefined;
+    }
+}
+
+/**
+ * Build the branded ticket PDF as a base64 nodemailer attachment.
+ *
+ * Returns null on ANY failure so a PDF problem can never block the ticket
+ * email — the inline QR and the download link still get the holder through
+ * the door.
+ */
+async function buildTicketPdfAttachment(
+    attendeeRow: any,
+    formRow: any,
+    appSettings: any,
+    registrationUrl?: string,
+): Promise<any | null> {
+    try {
+        if (!attendeeRow) return null;
+        const ticket = ticketFromAttendeeRow(attendeeRow, formRow?.title);
+        const settings = { pdfSettings: (appSettings?.pdf_settings || {}) as any };
+        const form = {
+            fields: (formRow?.fields || undefined) as any,
+            pdfSettings: (formRow?.settings?.pdfSettings || undefined) as any,
+        };
+        const doc = new jsPDF();
+        await drawTicketPdf(doc as any, ticket, settings, form, registrationUrl, { toDataUrl: edgeToDataUrl });
+        const bytes = new Uint8Array(doc.output('arraybuffer') as ArrayBuffer);
+        return {
+            filename: ticketPdfFilename(resolveAttendeeDisplayName(ticket, form)),
+            content: bytesToBase64(bytes),
+            encoding: 'base64',
+            contentType: 'application/pdf',
+        };
+    } catch (e) {
+        console.error('[ticketPdf] generation failed', String(e));
+        return null;
+    }
 }
 
 /**
@@ -724,7 +798,7 @@ serve(async (req: Request) => {
             let formSettings: any = null;
             if (staffRow?.form_id) {
                 const { data: form } = await supabase
-                    .from('forms').select('title, settings').eq('id', staffRow.form_id).maybeSingle();
+                    .from('forms').select('title, settings, fields').eq('id', staffRow.form_id).maybeSingle();
                 formSettings = form;
             }
             const formEmailOverrides = (formSettings as any)?.settings?.emailOverrides;
@@ -769,12 +843,19 @@ serve(async (req: Request) => {
             const subject = applyPlaceholders(tpl.subject, vars, body.mode);
             const body_html = prependReissueNotice(applyPlaceholders(bodyTemplate, vars, body.mode), body.reissue);
 
-            const pdfAttachments = (body.attachments || []).map((att: { filename: string; content: string; contentType?: string }) => ({
+            // Caller-supplied attachments win (a client that already rendered
+            // the ticket shouldn't produce a second one); otherwise the server
+            // draws the branded PDF itself.
+            let pdfAttachments = (body.attachments || []).map((att: { filename: string; content: string; contentType?: string }) => ({
                 filename: att.filename,
                 content: att.content,
                 encoding: 'base64',
                 contentType: att.contentType || 'application/pdf',
             }));
+            if (!pdfAttachments.length && staffRow) {
+                const built = await buildTicketPdfAttachment(staffRow, formSettings, appSettings);
+                if (built) pdfAttachments = [built];
+            }
             const html = generateEmailTemplate({
                 title: vars.event,
                 content: body_html,
@@ -784,8 +865,11 @@ serve(async (req: Request) => {
                 footerText: tpl.footerText,
             });
 
+            // Drop the loose QR PNG when a full ticket PDF is attached — the
+            // PDF is the presentable artefact, the inline QR stays for scanning
+            // straight from the message.
             const embedded = qrImageUrl
-                ? await embedQrForEmail(html, qrData, qrImageUrl)
+                ? await embedQrForEmail(html, qrData, qrImageUrl, pdfAttachments.length === 0)
                 : { html, attachments: [] as any[] };
 
             const to = body.to || staffRow?.email;
@@ -849,7 +933,7 @@ serve(async (req: Request) => {
 
             const { data: form } = await supabase
                 .from('forms')
-                .select('title, settings')
+                .select('title, settings, fields')
                 .eq('id', staff.form_id)
                 .maybeSingle();
             const eventName = form?.title || 'the GANSID Congress';
@@ -995,13 +1079,14 @@ serve(async (req: Request) => {
                         headerImageUrl: tpl.headerImageUrl,
                         footerText: tpl.footerText,
                     });
-                    const embedded = await embedQrForEmail(html, qrData, qrImageUrl);
+                    const ticketPdf = await buildTicketPdfAttachment(staff, form, appSettings);
+                    const embedded = await embedQrForEmail(html, qrData, qrImageUrl, !ticketPdf);
                     await sendSimpleEmail({
                         to: staff.email,
                         subject,
                         html: embedded.html,
                         smtpConfig,
-                        attachments: embedded.attachments,
+                        attachments: ticketPdf ? [...embedded.attachments, ticketPdf] : embedded.attachments,
                         headerImageUrl: tpl.headerImageUrl,
                     });
                     staffTicketEmailSent = true;

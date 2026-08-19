@@ -1,9 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { PayPalScriptProvider, PayPalButtons } from '@paypal/react-paypal-js';
 import type { Form, AppSettings, FormField, FormStep } from '../../types';
-import { getFormById, getAttendee } from '../../services/storageService';
-import { generateTicketPDF } from '../../utils/pdfGenerator';
-import { arrayBufferToBase64 } from '../../services/smtpService';
+import { getFormById } from '../../services/storageService';
 import { useAuth } from '../AuthContext';
 import { StepperSidebar } from '../Portal/ui/StepperSidebar';
 import { GlassCard } from '../Portal/ui/GlassCard';
@@ -345,29 +343,11 @@ export default function PublicSponsorExhibitorForm({ form, settings, isEmbedded 
         // Failures are swallowed per row so one SMTP hiccup doesn't block the success UI.
         try {
           if (hasAllDetails) {
-            // Attach the branded ticket PDF when we can build it. This is a
-            // BONUS route only — the edge function independently embeds the
-            // check-in QR inline, attaches it as a PNG, and includes a
-            // tokenised download link, so a failure here still leaves the
-            // staff member with three working ways to get through the door.
-            // (Before 2026-08-18 this passed `attachments: []` and the
-            // template carried no QR, so the email contained no ticket at all.)
-            let attachments: Array<{ filename: string; content: string; contentType: string }> = [];
-            try {
-              const staffRow = await getAttendee(id);
-              if (staffRow) {
-                const staffForm = await getFormById(staffFormId);
-                const doc = await generateTicketPDF(staffRow, settings, staffForm || undefined);
-                attachments = [{
-                  filename: `${(entry.name || 'Ticket').replace(/[^a-z0-9]/gi, '_')}_Ticket.pdf`,
-                  content: arrayBufferToBase64(doc.output('arraybuffer') as ArrayBuffer),
-                  contentType: 'application/pdf',
-                }];
-              }
-            } catch (pdfErr) {
-              console.warn('Staff ticket PDF generation failed for', entry.email, pdfErr);
-            }
-
+            // The ticket PDF is built SERVER-SIDE by send-ticket-email (it draws
+            // the same shared layout via npm:jspdf), so nothing is generated
+            // here. Doing it client-side would tie the attendee's ticket to
+            // this tab staying open, which is the fragility that made the
+            // original client-only confirmation email unreliable.
             await supabase.functions.invoke('send-ticket-email', {
               body: {
                 mode: 'staff-claim-completed',
@@ -375,7 +355,6 @@ export default function PublicSponsorExhibitorForm({ form, settings, isEmbedded 
                 name: entry.name,
                 orgName: org.orgName,
                 eventName,
-                attachments,
                 origin: window.location.origin,
                 // Let the edge function stamp `last_ticket_email_at` so
                 // the dashboard reflects that we sent this staff member
