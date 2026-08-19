@@ -19,6 +19,7 @@ import {
   promoCoverageMessage,
 } from '../utils/promoCodes';
 import { resolveNameFromFormFields } from '../utils/resolveAttendeeDisplayName';
+import { fieldRenderableForClaim } from './SteppedRegistration/steppedValidation';
 import { portalEmailRedirectTo } from '../utils/authHashCallback';
 import { paymentAuthHeaders } from '../utils/authSession';
 import {
@@ -348,11 +349,17 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
     || (!!appliedPromo && bogoPayableAfterPromo === 0);
 
   // Pending-claim: group guest completing their personal details post-purchase
+  // Set when the ?ref= row was identified as staff by its parent org rather
+  // than by guest_type — covers rows written with guest_type = NULL.
+  const [refIsStaffRow, setRefIsStaffRow] = useState(false);
   const isPendingClaim = (loadedRefAttendee as any)?.guestType === 'pending-claim';
   const isExhibitorStaffPending = (loadedRefAttendee as any)?.guestType === 'exhibitor-staff-pending';
   const isStaffClaim = (loadedRefAttendee as any)?.guestType === 'staff-pending'
                      || (loadedRefAttendee as any)?.guestType === 'staff-claimed';
-  const isAnyPendingClaim = isPendingClaim || isExhibitorStaffPending || isStaffClaim;
+  /** BOTH staff claim types plus NULL-guest_type staff rows. Drives which
+   *  fields/steps are suppressed — see STAFF_CLAIM_HIDDEN_FIELD_IDS. */
+  const isStaffClaimFlow = isExhibitorStaffPending || isStaffClaim || refIsStaffRow;
+  const isAnyPendingClaim = isPendingClaim || isStaffClaimFlow;
 
   // Sync groupMembers array length when groupSize changes
   useEffect(() => {
@@ -666,21 +673,34 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
           return;
         }
 
-        const pendingClaimTypes = ['pending-claim', 'exhibitor-staff-pending', 'staff-pending'];
-        if (refAttendee && pendingClaimTypes.includes((refAttendee as any).guestType) && refAttendee.formId === formId) {
+        const pendingClaimTypes = ['pending-claim', 'exhibitor-staff-pending', 'staff-pending', 'staff-claimed', 'exhibitor-staff-claimed'];
+
+        // Resolve the parent row FIRST. Staff created via "I already have each
+        // staff member's details" are written with guest_type = NULL
+        // (verify-payment/index.ts ~1168), so a guest_type check alone rejects
+        // them — and the code below then falls through to purchaser mode and
+        // shows the FULL PAID registration form, complete with registration
+        // type, group-of-5 and payment. A staff member could pay for a seat
+        // their organisation already covered. Identify staff structurally
+        // instead: any non-primary row whose parent is a sponsor/exhibitor org.
+        let refParent: Awaited<ReturnType<typeof getAttendee>> | undefined;
+        if (refAttendee?.primaryAttendeeId) {
+          refParent = await getAttendee(refAttendee.primaryAttendeeId);
+        }
+        const parentIsOrg = !!refParent
+          && (!!(refParent as any).sponsorTier || !!(refParent as any).exhibitorBoothType);
+        const refIsStaff = !!refAttendee && !refAttendee.isPrimary && parentIsOrg;
+
+        if (refAttendee && refAttendee.formId === formId
+            && (pendingClaimTypes.includes((refAttendee as any).guestType) || refIsStaff)) {
           setLoadedRefAttendee(refAttendee);
+          setRefIsStaffRow(refIsStaff);
           setMode('guest');
           // Pre-fill answers from whatever was saved at purchase time
           if (refAttendee.answers && Object.keys(refAttendee.answers).length > 0) {
             setAnswers(refAttendee.answers);
           }
-          // Fetch the primary org row so staff-claim headlines can show orgName.
-          // Harmless for other pending-claim types too — the UI reads it
-          // conditionally.
-          if (refAttendee.primaryAttendeeId) {
-            const primary = await getAttendee(refAttendee.primaryAttendeeId);
-            if (primary) setFetchedPrimaryAttendee(primary);
-          }
+          if (refParent) setFetchedPrimaryAttendee(refParent);
           setLoading(false);
           setInitialLoadComplete(true);
           return;
@@ -843,6 +863,11 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   }, [answers, isFirstGuestPurchaser, guests.length, form, mode]);
 
   const isVisible = (field: FormField) => {
+    // Claim-hidden fields must be invisible to VALIDATION too. f_org is
+    // required on the congress form, so hiding it from the renderer alone
+    // would block submit on a field the staff member cannot even see — the
+    // 2026-07-29 BOGO stranding, repeated.
+    if (isAnyPendingClaim && !fieldRenderableForClaim(field, { isStaffClaim: isStaffClaimFlow })) return false;
     if (!field.conditional?.enabled || !field.conditional.fieldId) return true;
     const targetValue = answers[field.conditional.fieldId];
     if (targetValue === undefined || targetValue === null) return false;
@@ -2449,6 +2474,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                 form={form}
                 mode={mode}
                 isVisible={isVisible}
+                isStaffClaimFlow={isStaffClaimFlow}
                 isAnyPendingClaim={isAnyPendingClaim}
                 isPendingClaim={isPendingClaim}
                 isExhibitorStaffPending={isExhibitorStaffPending}
@@ -2512,6 +2538,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
                 form={form}
                 mode={mode}
                 isVisible={isVisible}
+                isStaffClaimFlow={isStaffClaimFlow}
                 isAnyPendingClaim={isAnyPendingClaim}
                 isPendingClaim={isPendingClaim}
                 isExhibitorStaffPending={isExhibitorStaffPending}

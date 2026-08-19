@@ -301,7 +301,7 @@ describe('groupFieldsBySection', () => {
 // ── Claim-mode step filtering (GANSID BOGO claim-link incident, 2026-07-29) ──
 // A stepped form whose first step holds ONLY the mode selector rendered zero
 // fields for pending-claim guests and stranded them behind rms validation.
-import { fieldRenderableForClaim, filterStepsForClaim, EXHIBITOR_STAFF_HIDDEN_FIELD_IDS } from '../components/SteppedRegistration/steppedValidation';
+import { fieldRenderableForClaim, filterStepsForClaim, STAFF_CLAIM_HIDDEN_FIELD_IDS } from '../components/SteppedRegistration/steppedValidation';
 import type { FormStep } from '../types';
 
 const f = (id: string, type: string): FormField => ({ id, type, label: id, required: false } as any);
@@ -319,9 +319,9 @@ describe('fieldRenderableForClaim', () => {
   });
 
   it('additionally hides the exhibitor-staff id set only when isExhibitorStaffPending', () => {
-    for (const id of EXHIBITOR_STAFF_HIDDEN_FIELD_IDS) {
-      expect(fieldRenderableForClaim(f(id, 'text'), { isExhibitorStaffPending: true })).toBe(false);
-      expect(fieldRenderableForClaim(f(id, 'text'), { isExhibitorStaffPending: false })).toBe(true);
+    for (const id of STAFF_CLAIM_HIDDEN_FIELD_IDS) {
+      expect(fieldRenderableForClaim(f(id, 'text'), { isStaffClaim: true })).toBe(false);
+      expect(fieldRenderableForClaim(f(id, 'text'), { isStaffClaim: false })).toBe(true);
     }
   });
 });
@@ -359,7 +359,7 @@ describe('filterStepsForClaim', () => {
       personal: [f('f_fname', 'text')],
       consent: [f('f_present', 'radio'), f('f_emerg_name', 'text')],
     };
-    const visible = filterStepsForClaim(steps, fieldsByStep, { isExhibitorStaffPending: true });
+    const visible = filterStepsForClaim(steps, fieldsByStep, { isStaffClaim: true });
     expect(visible.map(s => s.id)).toEqual(['personal']);
   });
 

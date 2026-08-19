@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, type ReactNode } from 'react';
 import { FormRenderer, type FormRendererProps } from './FormRenderer';
 import { StepperSidebar } from '../Portal/ui/StepperSidebar';
-import { groupFieldsBySection, validateRequired, validateRms, validateGroupMembers, filterStepsForClaim, type GroupMember } from './steppedValidation';
+import { groupFieldsBySection, validateRequired, validateRms, validateGroupMembers, filterStepsForClaim, stepTitleForClaim, type GroupMember } from './steppedValidation';
 import { loadDraft, saveDraft, clearDraft } from '../../services/registrationDraftService';
 
 interface SteppedFormShellProps extends Omit<FormRendererProps, 'filteredFields'> {
@@ -27,10 +27,10 @@ export function SteppedFormShell(props: SteppedFormShellProps) {
     if (!props.isAnyPendingClaim) return allSteps;
     const byAll = groupFieldsBySection(props.form.fields, allSteps);
     return filterStepsForClaim(allSteps, byAll, {
-      isExhibitorStaffPending: props.isExhibitorStaffPending,
+      isStaffClaim: props.isStaffClaimFlow,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.form.fields, allSteps, props.isAnyPendingClaim, props.isExhibitorStaffPending]);
+  }, [props.form.fields, allSteps, props.isAnyPendingClaim, props.isStaffClaimFlow]);
   const fieldsByStep = useMemo(
     () => groupFieldsBySection(props.form.fields, steps),
     [props.form.fields, steps],
@@ -183,6 +183,14 @@ export function SteppedFormShell(props: SteppedFormShellProps) {
 
   const currentStep = steps[currentIndex];
   const currentFields = currentStep ? fieldsByStep[currentStep.id] ?? [] : [];
+  // "Consent & Payment" holds the ticket field for purchasers, but a claim
+  // guest is already paid for and never sees it — leaving a heading promising
+  // a payment step that never arrives. Staff read that as "it's asking me to
+  // pay" even though no payment control rendered.
+  const currentStepLabel = stepTitleForClaim(currentStep?.label ?? '', currentFields, {
+    isClaim: props.isAnyPendingClaim,
+    isStaffClaim: props.isStaffClaimFlow,
+  });
   const isLastStep = currentIndex === steps.length - 1;
 
   const validateCurrentStep = (): boolean => {
@@ -253,7 +261,7 @@ export function SteppedFormShell(props: SteppedFormShellProps) {
             />
           </aside>
           <div className="flex-1 min-w-0 max-w-4xl">
-            <h2 className="text-xl md:text-2xl font-semibold mb-4 font-display">{currentStep?.label}</h2>
+            <h2 className="text-xl md:text-2xl font-semibold mb-4 font-display">{currentStepLabel}</h2>
             {/* 2-column grid on desktop — FormRenderer wraps each field in a div,
                 short inputs (text/email/phone/number) naturally share rows, long
                 fields (textarea, radio groups, ticket) stretch full-width via

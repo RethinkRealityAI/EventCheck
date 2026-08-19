@@ -18,7 +18,8 @@
     "check:migrations": "node scripts/check-migrations-parity.mjs",
     "smoke:db": "node scripts/smoke-db.mjs",
     "predeploy": "npm run lint:migrations && tsc --noEmit && npm run test && npm run build",
-    "postdeploy": "npm run smoke:db && npm run check:migrations"
+    "postdeploy": "npm run smoke:db && npm run check:migrations",
+    "check:edge-scope": "node scripts/check-edge-scope.mjs"
   },
   "dependencies": {
     "@paypal/react-paypal-js": "^8.9.2",

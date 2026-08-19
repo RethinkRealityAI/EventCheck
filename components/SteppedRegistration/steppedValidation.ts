@@ -10,25 +10,60 @@ const NON_ANSWER_FIELD_TYPES: ReadonlySet<string> = new Set([
   'registration-mode-selector',
 ]);
 
-// Fields FormRenderer hides for exhibitor-staff pending claims. Single source
-// of truth — FormRenderer imports this set, and claim-mode step filtering below
-// must agree with FormRenderer's hide rules or a step can render zero fields.
-export const EXHIBITOR_STAFF_HIDDEN_FIELD_IDS: ReadonlySet<string> = new Set([
+// Fields hidden for a STAFF claim — someone an exhibitor/sponsor already
+// registered on their organisation's allocation.
+//
+// The org told us who they are and which access tier they hold, and the org is
+// invoiced externally, so re-asking these is noise at best and misleading at
+// worst. Two groups:
+//   - f_org / f_role: affiliation is the organisation that registered them; we
+//     stamp it from the org record instead of making them retype it. f_org is
+//     REQUIRED on the GANSID form, which is exactly why hiding it must also
+//     exempt it from validation (see fieldRenderableForClaim's use as an
+//     isVisible filter) — hiding a required field WITHOUT that exemption is how
+//     the 2026-07-29 BOGO claim link stranded guests behind an invisible
+//     blocker.
+//   - f_present / f_emerg_*: booth staff are not presenting, and emergency
+//     contacts are collected by the org.
+//
+// Single source of truth: FormRenderer renders through this, SteppedFormShell
+// filters steps through it, and PublicRegistration folds it into `isVisible` so
+// validation agrees. All three MUST use it or a step renders zero fields / a
+// hidden required field blocks submit.
+export const STAFF_CLAIM_HIDDEN_FIELD_IDS: ReadonlySet<string> = new Set([
+  'f_org',
+  'f_role',
   'f_present',
   'f_emerg_name',
   'f_emerg_phone',
   'f_emerg_rel',
 ]);
 
-/** Mirrors FormRenderer's pending-claim hide rules: claim guests never see the
- *  ticket field or the registration-mode selector (their registration is
- *  already paid), and exhibitor staff additionally skip a fixed id set. */
+/** @deprecated Use STAFF_CLAIM_HIDDEN_FIELD_IDS. Kept so any stale import fails
+ *  loudly at the type level rather than silently reintroducing the old set. */
+export const EXHIBITOR_STAFF_HIDDEN_FIELD_IDS = STAFF_CLAIM_HIDDEN_FIELD_IDS;
+
+export interface ClaimFieldOptions {
+  /**
+   * True for BOTH staff claim types: `staff-pending` (combined sponsor+exhibitor
+   * form) and `exhibitor-staff-pending` (legacy exhibitor form).
+   *
+   * This used to be `isExhibitorStaffPending`, which only ever matched the
+   * LEGACY type — so staff invited through the combined form were asked for
+   * their affiliation, role, presentation plans and emergency contacts despite
+   * the set existing to hide exactly those (reported 2026-08-19).
+   */
+  isStaffClaim?: boolean;
+}
+
+/** Claim guests never see the ticket field or the registration-mode selector
+ *  (their registration is already paid); staff additionally skip the set above. */
 export function fieldRenderableForClaim(
   field: FormField,
-  opts: { isExhibitorStaffPending?: boolean } = {},
+  opts: ClaimFieldOptions = {},
 ): boolean {
   if (field.type === 'ticket' || field.type === 'registration-mode-selector') return false;
-  if (opts.isExhibitorStaffPending && EXHIBITOR_STAFF_HIDDEN_FIELD_IDS.has(field.id)) return false;
+  if (opts.isStaffClaim && STAFF_CLAIM_HIDDEN_FIELD_IDS.has(field.id)) return false;
   return true;
 }
 
@@ -40,11 +75,42 @@ export function fieldRenderableForClaim(
 export function filterStepsForClaim(
   steps: FormStep[],
   fieldsByStep: Record<string, FormField[]>,
-  opts: { isExhibitorStaffPending?: boolean } = {},
+  opts: ClaimFieldOptions = {},
 ): FormStep[] {
   return steps.filter(step =>
     (fieldsByStep[step.id] ?? []).some(f => fieldRenderableForClaim(f, opts)),
   );
+}
+
+/**
+ * Step label with the payment wording dropped when the step's payment field is
+ * hidden.
+ *
+ * GANSID's `consent` step is labelled "Consent & Payment" and genuinely holds
+ * the ticket field — for a PURCHASER. A claim guest has already been paid for,
+ * so the ticket field is hidden and only consents render, leaving a heading
+ * that promises a payment step that never comes. Staff reported this as "it's
+ * asking me for payment" even though no payment control was rendered.
+ *
+ * Only rewrites when the step actually had a payment field that is now hidden;
+ * an unrelated step whose label happens to end in "Payment" is left alone.
+ */
+export function stepTitleForClaim(
+  label: string,
+  stepFields: FormField[],
+  opts: ClaimFieldOptions & { isClaim?: boolean } = {},
+): string {
+  const original = label ?? '';
+  if (!opts.isClaim) return original;
+  const hidesPayment = stepFields.some(
+    f => f.type === 'ticket' && !fieldRenderableForClaim(f, opts),
+  );
+  if (!hidesPayment) return original;
+  const stripped = original
+    .replace(/\s*(&|\+|and)\s*payments?\s*$/i, '')
+    .replace(/^\s*payments?\s*(&|\+|and)\s*/i, '')
+    .trim();
+  return stripped || original;
 }
 
 // Fields the per-guest "full details" accordion excludes because they're already

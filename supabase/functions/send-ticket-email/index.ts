@@ -400,7 +400,9 @@ serve(async (req: Request) => {
             const smtpConfig = appSettings
                 ? { host: s.smtp_host, port: Number(s.smtp_port || 587), user: s.smtp_user, pass: s.smtp_pass, fromName: s.email_from_name || 'SCAGO' }
                 : undefined;
-            await sendSimpleEmail({ to, subject, html, smtpConfig, headerImageUrl: tpl.headerImageUrl });
+            // `tpl` does NOT exist in this scope — this mode receives pre-composed
+            // html from the caller. Reading the header logo straight from settings.
+            await sendSimpleEmail({ to, subject, html, smtpConfig, headerImageUrl: s.email_header_logo });
             return jsonResponse({ ok: true });
         }
 
@@ -1311,9 +1313,15 @@ serve(async (req: Request) => {
             // not — which is exactly how the staff and guest templates lost
             // their QR. The BOGO overrides are empty today; this keeps them
             // safe if that changes.
+            // Build the PDF FIRST — attachmentNoteFor(true) was hardcoded here
+            // while the PDF was built further down and returns null on failure,
+            // so the body could promise "your full ticket is attached as a PDF"
+            // with nothing attached. Exactly the claim-without-evidence bug
+            // this helper exists to prevent.
+            const bogoPdf = await buildTicketPdfAttachment(free, form, appSettings);
             const guardedBogoBody = ensureTicketBlocks(tpl.body, {
                 includeQr: true,
-                attachmentNote: attachmentNoteFor(true),
+                attachmentNote: attachmentNoteFor(!!bogoPdf),
             });
             const subject = applyPlaceholders(tpl.subject, vars, body.mode);
             let body_html = prependReissueNotice(applyPlaceholders(guardedBogoBody, vars, body.mode), body.reissue);
@@ -1339,7 +1347,6 @@ serve(async (req: Request) => {
                 // nothing. It now carries the same branded PDF as every other
                 // ticket. Build it FIRST: whether the loose QR PNG is also
                 // attached depends on whether the PDF succeeded.
-                const bogoPdf = await buildTicketPdfAttachment(free, form, appSettings);
                 const embedded = await embedQrForEmail(html, qrData, qrImageUrl, !bogoPdf);
                 await sendSimpleEmail({
                     to: free.email,
@@ -1462,9 +1469,10 @@ serve(async (req: Request) => {
             };
             // Same QR guard as bogo-ticket — a Settings override that dropped
             // {{qr_image_url}} would otherwise ship a ticket with no ticket.
+            const updatedPdf = await buildTicketPdfAttachment(free, form, appSettings);
             const guardedUpdatedBody = ensureTicketBlocks(tpl.body, {
                 includeQr: true,
-                attachmentNote: attachmentNoteFor(true),
+                attachmentNote: attachmentNoteFor(!!updatedPdf),
             });
             const subject = applyPlaceholders(tpl.subject, vars, body.mode);
             const body_html = applyPlaceholders(guardedUpdatedBody, vars, body.mode);
@@ -1477,14 +1485,13 @@ serve(async (req: Request) => {
             });
 
             try {
-                const bogoPdf = await buildTicketPdfAttachment(free, form, appSettings);
-                const embedded = await embedQrForEmail(html, qrData, qrImageUrl, !bogoPdf);
+                const embedded = await embedQrForEmail(html, qrData, qrImageUrl, !updatedPdf);
                 await sendSimpleEmail({
                     to: free.email,
                     subject,
                     html: embedded.html,
                     smtpConfig,
-                    attachments: bogoPdf ? [...embedded.attachments, bogoPdf] : embedded.attachments,
+                    attachments: updatedPdf ? [...embedded.attachments, updatedPdf] : embedded.attachments,
                     headerImageUrl: tpl.headerImageUrl,
                 });
                 await supabase.from('attendees')

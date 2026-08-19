@@ -14,7 +14,7 @@ import { formatPrice } from '../../utils/pricing';
 import { Check, Tag, Info, AlertCircle, MapPin } from 'lucide-react';
 // Shared with SteppedFormShell's claim-mode step filtering — the hide rules
 // here and `fieldRenderableForClaim` must stay in agreement.
-import { EXHIBITOR_STAFF_HIDDEN_FIELD_IDS } from './steppedValidation';
+import { fieldRenderableForClaim } from './steppedValidation';
 
 export interface FormRendererProps {
   form: Form;
@@ -26,6 +26,8 @@ export interface FormRendererProps {
   isAnyPendingClaim: boolean;
   isPendingClaim: boolean;
   isExhibitorStaffPending: boolean;
+  /** True for BOTH staff claim types (staff-pending AND exhibitor-staff-pending). */
+  isStaffClaimFlow?: boolean;
 
   // RMS / group state
   rmsField: FormField | null;
@@ -122,6 +124,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   isAnyPendingClaim,
   isPendingClaim,
   isExhibitorStaffPending,
+  isStaffClaimFlow = false,
   rmsField,
   registrationMode,
   setRegistrationMode,
@@ -178,11 +181,12 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
       {filteredFields.map(field => {
         if (!isVisible(field)) return null;
         if (field.type === 'ticket' && mode === 'guest') return null;
-        // Pending-claim guests skip pricing-related UI entirely
-        if (isAnyPendingClaim && field.type === 'registration-mode-selector') return null;
-        if (isAnyPendingClaim && field.type === 'ticket') return null;
-        // Exhibitor staff hide additional fields not relevant to their claim flow
-        if (isExhibitorStaffPending && EXHIBITOR_STAFF_HIDDEN_FIELD_IDS.has(field.id)) return null;
+        // Claim-mode hiding goes through the SHARED predicate so rendering,
+        // step filtering and required-field validation cannot drift apart —
+        // the old inline copy here missed `staff-pending` entirely, which is
+        // why combined-form staff were asked for affiliation, role,
+        // presentation plans and emergency contacts (2026-08-19).
+        if (isAnyPendingClaim && !fieldRenderableForClaim(field, { isStaffClaim: isStaffClaimFlow })) return null;
 
         // Registration Mode Selector field — always render so visitor can pick a path
         if (field.type === 'registration-mode-selector') {
