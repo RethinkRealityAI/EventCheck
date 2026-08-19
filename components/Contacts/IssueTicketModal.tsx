@@ -5,6 +5,7 @@ import { getForms } from '../../services/storageService';
 import { supabase } from '../../services/supabaseClient';
 import type { Form } from '../../types';
 import type { ImportedContact } from '../../services/importedContactsService';
+import { classifyEmailFailure, extractInvokeError, shouldAbortBulkSend } from '../../utils/emailSendErrors';
 import { generateTrackingId } from '../../services/emailSendsService';
 
 const DEFAULT_FORM_ID = 'gansid-congress-2026-invite';
@@ -27,7 +28,7 @@ const IssueTicketModal: React.FC<Props> = ({ open, contacts, onClose, onComplete
   const [formsLoading, setFormsLoading] = useState(false);
   const [formId, setFormId] = useState('');
   const [sending, setSending] = useState(false);
-  const [done, setDone] = useState(false);
+  const [done, setDone] = useState(false);  const [abortNotice, setAbortNotice] = useState<string | null>(null);
   const [statuses, setStatuses] = useState<Record<string, RowStatus>>({});
 
   useEffect(() => {
@@ -78,7 +79,20 @@ const IssueTicketModal: React.FC<Props> = ({ open, contacts, onClose, onComplete
         const { data, error } = await supabase.functions.invoke('contact-issue-ticket', {
           body: { contactId: c.id, formId, origin: window.location.origin, trackingId: generateTrackingId() },
         });
-        if (error || (data as any)?.error) throw new Error((data as any)?.error || error?.message || 'failed');
+        if (error || (data as any)?.error) {
+          const raw = (data as any)?.error
+            ? String((data as any).error)
+            : await extractInvokeError(error);
+          const failure = classifyEmailFailure(raw);
+          // Stop rather than march through the rest of the list producing the
+          // same provider rejection for every remaining contact.
+          if (shouldAbortBulkSend(failure.kind)) {
+            setAbortNotice(failure.message);
+            setStatuses(prev => ({ ...prev, [c.id]: 'failed' }));
+            break;
+          }
+          throw new Error(failure.message);
+        }
         // The ticket is created even if the confirmation email fails (best-effort
         // server-side) — surface that distinctly instead of a false green "sent".
         const status: RowStatus = (data as any)?.emailSent === false
@@ -112,6 +126,12 @@ const IssueTicketModal: React.FC<Props> = ({ open, contacts, onClose, onComplete
         </div>
 
         <div className="p-6 space-y-4 overflow-y-auto">
+          {abortNotice && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3" role="alert">
+              <p className="text-sm font-semibold text-amber-900">Sending stopped</p>
+              <p className="mt-1 text-sm text-amber-900/85">{abortNotice}</p>
+            </div>
+          )}
           <div>
             <label htmlFor="it-form" className="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-1">Ticket for</label>
             <div className="relative">

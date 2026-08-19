@@ -11,6 +11,7 @@ import { renderEmailShell, mergePlaceholders, plainTextToHtml } from '../../util
 import { buildOpenPixelUrl, wrapClickUrl } from '../../utils/emailTracking';
 import { CURRENT_SITE } from '../../config/sites';
 import { supabase } from '../../services/supabaseClient';
+import { classifyEmailFailure, extractInvokeError, shouldAbortBulkSend } from '../../utils/emailSendErrors';
 import { getForms } from '../../services/storageService';
 import { generateTrackingId, logEmailSend } from '../../services/emailSendsService';
 import {
@@ -243,6 +244,9 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume,
   const [countdown, setCountdown] = useState(0);
   const [importing, setImporting] = useState(false);
   const cancelRef = useRef(false);
+  // Set when the provider refuses the whole run (quota / credentials) so the
+  // operator is told WHY it stopped rather than seeing it halt silently.
+  const [abortNotice, setAbortNotice] = useState<string | null>(null);
   const mountedRef = useRef(true);
 
   // ENV-FIRST SMTP (Resend edge secrets on GANSID; app_settings.smtp_pass cleared)
@@ -512,8 +516,28 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume,
               },
             },
           });
-      if (error) throw new Error(error.message || 'Send failed');
-      if ((data as any)?.error) throw new Error((data as any).error);
+      // Read the REAL provider error off error.context — supabase-js only
+      // exposes the generic "non-2xx status code" on .message.
+      if (error) {
+        const raw = await extractInvokeError(error);
+        const failure = classifyEmailFailure(raw);
+        // Past a quota or credentials rejection every remaining recipient fails
+        // identically. Continuing wastes the operator's time, floods the run
+        // with the same error, and on a metered plan deepens the overage.
+        if (shouldAbortBulkSend(failure.kind)) {
+          cancelRef.current = true;
+          setAbortNotice(failure.message);
+        }
+        throw new Error(failure.message);
+      }
+      if ((data as any)?.error) {
+        const failure = classifyEmailFailure(String((data as any).error));
+        if (shouldAbortBulkSend(failure.kind)) {
+          cancelRef.current = true;
+          setAbortNotice(failure.message);
+        }
+        throw new Error(failure.message);
+      }
 
       const sentAt = new Date().toISOString();
       setItemsSafe(prev => prev.map(i => i.id === item.id ? { ...i, status: 'sent', error: null } : i));
@@ -992,6 +1016,12 @@ export default function BulkImportModal({ settings, onClose, onComplete, resume,
           {/* STEP: send */}
           {step === 'send' && (
             <div className="flex-1 overflow-hidden flex flex-col">
+              {abortNotice && (
+                <div className="mx-6 mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3" role="alert">
+                  <p className="text-sm font-semibold text-amber-900">Sending stopped</p>
+                  <p className="mt-1 text-sm text-amber-900/85">{abortNotice}</p>
+                </div>
+              )}
               {/* Summary bar */}
               <div className="px-6 py-4 border-b border-gray-100 bg-gray-50">
                 <div className="flex items-center justify-between gap-4 flex-wrap">
