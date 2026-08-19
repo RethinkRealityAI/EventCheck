@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../AuthContext';
+import { StaffCompletionCard } from './StaffCompletionCard';
 import {
   getAttendeesForUser,
   getPortalForms,
@@ -39,6 +40,21 @@ export function PortalDashboard() {
     getAttendeesForUser(user.id, user.email).then(setAttendees);
     getPortalForms().then(setForms);
   }, [user, profile, refreshKey]);
+
+  // A staff member who signs up instead of clicking their invite link had NO
+  // route into the claim form: their row is payment_status='paid', so
+  // AvailableFormsGrid treats that form as already completed and the dashboard
+  // told them "You're all registered — nothing left on your list" while their
+  // details were never collected. Surface their own pending row instead.
+  const pendingStaffRow = useMemo(
+    () =>
+      attendees.find(
+        (a) =>
+          !a.isPrimary &&
+          (a.guestType === 'staff-pending' || a.guestType === 'exhibitor-staff-pending'),
+      ) ?? null,
+    [attendees],
+  );
 
   // Identify the user's primary submission for a sponsor/exhibitor org —
   // drives the TeamTable. We look only at rows the user themselves owns as
@@ -190,6 +206,16 @@ export function PortalDashboard() {
                 primary={userPrimary}
                 staff={staffRows}
                 onFillIn={handleFillIn}
+              />
+            )}
+            {pendingStaffRow && (
+              <StaffCompletionCard
+                row={pendingStaffRow}
+                orgName={
+                  (primariesById[pendingStaffRow.primaryAttendeeId ?? '']?.companyInfo as any)?.orgName
+                  || primariesById[pendingStaffRow.primaryAttendeeId ?? '']?.name
+                  || undefined
+                }
               />
             )}
             <AvailableFormsGrid

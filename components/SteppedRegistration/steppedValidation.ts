@@ -135,6 +135,32 @@ const GUEST_INLINE_EXCLUDED_ID_SUFFIX = /_fname$|_lname$|_email$|_country$/;
 // bounces the ticket email even when payment succeeds.
 export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/**
+ * Is this plausibly a real phone number?
+ *
+ * The `phone` field renders a plain text input, so "n/a", "ask my assistant"
+ * and similar all sail through today — and a staff member's ticket-delivery
+ * problems start with an unreachable contact. Deliberately permissive about
+ * FORMAT (spaces, dashes, parens, dots, a leading +) and strict only about
+ * substance: digits, and a count inside E.164's 7–15 range.
+ *
+ * Not a carrier-level validation and not trying to be — it rejects text, not
+ * wrong numbers.
+ */
+export function isLikelyPhoneNumber(raw: unknown): boolean {
+  const s = String(raw ?? '').trim();
+  if (!s) return false;
+  const cleaned = s.replace(/[\s().-]/g, '');
+  const withoutPlus = cleaned.startsWith('+') ? cleaned.slice(1) : cleaned;
+  if (!/^\d+$/.test(withoutPlus)) return false;
+  return withoutPlus.length >= 7 && withoutPlus.length <= 15;
+}
+
+/** Normalise a value for confirm-field comparison (emails are case-insensitive). */
+function confirmValue(v: unknown): string {
+  return String(v ?? '').trim().toLowerCase();
+}
+
 export function validateRequired(
   fields: FormField[],
   answers: Record<string, any>,
@@ -142,6 +168,24 @@ export function validateRequired(
 ): ValidateResult {
   for (const field of fields) {
     if (!isVisible(field)) continue;
+    // Confirmation fields ("re-type your email"). A typo here is how a ticket
+    // goes to an address nobody reads, so mismatches block submit even though
+    // both fields individually look valid.
+    const confirmsId = (field as any).confirmsFieldId as string | undefined;
+    if (confirmsId) {
+      const source = fields.find(f => f.id === confirmsId);
+      const a = confirmValue(answers[confirmsId]);
+      const b = confirmValue(answers[field.id]);
+      if (a && b && a !== b) {
+        return { ok: false, error: `${field.label} does not match ${source?.label ?? 'the address above'}.` };
+      }
+    }
+    if (field.type === 'phone') {
+      const raw = answers[field.id];
+      if (String(raw ?? '').trim() && !isLikelyPhoneNumber(raw)) {
+        return { ok: false, error: `Please enter a valid phone number for ${field.label}.` };
+      }
+    }
     // Format-check any email field that has a value, required or not — an
     // optional address still ends up on the order and on the ticket.
     if (field.type === 'email') {

@@ -522,6 +522,35 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupAllSameCategory, groupMembers[0]?.categoryId]);
 
+  // Pre-fill from the ?ref= row itself. The profile effect below needs a
+  // signed-in account, which an invited staff member clicking an emailed link
+  // does not have — so their name and email sat in the DB while the form
+  // showed empty boxes. Runs once; anything already answered wins.
+  const rowPrefilledRef = useRef(false);
+  useEffect(() => {
+    if (rowPrefilledRef.current) return;
+    if (!form || !loadedRefAttendee || !isAnyPendingClaim) return;
+    const rowName = (loadedRefAttendee.name ?? '').trim();
+    const rowEmail = (loadedRefAttendee.email ?? '').trim();
+    if (!rowName && !rowEmail) return;
+    // A placeholder slot ("Acme — Staff slot #2") is not a person's name.
+    const looksPlaceholder = /staff slot|guest ticket #/i.test(rowName);
+    const parts = looksPlaceholder ? [] : rowName.split(/s+/).filter(Boolean);
+    const firstName = parts.slice(0, 1).join(' ');
+    const lastName = parts.slice(1).join(' ');
+
+    const patch: Record<string, any> = {};
+    for (const field of form.fields) {
+      const id = field.id.toLowerCase();
+      const label = (field.label ?? '').toLowerCase();
+      if ((id.includes('fname') || label.includes('first name')) && firstName) patch[field.id] = firstName;
+      else if ((id.includes('lname') || label.includes('last name')) && lastName) patch[field.id] = lastName;
+      else if (field.type === 'email' && rowEmail) patch[field.id] = rowEmail;
+    }
+    if (Object.keys(patch).length > 0) setAnswers(prev => ({ ...patch, ...prev }));
+    rowPrefilledRef.current = true;
+  }, [form, loadedRefAttendee, isAnyPendingClaim]);
+
   // Pre-fill form answers from the signed-in user's profile so we don't re-ask
   // things we already know (name, email, organization, country, phone). Runs once
   // when profile + form both exist; later user edits are preserved.
@@ -1087,7 +1116,27 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
         // `_guest_*`, plus the `_purchaser_filled` snapshot itself) survive the
         // claim. The guest's edits still win for any field they touch.
         const purchaserSnapshot = (loadedRefAttendee.answers as Record<string, any> | undefined) ?? {};
-        const mergedAnswers = { ...purchaserSnapshot, ...answers };
+        const mergedAnswers: Record<string, any> = { ...purchaserSnapshot, ...answers };
+
+        // Staff never type their affiliation or role — the organisation that
+        // registered them already determines both. Stamp them so the data is
+        // still captured for the dashboard, exports and badges, rather than
+        // simply lost along with the questions we removed.
+        if (isStaffClaimFlow) {
+          const orgName = (fetchedPrimaryAttendee?.companyInfo as any)?.orgName
+            || fetchedPrimaryAttendee?.name
+            || '';
+          if (orgName) {
+            if (!mergedAnswers.f_org) mergedAnswers.f_org = orgName;
+            // "Novartis Staff" rather than a bare "Staff" — on a badge or an
+            // export the org is the useful half.
+            if (!mergedAnswers.f_role) mergedAnswers.f_role = `${String(orgName).trim()} Staff`;
+          } else if (!mergedAnswers.f_role) {
+            mergedAnswers.f_role = 'Staff Attendee';
+          }
+          // The confirm-email box is a check, not an answer — don't persist it.
+          delete mergedAnswers.f_email_confirm;
+        }
         const claimEmailField = form?.fields.find(f => f.type === 'email' || f.label.toLowerCase().includes('email'));
         // Full display name — handles split First/Last name forms (GANSID
         // Congress) instead of grabbing only the first text field's value.
