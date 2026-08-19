@@ -128,7 +128,8 @@ describe('prependReissueNotice', () => {
   it('reassures that the registration itself was never affected', () => {
     // A recipient told "your QR is attached" who saw an empty box has good
     // reason to fear their booking is gone. The copy must address that.
-    expect(buildReissueNoticeHtml()).toContain('registration was never affected');
+    expect(buildReissueNoticeHtml()).toContain('never affected');
+    expect(buildReissueNoticeHtml().toLowerCase()).toContain('sorry');
   });
 
   it('handles a null body', () => {

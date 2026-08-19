@@ -101,7 +101,7 @@ export function ensureTicketBlocks(template: string, opts: EnsureTicketBlocksOpt
  */
 export function buildReissueNoticeHtml(): string {
   return `<div style="margin:0 0 20px;padding:12px 16px;background:#fffbeb;border-left:3px solid #f59e0b;border-radius:4px;font-size:14px;">
-<strong>We're resending your ticket.</strong> Some earlier emails showed a blank space where the check-in QR code should be. That's fixed — your QR code is below, attached as an image, and downloadable from the link further down. Your registration was never affected.
+<strong>We're resending your ticket — sorry for the confusion.</strong> Your earlier confirmation showed a blank space where the check-in QR code should have been. That was our error, and it's now fixed: your QR code is below, attached to this email as an image, and downloadable from the link further down. Your registration and your place at the Congress were never affected.
 </div>`;
 }
 
