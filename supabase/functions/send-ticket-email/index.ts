@@ -10,6 +10,8 @@ import { resolveEmailTemplate } from '../_shared/emailTemplates.ts';
 import { buildAppUrl, isAbsoluteHttpUrl, resolveOrigin } from '../_shared/emailLinks.ts';
 import { buildOpenPixelUrl, appendTrackingPixel } from '../_shared/emailTracking.ts';
 import { buildQrImageUrl, fetchQrPng, inlineQrSrc, qrAttachments } from '../_shared/qrEmbed.ts';
+import { HEADER_LOGO_CID, fetchRemoteImage, inlineImageSrc, inlineAttachmentEntry } from '../_shared/imageEmbed.ts';
+import { ensureTicketBlocks, prependReissueNotice } from '../_shared/ticketBlock.ts';
 import { signRegistrationToken } from '../_shared/registrationToken.ts';
 
 const corsHeaders = {
@@ -133,16 +135,30 @@ function buildTransporter(smtpConfig?: any) {
  * Send a simple HTML email (no attachments).
  * Reads SMTP config from environment variables.
  */
-async function sendSimpleEmail({ to, subject, html, smtpConfig, attachments }: { to: string; subject: string; html: string; smtpConfig?: any; attachments?: any[] }) {
+async function sendSimpleEmail({ to, subject, html, smtpConfig, attachments, headerImageUrl }: { to: string; subject: string; html: string; smtpConfig?: any; attachments?: any[]; headerImageUrl?: string }) {
     const { transporter, fromName, fromAddress } = buildTransporter(smtpConfig);
+    // Inline the branded header logo as cid: as well. It is a hotlinked remote
+    // image, so corporate gateways blank it by default — and that empty box is
+    // what the Novartis recipient mistook for their missing QR code
+    // (2026-08-18). Best-effort: a fetch failure leaves the remote <img> in
+    // place, which is exactly the previous behaviour.
+    let finalHtml = html;
+    const finalAttachments: any[] = attachments ? [...attachments] : [];
+    if (headerImageUrl) {
+        const logo = await fetchRemoteImage(headerImageUrl, HEADER_LOGO_CID, 'email-header.png');
+        if (logo) {
+            finalHtml = inlineImageSrc(finalHtml, headerImageUrl, HEADER_LOGO_CID);
+            finalAttachments.push(inlineAttachmentEntry(logo));
+        }
+    }
     await transporter.sendMail({
         from: `"${fromName}" <${fromAddress}>`,
         to,
         subject,
-        html,
+        html: finalHtml,
         // Inline (cid:) attachments — the check-in QR rides here rather than as
         // a hotlinked remote image, which most clients block by default.
-        ...(attachments && attachments.length ? { attachments } : {}),
+        ...(finalAttachments.length ? { attachments: finalAttachments } : {}),
     });
 }
 
@@ -277,7 +293,7 @@ serve(async (req: Request) => {
                 footerText: tpl.footerText,
             });
 
-            await sendSimpleEmail({ to: guest.email, subject, html, smtpConfig });
+            await sendSimpleEmail({ to: guest.email, subject, html, smtpConfig, headerImageUrl: tpl.headerImageUrl });
             return jsonResponse({ ok: true });
         }
 
@@ -292,7 +308,7 @@ serve(async (req: Request) => {
             const smtpConfig = appSettings
                 ? { host: s.smtp_host, port: Number(s.smtp_port || 587), user: s.smtp_user, pass: s.smtp_pass, fromName: s.email_from_name || 'SCAGO' }
                 : undefined;
-            await sendSimpleEmail({ to, subject, html, smtpConfig });
+            await sendSimpleEmail({ to, subject, html, smtpConfig, headerImageUrl: tpl.headerImageUrl });
             return jsonResponse({ ok: true });
         }
 
@@ -388,7 +404,7 @@ serve(async (req: Request) => {
                 trackingId: typeof body.trackingId === 'string' ? body.trackingId : undefined,
             });
 
-            await sendSimpleEmail({ to: primary.email, subject, html, smtpConfig });
+            await sendSimpleEmail({ to: primary.email, subject, html, smtpConfig, headerImageUrl: tpl.headerImageUrl });
 
             // Stamp send time (best-effort; rowcount not critical for a metadata stamp).
             await supabase.from('attendees')
@@ -486,7 +502,7 @@ serve(async (req: Request) => {
                     footerText: tpl.footerText,
                 });
                 const embedded = await embedQrForEmail(html, qrData, qrImageUrl);
-                await sendSimpleEmail({ to: attendee.email, subject, html: embedded.html, smtpConfig, attachments: embedded.attachments });
+                await sendSimpleEmail({ to: attendee.email, subject, html: embedded.html, smtpConfig, attachments: embedded.attachments, headerImageUrl: tpl.headerImageUrl });
             } catch (e) {
                 console.warn('Failed to send personal ticket on claim-completion', e);
                 ticketOk = false;
@@ -519,7 +535,7 @@ serve(async (req: Request) => {
                     headerImageUrl: notifyTpl.headerImageUrl,
                     footerText: notifyTpl.footerText,
                 });
-                await sendSimpleEmail({ to: primary.email, subject, html, smtpConfig })
+                await sendSimpleEmail({ to: primary.email, subject, html, smtpConfig, headerImageUrl: notifyTpl.headerImageUrl })
                     .catch(e => console.warn('Primary notification failed', e));
             }
 
@@ -674,7 +690,7 @@ serve(async (req: Request) => {
                 footerText: tpl.footerText,
             });
 
-            await sendSimpleEmail({ to, subject, html, smtpConfig });
+            await sendSimpleEmail({ to, subject, html, smtpConfig, headerImageUrl: tpl.headerImageUrl });
             return jsonResponse({ ok: true });
         }
 
@@ -693,52 +709,99 @@ serve(async (req: Request) => {
                 ? { host: appSettings.smtp_host, port: Number(appSettings.smtp_port || 587), user: appSettings.smtp_user, pass: appSettings.smtp_pass, fromName: (appSettings as any).email_from_name || 'GANSID Congress' }
                 : undefined;
 
+            // Hydrate the staff row when we have an id. This mode used to take
+            // ONLY pre-composed fields, which is why it shipped a "ticket"
+            // email containing no ticket: the caller passed `attachments: []`
+            // and the template had no QR, so the recipient's only <img> was the
+            // (blocked) header logo — the 2026-08-18 Novartis report.
+            let staffRow: any = null;
+            if (body.attendeeId) {
+                const { data } = await supabase
+                    .from('attendees').select('*').eq('id', body.attendeeId).maybeSingle();
+                staffRow = data;
+            }
+
+            let formSettings: any = null;
+            if (staffRow?.form_id) {
+                const { data: form } = await supabase
+                    .from('forms').select('title, settings').eq('id', staffRow.form_id).maybeSingle();
+                formSettings = form;
+            }
+            const formEmailOverrides = (formSettings as any)?.settings?.emailOverrides;
+            const overrideOn = formEmailOverrides?.enabled === true;
+
             const tpl = resolveEmailTemplate({
+                formOverride: overrideOn ? formEmailOverrides?.templates?.['staff-confirmed'] : undefined,
                 globalSubject: (appSettings as any)?.email_staff_confirmed_subject,
                 globalBody: (appSettings as any)?.email_staff_confirmed_body,
                 defaultSubject: 'Your registration for {{event}} is confirmed',
-                defaultBody: `<p>Hi {{name}},</p><p>Thank you for completing your registration for <strong>{{event}}</strong> on behalf of <strong>{{org_name}}</strong>!</p><p>Your ticket is attached. Please bring it (or the QR code) to the event for check-in.</p>`,
+                defaultBody: `<p>Hi {{name}},</p><p>Thank you for completing your registration for <strong>{{event}}</strong> on behalf of <strong>{{org_name}}</strong>!</p><p>Present the QR code below at the entrance — the team will scan it.</p>`,
+                formHeaderImageUrl: overrideOn ? formEmailOverrides?.headerImageUrl : undefined,
                 globalHeaderImageUrl: (appSettings as any)?.email_header_logo,
                 globalFooterText: (appSettings as any)?.email_footer_text,
             });
 
-            const vars = {
-                name: body.name || 'there',
-                org_name: body.orgName || '',
-                event: body.eventName || 'the event',
-            };
-            const subject = applyPlaceholders(tpl.subject, vars, body.mode);
-            const body_html = applyPlaceholders(tpl.body, vars, body.mode);
-            const hasAttachments = Array.isArray(body.attachments) && body.attachments.length > 0;
-            const html = generateEmailTemplate({
-                title: body.eventName || 'the event',
-                content: body_html,
-                attachmentNote: hasAttachments ? 'Attachment included — please review the PDF.' : undefined,
-                fromName: smtpConfig?.fromName,
-                headerImageUrl: tpl.headerImageUrl,
-                footerText: tpl.footerText,
+            // Three independent routes to a ticket: inline cid: QR, the same
+            // PNG attached separately, and a tokenised /#/tickets link that
+            // rebuilds the branded PDF. Any one of them is enough to get the
+            // holder through the door.
+            const qrData = staffRow ? (staffRow.qr_payload || staffRow.id) : '';
+            const qrImageUrl = qrData ? buildQrImageUrl(qrData) : '';
+            const downloadUrl = staffRow
+                ? await buildTicketDownloadUrl(staffRow.id, staffRow.form_id, sendOrigin(body, req))
+                : '';
+
+            // Append whatever the (admin-editable) template is missing, so an
+            // edit in Settings can never silently delete the ticket again.
+            const bodyTemplate = ensureTicketBlocks(tpl.body, {
+                includeQr: !!qrImageUrl,
+                includeDownload: !!downloadUrl,
             });
 
-            // Use the transporter directly so we can include attachments.
-            const { transporter, fromName, fromAddress } = buildTransporter(smtpConfig);
-            const attachments = (body.attachments || []).map((att: { filename: string; content: string; contentType?: string }) => ({
+            const vars = {
+                name: body.name || staffRow?.name || 'there',
+                org_name: body.orgName || '',
+                event: body.eventName || (formSettings as any)?.title || 'the event',
+                registration_id: staffRow?.id || '',
+                qr_image_url: qrImageUrl,
+                ticket_download_url: downloadUrl,
+            };
+            const subject = applyPlaceholders(tpl.subject, vars, body.mode);
+            const body_html = prependReissueNotice(applyPlaceholders(bodyTemplate, vars, body.mode), body.reissue);
+
+            const pdfAttachments = (body.attachments || []).map((att: { filename: string; content: string; contentType?: string }) => ({
                 filename: att.filename,
                 content: att.content,
                 encoding: 'base64',
                 contentType: att.contentType || 'application/pdf',
             }));
-            await transporter.sendMail({
-                from: `"${fromName}" <${fromAddress}>`,
-                to: body.to,
-                subject,
-                html,
-                attachments,
+            const html = generateEmailTemplate({
+                title: vars.event,
+                content: body_html,
+                attachmentNote: pdfAttachments.length ? 'Your ticket PDF is attached.' : undefined,
+                fromName: smtpConfig?.fromName,
+                headerImageUrl: tpl.headerImageUrl,
+                footerText: tpl.footerText,
             });
+
+            const embedded = qrImageUrl
+                ? await embedQrForEmail(html, qrData, qrImageUrl)
+                : { html, attachments: [] as any[] };
+
+            const to = body.to || staffRow?.email;
+            if (!to) return jsonResponse({ error: 'staff-claim-completed: missing recipient (to/attendeeId)' }, 400);
+
+            await sendSimpleEmail({
+                to,
+                subject,
+                html: embedded.html,
+                smtpConfig,
+                attachments: [...embedded.attachments, ...pdfAttachments],
+                headerImageUrl: tpl.headerImageUrl,
+            });
+
             // Stamp `last_ticket_email_at` when the caller supplies an
-            // attendeeId. The current shape doesn't require it (callers
-            // pass pre-composed fields), so we treat it as optional —
-            // sponsor/exhibitor flow can be updated to pass it for full
-            // dashboard coverage.
+            // attendeeId, so the dashboard reflects "Sent".
             if (body.attendeeId) {
                 try {
                     await supabase
@@ -749,7 +812,7 @@ serve(async (req: Request) => {
                     console.warn('Failed to stamp last_ticket_email_at on staff-claim-completed', stampErr);
                 }
             }
-            return jsonResponse({ ok: true });
+            return jsonResponse({ ok: true, qrEmbedded: !!qrImageUrl, downloadUrl: !!downloadUrl });
         }
 
         // ── EXHIBITOR STAFF INVITE: send registration-completion link to an exhibitor staff member ──
@@ -838,7 +901,7 @@ serve(async (req: Request) => {
                 footerText: tpl.footerText,
             });
 
-            await sendSimpleEmail({ to: staff.email, subject, html, smtpConfig });
+            await sendSimpleEmail({ to: staff.email, subject, html, smtpConfig, headerImageUrl: tpl.headerImageUrl });
             return jsonResponse({ ok: true });
         }
 
@@ -885,7 +948,7 @@ serve(async (req: Request) => {
                 globalSubject: (appSettings as any)?.email_staff_confirmed_subject,
                 globalBody: (appSettings as any)?.email_staff_confirmed_body,
                 defaultSubject: 'Your registration for {{event}} is confirmed',
-                defaultBody: `<p>Hi {{name}},</p><p>Thank you for completing your registration for <strong>{{event}}</strong> on behalf of <strong>{{org_name}}</strong>!</p><p>You are all set. Please bring this confirmation (or the QR code on your ticket) to the event for check-in.</p>`,
+                defaultBody: `<p>Hi {{name}},</p><p>Thank you for completing your registration for <strong>{{event}}</strong> on behalf of <strong>{{org_name}}</strong>!</p><p>Present the QR code below at the entrance — the team will scan it.</p>`,
                 formHeaderImageUrl: overrideOn ? formEmailOverrides?.headerImageUrl : undefined,
                 globalHeaderImageUrl: (appSettings as any)?.email_header_logo,
                 globalFooterText: (appSettings as any)?.email_footer_text,
@@ -907,8 +970,24 @@ serve(async (req: Request) => {
                 console.error('exhibitor-staff-claim-completed: staff has no email', { staffId: staff.id });
             } else {
                 try {
-                    const subject = applyPlaceholders(tpl.subject, vars, body.mode);
-                    const body_html = applyPlaceholders(tpl.body, vars, body.mode);
+                    // Three independent routes to a ticket: inline cid: QR, the
+                    // same PNG attached separately, and a tokenised /#/tickets
+                    // link. This email previously carried none of them.
+                    const qrData = staff.qr_payload || staff.id;
+                    const qrImageUrl = buildQrImageUrl(qrData);
+                    const downloadUrl = await buildTicketDownloadUrl(staff.id, staff.form_id, sendOrigin(body, req));
+                    const bodyTemplate = ensureTicketBlocks(tpl.body, {
+                        includeQr: true,
+                        includeDownload: !!downloadUrl,
+                    });
+                    const ticketVars = {
+                        ...vars,
+                        registration_id: staff.id,
+                        qr_image_url: qrImageUrl,
+                        ticket_download_url: downloadUrl,
+                    };
+                    const subject = applyPlaceholders(tpl.subject, ticketVars, body.mode);
+                    const body_html = prependReissueNotice(applyPlaceholders(bodyTemplate, ticketVars, body.mode), body.reissue);
                     const html = generateEmailTemplate({
                         title: eventName,
                         content: body_html,
@@ -916,7 +995,15 @@ serve(async (req: Request) => {
                         headerImageUrl: tpl.headerImageUrl,
                         footerText: tpl.footerText,
                     });
-                    await sendSimpleEmail({ to: staff.email, subject, html, smtpConfig });
+                    const embedded = await embedQrForEmail(html, qrData, qrImageUrl);
+                    await sendSimpleEmail({
+                        to: staff.email,
+                        subject,
+                        html: embedded.html,
+                        smtpConfig,
+                        attachments: embedded.attachments,
+                        headerImageUrl: tpl.headerImageUrl,
+                    });
                     staffTicketEmailSent = true;
                 } catch (e) {
                     console.warn('Failed to send exhibitor-staff ticket email', e);
@@ -952,7 +1039,7 @@ serve(async (req: Request) => {
                     headerImageUrl: notifyTpl.headerImageUrl,
                     footerText: notifyTpl.footerText,
                 });
-                await sendSimpleEmail({ to: org.email, subject, html, smtpConfig })
+                await sendSimpleEmail({ to: org.email, subject, html, smtpConfig, headerImageUrl: notifyTpl.headerImageUrl })
                     .catch(e => console.warn('Org contact notification failed', e));
             }
 
@@ -1076,16 +1163,7 @@ serve(async (req: Request) => {
                 account_cta: accountCta,
             };
             const subject = applyPlaceholders(tpl.subject, vars, body.mode);
-            let body_html = applyPlaceholders(tpl.body, vars, body.mode);
-
-            // Re-issue: prepend an explanation when we're resending because the
-            // original email's QR didn't display. Opt-in via `reissue: true` so
-            // ordinary sends are untouched.
-            if (body.reissue === true) {
-                body_html = `<div style="margin:0 0 20px;padding:12px 16px;background:#fffbeb;border-left:3px solid #f59e0b;border-radius:4px;font-size:14px;">
-<strong>We're resending your ticket.</strong> Some earlier emails showed a blank space where the check-in QR code should be. That's fixed — your QR code is below, attached as an image, and downloadable from the link further down. Your registration was never affected.
-</div>` + body_html;
-            }
+            let body_html = prependReissueNotice(applyPlaceholders(tpl.body, vars, body.mode), body.reissue);
 
             // Route 3 to a ticket: the tokenised download page rebuilds the full
             // branded PDF. Survives forwarding and image-stripping alike.
@@ -1106,7 +1184,7 @@ serve(async (req: Request) => {
                 // The BOGO email carries NO PDF — the QR image IS the ticket —
                 // so a blocked remote image left the guest with nothing.
                 const embedded = await embedQrForEmail(html, qrData, qrImageUrl);
-                await sendSimpleEmail({ to: free.email, subject, html: embedded.html, smtpConfig, attachments: embedded.attachments });
+                await sendSimpleEmail({ to: free.email, subject, html: embedded.html, smtpConfig, attachments: embedded.attachments, headerImageUrl: tpl.headerImageUrl });
                 // Stamp last_ticket_email_at so dashboards show "Sent".
                 await supabase.from('attendees')
                     .update({ last_ticket_email_at: new Date().toISOString() })
@@ -1172,7 +1250,7 @@ serve(async (req: Request) => {
             });
 
             try {
-                await sendSimpleEmail({ to: payerEmail, subject, html, smtpConfig });
+                await sendSimpleEmail({ to: payerEmail, subject, html, smtpConfig, headerImageUrl: tpl.headerImageUrl });
             } catch (e) {
                 console.error('bogo-claim-link email failed', e);
                 return jsonResponse({ error: 'Email send failed' }, 500);
@@ -1230,7 +1308,7 @@ serve(async (req: Request) => {
 
             try {
                 const embedded = await embedQrForEmail(html, qrData, qrImageUrl);
-                await sendSimpleEmail({ to: free.email, subject, html: embedded.html, smtpConfig, attachments: embedded.attachments });
+                await sendSimpleEmail({ to: free.email, subject, html: embedded.html, smtpConfig, attachments: embedded.attachments, headerImageUrl: tpl.headerImageUrl });
                 await supabase.from('attendees')
                     .update({ last_ticket_email_at: new Date().toISOString() })
                     .eq('id', free.id);
@@ -1292,7 +1370,7 @@ serve(async (req: Request) => {
             });
 
             try {
-                await sendSimpleEmail({ to: guestEmail, subject, html, smtpConfig });
+                await sendSimpleEmail({ to: guestEmail, subject, html, smtpConfig, headerImageUrl: tpl.headerImageUrl });
             } catch (e) {
                 console.error('bogo-ticket-withdrawn email failed', e);
                 return jsonResponse({ error: 'Email send failed' }, 500);
