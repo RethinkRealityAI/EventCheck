@@ -1237,6 +1237,15 @@ serve(async (req: Request) => {
         extrasIds = (extraData || []).map((r: any) => r.id);
       }
 
+      // The organisation's own contact got NO confirmation email at all. Every
+      // other registration path calls this; the sponsor/exhibitor branch never
+      // did, so the org contact — who is also an attendee, with their own
+      // qr_payload — was left with nothing while their STAFF received tickets.
+      // Confirmed on live GANSID: both Novartis primary rows had
+      // last_ticket_email_at = null. Best-effort, like every other call site:
+      // it must never fail a submission that already succeeded.
+      await sendRegistrationConfirmedEmail(primaryRow.id, formId, req.headers.get('origin') ?? '');
+
       return jsonResponse({
         ok: true,
         primaryId: primaryRow.id,

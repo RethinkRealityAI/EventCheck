@@ -425,7 +425,7 @@ serve(async (req: Request) => {
             if (primary.is_test === true) return jsonResponse({ ok: true, skipped: 'test' });
 
             const { data: form } = await supabase
-                .from('forms').select('title, settings').eq('id', primary.form_id).maybeSingle();
+                .from('forms').select('title, settings, fields').eq('id', primary.form_id).maybeSingle();
             const eventName = form?.title || 'the event';
             const formEmailOverrides = (form as any)?.settings?.emailOverrides;
 
@@ -479,6 +479,20 @@ serve(async (req: Request) => {
                    </div>`
                 : '';
 
+            // This email is the highest-volume one we send — it fires on EVERY
+            // registration — and its live template says "your ticket is attached
+            // to this email" / "bring the attached PDF". Until now it attached
+            // NOTHING and rendered no QR: the copy was simply false, and this
+            // was the only ticket-bearing mode never given the treatment the
+            // others got. It now carries the same three routes as the rest.
+            const qrData = primary.qr_payload || primary.id;
+            const qrImageUrl = buildQrImageUrl(qrData);
+            const ticketPdf = await buildTicketPdfAttachment(primary, form, appSettings);
+            const bodyTemplate = ensureTicketBlocks(tpl.body, {
+                includeQr: true,
+                attachmentNote: attachmentNoteFor(!!ticketPdf),
+            });
+
             const vars = {
                 event: eventName,
                 name: primary.name || '',
@@ -486,9 +500,12 @@ serve(async (req: Request) => {
                 invoiceId: primary.invoice_id || '',
                 amount: primary.payment_amount || '',
                 download_url: downloadUrl,
+                registration_id: primary.id || '',
+                qr_image_url: qrImageUrl,
+                ticket_download_url: downloadUrl,
             };
             const subject = applyPlaceholders(tpl.subject, vars, body.mode);
-            const contentHtml = applyPlaceholders(tpl.body, vars, body.mode) + downloadBlock;
+            const contentHtml = applyPlaceholders(bodyTemplate, vars, body.mode) + downloadBlock;
             const html = generateEmailTemplate({
                 title: eventName,
                 content: contentHtml,
@@ -498,7 +515,18 @@ serve(async (req: Request) => {
                 trackingId: typeof body.trackingId === 'string' ? body.trackingId : undefined,
             });
 
-            await sendSimpleEmail({ to: primary.email, subject, html, smtpConfig, headerImageUrl: tpl.headerImageUrl });
+            // The PDF here is the PURCHASER's own ticket. Guests are covered by
+            // the download link — attaching N guest PDFs is what made the old
+            // client-side table email hit provider size limits.
+            const embedded = await embedQrForEmail(html, qrData, qrImageUrl, !ticketPdf);
+            await sendSimpleEmail({
+                to: primary.email,
+                subject,
+                html: embedded.html,
+                smtpConfig,
+                attachments: ticketPdf ? [...embedded.attachments, ticketPdf] : embedded.attachments,
+                headerImageUrl: tpl.headerImageUrl,
+            });
 
             // Stamp send time (best-effort; rowcount not critical for a metadata stamp).
             await supabase.from('attendees')
