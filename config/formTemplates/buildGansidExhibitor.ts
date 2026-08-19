@@ -26,7 +26,7 @@ export function buildGansidExhibitor(): Omit<Form, 'id' | 'status' | 'createdAt'
     thankYouMessage: 'Thank you for registering! Your staff will receive invitation emails.',
     formType: 'exhibitor',
     settings: {
-      staffFormId: 'gansid-congress-2026',
+      staffFormId: 'gansid-congress-2026-staff',
     } as any,
     fields: [],
   };

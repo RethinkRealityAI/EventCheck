@@ -7,7 +7,9 @@ import type { Form } from '../../types';
 // StepSponsorTier + StepExhibitorBooth read their respective config modules
 // directly, same pattern as the legacy PublicExhibitorForm.
 //
-// `settings.staffFormId` points at the companion event form (gansid-congress-2026)
+// `settings.staffFormId` points at the SHORT staff form (gansid-congress-2026-staff),
+// NOT the full paid congress form — staff are covered by the org and must never
+// be shown a registration type, a group, or payment.
 // that collects per-staff personal details (dietary, emergency, consents). Staff
 // rows written by verify-payment's sponsorExhibitorSubmission branch inherit that
 // form_id so the claim link lands on the right personal-details form.
@@ -18,7 +20,7 @@ export function buildGansidSponsorExhibitor(): Omit<Form, 'id' | 'status' | 'cre
     thankYouMessage: 'Thank you. Your staff will receive invitation emails shortly. You can manage your team from your portal dashboard.',
     formType: 'sponsor_exhibitor',
     settings: {
-      staffFormId: 'gansid-congress-2026',
+      staffFormId: 'gansid-congress-2026-staff',
     } as any,
     fields: [],
   };

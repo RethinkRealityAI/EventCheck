@@ -46,6 +46,13 @@ export function PortalDashboard() {
   // AvailableFormsGrid treats that form as already completed and the dashboard
   // told them "You're all registered — nothing left on your list" while their
   // details were never collected. Surface their own pending row instead.
+  //
+  // Deliberately guest_type-based, unlike the ?ref= claim path which is
+  // structural. The two answer different questions: the claim path must ACCEPT
+  // anyone arriving with a link (including rows written with guest_type=NULL),
+  // whereas this CTA should only prompt people who genuinely still owe us
+  // details. A NULL row means the organisation already supplied everything, so
+  // nagging them to "finish" would be wrong.
   const pendingStaffRow = useMemo(
     () =>
       attendees.find(

@@ -535,7 +535,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
     if (!rowName && !rowEmail) return;
     // A placeholder slot ("Acme — Staff slot #2") is not a person's name.
     const looksPlaceholder = /staff slot|guest ticket #/i.test(rowName);
-    const parts = looksPlaceholder ? [] : rowName.split(/s+/).filter(Boolean);
+    const parts = looksPlaceholder ? [] : rowName.split(/\s+/).filter(Boolean);
     const firstName = parts.slice(0, 1).join(' ');
     const lastName = parts.slice(1).join(' ');
 
@@ -543,6 +543,9 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
     for (const field of form.fields) {
       const id = field.id.toLowerCase();
       const label = (field.label ?? '').toLowerCase();
+      // NEVER prefill a confirmation field: pre-filling both boxes with the
+      // same value means the check can never catch the typo it exists to catch.
+      if ((field as any).confirmsFieldId) continue;
       if ((id.includes('fname') || label.includes('first name')) && firstName) patch[field.id] = firstName;
       else if ((id.includes('lname') || label.includes('last name')) && lastName) patch[field.id] = lastName;
       else if (field.type === 'email' && rowEmail) patch[field.id] = rowEmail;
@@ -716,7 +719,19 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
         if (refAttendee?.primaryAttendeeId) {
           refParent = await getAttendee(refAttendee.primaryAttendeeId);
         }
-        const parentIsOrg = !!refParent
+        // A sponsor TIER alone is not enough to mean "staff". SCAGO's Hope Gala
+        // sponsor form also creates non-primary guest rows under a parent that
+        // carries `sponsorTier` — treating those as staff would hide fields
+        // from ordinary sponsor guests and stamp f_org/f_role into their
+        // answers on the other tenant. Require the parent to have been created
+        // by a form that actually has a staff roster.
+        let parentFormType: string | undefined;
+        if (refParent?.formId) {
+          const parentForm = await getFormById(refParent.formId);
+          parentFormType = (parentForm as any)?.formType;
+        }
+        const parentIsStaffOrg = parentFormType === 'sponsor_exhibitor' || parentFormType === 'exhibitor';
+        const parentIsOrg = !!refParent && parentIsStaffOrg
           && (!!(refParent as any).sponsorTier || !!(refParent as any).exhibitorBoothType);
         const refIsStaff = !!refAttendee && !refAttendee.isPrimary && parentIsOrg;
 
@@ -1095,15 +1110,20 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
     if (isAnyPendingClaim && loadedRefAttendee) {
       setLoading(true);
       try {
-        const newGuestType = isStaffClaim
-          ? 'staff-claimed'
-          : isExhibitorStaffPending
-            ? 'exhibitor-staff-claimed'
+        // Key off isStaffClaimFlow, NOT isStaffClaim. The latter is guest_type
+        // based, so a staff row written with guest_type = NULL would be stamped
+        // 'claimed' and sent the ordinary guest email — which then hides it from
+        // the Exhibitors tab (neither Pending nor Claimed) and leaks it into the
+        // dashboard's Live tab, since isStaffRow keys on the staff guest_types.
+        const newGuestType = isExhibitorStaffPending
+          ? 'exhibitor-staff-claimed'
+          : isStaffClaimFlow
+            ? 'staff-claimed'
             : 'claimed';
-        const emailMode = isStaffClaim
-          ? 'staff-claim-completed'
-          : isExhibitorStaffPending
-            ? 'exhibitor-staff-claim-completed'
+        const emailMode = isExhibitorStaffPending
+          ? 'exhibitor-staff-claim-completed'
+          : isStaffClaimFlow
+            ? 'staff-claim-completed'
             : 'guest-claim-completed';
 
         // If the guest is already signed in AND their auth email matches the

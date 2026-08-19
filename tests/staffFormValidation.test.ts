@@ -169,3 +169,31 @@ describe('stepTitleForClaim', () => {
     expect(stepTitleForClaim('Payment', [ticket], { isClaim: true })).toBe('Payment');
   });
 });
+
+describe('claim-row prefill name splitting', () => {
+  // Mirrors the prefill effect in PublicRegistration. A missing backslash here
+  // (`/s+/` instead of `/\s+/`) split on the LETTER s, so "Musa Hassan" became
+  // first="Mu", last="a Ha an" — straight onto the badge and the ticket.
+  const splitName = (rowName: string) => {
+    const parts = rowName.split(/\s+/).filter(Boolean);
+    return { first: parts.slice(0, 1).join(' '), last: parts.slice(1).join(' ') };
+  };
+
+  it('splits names containing a lowercase s correctly', () => {
+    expect(splitName('Musa Hassan')).toEqual({ first: 'Musa', last: 'Hassan' });
+    expect(splitName('Sameera Srinivasan')).toEqual({ first: 'Sameera', last: 'Srinivasan' });
+    expect(splitName('Joseph Macaulay')).toEqual({ first: 'Joseph', last: 'Macaulay' });
+  });
+
+  it('keeps multi-part surnames together', () => {
+    expect(splitName('Ashok Varma Kalidindi')).toEqual({ first: 'Ashok', last: 'Varma Kalidindi' });
+  });
+
+  it('tolerates padding and collapses runs of whitespace', () => {
+    expect(splitName('  Vikas   Joshi ')).toEqual({ first: 'Vikas', last: 'Joshi' });
+  });
+
+  it('handles a single-word name without inventing a surname', () => {
+    expect(splitName('Prince')).toEqual({ first: 'Prince', last: '' });
+  });
+});
