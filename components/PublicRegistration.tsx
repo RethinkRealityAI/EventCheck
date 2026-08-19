@@ -579,6 +579,11 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
     for (const field of form.fields) {
       const id = field.id.toLowerCase();
       const label = (field.label ?? '').toLowerCase();
+      // Never prefill a confirmation field. Doing so defeats the check, and
+      // worse: this effect fills from the signed-in PROFILE, so a staff member
+      // whose account address differs from the address the org registered got
+      // "Confirm Email does not match" on a form they had not touched.
+      if ((field as any).confirmsFieldId) continue;
       if ((id.includes('fname') || label.includes('first name')) && firstName) patch[field.id] = firstName;
       else if ((id.includes('lname') || label.includes('last name')) && lastName) patch[field.id] = lastName;
       else if (field.type === 'email' && profile.email) patch[field.id] = profile.email;
