@@ -10,6 +10,7 @@ import Settings from './components/Settings';
 import { ContentCms } from './components/ContentCms/ContentCms';
 import PublicRegistration from './components/PublicRegistration';
 import { TicketDownloadPage } from './components/TicketDownload/TicketDownloadPage';
+import PayBalancePage from './components/PayBalance/PayBalancePage';
 import SeatingConfigurator from './components/Seating/SeatingConfigurator';
 import SponsorsDashboard from './components/Sponsors/SponsorsDashboard';
 import { NotificationProvider } from './components/NotificationSystem';
@@ -792,6 +793,12 @@ export default function App() {
                 confirmation email's secure token link. No auth required:
                 the HMAC token in the URL is the credential. */}
             <Route path="/tickets" element={<TicketDownloadPage />} />
+
+            {/* Public balance-payment page — opened from a payment-request
+                email for a pending-payment registration. Same trust model as
+                /tickets: the signed token is the credential, and the amount is
+                resolved server-side from the attendee row. */}
+            <Route path="/pay" element={<PayBalancePage />} />
 
             {/* Change password — any signed-in user can reach this. Primarily
                 used by SCAGO admins (no portal surface) + as a fallback link

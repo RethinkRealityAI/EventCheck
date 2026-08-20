@@ -76,3 +76,7 @@ verify_jwt = true
 # refuses to touch super_admin targets, and restricts set-password to super_admin.
 [functions.admin-user-actions]
 verify_jwt = true
+
+[functions.pay-balance]
+# The signed pay token IS the credential (same model as registration-download).
+verify_jwt = false

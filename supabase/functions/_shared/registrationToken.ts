@@ -148,3 +148,49 @@ export async function verifyInviteToken(
   if (typeof raw.c !== 'string' || typeof raw.f !== 'string') return { valid: false, reason: 'malformed' };
   return { valid: true, contactId: raw.c as string, formId: raw.f as string };
 }
+
+// ── Pay token (kind='pay') ───────────────────────────────────────────────────
+// Encodes { attendeeId } for the standalone /#/pay balance-collection page.
+// Same isolation rules as the invite token: a pay token parsed by any other
+// verifier fails on kind, and vice versa, so a payment link can never be used
+// to download tickets or claim an invite (or the reverse).
+
+export interface PayTokenPayload {
+  k: 'pay';
+  a: string; // attendees.id (TEXT on both tenants)
+  iat: number;
+  exp: number;
+}
+
+export type PayVerifyResult =
+  | { valid: true; attendeeId: string }
+  | { valid: false; reason: 'malformed' | 'bad-signature' | 'expired' | 'wrong-kind' };
+
+export async function signPayToken(
+  attendeeId: string, secret: string, nowMs: number, ttlMs: number,
+): Promise<string> {
+  const payload: PayTokenPayload = { k: 'pay', a: attendeeId, iat: nowMs, exp: nowMs + ttlMs };
+  const body = b64urlEncode(new TextEncoder().encode(JSON.stringify(payload)));
+  const sig = await hmacBase64Url(secret, body);
+  return `${body}.${sig}`;
+}
+
+export async function verifyPayToken(
+  token: string, secret: string, nowMs: number,
+): Promise<PayVerifyResult> {
+  if (typeof token !== 'string') return { valid: false, reason: 'malformed' };
+  const parts = token.split('.');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return { valid: false, reason: 'malformed' };
+  const [body, sig] = parts;
+  let raw: Record<string, unknown>;
+  try { raw = JSON.parse(b64urlDecodeToString(body)); }
+  catch { return { valid: false, reason: 'malformed' }; }
+  if (!raw || typeof raw.exp !== 'number') return { valid: false, reason: 'malformed' };
+  // Signature check BEFORE k/exp — a forged-kind token still fails on signature first.
+  const expected = await hmacBase64Url(secret, body);
+  if (!timingSafeEqual(sig, expected)) return { valid: false, reason: 'bad-signature' };
+  if (raw.k !== 'pay') return { valid: false, reason: 'wrong-kind' };
+  if (nowMs > (raw.exp as number)) return { valid: false, reason: 'expired' };
+  if (typeof raw.a !== 'string' || !raw.a) return { valid: false, reason: 'malformed' };
+  return { valid: true, attendeeId: raw.a as string };
+}

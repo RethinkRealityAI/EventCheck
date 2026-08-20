@@ -122,6 +122,36 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
     || localAttendee.guestType === 'exhibitor-staff-pending'
     || localAttendee.guestType === 'staff-pending';
 
+  // Payment-link send state: idle → sending → the URL (shown for copy/relay).
+  const [payLinkState, setPayLinkState] = useState<'idle' | 'sending' | 'sent'>('idle');
+  const [payLinkUrl, setPayLinkUrl] = useState('');
+  const [payLinkError, setPayLinkError] = useState('');
+
+  const handleSendPaymentLink = async () => {
+    setPayLinkState('sending');
+    setPayLinkError('');
+    try {
+      const { data, error } = await supabase.functions.invoke('send-ticket-email', {
+        body: {
+          mode: 'payment-request',
+          attendeeId: localAttendee.id,
+          origin: window.location.origin,
+        },
+      });
+      if (error) {
+        const { extractInvokeError, classifyEmailFailure } = await import('../utils/emailSendErrors');
+        throw new Error(classifyEmailFailure(await extractInvokeError(error)).message);
+      }
+      if ((data as any)?.error) throw new Error(String((data as any).error));
+      setPayLinkUrl(String((data as any)?.url ?? ''));
+      setPayLinkState('sent');
+      showNotification('Payment link emailed.', 'success');
+    } catch (e: any) {
+      setPayLinkState('idle');
+      setPayLinkError(e?.message || 'Failed to send the payment link.');
+    }
+  };
+
   const handleResendEmail = async (scope: 'primary-only' | 'all' = 'all') => {
     setResending(scope === 'all' ? 'all' : 'primary');
     try {
@@ -723,6 +753,42 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
                       </button>
                     );
                   })()}
+
+                  {/* Balance collection — ONLY for pending-payment rows. The
+                      email carries a signed /#/pay link: amount + PayPal
+                      button, no re-registration. Paid/free/cheque/external
+                      rows never see this button (the server refuses them
+                      too — this gate is cosmetic, that one is real). */}
+                  {localAttendee.paymentStatus === 'pending'
+                    && (localAttendee.paymentMethod === 'paypal' || localAttendee.paymentMethod === 'card') && (
+                    <div className="mt-2">
+                      <button
+                        onClick={handleSendPaymentLink}
+                        disabled={payLinkState === 'sending'}
+                        className="w-full py-2.5 bg-amber-500 text-white rounded-xl font-bold hover:bg-amber-600 transition-all flex items-center justify-center gap-2 shadow-sm text-xs disabled:opacity-50"
+                      >
+                        <Mail className="w-4 h-4" />
+                        {payLinkState === 'sending' ? 'Sending…' : payLinkState === 'sent' ? 'Payment link sent — send again' : 'Send Payment Link'}
+                      </button>
+                      {payLinkError && <p className="text-xs text-red-600 mt-1.5">{payLinkError}</p>}
+                      {payLinkState === 'sent' && payLinkUrl && (
+                        <div className="mt-1.5 flex items-center gap-1.5">
+                          <input
+                            readOnly
+                            value={payLinkUrl}
+                            className="flex-1 text-[11px] font-mono bg-gray-50 border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600"
+                            onFocus={e => e.currentTarget.select()}
+                          />
+                          <button
+                            onClick={() => { navigator.clipboard?.writeText(payLinkUrl); showNotification('Link copied.', 'success'); }}
+                            className="text-[11px] px-2 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                          >
+                            Copy
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Portal account management — reset / magic link / create.

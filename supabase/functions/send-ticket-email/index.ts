@@ -16,7 +16,8 @@ import { jsPDF } from 'npm:jspdf@2.5.1';
 import { drawTicketPdf, ticketFromAttendeeRow, ticketPdfFilename, bytesToBase64 } from '../_shared/ticketPdf.ts';
 import { resolveAttendeeDisplayName } from '../_shared/attendeeDisplayName.ts';
 import { guessImageContentType, isFetchableImageUrl } from '../_shared/imageEmbed.ts';
-import { signRegistrationToken } from '../_shared/registrationToken.ts';
+import { signRegistrationToken, signPayToken } from '../_shared/registrationToken.ts';
+import { assessPayability } from '../_shared/payBalance.ts';
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -338,6 +339,73 @@ serve(async (req: Request) => {
                 html: rawHtml,
             });
             return jsonResponse({ ok: true });
+        }
+
+        // ── PAYMENT REQUEST: send a pay-balance link for a pending-payment row ──
+        // The recipient is ALREADY registered and ticketed; only money is
+        // outstanding. The link opens /#/pay — amount + PayPal button, nothing
+        // else — so it cannot read as "please register again". Only rows the
+        // payability rules accept can be sent a link at all: mailing one to a
+        // paid/free/cheque/external row would at best confuse and at worst
+        // double-collect. Always returns the URL so an admin can relay it.
+        if (body.mode === 'payment-request') {
+            const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+            const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+            const supabase = createClient(supabaseUrl, serviceKey);
+
+            const { data: row } = await supabase
+                .from('attendees').select('*').eq('id', body.attendeeId).maybeSingle();
+            if (!row) return jsonResponse({ error: 'Attendee not found' }, 404);
+            if (!row.email) return jsonResponse({ error: 'Attendee has no email address' }, 400);
+
+            const payability = assessPayability(row);
+            if (!payability.ok) {
+                return jsonResponse({ error: `This registration cannot take a payment link (${payability.reason}).` }, 409);
+            }
+
+            const origin = sendOrigin(body, req);
+            if (!origin) return jsonResponse({ error: 'payment-request: no origin available for the link' }, 400);
+            const token = await signPayToken(row.id, serviceKey, Date.now(), 180 * 24 * 60 * 60 * 1000);
+            const payUrl = buildAppUrl(origin, `/#/pay?token=${encodeURIComponent(token)}`);
+
+            const { data: form } = await supabase
+                .from('forms').select('title').eq('id', row.form_id).maybeSingle();
+            const eventName = form?.title || 'the event';
+            const amountLabel = `${(payability.cents / 100).toFixed(2)} ${payability.currency}`;
+
+            const { data: appSettings } = await supabase
+                .from('app_settings').select('*').eq('id', 1).maybeSingle();
+            const s2 = (appSettings as any) || {};
+            const smtpConfig = appSettings
+                ? { host: s2.smtp_host, port: Number(s2.smtp_port || 587), user: s2.smtp_user, pass: s2.smtp_pass, fromName: s2.email_from_name || 'GANSID Congress' }
+                : undefined;
+
+            const payTpl = resolveEmailTemplate({
+                globalSubject: s2.email_payment_request_subject,
+                globalBody: s2.email_payment_request_body,
+                defaultSubject: 'Complete your payment for {{event}}',
+                defaultBody: `<p>Hi {{name}},</p><p>Your registration for <strong>{{event}}</strong> is confirmed and your ticket has been issued — this is only about the payment, which shows as outstanding on our side.</p><p>The balance is <strong>{{amount}}</strong>. You can settle it securely here — no need to fill anything in again:</p><p style="text-align:center;margin:24px 0;"><a href="{{pay_url}}" style="display:inline-block;padding:12px 24px;background:#1E4A8C;color:#fff;text-decoration:none;border-radius:6px;font-weight:600;">Pay {{amount}}</a></p><p style="color:#666;font-size:13px;">If you have already paid and believe this is in error, just reply to this email — do not pay twice.</p>`,
+                globalHeaderImageUrl: s2.email_header_logo,
+                globalFooterText: s2.email_footer_text,
+            });
+            const payVars = {
+                name: row.name || 'there',
+                event: eventName,
+                amount: amountLabel,
+                pay_url: payUrl,
+            };
+            const paySubject = applyPlaceholders(payTpl.subject, payVars, body.mode);
+            const payHtml = generateEmailTemplate({
+                title: eventName,
+                content: applyPlaceholders(payTpl.body, payVars, body.mode),
+                fromName: smtpConfig?.fromName,
+                headerImageUrl: payTpl.headerImageUrl,
+                footerText: payTpl.footerText,
+            });
+            await sendSimpleEmail({ to: row.email, subject: paySubject, html: payHtml, smtpConfig, headerImageUrl: payTpl.headerImageUrl });
+
+            // URL always returned so the admin can copy/relay it by hand.
+            return jsonResponse({ ok: true, url: payUrl, amount: amountLabel });
         }
 
         // ── GROUP INVITE: send registration-completion link to a pending-claim guest ──
