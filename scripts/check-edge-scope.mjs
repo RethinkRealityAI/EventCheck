@@ -27,6 +27,7 @@
  * Exit 1 on any finding.
  */
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 
 const FUNCTIONS_DIR = 'supabase/functions';
@@ -116,4 +117,8 @@ function main() {
   console.log(`✓ check-edge-scope: ${fns.length} edge function(s), no out-of-scope references`);
 }
 
-if (import.meta.url === `file://${process.argv[1].replace(/\\/g, '/')}`) main();
+// `file://${path}` does not round-trip on Windows (import.meta.url uses
+// file:///C:/... with three slashes), so the hand-rolled comparison silently
+// never matched and running this script printed NOTHING — indistinguishable
+// from a pass. pathToFileURL is the platform-correct comparison.
+if (import.meta.url === pathToFileURL(process.argv[1]).href) main();
