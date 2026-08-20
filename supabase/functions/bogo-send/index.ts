@@ -1,4 +1,3 @@
-// @ts-nocheck
 // bogo-send: JWT-authenticated edge function backing the portal "My Tickets"
 // page's send / resend / edit-name / edit-recipient / dismiss / restore
 // actions. Companion to verify-payment, which handles at-checkout BOGO

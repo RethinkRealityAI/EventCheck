@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Shared helper for constructing BOGO free-attendee insert rows. Used by
 // both `verify-payment` (at-checkout BOGO claims) and `bogo-send` (portal
 // post-purchase actions) so the row shape stays identical across surfaces.

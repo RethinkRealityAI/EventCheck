@@ -1,0 +1,31 @@
+{
+  "//": [
+    "Type-checks the EDGE functions, which the root tsconfig deliberately excludes.",
+    "Run with: npm run check:edge-types",
+    "",
+    "This exists because an undefined variable reached production and 500'd every",
+    "free-registration invite on both tenants for ~95 minutes (2026-08-19). The",
+    "checks that should have caught it were all blind: the file had @ts-nocheck,",
+    "the root tsc excludes this directory, and CI deployed with no type step.",
+    "",
+    "Settings are deliberately permissive about TYPES and strict about EXISTENCE:",
+    "the goal is to catch identifiers and imports that do not exist, without",
+    "demanding a full type-clean rewrite of Deno code written against `any` shims."
+  ],
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "isolatedModules": false,
+    "allowJs": false,
+    "strict": false,
+    "strictNullChecks": true,
+    "noImplicitAny": false,
+    "types": []
+  },
+  "include": ["**/*.ts", "deno-shims.d.ts"]
+}

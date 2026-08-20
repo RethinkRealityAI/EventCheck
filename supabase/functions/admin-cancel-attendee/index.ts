@@ -1,4 +1,3 @@
-// @ts-nocheck
 // admin-cancel-attendee: admin-only edge function that hard-deletes an
 // attendee row and cascades to any linked BOGO free guest (with a
 // "withdrawn" notification email).

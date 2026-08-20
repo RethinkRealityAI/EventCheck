@@ -62,6 +62,25 @@ jobs:
             exit 1
           fi
 
+      # ── Gate: never deploy code the compiler has not seen ──────────────────
+      # On 2026-08-19 an undefined variable (`tpl` referenced in a mode that has
+      # none) reached BOTH tenants and 500'd every free-registration invite for
+      # ~95 minutes. Nothing caught it: the file carried @ts-nocheck, the root
+      # tsc excludes supabase/functions, and this workflow deployed with no type
+      # or lint step at all. These two checks are why that cannot recur —
+      # check:edge-types resolves Deno/npm/https imports via deno-shims.d.ts and
+      # fails on any identifier that does not exist.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check and scope-check the edge functions
+        run: npm run check:edge
+
       - name: Deploy
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
