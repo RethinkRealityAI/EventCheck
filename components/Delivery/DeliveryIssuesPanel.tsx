@@ -123,7 +123,13 @@ export const DeliveryIssuesPanel: React.FC<Props> = ({ onClose, onChanged }) => 
             <div className="min-w-0">
               <h2 className="font-semibold text-gray-900">Email delivery issues</h2>
               <p className="text-xs text-gray-600 truncate">
-                {loading ? 'Loading…' : `${groups.length} ${groups.length === 1 ? 'person' : 'people'} did not receive an email`}
+                {loading
+                  ? 'Loading…'
+                  : groups.length === 0
+                    // "0 people did not receive an email" is a clumsy way to say
+                    // good news, and it sits right above the all-clear state.
+                    ? 'Nothing outstanding'
+                    : `${groups.length} ${groups.length === 1 ? 'person' : 'people'} did not receive an email`}
               </p>
             </div>
           </div>
