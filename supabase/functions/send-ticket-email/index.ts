@@ -12,6 +12,7 @@ import { buildOpenPixelUrl, appendTrackingPixel } from '../_shared/emailTracking
 import { buildQrImageUrl, fetchQrPng, inlineQrSrc, qrAttachments } from '../_shared/qrEmbed.ts';
 import { HEADER_LOGO_CID, fetchRemoteImage, inlineImageSrc, inlineAttachmentEntry } from '../_shared/imageEmbed.ts';
 import { ensureTicketBlocks, prependReissueNotice, attachmentNoteFor } from '../_shared/ticketBlock.ts';
+import { buildEmailFailureRow } from '../_shared/emailFailure.ts';
 import { jsPDF } from 'npm:jspdf@2.5.1';
 import { drawTicketPdf, ticketFromAttendeeRow, ticketPdfFilename, bytesToBase64 } from '../_shared/ticketPdf.ts';
 import { resolveAttendeeDisplayName } from '../_shared/attendeeDisplayName.ts';
@@ -295,8 +296,23 @@ serve(async (req: Request) => {
         return new Response('ok', { headers: corsHeaders });
     }
 
+    // Hoisted so the outer catch can attribute a failure to a recipient and a
+    // mode. `body` is block-scoped to the try and is not reachable there.
+    let failureCtx: {
+        mode?: string; templateKey?: string; recipient?: string;
+        formId?: string; attendeeId?: string; subject?: string;
+    } = {};
+
     try {
         const body = await req.json();
+        failureCtx = {
+            mode: body?.mode,
+            templateKey: body?.templateKey,
+            recipient: body?.to ?? body?.email?.to,
+            formId: body?.formId,
+            attendeeId: body?.attendeeId ?? body?.primaryAttendeeId,
+            subject: body?.subject ?? body?.email?.subject,
+        };
 
         // ── RAW HTML: send a fully pre-rendered email with no extra templating ──
         // Used by admin tools (SendUserEmailModal) that generate their own branded
@@ -1687,6 +1703,27 @@ serve(async (req: Request) => {
     } catch (error: unknown) {
         const message = error instanceof Error ? error.message : 'Unknown error';
         console.error('send-ticket-email error:', message);
+
+        // Persist the failure. Edge logs age out unread and are unreachable
+        // entirely on GANSID (its project sits in an org the MCP token cannot
+        // see), so a send that fails silently used to leave NOTHING to
+        // investigate — an admin reported "reminders stopped working" and the
+        // only way to find the 550 quota rejection was to reproduce it by hand
+        // against production. Best-effort and never rethrows: a logging problem
+        // must not change what the caller is told.
+        try {
+            const supabaseUrl = Deno.env.get('SUPABASE_URL');
+            const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+            if (supabaseUrl && serviceKey) {
+                const admin = createClient(supabaseUrl, serviceKey);
+                await admin.from('email_failures').insert(
+                    buildEmailFailureRow({ ...failureCtx, rawError: message }),
+                );
+            }
+        } catch (logErr) {
+            console.error('send-ticket-email: failed to record email_failures row', String(logErr));
+        }
+
         return new Response(
             JSON.stringify({ error: message }),
             { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

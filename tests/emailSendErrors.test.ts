@@ -3,6 +3,7 @@ import {
   classifyEmailFailure,
   extractInvokeError,
   shouldAbortBulkSend,
+  buildEmailFailureRow,
 } from '../utils/emailSendErrors';
 
 describe('extractInvokeError', () => {
@@ -99,5 +100,52 @@ describe('shouldAbortBulkSend', () => {
     expect(shouldAbortBulkSend('recipient')).toBe(false);
     expect(shouldAbortBulkSend('connection')).toBe(false);
     expect(shouldAbortBulkSend('unknown')).toBe(false);
+  });
+});
+
+describe('buildEmailFailureRow', () => {
+  it('captures the incident with enough to diagnose it', () => {
+    const row: any = buildEmailFailureRow({
+      mode: 'raw-html',
+      templateKey: 'reminder',
+      recipient: 'someone@example.org',
+      formId: 'gansid-congress-2026',
+      subject: 'Reminder: complete your registration',
+      rawError: 'Message failed: 550 You have reached your daily email sending quota.',
+    });
+    expect(row.kind).toBe('quota');
+    expect(row.mode).toBe('raw-html');
+    expect(row.template_key).toBe('reminder');
+    expect(row.recipient).toBe('someone@example.org');
+    // The verbatim provider line is the recovery key — keep it, not a summary.
+    expect(row.message).toContain('550');
+  });
+
+  it('stores empty/missing fields as null rather than empty strings', () => {
+    const row: any = buildEmailFailureRow({ rawError: 'boom' });
+    expect(row.recipient).toBeNull();
+    expect(row.form_id).toBeNull();
+    expect(row.attendee_id).toBeNull();
+    expect(row.template_key).toBeNull();
+  });
+
+  it('truncates a runaway provider response instead of failing the insert', () => {
+    const row: any = buildEmailFailureRow({ rawError: 'x'.repeat(9000) });
+    expect(row.message.length).toBeLessThanOrEqual(2000);
+  });
+
+  it('carries no message body and no credentials', () => {
+    const row: any = buildEmailFailureRow({
+      mode: 'raw-html',
+      recipient: 'a@b.co',
+      rawError: 'Invalid login: 535 incorrect username and password',
+    });
+    // The row records THAT auth failed, never the secret itself.
+    expect(Object.keys(row)).toEqual(
+      expect.arrayContaining(['mode', 'template_key', 'recipient', 'form_id', 'attendee_id', 'kind', 'message', 'subject']),
+    );
+    expect(Object.keys(row)).not.toContain('html');
+    expect(Object.keys(row)).not.toContain('password');
+    expect(row.kind).toBe('auth');
   });
 });
