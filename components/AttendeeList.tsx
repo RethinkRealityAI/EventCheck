@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Attendee, Form, AppSettings, SeatingTable } from '../types';
-import { LayoutDashboard, Users, ChevronDown, ChevronRight, UserPlus, CheckCircle, Clock, Search, Calendar, Eye, X, Mail, User, Download, FileSpreadsheet, Check, ChevronLeft, Filter, Loader2, Copy, ChevronsDown, ChevronsRight, Star, Pin, Plus, SlidersHorizontal, Heart, Upload } from 'lucide-react';
+import { LayoutDashboard, Users, ChevronDown, ChevronRight, UserPlus, CheckCircle, Clock, Search, Calendar, Eye, X, Mail, User, Download, FileSpreadsheet, Check, ChevronLeft, Filter, Loader2, Copy, ChevronsDown, ChevronsRight, Star, Pin, Plus, SlidersHorizontal, Heart, Upload, AlertTriangle } from 'lucide-react';
 import { format } from 'date-fns';
 import { updateAttendee, getSettings, saveSettings, getAllSeatingTablesForForm, createGuestForPrimary, syncAttendeeSeatingToChart } from '../services/storageService';
 import { supabase } from '../services/supabaseClient';
@@ -18,6 +18,8 @@ import ExhibitorsTab from './Exhibitor/ExhibitorsTab';
 import SignupsTab from './Signups/SignupsTab';
 import ImportedContactsTab from './Contacts/ImportedContactsTab';
 import BulkImportModal from './BulkImport/BulkImportModal';
+import { DeliveryIssuesPanel } from './Delivery/DeliveryIssuesPanel';
+import { getUnresolvedEmailFailures } from '../services/emailFailuresService';
 import { CURRENT_SITE } from '../config/sites';
 import DashboardTabsConfig, { resolveVisibleTabs, type DashboardTabId } from './DashboardTabsConfig';
 import {
@@ -157,6 +159,17 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
   // see utils/adminPermissions.effectiveFeaturePermissions.
   const canExport = canUseFeature(profile, 'exportAttendees');
   const [showExportModal, setShowExportModal] = useState(false);
+  // Failed sends used to be invisible: nothing recorded them, and once
+  // email_failures existed nothing surfaced it. The badge appears ONLY when
+  // there is something to act on, so it reads as an alert rather than chrome.
+  const [showDeliveryIssues, setShowDeliveryIssues] = useState(false);
+  const [deliveryIssueCount, setDeliveryIssueCount] = useState(0);
+  const refreshDeliveryIssues = React.useCallback(() => {
+    getUnresolvedEmailFailures(200)
+      .then(rows => setDeliveryIssueCount(new Set(rows.map(r => (r.recipient ?? '').toLowerCase())).size))
+      .catch(() => { /* non-admins simply see no badge */ });
+  }, []);
+  useEffect(() => { refreshDeliveryIssues(); }, [refreshDeliveryIssues]);
   const [exporting, setExporting] = useState(false);
   const [showBulkImport, setShowBulkImport] = useState(false);
 
@@ -1032,6 +1045,20 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                 >
                   <Download className="w-4 h-4" />
                   <span className="hidden sm:inline">Export</span>
+                </button>
+              )}
+
+              {deliveryIssueCount > 0 && (
+                <button
+                  onClick={() => setShowDeliveryIssues(true)}
+                  className="flex items-center gap-2 px-4 py-2 bg-amber-500 text-white rounded-lg text-sm font-medium hover:bg-amber-600 transition shadow-sm"
+                  title="Some emails could not be delivered — review and resend"
+                >
+                  <AlertTriangle className="w-4 h-4" />
+                  <span className="hidden sm:inline">Delivery issues</span>
+                  <span className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full bg-white/25 text-xs font-bold">
+                    {deliveryIssueCount}
+                  </span>
                 </button>
               )}
 
@@ -1948,6 +1975,13 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
       )}
 
       {/* Export Selection Modal */}
+      {showDeliveryIssues && (
+        <DeliveryIssuesPanel
+          onClose={() => { setShowDeliveryIssues(false); refreshDeliveryIssues(); }}
+          onChanged={refreshDeliveryIssues}
+        />
+      )}
+
       {showExportModal && canExport && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
           {/* max-h + flex column so the body scrolls and the footer stays
