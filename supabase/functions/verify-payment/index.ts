@@ -34,7 +34,7 @@ function jsonResponse(body: Record<string, any>, status = 200) {
 // test (dev runs test credentials), then explicit *_MODE, then all-test
 // submissions, else production.
 type ResolvedTxn =
-  | { ok: true; transactionId: string; amountMajorUnits: number; currency: string; method: 'paypal' | 'flutterwave' }
+  | { ok: true; transactionId: string; amountMajorUnits: number; currency: string; method: 'paypal' | 'flutterwave'; paypal?: { apiBase: string; accessToken: string } }
   | { ok: false; response: Response };
 
 async function resolvePaidTransaction(opts: {
@@ -45,6 +45,9 @@ async function resolvePaidTransaction(opts: {
   origin: string; // already-lowercased origin header
   allAreTest: boolean;
   logTag: string;
+  // When provided, provider-side declines are persisted to payment_failures —
+  // the client's best-effort diagnostic is lost whenever the tab closes.
+  supabase?: any;
 }): Promise<ResolvedTxn> {
   const { origin, allAreTest, logTag } = opts;
   const isLocalhost = origin !== '' && (origin.includes('localhost') || origin.includes('127.0.0.1'));
@@ -62,6 +65,16 @@ async function resolvePaidTransaction(opts: {
     });
     if (!result.ok) {
       console.error(`[verify-payment ${logTag}] Flutterwave verify failed`, JSON.stringify({ status: result.status, error: result.error, useTestMode }));
+      if (opts.supabase) {
+        await recordPostCaptureFailure(opts.supabase, {
+          provider: 'flutterwave',
+          stage: 'flutterwave-verify-failed',
+          orderRef: String(opts.flwTransactionId ?? ''),
+          formId: opts.formId ?? null,
+          dbError: String(result.error ?? 'unknown'),
+          extra: logTag,
+        });
+      }
       return { ok: false, response: jsonResponse({ error: result.error }, result.status) };
     }
     return {
@@ -112,7 +125,20 @@ async function resolvePaidTransaction(opts: {
     const issue = capData?.details?.[0]?.issue || capData?.name || capData?.message || 'unknown';
     const debugId = capData?.debug_id || '';
     console.error(`[verify-payment ${logTag}] PayPal capture failed`, JSON.stringify({ issue, debugId, useSandbox, apiBase: PP_API_BASE, clientIdTail: PP_CLIENT_ID.slice(-6), orderId: opts.paypalOrderId }));
-    return { ok: false, response: jsonResponse({ error: `PayPal capture failed: ${issue}${debugId ? ` (debug_id: ${debugId})` : ''}`, details: capData, diagnostic: { useSandbox, clientIdTail: PP_CLIENT_ID.slice(-6) } }, 502) };
+    // Persist the decline. INSTRUMENT_DECLINED & co. leave the buyer with a
+    // pending authorization hold on their statement (which auto-reverses),
+    // so they believe they paid — this row is what makes that traceable.
+    if (opts.supabase) {
+      await recordPostCaptureFailure(opts.supabase, {
+        stage: 'paypal-capture-declined',
+        orderRef: opts.paypalOrderId ?? null,
+        formId: opts.formId ?? null,
+        reference: String(issue),
+        dbError: `capture failed: ${issue}${debugId ? ` (debug_id: ${debugId})` : ''}`,
+        extra: logTag,
+      });
+    }
+    return { ok: false, response: jsonResponse({ error: `PayPal capture failed: ${issue}${debugId ? ` (debug_id: ${debugId})` : ''}`, errorCode: String(issue), details: capData, diagnostic: { useSandbox, clientIdTail: PP_CLIENT_ID.slice(-6) } }, 502) };
   }
   const capture = capData.purchase_units?.[0]?.payments?.captures?.[0];
   if (!capture) {
@@ -124,6 +150,7 @@ async function resolvePaidTransaction(opts: {
     amountMajorUnits: parseFloat(capture.amount.value),
     currency: capture.amount.currency_code,
     method: 'paypal',
+    paypal: { apiBase: PP_API_BASE, accessToken: access_token },
   };
 }
 
@@ -281,6 +308,8 @@ async function recordPostCaptureFailure(
   supabase: any,
   args: {
     stage: string;
+    provider?: string;
+    reference?: string | null;
     orderRef?: string | null;
     formId?: string | null;
     email?: string | null;
@@ -293,9 +322,10 @@ async function recordPostCaptureFailure(
 ): Promise<void> {
   try {
     await supabase.from('payment_failures').insert({
-      provider: 'paypal',
+      provider: args.provider ?? 'paypal',
       stage: args.stage,
       order_ref: args.orderRef ?? null,
+      reference: args.reference ?? null,
       form_id: args.formId ?? null,
       email: args.email ?? null,
       attendee_name: args.name ?? null,
@@ -306,6 +336,98 @@ async function recordPostCaptureFailure(
   } catch (e) {
     console.error('[verify-payment] recordPostCaptureFailure failed', String(e));
   }
+}
+
+/**
+ * Refund a COMPLETED PayPal capture. Used when server-side validation refuses
+ * the registration AFTER the money moved (amount/currency mismatch): holding
+ * the funds while telling the buyer "payment failed" is the worst outcome —
+ * a real charge with nothing to show for it. Best-effort: failure is
+ * reported to the caller, never thrown.
+ */
+async function refundPayPalCapture(args: {
+  captureId: string;
+  apiBase: string;
+  accessToken: string;
+  logTag: string;
+}): Promise<{ ok: boolean; refundId?: string; error?: string }> {
+  try {
+    const resp = await fetch(`${args.apiBase}/v2/payments/captures/${args.captureId}/refund`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${args.accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || (data?.status && data.status !== 'COMPLETED' && data.status !== 'PENDING')) {
+      const issue = data?.details?.[0]?.issue || data?.name || data?.message || `HTTP ${resp.status}`;
+      console.error(`[verify-payment ${args.logTag}] auto-refund FAILED`, JSON.stringify({ captureId: args.captureId, issue }));
+      return { ok: false, error: String(issue) };
+    }
+    console.log(`[verify-payment ${args.logTag}] auto-refund issued`, JSON.stringify({ captureId: args.captureId, refundId: data?.id ?? null }));
+    return { ok: true, refundId: data?.id };
+  } catch (e) {
+    console.error(`[verify-payment ${args.logTag}] auto-refund threw`, String(e));
+    return { ok: false, error: String(e) };
+  }
+}
+
+/**
+ * A capture COMPLETED but server-side validation refused the registration
+ * (amount/currency mismatch). Previously these branches returned a bare 4xx:
+ * the buyer was genuinely charged while the site said "payment failed", and
+ * nothing was recorded anywhere — the exact anatomy of a "charged but not
+ * completed" complaint. Now: refund automatically when we can (PayPal —
+ * Flutterwave refunds remain manual), persist a payment_failures row either
+ * way, and tell the buyer the truth about their money. `charged`/`refunded`
+ * flags let the client pick honest copy instead of its default "you have not
+ * been charged" reassurance.
+ */
+async function rejectCapturedPayment(args: {
+  supabase: any;
+  logTag: string;
+  stage: string;
+  reason: string;
+  txn: { method: 'paypal' | 'flutterwave'; transactionId: string; amountMajorUnits: number; currency: string; paypal?: { apiBase: string; accessToken: string } };
+  formId?: string | null;
+  email?: string | null;
+  name?: string | null;
+  status?: number;
+}): Promise<Response> {
+  const { txn } = args;
+  let refunded = false;
+  let refundId: string | undefined;
+  if (txn.method === 'paypal' && txn.paypal) {
+    const r = await refundPayPalCapture({
+      captureId: txn.transactionId,
+      apiBase: txn.paypal.apiBase,
+      accessToken: txn.paypal.accessToken,
+      logTag: args.logTag,
+    });
+    refunded = r.ok;
+    refundId = r.refundId;
+  }
+  await recordPostCaptureFailure(args.supabase, {
+    provider: txn.method,
+    stage: `${args.stage}${refunded ? '-refunded' : '-refund-needed'}`,
+    orderRef: txn.transactionId,
+    formId: args.formId ?? null,
+    email: args.email ?? null,
+    name: args.name ?? null,
+    amount: String(txn.amountMajorUnits),
+    currency: txn.currency,
+    reference: refundId ?? null,
+    dbError: args.reason,
+    extra: args.logTag,
+  });
+  const moneyNote = refunded
+    ? 'Your payment WAS captured and has been automatically refunded — the refund normally appears within 3–5 business days.'
+    : 'Your payment WAS captured; the organizer has been notified and will refund it.';
+  return jsonResponse({
+    error: `${args.reason}. ${moneyNote} Reference: ${txn.transactionId}.`,
+    charged: true,
+    refunded,
+    reference: txn.transactionId,
+  }, args.status ?? 422);
 }
 
 function resolveFormPromoCode(formData: any, rawCode: any): any | null {
@@ -1068,7 +1190,15 @@ serve(async (req: Request) => {
           const issue = capData?.details?.[0]?.issue || capData?.name || capData?.message || 'unknown';
           const debugId = capData?.debug_id || '';
           console.error('[verify-payment se-extras] PayPal capture failed', JSON.stringify({ issue, debugId, useSandbox, apiBase: PP_API_BASE, orderId: paypalOrderId }));
-          return jsonResponse({ error: `PayPal capture failed: ${issue}${debugId ? ` (debug_id: ${debugId})` : ''}` }, 502);
+          await recordPostCaptureFailure(supabase, {
+            stage: 'paypal-capture-declined',
+            orderRef: paypalOrderId ?? null,
+            formId: formId ?? null,
+            reference: String(issue),
+            dbError: `capture failed: ${issue}${debugId ? ` (debug_id: ${debugId})` : ''}`,
+            extra: 'se-extras',
+          });
+          return jsonResponse({ error: `PayPal capture failed: ${issue}${debugId ? ` (debug_id: ${debugId})` : ''}`, errorCode: String(issue) }, 502);
         }
         const capture = capData.purchase_units?.[0]?.payments?.captures?.[0];
         if (!capture) return jsonResponse({ error: 'No capture data' }, 502);
@@ -1083,13 +1213,30 @@ serve(async (req: Request) => {
 
         const capturedAmount = parseFloat(capture.amount.value);
         const capturedCurrency = capture.amount.currency_code;
+        // Post-capture validation: money already moved, so mismatches refund
+        // + persist instead of stranding a real charge behind a bare 422.
+        const seTxn = {
+          method: 'paypal' as const,
+          transactionId: capture.id,
+          amountMajorUnits: capturedAmount,
+          currency: capturedCurrency,
+          paypal: { apiBase: PP_API_BASE, accessToken: access_token },
+        };
         if (Math.abs(capturedAmount - expectedExtrasTotal) > 0.01) {
-          return jsonResponse({
-            error: `Extras amount mismatch. Expected: $${expectedExtrasTotal} USD, Captured: ${capturedAmount} ${capturedCurrency}`,
-          }, 422);
+          return await rejectCapturedPayment({
+            supabase, logTag: 'se-extras', stage: 'amount-mismatch',
+            reason: `Extras amount mismatch. Expected: $${expectedExtrasTotal} USD, Captured: ${capturedAmount} ${capturedCurrency}`,
+            txn: seTxn, formId: formId ?? null,
+            email: attendees[0]?.email ?? null, name: attendees[0]?.name ?? null,
+          });
         }
         if (capturedCurrency !== 'USD') {
-          return jsonResponse({ error: `Extras currency must be USD, got ${capturedCurrency}` }, 422);
+          return await rejectCapturedPayment({
+            supabase, logTag: 'se-extras', stage: 'currency-mismatch',
+            reason: `Extras currency must be USD, got ${capturedCurrency}`,
+            txn: seTxn, formId: formId ?? null,
+            email: attendees[0]?.email ?? null, name: attendees[0]?.name ?? null,
+          });
         }
         extrasTransactionId = capture.id;
         extrasPaymentAmount = `${capturedAmount} ${capturedCurrency}`;
@@ -1231,6 +1378,8 @@ serve(async (req: Request) => {
           });
           return jsonResponse({
             error: `Your payment was processed but we encountered a database error saving the additional staff. Please contact the event organizers with this reference: ${extrasTransactionId}`,
+            charged: true,
+            reference: extrasTransactionId,
           }, 500);
         }
         extrasIds = (extraData || []).map((r: any) => r.id);
@@ -1446,7 +1595,15 @@ serve(async (req: Request) => {
         const issue = capData?.details?.[0]?.issue || capData?.name || capData?.message || 'unknown';
         const debugId = capData?.debug_id || '';
         console.error('[verify-payment sponsor] PayPal capture failed', JSON.stringify({ issue, debugId, useSandbox, apiBase: PAYPAL_API_BASE, clientIdTail: PAYPAL_CLIENT_ID.slice(-6), orderId: paypalOrderId }));
-        return jsonResponse({ error: `PayPal capture failed: ${issue}${debugId ? ` (debug_id: ${debugId})` : ''}`, details: capData, diagnostic: { useSandbox, clientIdTail: PAYPAL_CLIENT_ID.slice(-6) } }, 502);
+        await recordPostCaptureFailure(supabase, {
+          stage: 'paypal-capture-declined',
+          orderRef: paypalOrderId ?? null,
+          formId: body.formId ?? null,
+          reference: String(issue),
+          dbError: `capture failed: ${issue}${debugId ? ` (debug_id: ${debugId})` : ''}`,
+          extra: 'sponsor',
+        });
+        return jsonResponse({ error: `PayPal capture failed: ${issue}${debugId ? ` (debug_id: ${debugId})` : ''}`, errorCode: String(issue), details: capData, diagnostic: { useSandbox, clientIdTail: PAYPAL_CLIENT_ID.slice(-6) } }, 502);
       }
       const capture = capData.purchase_units?.[0]?.payments?.captures?.[0];
       if (!capture) return jsonResponse({ error: 'No capture data' }, 502);
@@ -1463,7 +1620,21 @@ serve(async (req: Request) => {
 
       const capturedAmount = parseFloat(capture.amount.value);
       if (Math.abs(capturedAmount - computedTotal) > 0.01) {
-        return jsonResponse({ error: `Amount mismatch: expected ${computedTotal}, captured ${capturedAmount}` }, 422);
+        // Post-capture: money already moved — refund + persist, don't strand.
+        return await rejectCapturedPayment({
+          supabase, logTag: 'sponsor', stage: 'amount-mismatch',
+          reason: `Amount mismatch: expected ${computedTotal}, captured ${capturedAmount}`,
+          txn: {
+            method: 'paypal',
+            transactionId: capture.id,
+            amountMajorUnits: capturedAmount,
+            currency: capture.amount.currency_code,
+            paypal: { apiBase: PAYPAL_API_BASE, accessToken: access_token },
+          },
+          formId: body.formId ?? null,
+          email: primary.email ?? null,
+          name: primary.company_info?.orgName ?? primary.name ?? null,
+        });
       }
 
       primary.payment_status = 'paid';
@@ -1525,6 +1696,8 @@ serve(async (req: Request) => {
         });
         return jsonResponse({
           error: `Your payment was processed but we encountered a database error saving your sponsorship. Please contact SCAGO with this reference: ${capture.id}`,
+          charged: true,
+          reference: capture.id,
         }, 500);
       }
 
@@ -1677,18 +1850,29 @@ serve(async (req: Request) => {
           origin: (req.headers.get('origin') || '').toLowerCase(),
           allAreTest: attendees.every((a: any) => a.is_test === true),
           logTag: 'dyn-group',
+          supabase,
         });
         if (!groupResolved.ok) return groupResolved.response;
         const capturedCents = Math.round(groupResolved.amountMajorUnits * 100);
 
         if (Math.abs(capturedCents - groupDiscountedCents) > 1) {
-          return jsonResponse({ error: 'Group price mismatch', expected: groupDiscountedCents, received: capturedCents }, 400);
+          return await rejectCapturedPayment({
+            supabase, logTag: 'dyn-group', stage: 'amount-mismatch', status: 400,
+            reason: `Group price mismatch. Expected: ${(groupDiscountedCents / 100).toFixed(2)}, Captured: ${groupResolved.amountMajorUnits}`,
+            txn: groupResolved, formId: formId ?? null,
+            email: attendees[0]?.email ?? null, name: attendees[0]?.name ?? null,
+          });
         }
         // Flutterwave reports the charged currency — enforce it matches the
         // template (a PayPal order's currency was already fixed client-side).
         const groupExpectedCcy = tpl.currency ?? 'USD';
         if (groupResolved.method === 'flutterwave' && groupResolved.currency !== groupExpectedCcy) {
-          return jsonResponse({ error: `Payment currency mismatch. Expected: ${groupExpectedCcy}, Received: ${groupResolved.currency}` }, 422);
+          return await rejectCapturedPayment({
+            supabase, logTag: 'dyn-group', stage: 'currency-mismatch',
+            reason: `Payment currency mismatch. Expected: ${groupExpectedCcy}, Received: ${groupResolved.currency}`,
+            txn: groupResolved, formId: formId ?? null,
+            email: attendees[0]?.email ?? null, name: attendees[0]?.name ?? null,
+          });
         }
         groupTxId = groupResolved.transactionId;
         groupTxMethod = groupResolved.method;
@@ -1775,6 +1959,8 @@ serve(async (req: Request) => {
             error: groupTxId
               ? `Your payment was processed but we could not save the registration. Please contact the event organizer with this reference: ${groupTxId}`
               : 'We could not complete your group registration. This is usually a promo code that does not cover every category in your group, or one that has run out of uses. Please check your promo code, or remove it to pay the standard rate.',
+            charged: !!groupTxId,
+            reference: groupTxId ?? null,
             details: { dbError: insertErr.message, rowCount: rows.length },
           }, 500);
         }
@@ -1942,23 +2128,30 @@ serve(async (req: Request) => {
           origin: (req.headers.get('origin') || '').toLowerCase(),
           allAreTest: attendees.every((a: any) => a.is_test === true),
           logTag: 'dyn-single',
+          supabase,
         });
         if (!soloResolved.ok) return soloResolved.response;
         const capturedCents = Math.round(soloResolved.amountMajorUnits * 100);
 
         // 9. Reject if captured amount differs from expected by > 1 cent
         if (Math.abs(capturedCents - soloDiscountedCents) > 1) {
-          return jsonResponse({
-            error: 'Price mismatch',
-            expected: soloDiscountedCents,
-            received: capturedCents,
-          }, 400);
+          return await rejectCapturedPayment({
+            supabase, logTag: 'dyn-single', stage: 'amount-mismatch', status: 400,
+            reason: `Price mismatch. Expected: ${(soloDiscountedCents / 100).toFixed(2)}, Captured: ${soloResolved.amountMajorUnits}`,
+            txn: soloResolved, formId: formId ?? null,
+            email: attendees[0]?.email ?? null, name: attendees[0]?.name ?? null,
+          });
         }
         // Flutterwave reports the charged currency — enforce it matches the
         // template (a PayPal order's currency was already fixed client-side).
         const soloExpectedCcy = tpl.currency ?? 'CAD';
         if (soloResolved.method === 'flutterwave' && soloResolved.currency !== soloExpectedCcy) {
-          return jsonResponse({ error: `Payment currency mismatch. Expected: ${soloExpectedCcy}, Received: ${soloResolved.currency}` }, 422);
+          return await rejectCapturedPayment({
+            supabase, logTag: 'dyn-single', stage: 'currency-mismatch',
+            reason: `Payment currency mismatch. Expected: ${soloExpectedCcy}, Received: ${soloResolved.currency}`,
+            txn: soloResolved, formId: formId ?? null,
+            email: attendees[0]?.email ?? null, name: attendees[0]?.name ?? null,
+          });
         }
         soloTxId = soloResolved.transactionId;
         soloTxMethod = soloResolved.method;
@@ -2027,6 +2220,8 @@ serve(async (req: Request) => {
             error: soloTxId
               ? `Your payment was processed but we could not save your registration. Please contact the event organizer with this reference: ${soloTxId}`
               : 'We could not complete your free registration. This is usually a promo code that does not cover your selected category, or one that has run out of uses. Please check your promo code, or remove it to pay the standard rate.',
+            charged: !!soloTxId,
+            reference: soloTxId ?? null,
             details: { dbError: insertErr.message },
           }, 500);
         }
@@ -2242,6 +2437,7 @@ serve(async (req: Request) => {
       origin: originHeader,
       allAreTest,
       logTag: 'static',
+      supabase,
     });
     if (!resolvedTxn.ok) return resolvedTxn.response;
 
@@ -2249,20 +2445,28 @@ serve(async (req: Request) => {
     const capturedAmount = resolvedTxn.amountMajorUnits;
     const capturedCurrency = resolvedTxn.currency;
 
-    // ALWAYS validate amount — no more falsy bypass
+    // ALWAYS validate amount — no more falsy bypass. The money has ALREADY
+    // moved here (capture completed), so a mismatch must refund + persist,
+    // not bare-422 the buyer into a charge with nothing to show for it.
     if (Math.abs(capturedAmount - expectedAmount) > 0.01) {
       console.error(`Amount mismatch: expected ${expectedAmount}, captured ${capturedAmount}`);
-      return jsonResponse({
-        error: `Payment amount mismatch. Expected: ${expectedAmount}, Captured: ${capturedAmount}`,
-      }, 422);
+      return await rejectCapturedPayment({
+        supabase, logTag: 'static', stage: 'amount-mismatch',
+        reason: `Payment amount mismatch. Expected: ${expectedAmount}, Captured: ${capturedAmount}`,
+        txn: resolvedTxn, formId: formId ?? null,
+        email: attendees[0]?.email ?? null, name: attendees[0]?.name ?? null,
+      });
     }
 
     // ALWAYS validate currency
     if (capturedCurrency !== expectedCurrency) {
       console.error(`Currency mismatch: expected ${expectedCurrency}, captured ${capturedCurrency}`);
-      return jsonResponse({
-        error: `Payment currency mismatch. Expected: ${expectedCurrency}, Captured: ${capturedCurrency}`,
-      }, 422);
+      return await rejectCapturedPayment({
+        supabase, logTag: 'static', stage: 'currency-mismatch',
+        reason: `Payment currency mismatch. Expected: ${expectedCurrency}, Captured: ${capturedCurrency}`,
+        txn: resolvedTxn, formId: formId ?? null,
+        email: attendees[0]?.email ?? null, name: attendees[0]?.name ?? null,
+      });
     }
 
     // ── Duplicate transaction protection ──
@@ -2318,6 +2522,8 @@ serve(async (req: Request) => {
       });
       return jsonResponse({
         error: `Your payment was processed but we encountered a database error saving your registration. Please contact the event organizer with this reference: ${transactionId}`,
+        charged: true,
+        reference: transactionId,
       }, 500);
     }
 

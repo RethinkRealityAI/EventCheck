@@ -522,6 +522,12 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupAllSameCategory, groupMembers[0]?.categoryId]);
 
+  // Failure code (e.g. 'INSTRUMENT_DECLINED') from the most recent
+  // finalizeRegistration attempt. finalizeRegistration swallows its own errors
+  // to render them, so onPayPalApprove reads this ref afterwards to run
+  // PayPal's restart() recovery for declined funding sources.
+  const lastPaymentErrorCodeRef = useRef<string | null>(null);
+
   // Pre-fill from the ?ref= row itself. The profile effect below needs a
   // signed-in account, which an invited staff member clicking an emailed link
   // does not have — so their name and email sat in the DB while the form
@@ -1828,18 +1834,36 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
     if (fnError) {
       // For non-2xx responses, the error message is generic — read the actual error from the response body
       let detail = 'Registration failed';
+      // Money-truth flags from the server: `charged` means the capture COMPLETED
+      // before the failure (post-capture mismatch or DB error) and the default
+      // "you have not been charged" reassurance would be a lie; `refunded`
+      // means the server already auto-refunded; `errorCode` carries the PayPal
+      // issue (e.g. INSTRUMENT_DECLINED) for targeted recovery.
+      let charged = false;
+      let refunded = false;
+      let errorCode: string | null = null;
+      let reference: string | null = null;
       try {
         const body = await fnResponse?.json();
         detail = formatVerifyPaymentError(
           body?.message || body?.error || fnError.message || detail,
           body?.error,
         );
+        charged = body?.charged === true;
+        refunded = body?.refunded === true;
+        errorCode = typeof body?.errorCode === 'string' ? body.errorCode : null;
+        reference = typeof body?.reference === 'string' ? body.reference : null;
         if (body?.diagnostic) detail += ` [diag: ${JSON.stringify(body.diagnostic)}]`;
         if (body?.details && typeof body.details === 'object') console.error('verify-payment error details:', body.details);
       } catch {
         detail = fnError.message || detail;
       }
-      throw new Error(detail);
+      const err: any = new Error(detail);
+      err.charged = charged;
+      err.refunded = refunded;
+      err.errorCode = errorCode;
+      err.reference = reference;
+      throw err;
     }
     if (data?.error) {
       throw new Error(formatVerifyPaymentError(String(data.error), data.error));
@@ -2038,6 +2062,10 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
       // (reported 2026-08-04). Record it with the order reference so an admin
       // can find the order in PayPal and capture or void it, and put that same
       // reference in front of the buyer so their support message is actionable.
+      // Surface the failure code to onPayPalApprove so it can run PayPal's
+      // recommended INSTRUMENT_DECLINED recovery (actions.restart()).
+      lastPaymentErrorCodeRef.current =
+        typeof registrationError?.errorCode === 'string' ? registrationError.errorCode : null;
       if (paymentStatus === 'paid' && transactionId) {
         logPaymentFailure({
           provider: paymentMeta?.provider === 'flutterwave' ? 'flutterwave' : 'paypal',
@@ -2046,15 +2074,30 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
           amount: paymentAmount ?? null,
           currency: pricingTemplate?.currency || ticketField?.ticketConfig?.currency || null,
           orderRef: transactionId,
+          reference: typeof registrationError?.errorCode === 'string' ? registrationError.errorCode : null,
           message: baseMessage,
           email: resolvedEmailForDiagnostics(),
           attendeeName: form ? resolveDisplayName(form.fields, answers) : null,
         });
-        setError(
-          `${baseMessage} Your payment was NOT completed, so you have not been charged — `
-          + `if a charge does appear, quote reference ${transactionId} to ${BOGO_ADMIN_CONTACT} and it will be refunded. `
-          + `You can safely try again.`,
-        );
+        if (registrationError?.charged === true) {
+          // The capture COMPLETED before the failure (post-capture mismatch or
+          // DB error) — the server's message already states whether it was
+          // auto-refunded. Saying "you have not been charged" here would be a
+          // lie; a real charge with a "payment failed" page is exactly the
+          // complaint this branch exists to prevent.
+          setError(baseMessage);
+        } else if (baseMessage.includes('authorization hold')) {
+          // INSTRUMENT_DECLINED copy already explains the pending-hold reversal.
+          setError(baseMessage);
+        } else {
+          setError(
+            `${baseMessage} Your payment was NOT completed, so you have not been charged. `
+            + `If a "pending" amount appears on your card or bank statement, it is a temporary `
+            + `authorization hold that your bank reverses automatically within a few business days — `
+            + `if it does not, quote reference ${transactionId} to ${BOGO_ADMIN_CONTACT} and it will be refunded. `
+            + `You can safely try again.`,
+          );
+        }
       } else {
         setError(baseMessage);
       }
@@ -2069,6 +2112,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   // PayPal Payment Handler (Secure Server-Side Capture)
   const onPayPalApprove = async (data: any, actions: any) => {
     setError('');
+    lastPaymentErrorCodeRef.current = null;
     // We pass the orderID straight to our Edge Function for server-side verification and capture
     const paypalOrderId = data.orderID;
     const expectedCurrency = pricingTemplate?.currency
@@ -2079,7 +2123,17 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
       : pricingTemplate && displayDynamicTotal != null
         ? (displayDynamicTotal / 100)
         : paymentTotal;
-    finalizeRegistration('paid', paypalOrderId, `${paidDollars.toFixed(2)} ${expectedCurrency}`);
+    await finalizeRegistration('paid', paypalOrderId, `${paidDollars.toFixed(2)} ${expectedCurrency}`);
+    // PayPal's recommended recovery for INSTRUMENT_DECLINED: the buyer's
+    // funding source (common with cards issued in India and other markets with
+    // restrictions on international captures) was authorized but the capture
+    // was declined. restart() reopens the PayPal sheet so they can pick a
+    // different card/funding source; the failed attempt leaves only a pending
+    // authorization hold that the bank reverses automatically.
+    if (lastPaymentErrorCodeRef.current === 'INSTRUMENT_DECLINED' && typeof actions?.restart === 'function') {
+      lastPaymentErrorCodeRef.current = null;
+      return actions.restart();
+    }
   };
 
   // Flutterwave success — the charge already completed in the modal; hand the
