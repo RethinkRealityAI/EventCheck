@@ -46,7 +46,23 @@ export function formatVerifyPaymentError(raw: string, errorCode?: string): strin
     case 'BOGO_DUPLICATE_SOURCE':
     case 'BOGO_BAD_MODE':
       return 'There was a problem with the complimentary guest setup. Please refresh and try again.';
+    case 'ORDER_AMOUNT_MISMATCH':
+      // Rejected server-side BEFORE capture: the buyer was never charged;
+      // any pending statement entry is the authorization hold releasing.
+      return 'The payment did not match the registration total, so it was rejected before your card was charged. '
+        + 'No money has been taken — a "pending" amount on your statement is a temporary hold that your bank '
+        + 'reverses automatically. Please refresh the page and try again.';
     default:
+      // A declined capture: the buyer's bank/PayPal refused the charge AFTER
+      // authorizing it, so their statement may show a pending hold that
+      // auto-reverses. Common with cards issued in India and other markets
+      // that restrict international online captures.
+      if (raw.includes('INSTRUMENT_DECLINED')) {
+        return 'Your bank or PayPal declined this payment method, so the payment was not completed. '
+          + 'Any "pending" amount on your statement is a temporary authorization hold that your bank '
+          + 'reverses automatically within a few business days. Please try again with a different card '
+          + 'or PayPal funding source.';
+      }
       if (raw.includes('payment was processed but we encountered a database error')) {
         return raw;
       }
