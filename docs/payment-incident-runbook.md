@@ -51,12 +51,20 @@ affected deployment (each event site has its own project).
    Stages you will see:
    - `paypal-capture-declined` — capture refused (the §1 first-row case).
      `reference` holds the PayPal issue code (e.g. `INSTRUMENT_DECLINED`).
+   - `order-mismatch-rejected-precapture` — the order's amount/currency
+     didn't match the server-computed total, so the server refused to
+     capture at all. **The buyer was never charged**; any pending
+     statement entry is the authorization hold releasing on its own.
+     Nothing to refund — this row is diagnostic only (a stale tab or a
+     tampered client).
    - `capture-failed` — client-side report after an approved payment failed
      to finalize. `order_ref` is the PayPal order id.
    - `amount-mismatch-*` / `currency-mismatch-*` — capture completed but the
      total didn't match; suffix `-refunded` means the server already
      auto-refunded (refund id in `reference`), `-refund-needed` means a
-     **manual refund is required now**.
+     **manual refund is required now**. Rare since the pre-capture guard:
+     PayPal mismatches are normally rejected before capture (previous stage);
+     these are the safety net, and the only path for Flutterwave.
    - `*-insert-failed` — capture completed, DB write failed. Manual recovery:
      the buyer paid and has no registration.
    - `paypal-onerror` / `flutterwave-onerror` — the provider UI failed before

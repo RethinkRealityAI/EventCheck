@@ -48,6 +48,14 @@ async function resolvePaidTransaction(opts: {
   // When provided, provider-side declines are persisted to payment_failures —
   // the client's best-effort diagnostic is lost whenever the tab closes.
   supabase?: any;
+  // When provided, the PayPal order is validated against this total BEFORE
+  // capture: a mismatched order is rejected with no charge at all (the card
+  // hold auto-reverses) instead of capture-then-refund. Flutterwave ignores
+  // these — its charge already happened client-side.
+  expectedAmountMajorUnits?: number | null;
+  expectedCurrency?: string | null;
+  email?: string | null;
+  name?: string | null;
 }): Promise<ResolvedTxn> {
   const { origin, allAreTest, logTag } = opts;
   const isLocalhost = origin !== '' && (origin.includes('localhost') || origin.includes('127.0.0.1'));
@@ -115,6 +123,23 @@ async function resolvePaidTransaction(opts: {
     return { ok: false, response: jsonResponse({ error: 'Failed to authenticate with PayPal API' }, 502) };
   }
   const { access_token } = await authResp.json();
+
+  // Refuse a mismatched order BEFORE capture — no charge, nothing to refund.
+  if (opts.expectedAmountMajorUnits != null) {
+    const rejected = await rejectOrderBeforeCapture({
+      apiBase: PP_API_BASE,
+      accessToken: access_token,
+      orderId: opts.paypalOrderId,
+      expectedAmountMajorUnits: opts.expectedAmountMajorUnits,
+      expectedCurrency: opts.expectedCurrency ?? null,
+      supabase: opts.supabase,
+      logTag,
+      formId: opts.formId ?? null,
+      email: opts.email ?? null,
+      name: opts.name ?? null,
+    });
+    if (rejected) return { ok: false, response: rejected };
+  }
 
   const capResp = await fetch(`${PP_API_BASE}/v2/checkout/orders/${opts.paypalOrderId}/capture`, {
     method: 'POST',
@@ -336,6 +361,80 @@ async function recordPostCaptureFailure(
   } catch (e) {
     console.error('[verify-payment] recordPostCaptureFailure failed', String(e));
   }
+}
+
+/**
+ * Pre-capture guard: fetch the buyer-approved order from PayPal and refuse
+ * to capture it when its amount/currency don't match the server-computed
+ * total. Rejecting HERE means the buyer is never charged — the card's
+ * authorization hold releases on its own — instead of capture-then-refund.
+ * The post-capture checks stay in every branch as the safety net, and they
+ * remain the only check for Flutterwave, whose charge happens client-side.
+ *
+ * Best-effort on infrastructure errors: if the order lookup itself fails,
+ * return null and let capture proceed — the post-capture check still guards.
+ * Returns a Response to send verbatim on mismatch, null to continue.
+ */
+async function rejectOrderBeforeCapture(args: {
+  apiBase: string;
+  accessToken: string;
+  orderId: string;
+  expectedAmountMajorUnits: number;
+  // null → this branch doesn't enforce a currency; mirrors its post-capture rule
+  expectedCurrency?: string | null;
+  supabase: any;
+  logTag: string;
+  formId?: string | null;
+  email?: string | null;
+  name?: string | null;
+}): Promise<Response | null> {
+  let orderAmount: number;
+  let orderCurrency: string | null;
+  try {
+    const resp = await fetch(`${args.apiBase}/v2/checkout/orders/${args.orderId}`, {
+      headers: { 'Authorization': `Bearer ${args.accessToken}` },
+    });
+    if (!resp.ok) {
+      console.error(`[verify-payment ${args.logTag}] pre-capture order lookup failed (${resp.status}) — falling through to capture`);
+      return null;
+    }
+    const order = await resp.json();
+    const amt = order?.purchase_units?.[0]?.amount;
+    if (!amt?.value) return null;
+    orderAmount = parseFloat(amt.value);
+    orderCurrency = amt.currency_code ?? null;
+  } catch (e) {
+    console.error(`[verify-payment ${args.logTag}] pre-capture order lookup error — falling through to capture`, String(e));
+    return null;
+  }
+
+  const amountBad = Math.abs(orderAmount - args.expectedAmountMajorUnits) > 0.01;
+  const currencyBad = !!args.expectedCurrency && !!orderCurrency && orderCurrency !== args.expectedCurrency;
+  if (!amountBad && !currencyBad) return null;
+
+  const expectedDesc = `${args.expectedAmountMajorUnits.toFixed(2)}${args.expectedCurrency ? ` ${args.expectedCurrency}` : ''}`;
+  const orderDesc = `${orderAmount}${orderCurrency ? ` ${orderCurrency}` : ''}`;
+  const reason = `Order ${amountBad ? 'amount' : 'currency'} mismatch rejected BEFORE capture (buyer NOT charged). Expected: ${expectedDesc}, Order: ${orderDesc}`;
+  console.error(`[verify-payment ${args.logTag}] ${reason}`);
+  await recordPostCaptureFailure(args.supabase, {
+    stage: 'order-mismatch-rejected-precapture',
+    orderRef: args.orderId,
+    formId: args.formId ?? null,
+    email: args.email ?? null,
+    name: args.name ?? null,
+    amount: String(orderAmount),
+    currency: orderCurrency,
+    dbError: reason,
+    extra: args.logTag,
+  });
+  return jsonResponse({
+    error: 'The payment order did not match the registration total, so it was rejected before your card was charged. '
+      + 'No money has been taken — if your bank shows a pending amount, it is a temporary authorization hold that '
+      + 'disappears on its own within a few business days. Please refresh the page and try again.',
+    errorCode: 'ORDER_AMOUNT_MISMATCH',
+    charged: false,
+    details: { expected: expectedDesc, order: orderDesc },
+  }, 400);
 }
 
 /**
@@ -1181,6 +1280,15 @@ serve(async (req: Request) => {
         if (!authResp.ok) return jsonResponse({ error: 'PayPal auth failed' }, 502);
         const { access_token } = await authResp.json();
 
+        // Refuse a mismatched order BEFORE capture — no charge, nothing to refund.
+        const extrasPreReject = await rejectOrderBeforeCapture({
+          apiBase: PP_API_BASE, accessToken: access_token, orderId: String(paypalOrderId),
+          expectedAmountMajorUnits: expectedExtrasTotal, expectedCurrency: 'USD',
+          supabase, logTag: 'se-extras', formId: formId ?? null,
+          email: attendees[0]?.email ?? null, name: attendees[0]?.name ?? null,
+        });
+        if (extrasPreReject) return extrasPreReject;
+
         const capResp = await fetch(`${PP_API_BASE}/v2/checkout/orders/${paypalOrderId}/capture`, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${access_token}`, 'Content-Type': 'application/json' },
@@ -1586,6 +1694,18 @@ serve(async (req: Request) => {
       if (!authResp.ok) return jsonResponse({ error: 'PayPal auth failed' }, 502);
       const { access_token } = await authResp.json();
 
+      // Refuse a mismatched order BEFORE capture — no charge, nothing to
+      // refund. (Currency stays unenforced here, matching the post-capture
+      // rule for this branch.)
+      const sponsorPreReject = await rejectOrderBeforeCapture({
+        apiBase: PAYPAL_API_BASE, accessToken: access_token, orderId: String(paypalOrderId),
+        expectedAmountMajorUnits: computedTotal, expectedCurrency: null,
+        supabase, logTag: 'sponsor', formId: body.formId ?? null,
+        email: primary.email ?? null,
+        name: primary.company_info?.orgName ?? primary.name ?? null,
+      });
+      if (sponsorPreReject) return sponsorPreReject;
+
       const capResp = await fetch(`${PAYPAL_API_BASE}/v2/checkout/orders/${paypalOrderId}/capture`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${access_token}`, 'Content-Type': 'application/json' },
@@ -1851,6 +1971,11 @@ serve(async (req: Request) => {
           allAreTest: attendees.every((a: any) => a.is_test === true),
           logTag: 'dyn-group',
           supabase,
+          // Client creates the order in pricingTemplate.currency for this total,
+          // so a mismatched order is rejected pre-capture — buyer never charged.
+          expectedAmountMajorUnits: groupDiscountedCents / 100,
+          expectedCurrency: tpl.currency ?? null,
+          email: attendees[0]?.email ?? null, name: attendees[0]?.name ?? null,
         });
         if (!groupResolved.ok) return groupResolved.response;
         const capturedCents = Math.round(groupResolved.amountMajorUnits * 100);
@@ -2129,6 +2254,11 @@ serve(async (req: Request) => {
           allAreTest: attendees.every((a: any) => a.is_test === true),
           logTag: 'dyn-single',
           supabase,
+          // Client creates the order in pricingTemplate.currency for this total,
+          // so a mismatched order is rejected pre-capture — buyer never charged.
+          expectedAmountMajorUnits: soloDiscountedCents / 100,
+          expectedCurrency: tpl.currency ?? null,
+          email: attendees[0]?.email ?? null, name: attendees[0]?.name ?? null,
         });
         if (!soloResolved.ok) return soloResolved.response;
         const capturedCents = Math.round(soloResolved.amountMajorUnits * 100);
@@ -2438,6 +2568,12 @@ serve(async (req: Request) => {
       allAreTest,
       logTag: 'static',
       supabase,
+      // Reject a mismatched order pre-capture — buyer never charged. Same
+      // expected values the post-capture safety net below validates against.
+      expectedAmountMajorUnits: expectedAmount,
+      expectedCurrency,
+      email: attendees[0]?.email ?? null,
+      name: attendees[0]?.name ?? null,
     });
     if (!resolvedTxn.ok) return resolvedTxn.response;
 

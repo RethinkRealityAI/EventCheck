@@ -20,6 +20,16 @@ describe('formatVerifyPaymentError', () => {
     expect(msg).not.toMatch(/INSTRUMENT_DECLINED/);
   });
 
+  it('explains pre-capture order rejection as no-charge with an auto-reversing hold', () => {
+    const msg = formatVerifyPaymentError(
+      'The payment order did not match the registration total…',
+      'ORDER_AMOUNT_MISMATCH',
+    );
+    expect(msg).toMatch(/before your card was charged/i);
+    expect(msg).toMatch(/no money has been taken/i);
+    expect(msg).toMatch(/reverses automatically/i);
+  });
+
   it('passes post-capture DB-error messages through verbatim', () => {
     const raw = 'Your payment was processed but we encountered a database error saving your registration. Please contact the event organizer with this reference: 4XJ12345';
     expect(formatVerifyPaymentError(raw)).toBe(raw);
