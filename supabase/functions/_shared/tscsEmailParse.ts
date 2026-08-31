@@ -24,6 +24,8 @@ export interface TscsGroupMember {
   role?: string;
   category?: string;
   attending_days?: string;
+  /** Per-member fee in ₹ when the payload provides it (the TSCS form computes one). */
+  fee?: number;
 }
 
 export interface TscsRegistration {

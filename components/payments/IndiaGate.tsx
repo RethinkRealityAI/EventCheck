@@ -14,11 +14,9 @@
 
 import React, { useState } from 'react';
 import { ExternalLink, ArrowLeft, Globe2, IndianRupee } from 'lucide-react';
+import type { IndiaPartnerConfig } from '../../utils/indiaPartner';
 
-export interface IndiaPartnerConfig {
-  pageUrl: string;
-  partnerName: string;
-}
+export { resolveIndiaPartner, type IndiaPartnerConfig } from '../../utils/indiaPartner';
 
 /** Step 0: "Where are you registering from?" */
 export const IndiaGateChooser: React.FC<{
@@ -100,8 +98,10 @@ export const IndiaPartnerEmbed: React.FC<{
 
       <div className="px-6 py-3 bg-blue-50 border-b border-blue-100 text-sm text-blue-900 flex items-center justify-between gap-3 flex-wrap">
         <span>
-          Complete the form and payment below. Your congress ticket is emailed to you once the
-          payment is confirmed — <strong>use the same email address everywhere</strong>.
+          We've partnered with the <strong>Thalassemia and Sickle Cell Society (TSCS)</strong> to
+          enable smoother payments in India. Complete the form and payment below — your congress
+          ticket is emailed to you once the payment is confirmed, so{' '}
+          <strong>use the same email address everywhere</strong>.
         </span>
         <a
           href={config.pageUrl}
@@ -140,21 +140,3 @@ export const IndiaPartnerEmbed: React.FC<{
     </div>
   );
 };
-
-/**
- * Resolve the partner config for a form. Enabled via
- * `form.settings.indiaPartner` (additive jsonb — no migration), with a
- * built-in default for the GANSID Congress 2026 form so the flow works
- * without an admin settings edit. `enabled: false` always wins.
- */
-export function resolveIndiaPartner(
-  formId: string | undefined,
-  settings: { indiaPartner?: { enabled?: boolean; pageUrl?: string; partnerName?: string } } | undefined,
-): IndiaPartnerConfig | null {
-  const s = settings?.indiaPartner;
-  if (s?.enabled === false) return null;
-  const isDefaultForm = formId === 'gansid-congress-2026';
-  if (!s?.enabled && !isDefaultForm) return null;
-  const pageUrl = s?.pageUrl || 'https://www.tscsindia.org/gansid-registration/';
-  return { pageUrl, partnerName: s?.partnerName || 'TSCS India' };
-}
