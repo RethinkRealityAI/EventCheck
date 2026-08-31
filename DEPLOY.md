@@ -313,3 +313,70 @@ supabase secrets list | grep PUBLIC_SITE_URL
 Then grep the function logs for `no absolute origin` and
 `[email] placeholders resolved to nothing` — both should be absent in steady
 state. Either one appearing means a send lost a link and names the mode.
+
+## 6. TSCS India registration pipeline (email ingest)
+
+India congress registrations are collected in ₹ on the TSCS partner page
+(https://www.tscsindia.org/gansid-registration/) via TSCS's Razorpay account.
+Our registration flow shows an "Are you registering from India?" gate on the
+GANSID congress form (default ON for `gansid-congress-2026`; controlled by
+`forms.settings.indiaPartner`) and embeds that page for the India path. The
+signal that a registration was paid is the confirmation email TSCS sends to
+our dedicated IONOS mailbox; the `tscs-email-ingest` function polls it,
+creates the attendee rows (`payment_method='razorpay'`), sends the ticket via
+`registration-confirmed`, and logs every message in
+`tscs_email_registrations` (unparseable → `needs-review`, never dropped).
+
+### 6a. SQL (GANSID project `gticuvgclbvhwvpzkuez` — SCAGO does not need this)
+
+Run migrations `20260901120000_allow_razorpay_payment_method.sql` and
+`20260901120100_add_tscs_email_registrations.sql`.
+
+### 6b. Function secrets (GANSID project)
+
+```bash
+supabase secrets set --project-ref gticuvgclbvhwvpzkuez \
+  TSCS_INGEST_SECRET="<long random – also set as the GitHub repo secret>" \
+  TSCS_IMAP_HOST="imap.ionos.com" \
+  TSCS_IMAP_PORT="993" \
+  TSCS_IMAP_USER="<the dedicated IONOS mailbox address>" \
+  TSCS_IMAP_PASS="<that mailbox's password>" \
+  TSCS_ALLOWED_SENDERS="@tscsindia.org"
+```
+
+Use a DEDICATED mailbox (e.g. india-registrations@…): the poller marks
+messages read and the password lives in server config. IONOS IMAP is
+`imap.ionos.com:993` (SSL) with the mailbox's own address + password.
+
+### 6c. GitHub repository secret
+
+`TSCS_INGEST_SECRET` (same value as 6b) — enables the
+`.github/workflows/tscs-email-poll.yml` cron (every 10 min). While unset the
+workflow no-ops with a warning, so nothing breaks before enablement.
+
+### 6d. Deploy + verify
+
+```bash
+supabase functions deploy tscs-email-ingest --project-ref gticuvgclbvhwvpzkuez --use-api
+# health (no writes):
+curl -X POST https://gticuvgclbvhwvpzkuez.supabase.co/functions/v1/tscs-email-ingest \
+  -H "x-ingest-secret: $TSCS_INGEST_SECRET" -H 'Content-Type: application/json' \
+  -d '{"mode":"health"}'
+# end-to-end rehearsal without touching real data:
+#   {"mode":"poll","dryRun":true}   – reads mail, parses, writes nothing
+#   {"mode":"ingest","isTest":true,"registration":{…}} – creates an is_test row
+```
+
+### 6e. Parsing contract with TSCS
+
+Ask TSCS to include in the confirmation email either the machine block
+`<!-- GANSID-JSON {…} -->` (fields per `_shared/tscsEmailParse.ts`) or plain
+`Label: value` lines including at least Name, Email, Registration Category,
+Total Fee and Razorpay Payment ID. Anything unparseable is queued as
+`needs-review` in `tscs_email_registrations` and can be finished by hand with
+`{"mode":"ingest", …}`.
+
+Known limits: email is not cryptographically verifiable (sender allow-list +
+payment-id dedupe are the guards); the designed upgrade is the signed
+WordPress relay (`gansid-payment-relay.php`, shared with TSCS) which replaces
+the mailbox with a server-to-server call and needs no parser at all.

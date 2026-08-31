@@ -43,6 +43,7 @@ import { useNotifications } from './NotificationSystem';
 import { useParams, useLocation } from 'react-router-dom';
 import { generateTicketPDF } from '../utils/pdfGenerator';
 import { PayPalScriptProvider, PayPalButtons } from "@paypal/react-paypal-js";
+import { IndiaGateChooser, IndiaPartnerEmbed, resolveIndiaPartner } from './payments/IndiaGate';
 import { FlutterwavePay } from "./payments/FlutterwavePay";
 import { sendTicketEmail, arrayBufferToBase64 } from '../services/smtpService';
 import { applyPlaceholders } from '../utils/emailShell';
@@ -209,6 +210,10 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   // the header/ticket/buttons (when a form sets no custom color). Other tenants
   // (SCAGO) keep the original indigo default, so this never restyles SCAGO forms.
   const isGansid = CURRENT_SITE.key === 'gansid';
+  // India routing gate: India registrations pay in ₹ on the TSCS partner page
+  // (their Razorpay account); everyone else uses this form as before. 'unset'
+  // shows the chooser. Never applies to invite/claim flows — guarded at render.
+  const [indiaChoice, setIndiaChoice] = useState<'unset' | 'india' | 'international'>('unset');
   const brandGradientClass = isGansid ? 'bg-gansid-primary-gradient' : '';
   const brandDefaultStyle = isGansid ? undefined : { backgroundColor: '#4F46E5' };
 
@@ -2295,6 +2300,11 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   }
 
   const isSteppedMode = form.settings?.renderMode === 'stepped';
+  // India gate applies only to the plain paid-registration flow. Invite,
+  // claim and guest-link visitors (?ref=) carry a token or reference, pay
+  // nothing here, and must never be routed to the partner page.
+  const indiaPartner = resolveIndiaPartner(form.id, form.settings as any);
+  const showIndiaGate = !!indiaPartner && !inviteMode && !isAnyPendingClaim && !inviteToken && !guestRef;
 
   const bogoBlockedNotice: React.ReactNode = (bogoFeatureOn && !isAnyPendingClaim && bogoSlotCount > 0 && pricingTemplate && bogoBlockedByPromo) ? (
     <div className="rounded-2xl border-2 border-amber-200 bg-amber-50/80 p-4">
@@ -2508,7 +2518,23 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
         </div>
       )}
 
-      {step === 'form' && (
+      {step === 'form' && showIndiaGate && indiaChoice === 'unset' && (
+        <IndiaGateChooser
+          eventName={form.settings?.formTitle || form.title}
+          partnerName={indiaPartner!.partnerName}
+          onChoose={setIndiaChoice}
+        />
+      )}
+
+      {step === 'form' && showIndiaGate && indiaChoice === 'india' && (
+        <IndiaPartnerEmbed
+          config={indiaPartner!}
+          eventName={form.settings?.formTitle || form.title}
+          onBack={() => setIndiaChoice('unset')}
+        />
+      )}
+
+      {step === 'form' && (!showIndiaGate || indiaChoice === 'international') && (
         <div
           className={
             isSteppedMode
@@ -2541,6 +2567,20 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
               {form.description}
             </p>
           </div>
+
+          {showIndiaGate && indiaChoice === 'international' && (
+            <div className="px-6 py-2 bg-orange-50 border-b border-orange-100 text-xs text-orange-900 text-center">
+              Registering from India?{' '}
+              <button
+                type="button"
+                data-testid="india-gate-switch"
+                onClick={() => setIndiaChoice('india')}
+                className="font-bold underline hover:text-orange-700"
+              >
+                Pay in ₹ via {indiaPartner!.partnerName} instead
+              </button>
+            </div>
+          )}
 
           <form onSubmit={submitForm} className={isSteppedMode ? 'flex-1 min-h-0 flex flex-col' : 'p-8 space-y-6'}>
             {error && (

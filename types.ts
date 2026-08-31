@@ -308,6 +308,16 @@ export interface Form {
         { subject?: string; body?: string }
       >>;
     };
+    /** India routing gate: registrations from India are collected in ₹ by the
+     *  local partner (TSCS) on THEIR page via their Razorpay account; the
+     *  gate embeds that page instead of this form. Additive jsonb — no
+     *  migration. Defaults ON for the GANSID Congress 2026 form (see
+     *  resolveIndiaPartner); `enabled: false` switches it off there too. */
+    indiaPartner?: {
+      enabled?: boolean;
+      pageUrl?: string;
+      partnerName?: string;
+    };
   };
   pdfSettings?: Partial<PdfSettings>; // Per-form PDF overrides
   pricingTemplate?: PricingTemplate; // Runtime-attached in getFormById; not persisted in DB
@@ -540,7 +550,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
 
 export type SponsorTier = 'signature' | 'gold' | 'silver' | 'award' | 'scholarship';
 export type SponsorItemCategory = 'package' | 'scholarship' | 'ad' | 'booth';
-export type PaymentMethod = 'card' | 'paypal' | 'flutterwave' | 'cheque' | 'external';
+// Must stay a subset match of the DB CHECK constraint
+// attendees_payment_method_check (see the allow_razorpay migration for the
+// current list). 'razorpay' rows come from the TSCS India ingest pipeline.
+export type PaymentMethod = 'card' | 'paypal' | 'flutterwave' | 'razorpay' | 'cheque' | 'external' | 'promo' | 'bogo';
 export type SponsorProspectStatus = 'prospect' | 'invited' | 'responded' | 'confirmed' | 'declined';
 
 export interface SponsorItem {

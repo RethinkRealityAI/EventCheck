@@ -261,7 +261,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     checkedInAt: 'Check-in Time',
     paymentStatus: 'Payment Status',
     invoiceId: 'Invoice ID',
-    transactionId: 'PayPal Transaction ID',
+    transactionId: 'Transaction ID',
     paymentAmount: 'Amount Paid',
     formTitle: 'Event Title',
     donatedSeats: 'Donated Seats',

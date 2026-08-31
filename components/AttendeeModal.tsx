@@ -855,7 +855,7 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
                       )}
                       {localAttendee.transactionId && (
                         <div>
-                          <label className="text-[10px] font-bold text-blue-500 uppercase block mb-1.5 tracking-wider">PayPal Transaction</label>
+                          <label className="text-[10px] font-bold text-blue-500 uppercase block mb-1.5 tracking-wider">Transaction</label>
                           <div className="text-xs font-mono font-bold text-blue-700 select-all bg-blue-50/60 px-3 py-2 rounded-xl border border-blue-100/60">{localAttendee.transactionId}</div>
                         </div>
                       )}
