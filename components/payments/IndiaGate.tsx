@@ -30,7 +30,7 @@ export const IndiaGateChooser: React.FC<{
       <p className="text-white/90 text-sm font-medium">One quick question before you register</p>
     </div>
     <div className="p-8 space-y-4">
-      <h2 className="text-lg font-bold text-gray-900 text-center">Are you registering from India?</h2>
+      <h2 className="text-lg font-bold text-gray-900 text-center">Where are you registering from?</h2>
       <p className="text-sm text-gray-500 text-center -mt-2">
         This decides how you pay — Indian cards and UPI work best through our local partner.
       </p>
@@ -44,7 +44,7 @@ export const IndiaGateChooser: React.FC<{
           <IndianRupee className="w-5 h-5 text-orange-600" />
         </span>
         <span>
-          <span className="block font-bold text-gray-900">Yes — I'm registering from India</span>
+          <span className="block font-bold text-gray-900">India</span>
           <span className="block text-sm text-gray-500 mt-0.5">
             Pay in ₹ by UPI, Indian card or net-banking via {partnerName}, our official local partner.
           </span>
@@ -60,7 +60,7 @@ export const IndiaGateChooser: React.FC<{
           <Globe2 className="w-5 h-5 text-blue-600" />
         </span>
         <span>
-          <span className="block font-bold text-gray-900">No — I'm registering from another country</span>
+          <span className="block font-bold text-gray-900">Another country</span>
           <span className="block text-sm text-gray-500 mt-0.5">
             Continue to the standard registration and pay in USD.
           </span>

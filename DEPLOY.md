@@ -327,10 +327,17 @@ creates the attendee rows (`payment_method='razorpay'`), sends the ticket via
 `registration-confirmed`, and logs every message in
 `tscs_email_registrations` (unparseable → `needs-review`, never dropped).
 
-### 6a. SQL (GANSID project `gticuvgclbvhwvpzkuez` — SCAGO does not need this)
+### 6a. SQL (GANSID project `gticuvgclbvhwvpzkuez`)
 
-Run migrations `20260901120000_allow_razorpay_payment_method.sql` and
-`20260901120100_add_tscs_email_registrations.sql`.
+Run migrations `20260901120000_allow_razorpay_payment_method.sql`,
+`20260901120100_add_tscs_email_registrations.sql`, and
+`20260901120200_add_razorpay_txn_unique.sql`.
+
+SCAGO does not need the `tscs_email_registrations` table (the pipeline is
+GANSID-only), but apply `20260901120000` and `20260901120200` there too —
+they touch the shared `attendees` schema and keeping the tenants in step
+avoids parity drift. All of the above were applied to both projects on
+2026-08-31.
 
 ### 6b. Function secrets (GANSID project)
 
