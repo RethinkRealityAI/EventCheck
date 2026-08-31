@@ -43,3 +43,9 @@ declare module 'npm:jspdf@2.5.1' {
   export const jsPDF: any;
   export default any;
 }
+declare module 'npm:imapflow@1.0.164' {
+  export const ImapFlow: any;
+}
+declare module 'npm:mailparser@3.7.1' {
+  export const simpleParser: any;
+}
