@@ -1,0 +1,50 @@
+# Polls the IONOS mailbox for TSCS India registration-confirmation emails by
+# invoking the tscs-email-ingest edge function on the GANSID project. The
+# function does all the work (IMAP, parse, attendee rows, ticket email); this
+# workflow is only the clock.
+#
+# Required repository secret:
+#   TSCS_INGEST_SECRET — must equal the TSCS_INGEST_SECRET function secret on
+#                        the GANSID Supabase project.
+# The job no-ops loudly (but green) while the secret is unset, so enabling the
+# pipeline is: set the secret here + set the function secrets on Supabase.
+name: tscs-email-poll
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Parse and report without writing rows or sending tickets
+        type: boolean
+        default: false
+
+concurrency:
+  group: tscs-email-poll
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Poll mailbox via tscs-email-ingest
+        env:
+          INGEST_SECRET: ${{ secrets.TSCS_INGEST_SECRET }}
+          DRY_RUN: ${{ inputs.dry_run == true && 'true' || 'false' }}
+        run: |
+          if [ -z "$INGEST_SECRET" ]; then
+            echo "::warning::TSCS_INGEST_SECRET not set — poller idle (pipeline not yet enabled)"
+            exit 0
+          fi
+          resp=$(curl -sS -w '\n%{http_code}' \
+            -X POST 'https://gticuvgclbvhwvpzkuez.supabase.co/functions/v1/tscs-email-ingest' \
+            -H 'Content-Type: application/json' \
+            -H "x-ingest-secret: $INGEST_SECRET" \
+            -d "{\"mode\":\"poll\",\"dryRun\":$DRY_RUN}")
+          code=$(echo "$resp" | tail -1)
+          body=$(echo "$resp" | sed '$d')
+          echo "HTTP $code"
+          echo "$body"
+          [ "$code" -ge 200 ] && [ "$code" -lt 300 ]
