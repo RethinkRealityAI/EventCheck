@@ -137,6 +137,23 @@ export const IndiaPartnerEmbed: React.FC<{
           style={{ height: '75vh', minHeight: 620 }}
         />
       </div>
+
+      {/* A frame blocked by X-Frame-Options/CSP still fires onLoad, so the
+          spinner alone can't signal failure — keep an escape hatch visible
+          under the frame at all times. */}
+      <div className="px-6 py-2.5 bg-gray-50 border-t border-gray-100 text-xs text-gray-500 text-center">
+        Trouble seeing the form above?{' '}
+        <a
+          href={config.pageUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          data-testid="india-open-new-tab-footer"
+          className="font-semibold text-blue-700 hover:text-blue-900 underline"
+        >
+          Open it in a new tab
+        </a>{' '}
+        — it's the same secure page.
+      </div>
     </div>
   );
 };

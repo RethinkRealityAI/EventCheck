@@ -41,9 +41,12 @@ export function buildTscsAttendeeRows(reg: TscsRegistration, opts: BuildRowsOpts
 
   // Dedupe key: the Razorpay payment id when present, else a deterministic id
   // from the email message id — so IMAP re-reads of the same message can
-  // never double-register anyone.
-  const txnBase = reg.payment_id || (opts.messageId ? `tscs-${opts.messageId}` : null);
-  if (!txnBase) return { ok: false, error: 'no payment id and no message id to dedupe on' };
+  // never double-register anyone. Test rehearsals get their own key space:
+  // an is_test dry-run for pay_X must never block (or be blocked by) the
+  // real ingest of pay_X later.
+  const rawBase = reg.payment_id || (opts.messageId ? `tscs-${opts.messageId}` : null);
+  if (!rawBase) return { ok: false, error: 'no payment id and no message id to dedupe on' };
+  const txnBase = opts.isTest ? `test-${rawBase}` : rawBase;
 
   const uuid = opts.uuid ?? (() => crypto.randomUUID());
   const nowIso = (opts.now ?? (() => new Date().toISOString()))();
@@ -73,7 +76,8 @@ export function buildTscsAttendeeRows(reg: TscsRegistration, opts: BuildRowsOpts
   // when the payload provides one, else a deliberately NON-monetary marker so
   // reports never double-count the total and pay-balance can never re-collect
   // (parsePaymentAmount refuses non-monetary strings).
-  const totalLabel = reg.total_inr != null ? `${Number(reg.total_inr).toFixed(2)} INR` : 'PAID VIA TSCS (INR)';
+  const totalNum = typeof reg.total_inr === 'number' && Number.isFinite(reg.total_inr) ? reg.total_inr : null;
+  const totalLabel = totalNum != null ? `${totalNum.toFixed(2)} INR` : 'PAID VIA TSCS (INR)';
 
   rows.push({
     id: primaryId,
@@ -122,7 +126,9 @@ export function buildTscsAttendeeRows(reg: TscsRegistration, opts: BuildRowsOpts
       qr_payload: JSON.stringify({ id: gid }),
       payment_status: 'paid',
       payment_method: 'razorpay',
-      payment_amount: g.fee != null ? `${Number(g.fee).toFixed(2)} INR` : `PAID WITH ${txnBase} (INR)`,
+      payment_amount: typeof g.fee === 'number' && Number.isFinite(g.fee)
+        ? `${g.fee.toFixed(2)} INR`
+        : `PAID WITH ${txnBase} (INR)`,
       transaction_id: `${txnBase}-p${i + 2}`,
       pricing_template_id: opts.pricingTemplateId,
       pricing_category_id: gCat,

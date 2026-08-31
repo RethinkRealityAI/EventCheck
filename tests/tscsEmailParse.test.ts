@@ -3,6 +3,7 @@ import {
   parseTscsEmail,
   senderAllowed,
   categoryToPricingId,
+  parseAmount,
 } from '../supabase/functions/_shared/tscsEmailParse';
 
 describe('senderAllowed', () => {
@@ -11,6 +12,39 @@ describe('senderAllowed', () => {
     expect(senderAllowed('Registrations <forms@tscsindia.org>', '@tscsindia.org')).toBe(true);
     expect(senderAllowed('attacker@evil.com', '@tscsindia.org')).toBe(false);
     expect(senderAllowed('a@b.com', '@tscsindia.org, a@b.com')).toBe(true);
+  });
+
+  it('full-address entries are EXACT — no substring impersonation', () => {
+    // 'registrations@tscsindia.org.evil.in' CONTAINS the allowed address; a
+    // substring check would wave it through.
+    expect(senderAllowed('registrations@tscsindia.org.evil.in', 'registrations@tscsindia.org')).toBe(false);
+    expect(senderAllowed('Evil <registrations@tscsindia.org.evil.in>', 'registrations@tscsindia.org')).toBe(false);
+    expect(senderAllowed('xregistrations@tscsindia.org', 'registrations@tscsindia.org')).toBe(false);
+    expect(senderAllowed('registrations@tscsindia.org', 'registrations@tscsindia.org')).toBe(true);
+    expect(senderAllowed('REGISTRATIONS@TSCSINDIA.ORG', 'registrations@tscsindia.org')).toBe(true);
+  });
+
+  it('@domain entries anchor at the @ — lookalike domains fail', () => {
+    expect(senderAllowed('x@eviltscsindia.org', '@tscsindia.org')).toBe(false);
+    expect(senderAllowed('x@tscsindia.org.in', '@tscsindia.org')).toBe(false);
+  });
+});
+
+describe('parseAmount', () => {
+  it('preserves decimals — never a 100x inflation', () => {
+    expect(parseAmount('₹2,400.00')).toBe(2400);
+    expect(parseAmount('INR 2400.50')).toBe(2400.5);
+    expect(parseAmount('Rs. 9,600')).toBe(9600);
+    expect(parseAmount('9600')).toBe(9600);
+    expect(parseAmount(2400)).toBe(2400);
+  });
+
+  it('refuses garbage instead of inventing a number', () => {
+    expect(parseAmount('free')).toBeUndefined();
+    expect(parseAmount('')).toBeUndefined();
+    expect(parseAmount(undefined)).toBeUndefined();
+    expect(parseAmount(null)).toBeUndefined();
+    expect(parseAmount(NaN)).toBeUndefined();
   });
 });
 
@@ -55,6 +89,46 @@ describe('parseTscsEmail — GANSID-JSON block', () => {
     if (!r.ok) return;
     expect(r.registration.group).toHaveLength(1);
     expect(r.registration.group![0].email).toBe('p2@x.in');
+  });
+
+  it('survives inside a full HTML body (comments are stripped by stripHtml)', () => {
+    const html = `<html><body><p>Thank you for registering!</p>
+<!-- GANSID-JSON {"name":"Html Person","email":"h@x.in","category":"Industry Partners","total_inr":24000,"payment_id":"pay_HtmlBody01"} -->
+<div>GANSID Congress 2026</div></body></html>`;
+    const r = parseTscsEmail({ html });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.via).toBe('json');
+    expect(r.registration.payment_id).toBe('pay_HtmlBody01');
+    expect(r.registration.total_inr).toBe(24000);
+  });
+
+  it('brace-balances a bare block followed by footer text (no terminator)', () => {
+    const r = parseTscsEmail({
+      text: `GANSID-JSON {"name":"Brace Case","email":"b@x.in","category":"Physicians / Researchers","addon":{"name":"Curly {Brace} Fan"}}\nRegards,\nThe TSCS Team {est. 1998}`,
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.via).toBe('json');
+    expect(r.registration.addon?.name).toBe('Curly {Brace} Fan');
+  });
+
+  it('coerces string-typed amounts from the JSON path — no NaN on paid records', () => {
+    const r = parseTscsEmail({
+      text: `GANSID-JSON {"name":"String Amount","email":"s@x.in","category":"Patients or Family Members","total_inr":"₹2,400.00","group":[{"name":"G One","fee":"7,200"}]}`,
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.registration.total_inr).toBe(2400);
+    expect(r.registration.group![0].fee).toBe(7200);
+  });
+
+  it('drops a non-numeric total rather than keeping NaN', () => {
+    const r = parseTscsEmail({
+      text: `GANSID-JSON {"name":"Bad Amount","email":"n@x.in","category":"Industry Partners","total_inr":"contact us"}`,
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.registration.total_inr).toBeUndefined();
   });
 });
 
@@ -103,6 +177,14 @@ describe('parseTscsEmail — label fallback', () => {
     expect(parseTscsEmail({ text: 'Name: X\nCategory: Physicians / Researchers' }).ok).toBe(false);
     expect(parseTscsEmail({ text: 'Email: a@b.com\nName: X\nCategory: Rocket Scientist' }).ok).toBe(false);
     expect(parseTscsEmail({ text: '' }).ok).toBe(false);
+  });
+
+  it('parses a decimal total from label lines without 100x inflation', () => {
+    const r = parseTscsEmail({
+      text: 'Name: A B\nEmail: a@b.com\nCategory: Industry Partners\nTotal Fee: ₹9,600.00',
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.registration.total_inr).toBe(9600);
   });
 
   it('drops implausible payment ids rather than trusting them', () => {

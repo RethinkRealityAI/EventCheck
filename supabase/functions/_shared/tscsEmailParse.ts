@@ -57,11 +57,14 @@ export function senderAllowed(fromAddr: string, allowedCsv: string): boolean {
   // Accept both bare addresses and "Display Name <addr>" forms.
   const angled = (fromAddr || '').match(/<([^>]+)>/);
   const from = (angled ? angled[1] : fromAddr || '').trim().toLowerCase();
+  // '@domain' entries match the sender's domain suffix; anything else must be
+  // an EXACT address match — substring matching would let
+  // 'registrations@tscsindia.org.evil.in' impersonate an allowed sender.
   return allowedCsv
     .split(',')
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean)
-    .some((allowed) => (allowed.startsWith('@') ? from.endsWith(allowed) : from.includes(allowed)));
+    .some((allowed) => (allowed.startsWith('@') ? from.endsWith(allowed) : from === allowed));
 }
 
 /** TSCS category name → our pricing_category_id. Matches the shared list used
@@ -135,24 +138,60 @@ function stripHtml(html: string): string {
     .replace(/[ \t]+/g, ' ');
 }
 
-function parseAmount(v: string): number | undefined {
-  const m = v.replace(/[₹,\sINRrsRS.]{0,3}(?=\d)/g, '').match(/([\d,]+(?:\.\d{1,2})?)/);
+/** '₹2,400.00' → 2400; 'INR 2400.50' → 2400.5. Strips currency markers and
+ *  thousands separators but PRESERVES the decimal point. Exported for the
+ *  JSON path too, which must not trust string-typed amounts. */
+export function parseAmount(v: string | number | undefined | null): number | undefined {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : undefined;
+  if (v == null) return undefined;
+  const cleaned = String(v)
+    .replace(/₹/g, '')
+    .replace(/\b(?:INR|Rs\.?|RS)\b/gi, '')
+    .replace(/,/g, '')
+    .trim();
+  const m = cleaned.match(/(\d+(?:\.\d{1,2})?)/);
   if (!m) return undefined;
-  const n = parseFloat(m[1].replace(/,/g, ''));
+  const n = parseFloat(m[1]);
   return Number.isFinite(n) ? n : undefined;
 }
 
-/** Try the embedded machine block first. */
+/**
+ * Try the embedded machine block first. Brace-balanced extraction — the block
+ * may be followed by anything (an email footer, '-->', a fence), and in an
+ * HTML body it must be found BEFORE tag-stripping (stripHtml deletes comments,
+ * where the block usually lives).
+ */
 function tryJsonBlock(text: string): TscsRegistration | null {
-  const m = text.match(/GANSID-JSON[^{]*({[\s\S]*?})\s*(?:-->|```|$)/);
-  if (!m) return null;
-  try {
-    const j = JSON.parse(m[1]);
-    if (!j || typeof j !== 'object') return null;
-    return j as TscsRegistration;
-  } catch {
-    return null;
+  const marker = text.indexOf('GANSID-JSON');
+  if (marker < 0) return null;
+  const start = text.indexOf('{', marker);
+  if (start < 0) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) {
+        try {
+          const j = JSON.parse(text.slice(start, i + 1));
+          return j && typeof j === 'object' ? (j as TscsRegistration) : null;
+        } catch {
+          return null;
+        }
+      }
+    }
   }
+  return null;
 }
 
 export function parseTscsEmail(args: {
@@ -162,9 +201,12 @@ export function parseTscsEmail(args: {
 }): TscsParseResult {
   const bodies = [args.text || '', args.html ? stripHtml(args.html) : ''].filter(Boolean);
   const full = bodies.join('\n');
-  if (!full.trim()) return { ok: false, reason: 'empty body' };
+  if (!full.trim() && !(args.html || '').trim()) return { ok: false, reason: 'empty body' };
 
-  let reg: Partial<TscsRegistration> | null = tryJsonBlock(full);
+  // The machine block usually lives in an HTML comment, which BOTH stripHtml
+  // and mail clients' text rendering destroy — so look in the raw bodies first.
+  let reg: Partial<TscsRegistration> | null =
+    tryJsonBlock(args.text || '') || tryJsonBlock(args.html || '') || tryJsonBlock(full);
   let via: 'json' | 'labels' = 'json';
 
   if (!reg) {
@@ -227,10 +269,19 @@ export function parseTscsEmail(args: {
     registration.payment_id = String(registration.payment_id).trim();
     if (!/^[A-Za-z0-9_.-]{6,64}$/.test(registration.payment_id)) delete registration.payment_id;
   }
+  // Amounts from the JSON path can arrive as strings ('2,400') — normalize
+  // through the same tolerant parser the label path uses, and never let a
+  // non-numeric value survive as NaN on a paid record.
+  registration.total_inr = parseAmount(registration.total_inr as any);
   if (Array.isArray(registration.group)) {
     registration.group = registration.group
       .filter((g) => g && typeof g === 'object' && (g.name || '').trim())
-      .map((g) => ({ ...g, name: String(g.name).trim(), email: g.email ? String(g.email).trim().toLowerCase() : undefined }));
+      .map((g) => ({
+        ...g,
+        name: String(g.name).trim(),
+        email: g.email ? String(g.email).trim().toLowerCase() : undefined,
+        fee: parseAmount(g.fee as any),
+      }));
   } else {
     delete (registration as any).group;
   }

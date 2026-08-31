@@ -64,6 +64,35 @@ describe('buildTscsAttendeeRows — solo', () => {
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.rows.every((row: any) => row.is_test === true)).toBe(true);
   });
+
+  it('test rehearsals get their own dedupe keyspace (test- prefix)', () => {
+    // An isTest dry-run for pay_X must never block (or be blocked by) the
+    // later REAL ingest of pay_X.
+    const rehearsal = buildTscsAttendeeRows(
+      { ...solo, group: [{ name: 'P Two' }] },
+      { ...baseOpts, isTest: true },
+    );
+    const real = buildTscsAttendeeRows({ ...solo, group: [{ name: 'P Two' }] }, baseOpts);
+    expect(rehearsal.ok && real.ok).toBe(true);
+    if (!rehearsal.ok || !real.ok) return;
+    expect(rehearsal.txnBase).toBe('test-pay_ABC123');
+    expect(real.txnBase).toBe('pay_ABC123');
+    expect((rehearsal.rows[1] as any).transaction_id).toBe('test-pay_ABC123-p2');
+    const fromMsg = buildTscsAttendeeRows(
+      { ...solo, payment_id: undefined },
+      { ...baseOpts, messageId: 'msg-1', isTest: true },
+    );
+    if (fromMsg.ok) expect(fromMsg.txnBase).toBe('test-tscs-msg-1');
+  });
+
+  it('a non-finite total falls back to the non-monetary marker, never "NaN INR"', () => {
+    const r = buildTscsAttendeeRows({ ...solo, total_inr: NaN }, baseOpts);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect((r.rows[0] as any).payment_amount).toBe('PAID VIA TSCS (INR)');
+    const r2 = buildTscsAttendeeRows({ ...solo, total_inr: undefined }, baseOpts);
+    if (r2.ok) expect((r2.rows[0] as any).payment_amount).toBe('PAID VIA TSCS (INR)');
+  });
 });
 
 describe('buildTscsAttendeeRows — group + addon', () => {

@@ -86,7 +86,17 @@ async function ingestRegistration(
   if (opts.dryRun) return { ok: true, status: 'ingested', attendeeId: primaryId, createdCount: rows.length };
 
   const { error: insErr } = await supabase.from('attendees').insert(rows);
-  if (insErr) return { ok: false, status: 'error', error: `insert failed: ${insErr.message}` };
+  if (insErr) {
+    // The partial unique index on razorpay transaction_ids backstops the
+    // select-then-insert race: a concurrent ingest of the same payment loses
+    // here and must be treated as the duplicate it is, not an error.
+    if (String(insErr.code) === '23505') {
+      const { data: winner } = await supabase
+        .from('attendees').select('id').eq('transaction_id', txnBase).limit(1);
+      return { ok: true, status: 'duplicate', attendeeId: winner?.[0]?.id };
+    }
+    return { ok: false, status: 'error', error: `insert failed: ${insErr.message}` };
+  }
 
   // Ticket email — same registration-confirmed path every other paid flow uses.
   try {
@@ -150,10 +160,13 @@ async function pollMailbox(supabase: any, origin: string, dryRun: boolean): Prom
     await client.connect();
     const lock = await client.getMailboxLock('INBOX');
     try {
-      const unseen = await client.search({ seen: false });
+      // uid:true everywhere — sequence numbers shift if the mailbox mutates
+      // mid-run (another client expunging), which would read or flag the
+      // WRONG message. UIDs are stable for the mailbox's lifetime.
+      const unseen = await client.search({ seen: false }, { uid: true });
       const uids: number[] = (unseen || []).slice(0, 25); // bounded per run
       for (const uid of uids) {
-        const msg = await client.fetchOne(uid, { source: true, envelope: true });
+        const msg = await client.fetchOne(String(uid), { source: true, envelope: true }, { uid: true });
         if (!msg?.source) continue;
         const parsedMail = await simpleParser(msg.source);
         const fromAddr = parsedMail.from?.value?.[0]?.address || msg.envelope?.from?.[0]?.address || '';
@@ -191,11 +204,18 @@ async function pollMailbox(supabase: any, origin: string, dryRun: boolean): Prom
 
         let recorded: string = 'skipped (dry run)';
         if (!dryRun) {
-          recorded = await recordEmail(supabase, outcomeRow);
-          if (recorded !== 'error') {
-            // Mark seen only after the audit row exists — an unseen message is
-            // the retry mechanism.
-            await client.messageFlagsAdd(uid, ['\\Seen']);
+          if (outcomeRow.status === 'error') {
+            // A transient failure (e.g. a momentary DB error on the attendee
+            // insert) must NOT consume the message: leave it unseen and
+            // unrecorded so the next poll retries it from scratch.
+            recorded = 'left unseen for retry';
+          } else {
+            recorded = await recordEmail(supabase, outcomeRow);
+            if (recorded !== 'error') {
+              // Mark seen only after the audit row exists — an unseen message
+              // is the retry mechanism.
+              await client.messageFlagsAdd(String(uid), ['\\Seen'], { uid: true });
+            }
           }
         }
         results.push({ messageId, from: fromAddr, status: outcomeRow.status, recorded, attendeeId: outcomeRow.attendee_id ?? null, error: outcomeRow.error ?? null });

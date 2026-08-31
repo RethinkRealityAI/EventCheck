@@ -2300,11 +2300,11 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
   }
 
   const isSteppedMode = form.settings?.renderMode === 'stepped';
-  // India gate applies only to the plain paid-registration flow. Invite and
-  // claim visitors carry a token, pay nothing here, and must never be routed
-  // to the partner page.
+  // India gate applies only to the plain paid-registration flow. Invite,
+  // claim and guest-link visitors (?ref=) carry a token or reference, pay
+  // nothing here, and must never be routed to the partner page.
   const indiaPartner = resolveIndiaPartner(form.id, form.settings as any);
-  const showIndiaGate = !!indiaPartner && !inviteMode && !isAnyPendingClaim && !inviteToken;
+  const showIndiaGate = !!indiaPartner && !inviteMode && !isAnyPendingClaim && !inviteToken && !guestRef;
 
   const bogoBlockedNotice: React.ReactNode = (bogoFeatureOn && !isAnyPendingClaim && bogoSlotCount > 0 && pricingTemplate && bogoBlockedByPromo) ? (
     <div className="rounded-2xl border-2 border-amber-200 bg-amber-50/80 p-4">
