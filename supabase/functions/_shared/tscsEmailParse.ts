@@ -49,7 +49,7 @@ export interface TscsRegistration {
 }
 
 export type TscsParseResult =
-  | { ok: true; registration: TscsRegistration; via: 'json' | 'labels' }
+  | { ok: true; registration: TscsRegistration; via: 'json' | 'labels' | 'table' }
   | { ok: false; reason: string };
 
 /** The partner's sender must match one of these (comma-separated env). */
@@ -155,6 +155,109 @@ export function parseAmount(v: string | number | undefined | null): number | und
   return Number.isFinite(n) ? n : undefined;
 }
 
+// ── TSCS table-template strategy ─────────────────────────────────────────────
+// The live "[PAID] Registration Confirmed" emails render the details as an
+// HTML table, so the text arrives as run-together label/value pairs with NO
+// colons ("Full NameMs. Ashif Ahammed Emailashif@…"), sometimes wrapped
+// mid-label across lines. The labels themselves are a fixed, capitalized set,
+// so: join the body to one line, locate each known label (case-SENSITIVE, to
+// avoid matching label words inside values), and read each value as the text
+// between one label and the next.
+
+/** Longest-first so 'Total Participants' wins over 'Participants' etc. */
+const TABLE_LABELS: Array<[label: string, field: string]> = [
+  ['Total Participants', 'participants'],
+  ['Attending Days', 'attending_days'],
+  ['Transaction ID', 'payment_id'],
+  ['Pricing Tier', '_ignore'],
+  ['Presentation', '_ignore'],
+  ['Amount Paid', 'total_inr'],
+  ['Institution', 'institution'],
+  ['Full Name', 'name'],
+  ['Category', 'category'],
+  ['Country', '_ignore'],
+  ['Email', 'email'],
+  ['Phone', 'phone'],
+  ['City', 'city'],
+  ['Role', 'role'],
+];
+
+const HONORIFIC_RE = /^(?:mr|mrs|ms|miss|dr|prof|mx)\.?\s+/i;
+
+function tryTscsTable(rawText: string, strippedHtml: string): Partial<TscsRegistration> | null {
+  for (const source of [rawText, strippedHtml]) {
+    if (!source || !/Full Name/.test(source)) continue;
+    // Join to one line: the template wraps mid-label ("Attending\nDaysOct 23").
+    const joined = source.replace(/\s+/g, ' ');
+    const labelRe = new RegExp(
+      `(?:^| )(${TABLE_LABELS.map(([l]) => l.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`,
+      'g',
+    );
+    const hits: Array<{ field: string; valueStart: number; labelStart: number }> = [];
+    for (let m = labelRe.exec(joined); m; m = labelRe.exec(joined)) {
+      const field = TABLE_LABELS.find(([l]) => l === m![1])![1];
+      hits.push({ field, valueStart: m.index + m[0].length, labelStart: m.index });
+    }
+    if (hits.length < 3) continue;
+
+    const reg: Partial<TscsRegistration> = {};
+    for (let i = 0; i < hits.length; i++) {
+      const { field, valueStart } = hits[i];
+      if (field === '_ignore') continue;
+      if ((reg as any)[field] !== undefined) continue; // first occurrence wins
+      const end = i + 1 < hits.length ? hits[i + 1].labelStart : joined.length;
+      // The footer follows the last value — cut Amount Paid at its currency.
+      let value = joined.slice(valueStart, end).trim();
+      if (field === 'total_inr') value = value.replace(/\bINR\b[\s\S]*$/i, 'INR');
+      // A transaction id is one token; anything after the first whitespace is
+      // trailing template text (e.g. the Additional Participants section).
+      if (field === 'payment_id') value = value.split(/\s/)[0];
+      if (!value) continue;
+      if (field === 'name') (reg as any)[field] = value.replace(HONORIFIC_RE, '');
+      else if (field === 'total_inr') (reg as any)[field] = parseAmount(value);
+      else if (field === 'participants') (reg as any)[field] = parseInt(value, 10) || undefined;
+      else (reg as any)[field] = value;
+    }
+    if (!reg.email) continue;
+
+    // "Additional Participants" block: per member, a "Participant N <name>"
+    // line, then "email | phone", "Attending: …", and a category line. Parse
+    // from the ORIGINAL (unjoined) source — the block relies on line structure.
+    const block = source.match(/Additional Participants([\s\S]*?)(?:Amount Paid|$)/i);
+    if (block) {
+      const members: TscsGroupMember[] = [];
+      let cur: TscsGroupMember | null = null;
+      for (const rawLine of block[1].split('\n')) {
+        const line = rawLine.trim();
+        if (!line) continue;
+        const p = line.match(/^Participant\s+\d+\s*[:\-]?\s*(.*)$/i);
+        if (p) {
+          if (cur && cur.name) members.push(cur);
+          cur = { name: (p[1] || '').trim().replace(HONORIFIC_RE, '') };
+          continue;
+        }
+        if (!cur) continue;
+        if (!cur.name) { cur.name = line.replace(HONORIFIC_RE, ''); continue; }
+        const att = line.match(/^Attending\s*:?\s*(.+)$/i);
+        if (att) { cur.attending_days = att[1].trim(); continue; }
+        if (line.includes('@')) {
+          const email = line.split('|')[0].trim();
+          if (email.includes('@')) cur.email = email;
+          continue;
+        }
+        if (categoryToPricingId(line)) cur.category = line;
+      }
+      if (cur && cur.name) members.push(cur);
+      if (members.length > 0) {
+        reg.group = members;
+        reg.registration_type = 'group';
+      }
+    }
+    return reg;
+  }
+  return null;
+}
+
 /**
  * Try the embedded machine block first. Brace-balanced extraction — the block
  * may be followed by anything (an email footer, '-->', a fence), and in an
@@ -207,7 +310,7 @@ export function parseTscsEmail(args: {
   // and mail clients' text rendering destroy — so look in the raw bodies first.
   let reg: Partial<TscsRegistration> | null =
     tryJsonBlock(args.text || '') || tryJsonBlock(args.html || '') || tryJsonBlock(full);
-  let via: 'json' | 'labels' = 'json';
+  let via: 'json' | 'labels' | 'table' = 'json';
 
   if (!reg) {
     via = 'labels';
@@ -237,6 +340,14 @@ export function parseTscsEmail(args: {
       else if (k === 'participants') (reg as any)[k] = parseInt(v, 10) || undefined;
       else if (k === 'registration_type') (reg as any)[k] = /group/i.test(v) ? 'group' : 'individual';
       else (reg as any)[k] = v;
+    }
+    // Colon-lines found nothing usable → try the live TSCS table template.
+    if (!(reg as any).email) {
+      const table = tryTscsTable(args.text || '', args.html ? stripHtml(args.html) : '');
+      if (table) {
+        reg = table;
+        via = 'table';
+      }
     }
   }
 

@@ -195,3 +195,122 @@ describe('parseTscsEmail — label fallback', () => {
     if (r.ok) expect(r.registration.payment_id).toBeUndefined();
   });
 });
+
+// Fixtures below are the text bodies of REAL "[PAID] Registration Confirmed"
+// emails from contact@tscsindia.org (captured 2026-08-31, dry-run poll). The
+// template renders an HTML table, so labels and values run together with no
+// colons and wrap mid-label — the 'table' strategy exists for exactly this.
+describe('parseTscsEmail — live TSCS table template', () => {
+  const solo = [
+    '✅ [https://s.w.org/images/core/emoji/17.0.2/72x72/2705.png]',
+    '',
+    'PAYMENT CONFIRMED',
+    '',
+    'Registration Successful',
+    '',
+    'Ref: REG-00020  |  Via: Razorpay',
+    '',
+    'Your registration has been successfully completed.',
+    '',
+    'Hello Sathwika,',
+    '',
+    'Registration Details',
+    '',
+    'Full NameDr. Sathwika Maheswarapu Emailsathwika.mbbs@gmail.com Phone9390585989',
+    'CountryIndia CityHanamkonda InstitutionChelmeda Anand Rao institute of medical',
+    'science RoleMedical officer CategoryUndergraduate, Medical, Graduate Students',
+    'Pricing TierPromo Total Participants1 Attending DaysOct 23, 2026, Oct 24, 2026,',
+    'Oct 25, 2026 Presentation Transaction IDpay_TWIWKFEYdkL4F7',
+    '',
+    'Amount Paid ₹2,400.00 INR',
+    '',
+    'Automated notification from TSCS INDIA – Best Thalassemia Treatment in Hyderabad',
+    '— https://www.tscsindia.org [https://www.tscsindia.org]',
+  ].join('\n');
+
+  it('parses a real individual registration (run-together labels, no colons)', () => {
+    const r = parseTscsEmail({ subject: '[PAID] Registration Confirmed: REG-00020', text: solo });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.via).toBe('table');
+    expect(r.registration.name).toBe('Sathwika Maheswarapu'); // honorific stripped
+    expect(r.registration.email).toBe('sathwika.mbbs@gmail.com');
+    expect(r.registration.phone).toBe('9390585989');
+    expect(r.registration.city).toBe('Hanamkonda');
+    expect(r.registration.institution).toBe('Chelmeda Anand Rao institute of medical science');
+    expect(r.registration.role).toBe('Medical officer');
+    expect(categoryToPricingId(r.registration.category)).toBe('student');
+    expect(r.registration.participants).toBe(1);
+    expect(r.registration.attending_days).toBe('Oct 23, 2026, Oct 24, 2026, Oct 25, 2026');
+    expect(r.registration.payment_id).toBe('pay_TWIWKFEYdkL4F7');
+    expect(r.registration.total_inr).toBe(2400); // not 240000 — footer cut at INR
+    expect(r.registration.group).toBeUndefined();
+  });
+
+  const group = [
+    'PAYMENT CONFIRMED',
+    '',
+    'Ref: REG-00012  |  Via: Razorpay',
+    '',
+    'Hello Ashif,',
+    '',
+    'Registration Details',
+    '',
+    'Full NameMs. Ashif Ahammed Emailashifahammed8@gmail.com Phone5555555555',
+    'CountryIndia CityRampurhat InstitutionTSCS RoleDeveloper CategoryMedical',
+    'Trainees (Residents, Fellows) Pricing TierPromo Total Participants2 Attending',
+    'DaysOct 23, 2026, Oct 24, 2026 Presentation Transaction IDpay_TVUDr8BBWJq3px',
+    '',
+    'Additional Participants',
+    '',
+    'Participant 2 Ashif Ahammed',
+    'ashifahammed8@gmail.com | 666666666',
+    'Attending: Oct 24, 2026',
+    'Undergraduate, Medical, Graduate Students',
+    '',
+    'Amount Paid ₹12,000.00 INR',
+    '',
+    'Automated notification from TSCS INDIA',
+  ].join('\n');
+
+  it('parses a real group registration with an Additional Participants block', () => {
+    const r = parseTscsEmail({ subject: '[PAID] Registration Confirmed: REG-00012', text: group });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.via).toBe('table');
+    expect(r.registration.name).toBe('Ashif Ahammed');
+    expect(categoryToPricingId(r.registration.category)).toBe('trainee');
+    expect(r.registration.participants).toBe(2);
+    expect(r.registration.total_inr).toBe(12000);
+    expect(r.registration.payment_id).toBe('pay_TVUDr8BBWJq3px');
+    expect(r.registration.registration_type).toBe('group');
+    expect(r.registration.group).toHaveLength(1);
+    const p2 = r.registration.group![0];
+    expect(p2.name).toBe('Ashif Ahammed');
+    expect(p2.email).toBe('ashifahammed8@gmail.com');
+    expect(p2.attending_days).toBe('Oct 24, 2026');
+    expect(categoryToPricingId(p2.category || '')).toBe('student');
+  });
+
+  it('parses the same template arriving as HTML table cells', () => {
+    const html = `<table><tr><td>Full Name</td><td>Ms. Snigdha rani Mishra</td></tr>
+<tr><td>Email</td><td>snigdharani1989@gmail.com</td></tr>
+<tr><td>Phone</td><td>+918847853553</td></tr>
+<tr><td>City</td><td>Semiliguda</td></tr>
+<tr><td>Institution</td><td>Live for Others</td></tr>
+<tr><td>Role</td><td>Secretary General</td></tr>
+<tr><td>Category</td><td>Patient Organizations</td></tr>
+<tr><td>Total Participants</td><td>1</td></tr>
+<tr><td>Attending Days</td><td>Oct 23, 2026, Oct 24, 2026, Oct 25, 2026</td></tr>
+<tr><td>Transaction ID</td><td>pay_TVz8M4EhmZNXMn</td></tr>
+<tr><td>Amount Paid</td><td>₹4,800.00 INR</td></tr></table>`;
+    const r = parseTscsEmail({ html });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.registration.email).toBe('snigdharani1989@gmail.com');
+    expect(r.registration.name).toBe('Snigdha rani Mishra');
+    expect(categoryToPricingId(r.registration.category)).toBe('patient_org');
+    expect(r.registration.total_inr).toBe(4800);
+    expect(r.registration.payment_id).toBe('pay_TVz8M4EhmZNXMn');
+  });
+});

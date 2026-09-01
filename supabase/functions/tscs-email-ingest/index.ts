@@ -218,7 +218,24 @@ async function pollMailbox(supabase: any, origin: string, dryRun: boolean): Prom
             }
           }
         }
-        results.push({ messageId, from: fromAddr, status: outcomeRow.status, recorded, attendeeId: outcomeRow.attendee_id ?? null, error: outcomeRow.error ?? null });
+        results.push({
+          messageId,
+          from: fromAddr,
+          status: outcomeRow.status,
+          recorded,
+          attendeeId: outcomeRow.attendee_id ?? null,
+          error: outcomeRow.error ?? null,
+          // Dry runs are the rehearsal tool: show what WOULD be ingested so
+          // parse quality can be verified against real emails without writing
+          // anything. Bounded preview; only the secret-holder ever sees this.
+          ...(dryRun
+            ? {
+                subject,
+                parsed: outcomeRow.parsed ?? null,
+                rawPreview: (parsedMail.text || String(parsedMail.html || '')).slice(0, 1500),
+              }
+            : {}),
+        });
       }
     } finally {
       lock.release();
