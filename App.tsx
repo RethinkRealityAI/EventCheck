@@ -647,7 +647,17 @@ const AdminLayout = () => {
               </ProtectedRoute>
             } />
             <Route path="/settings" element={<ProtectedRoute requirePage="settings"><Settings /></ProtectedRoute>} />
-            <Route path="/india" element={<ProtectedRoute requirePage="dashboard"><IndiaIngestPage /></ProtectedRoute>} />
+            {/* GANSID-only: the TSCS tables exist on that project alone, so on
+                SCAGO a bookmark or shared link would mount a page whose every
+                query fails. Redirect rather than render a broken shell. */}
+            <Route
+              path="/india"
+              element={
+                <ProtectedRoute requirePage="dashboard">
+                  {CURRENT_SITE.key === 'gansid' ? <IndiaIngestPage /> : <Navigate to="/admin" replace />}
+                </ProtectedRoute>
+              }
+            />
             <Route
               path="/content"
               element={

@@ -79,10 +79,16 @@ function mapRun(r: any): TscsPollRun {
   };
 }
 
+/** List columns only — `raw` is deliberately excluded (it stores up to 100k
+ *  chars per message and is rendered for exactly one row at a time). Use
+ *  getTscsEmailBody() when the review modal opens. */
+const LIST_COLUMNS =
+  'id, message_id, from_addr, subject, received_at, parsed, status, attendee_id, error, is_test, created_at';
+
 export async function getTscsEmails(limit = 200): Promise<TscsEmailRow[]> {
   const { data, error } = await supabase
     .from('tscs_email_registrations')
-    .select('*')
+    .select(LIST_COLUMNS)
     .order('received_at', { ascending: false, nullsFirst: false })
     .limit(limit);
   if (error) {
@@ -90,6 +96,20 @@ export async function getTscsEmails(limit = 200): Promise<TscsEmailRow[]> {
     throw error;
   }
   return (data || []).map(mapEmail);
+}
+
+/** The stored body of one message, fetched only when a human opens it. */
+export async function getTscsEmailBody(messageId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('tscs_email_registrations')
+    .select('raw')
+    .eq('message_id', messageId)
+    .maybeSingle();
+  if (error) {
+    console.error('Failed to load TSCS email body', error);
+    throw error;
+  }
+  return (data as any)?.raw ?? null;
 }
 
 export async function getTscsPollRuns(limit = 25): Promise<TscsPollRun[]> {
@@ -105,14 +125,21 @@ export async function getTscsPollRuns(limit = 25): Promise<TscsPollRun[]> {
   return (data || []).map(mapRun);
 }
 
-/** Edge functions can fail two ways: a transport/HTTP error, or a 200 whose
- *  body carries `{ error }`. Both must surface — swallowing the second is how
- *  an admin ends up believing a registration was created when it wasn't. */
+/** Edge functions fail two ways: a non-2xx, or a 200 whose body carries
+ *  `{ error }`. Both must surface with their real reason — an admin who sees
+ *  only "non-2xx status code" cannot tell an unrecognised category from a dead
+ *  mailbox. supabase-js sets `data = null` on non-2xx and stashes the JSON body
+ *  on `error.context`, so that is where the detail lives (same trap documented
+ *  in services/adminUserActionsService.ts). */
 async function invoke<T = any>(body: Record<string, unknown>): Promise<T> {
   const { data, error } = await supabase.functions.invoke('tscs-email-ingest', { body });
   if (error) {
-    const detail = (data as any)?.error || error.message || 'unknown error';
-    throw new Error(String(detail));
+    let detail = '';
+    try {
+      const parsed = await (error as any).context?.json?.();
+      detail = parsed?.error || parsed?.message || '';
+    } catch { /* body wasn't JSON */ }
+    throw new Error(detail || error.message || 'India ingest action failed.');
   }
   if ((data as any)?.error) throw new Error(String((data as any).error));
   return data as T;

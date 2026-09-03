@@ -44,7 +44,7 @@ import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { signRegistrationToken } from '../_shared/registrationToken.ts';
 import { buildAppUrl, resolveOrigin } from '../_shared/emailLinks.ts';
-import { plainTextToHtml } from '../_shared/emailShell.ts';
+import { plainTextToHtml, renderEmailShell } from '../_shared/emailShell.ts';
 import {
   parseTscsEmail,
   senderAllowed,
@@ -181,12 +181,23 @@ async function alertNeedsReview(count: number, source: string, origin: string): 
     const base = resolveOrigin(origin, Deno.env.get('PUBLIC_SITE_URL'));
     const link = base ? buildAppUrl(base, '/#/admin/india') : '';
     const noun = count === 1 ? 'registration email' : 'registration emails';
-    const html = plainTextToHtml(
+    // raw-html mode sends exactly what it is given, so the shell must be
+    // applied here — otherwise the one email whose whole job is to get someone
+    // to the review page arrives unstyled with an unclickable URL.
+    const site = (Deno.env.get('SUPABASE_URL') || '').includes('gticuvgclbvhwvpzkuez') ? 'gansid' : 'scago';
+    const body = plainTextToHtml(
       `${count} India ${noun} could not be read automatically and ${count === 1 ? 'is' : 'are'} waiting for review.\n\n` +
       `No one has been registered or ticketed for ${count === 1 ? 'it' : 'them'} yet — the payment is real, so this needs a human.\n\n` +
       (link ? `Review and finish: ${link}\n\n` : '') +
       `(poll source: ${source})`,
     );
+    const html = renderEmailShell({
+      content: link
+        ? `${body}<p><a href="${link}" style="display:inline-block;padding:10px 18px;background:#1E4A8C;color:#ffffff;border-radius:8px;text-decoration:none;font-weight:600">Open the review queue</a></p>`
+        : body,
+      site: site as any,
+      subject: `${count} India ${noun} need review`,
+    });
     const resp = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/send-ticket-email`, {
       method: 'POST',
       headers: {
@@ -214,6 +225,13 @@ async function pollMailbox(
   runCtx: { source: string; triggeredBy?: string | null },
 ): Promise<Response> {
   const startedAt = new Date().toISOString();
+  // Alerting is bound to the messages ALREADY recorded, not to the poll
+  // succeeding: anything written before a mid-run IMAP failure is already
+  // \Seen and will never come back, so it must alert now or never.
+  const maybeAlert = async (rs: readonly any[]) => {
+    const n = rs.filter((r) => r?.status === 'needs-review').length;
+    if (!dryRun && n > 0) await alertNeedsReview(n, runCtx.source, origin);
+  };
   const host = Deno.env.get('TSCS_IMAP_HOST') || 'imap.ionos.com';
   const port = Number(Deno.env.get('TSCS_IMAP_PORT') || 993);
   const user = Deno.env.get('TSCS_IMAP_USER');
@@ -326,14 +344,14 @@ async function pollMailbox(
     await client.logout();
   } catch (e) {
     try { await client.logout(); } catch { /* already gone */ }
+    await maybeAlert(results);
     await recordRun(supabase, buildPollRunRow({
       startedAt, dryRun, ...runCtx, results, ok: false,
       error: `IMAP poll failed: ${String(e)}`,
     }));
     return json({ error: `IMAP poll failed: ${String(e)}`, processed: results }, 502);
   }
-  const needsReview = results.filter((r) => r?.status === 'needs-review').length;
-  if (!dryRun && needsReview > 0) await alertNeedsReview(needsReview, runCtx.source, origin);
+  await maybeAlert(results);
   await recordRun(supabase, buildPollRunRow({ startedAt, dryRun, ...runCtx, results, ok: true }));
   return json({ ok: true, processed: results.length, results, dryRun });
 }
@@ -366,9 +384,17 @@ serve(async (req) => {
       const { data: userData } = await supabase.auth.getUser(jwt);
       if (userData?.user) {
         const { data: profile } = await supabase
-          .from('profiles').select('role').eq('id', userData.user.id).maybeSingle();
+          .from('profiles').select('role, admin_permissions').eq('id', userData.user.id).maybeSingle();
         const role = (profile as any)?.role ?? '';
         if (role === 'admin' || role === 'super_admin') {
+          // Mirror the UI gate server-side. A plain admin whose dashboard page
+          // is switched off is blocked in the sidebar but could otherwise POST
+          // here with their own session and create paid attendee rows.
+          // NULL permissions means legacy grandfather = full access, matching
+          // FALLBACK_ADMIN_PERMISSIONS in utils/adminPermissions.ts.
+          const perms = (profile as any)?.admin_permissions;
+          const allowed = role === 'super_admin' || perms == null || perms?.pages?.dashboard === true;
+          if (!allowed) return json({ error: 'forbidden — dashboard access required' }, 403);
           caller = { kind: 'admin', source: 'dashboard', email: userData.user.email ?? null };
         } else {
           // A real session that simply isn't an admin — say so rather than
@@ -440,10 +466,23 @@ serve(async (req) => {
     if (next !== 'ignored' && next !== 'needs-review') {
       return json({ error: "status must be 'ignored' or 'needs-review'" }, 400);
     }
-    const note = body?.note ? String(body.note).slice(0, 500) : null;
+    const { data: current } = await supabase
+      .from('tscs_email_registrations')
+      .select('status, attendee_id').eq('message_id', messageId).maybeSingle();
+    if (!current) return json({ error: 'no such message' }, 404);
+    // A message that already produced a registration must not be re-labelled:
+    // the attendee is live and ticketed, there is no transition back to
+    // 'ingested', and the queue would then misreport a real registration.
+    if ((current as any).attendee_id || (current as any).status === 'ingested') {
+      return json({ error: 'this message already created a registration — it cannot be set aside' }, 409);
+    }
+    // Preserve the parse-failure reason unless the admin supplies their own
+    // note: it is the only surviving record of WHY a human was needed, and the
+    // message is already \Seen so it can never be re-read.
+    const patch: Record<string, unknown> = { status: next };
+    if (body?.note) patch.error = String(body.note).slice(0, 500);
     const { error } = await supabase.from('tscs_email_registrations')
-      .update({ status: next, error: note })
-      .eq('message_id', messageId);
+      .update(patch).eq('message_id', messageId);
     if (error) return json({ error: error.message }, 500);
     return json({ ok: true, messageId, status: next, by: caller.email });
   }

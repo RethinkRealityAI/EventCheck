@@ -4,29 +4,11 @@ import {
   Search, ChevronDown, Mail, Inbox, X, Send, EyeOff, RotateCcw, Activity, ExternalLink,
 } from 'lucide-react';
 import { useNotifications } from '../NotificationSystem';
+import { timeAgo } from '../../utils/timeAgo';
 import {
-  getTscsEmails, getTscsPollRuns, runTscsPoll, ingestTscsRegistration, setTscsEmailStatus,
+  getTscsEmails, getTscsPollRuns, runTscsPoll, ingestTscsRegistration, setTscsEmailStatus, getTscsEmailBody,
   type TscsEmailRow, type TscsEmailStatus, type TscsPollRun,
 } from '../../services/tscsIngestService';
-
-/** House convention (mirrors Contacts/Signups): relative in the cell, exact in
- *  the title attribute. */
-function timeAgo(iso?: string | null): string {
-  if (!iso) return '';
-  const ms = Date.now() - new Date(iso).getTime();
-  if (Number.isNaN(ms)) return '';
-  const sec = Math.floor(ms / 1000);
-  if (sec < 60) return 'just now';
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const day = Math.floor(hr / 24);
-  if (day < 30) return `${day}d ago`;
-  const mo = Math.floor(day / 30);
-  if (mo < 12) return `${mo}mo ago`;
-  return `${Math.floor(mo / 12)}y ago`;
-}
 
 const STATUS_META: Record<TscsEmailStatus, { cls: string; icon: React.ReactNode; label: string }> = {
   'ingested':     { cls: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: <CheckCircle2 className="w-3 h-3" />,  label: 'Registered' },
@@ -86,6 +68,15 @@ const IndiaIngestPage: React.FC = () => {
   }, [showNotification]);
 
   useEffect(() => { load(); }, [load]);
+
+  // "Last checked 2m ago" must not still say 2m an hour later: this page is
+  // meant to be left open, and a frozen banner recreates exactly the ambiguity
+  // the run log was built to remove.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick(n => n + 1), 60_000);
+    return () => clearInterval(t);
+  }, []);
 
   // The health reading only counts LIVE runs: a dry-run rehearsal must never
   // make a broken cron look healthy.
@@ -385,20 +376,51 @@ const ReviewModal: React.FC<{
     return out;
   });
   const [busy, setBusy] = useState<null | 'ingest' | 'dismiss' | 'reopen'>(null);
+  // `raw` is excluded from the list query (it can be 100k chars per row), so
+  // the body is fetched for just this message when it is opened.
+  const [rawBody, setRawBody] = useState<string | null>(null);
+  const [rawLoading, setRawLoading] = useState(true);
+  useEffect(() => {
+    let alive = true;
+    setRawLoading(true);
+    getTscsEmailBody(row.messageId)
+      .then(b => { if (alive) setRawBody(b); })
+      .catch(() => { if (alive) setRawBody(null); })
+      .finally(() => { if (alive) setRawLoading(false); });
+    return () => { alive = false; };
+  }, [row.messageId]);
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
 
   const buildRegistration = () => {
-    const reg: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(form)) {
-      const t = v.trim();
-      if (!t) continue;
-      reg[k] = k === 'total_inr' ? Number(t.replace(/[^\d.]/g, '')) : t;
+    // Start from the ORIGINAL parse so fields this form does not expose —
+    // group members, the free add-on, participant count — survive a manual
+    // fix. Building from the form alone would register the primary and
+    // silently strand everyone else on a paid group booking.
+    const reg: Record<string, unknown> = { ...(row.parsed || {}) };
+    for (const f of EDIT_FIELDS) {
+      const t = (form[f.key] ?? '').trim();
+      if (!t) { delete reg[f.key]; continue; }
+      if (f.key === 'total_inr') {
+        const n = Number(t.replace(/[^\d.]/g, ''));
+        // An unreadable amount must stay ABSENT rather than become ₹0.00 on a
+        // paid row — the row builder's fallback is a non-monetary marker.
+        if (/\d/.test(t) && Number.isFinite(n)) reg[f.key] = n;
+        else delete reg[f.key];
+      } else {
+        reg[f.key] = t;
+      }
     }
     return reg;
   };
 
-  const canIngest = !!form.name?.trim() && !!form.email?.trim() && !!form.category?.trim();
+  // A message that already produced an attendee must not be registered again:
+  // editing the payment id would move the dedupe key and mint a second set of
+  // rows plus a second ticket for one ₹ payment.
+  const alreadyRegistered = !!row.attendeeId || row.status === 'ingested';
+  const groupSize = Array.isArray(row.parsed?.group) ? row.parsed!.group.length : 0;
+  const canIngest = !alreadyRegistered
+    && !!form.name?.trim() && !!form.email?.trim() && !!form.category?.trim();
 
   const doIngest = async () => {
     if (!canIngest) return;
@@ -498,7 +520,17 @@ const ReviewModal: React.FC<{
                   </div>
                 ))}
               </div>
-              {!canIngest && (
+              {groupSize > 0 && (
+                <p className="mt-3 text-xs text-gray-600 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-2">
+                  This booking includes <strong>{groupSize} additional participant{groupSize === 1 ? '' : 's'}</strong> read
+                  from the email. They are registered along with the primary — the fields above cover the primary only.
+                </p>
+              )}
+              {alreadyRegistered ? (
+                <p className="mt-3 text-xs text-gray-500">
+                  Already registered, so this cannot be submitted again. Edits here would not change the existing attendee.
+                </p>
+              ) : !canIngest && (
                 <p className="mt-3 text-xs text-gray-500">
                   Name, email and registration category are required before this can be registered.
                 </p>
@@ -508,7 +540,7 @@ const ReviewModal: React.FC<{
             <div className="min-w-0">
               <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">The email as received</h4>
               <pre className="text-[11px] leading-relaxed bg-gray-50 border border-gray-200 rounded-lg p-3 overflow-auto max-h-[420px] whitespace-pre-wrap break-words text-gray-700">
-                {row.raw || 'No body was stored for this message.'}
+                {rawLoading ? 'Loading the message…' : (rawBody || 'No body was stored for this message.')}
               </pre>
               <p className="mt-2 text-[11px] text-gray-400 font-mono break-all">{row.messageId}</p>
             </div>
@@ -516,7 +548,7 @@ const ReviewModal: React.FC<{
         </div>
 
         <div className="px-5 py-3 border-t border-gray-100 bg-gray-50 flex flex-wrap gap-2 justify-end flex-shrink-0">
-          {row.status === 'ignored' ? (
+          {alreadyRegistered ? null : row.status === 'ignored' ? (
             <button
               onClick={() => doStatus('needs-review')}
               disabled={!!busy}
@@ -541,7 +573,7 @@ const ReviewModal: React.FC<{
             onClick={doIngest}
             disabled={!!busy || !canIngest}
             className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 transition shadow-sm disabled:opacity-50"
-            title={row.attendeeId ? 'Already registered — this will be recognised as a duplicate' : 'Create the attendee and email the ticket'}
+            title={alreadyRegistered ? 'This message has already been registered' : 'Create the attendee and email the ticket'}
           >
             {busy === 'ingest' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
             Register &amp; send ticket
