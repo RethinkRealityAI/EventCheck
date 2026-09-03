@@ -42,7 +42,7 @@ jobs:
             -X POST 'https://gticuvgclbvhwvpzkuez.supabase.co/functions/v1/tscs-email-ingest' \
             -H 'Content-Type: application/json' \
             -H "x-ingest-secret: $INGEST_SECRET" \
-            -d "{\"mode\":\"poll\",\"dryRun\":$DRY_RUN}")
+            -d "{\"mode\":\"poll\",\"dryRun\":$DRY_RUN,\"source\":\"cron\"}")
           code=$(echo "$resp" | tail -1)
           body=$(echo "$resp" | sed '$d')
           echo "HTTP $code"
