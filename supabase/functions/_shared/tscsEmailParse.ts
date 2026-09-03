@@ -48,6 +48,35 @@ export interface TscsRegistration {
   addon?: { name?: string; email?: string };
 }
 
+export type TscsPaymentState = 'confirmed' | 'pending' | 'unknown';
+
+/**
+ * Does this email evidence a COMPLETED payment?
+ *
+ * TSCS sends a "[PENDING] Incomplete Registration" mail when someone starts
+ * checkout and abandons it. It is structurally IDENTICAL to the confirmation —
+ * same table, same fields, same registrant — so parsing alone cannot tell them
+ * apart, and ingesting one issues a congress ticket to somebody who never paid.
+ * The only reliable separators are the subject marker and the presence of a
+ * Razorpay transaction id, so both are checked and anything ambiguous is
+ * reported as 'unknown' for a human rather than guessed at.
+ */
+export function paymentStateOf(args: {
+  subject?: string;
+  text?: string;
+  html?: string;
+  paymentId?: string;
+}): TscsPaymentState {
+  const subject = args.subject || '';
+  const body = `${args.text || ''}\n${args.html || ''}`;
+  // Pending wins over every positive marker: the pending mail also contains
+  // the word "Registration" and a full details table.
+  if (/\[\s*PENDING\s*\]|incomplete\s+registration/i.test(`${subject}\n${body}`)) return 'pending';
+  if (args.paymentId) return 'confirmed';
+  if (/\[\s*(?:PAID|SUCCESS)\s*\]|PAYMENT\s+CONFIRMED/i.test(`${subject}\n${body}`)) return 'confirmed';
+  return 'unknown';
+}
+
 export type TscsParseResult =
   | { ok: true; registration: TscsRegistration; via: 'json' | 'labels' | 'table' }
   | { ok: false; reason: string };
@@ -184,6 +213,39 @@ const TABLE_LABELS: Array<[label: string, field: string]> = [
 
 const HONORIFIC_RE = /^(?:mr|mrs|ms|miss|dr|prof|mx)\.?\s+/i;
 
+/** Match an address at the START of run-together template text, e.g.
+ *  'isha@gmail.comPhone8978' → 'isha@gmail.com'.
+ *  Anchored on purpose: unanchored, the local-part would greedily run
+ *  BACKWARDS through the preceding label ('...PolavarapuEmailisha@gmail.com').
+ *  The lookahead is what stops the TLD swallowing the next label. */
+function emailAtStart(s: string): string | undefined {
+  const m = s.match(/^\s*([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+?\.[A-Za-z]{2,63})(?=[A-Z]|\s|$)/);
+  return m ? m[1] : undefined;
+}
+
+/** The "Free Addon Person" block — a complimentary companion on a paid
+ *  booking. Missing it means a real person on a real payment never gets
+ *  registered or ticketed, so it is parsed from the same run-together text as
+ *  everything else:
+ *    Free Addon Person
+ *    NameIsha PolavarapuEmailisha@gmail.comPhone8978978686 */
+function tryAddon(source: string): { name?: string; email?: string } | null {
+  const block = source.match(
+    /Free\s*Add-?on\s*Person([\s\S]*?)(?:Amount\s*Paid|Additional\s*Participants|Automated\s*notification|$)/i,
+  );
+  if (!block) return null;
+  const chunk = block[1].replace(/\s+/g, ' ').trim();
+  if (!chunk) return null;
+  // Split on the label so the address is matched from its own first character.
+  const afterEmail = chunk.split(/Email/i).slice(1).join('Email');
+  const email = emailAtStart(afterEmail);
+  // Name runs from the 'Name' label to the 'Email' label (or the end).
+  const nameMatch = chunk.match(/Name\s*(.+?)\s*(?:Email|Phone|$)/i);
+  const name = nameMatch ? nameMatch[1].trim().replace(HONORIFIC_RE, '') : undefined;
+  if (!name && !email) return null;
+  return { name, email };
+}
+
 function tryTscsTable(rawText: string, strippedHtml: string): Partial<TscsRegistration> | null {
   for (const source of [rawText, strippedHtml]) {
     if (!source || !/Full Name/.test(source)) continue;
@@ -219,6 +281,9 @@ function tryTscsTable(rawText: string, strippedHtml: string): Partial<TscsRegist
       else (reg as any)[field] = value;
     }
     if (!reg.email) continue;
+
+    const addon = tryAddon(source);
+    if (addon?.name) reg.addon = addon;
 
     // "Additional Participants" block: per member, a "Participant N <name>"
     // line, then "email | phone", "Attending: …", and a category line. Parse

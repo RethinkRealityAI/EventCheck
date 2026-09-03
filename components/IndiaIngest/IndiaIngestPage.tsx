@@ -85,9 +85,16 @@ const IndiaIngestPage: React.FC = () => {
   const minutesSinceGood = lastGoodRun
     ? Math.floor((Date.now() - new Date(lastGoodRun.startedAt).getTime()) / 60000)
     : null;
-  // The cron runs every 10 minutes; 30 is three missed ticks — late enough to
-  // mean something, early enough to matter.
-  const stale = minutesSinceGood === null || minutesSinceGood > 30;
+  // GitHub's scheduled workflows are best-effort, NOT punctual. This poller is
+  // configured for every 10 minutes, but the observed cadence in production is
+  // one run every 2-5 hours — GitHub delays and drops scheduled runs under
+  // load. 6h is therefore the honest threshold: past the worst gap actually
+  // seen, so amber means something is wrong rather than "GitHub is busy".
+  // "Check mail now" is the escape hatch when a registration is waiting.
+  const STALE_AFTER_MIN = 6 * 60;
+  const stale = minutesSinceGood === null || minutesSinceGood > STALE_AFTER_MIN;
+  // Past the nominal cadence but well inside GitHub's normal drift.
+  const overdue = !stale && minutesSinceGood !== null && minutesSinceGood > 60;
   const lastRunFailed = !!lastLiveRun && !lastLiveRun.ok;
 
   const counts = useMemo(() => {
@@ -187,6 +194,12 @@ const IndiaIngestPage: React.FC = () => {
                 ? 'Nothing new that run.'
                 : `${lastGoodRun.processed} message${lastGoodRun.processed === 1 ? '' : 's'} handled.`}
             </span>
+            {(overdue || stale) && (
+              <span className="opacity-80">
+                Scheduled checks are best-effort and often run only every few hours — use
+                <strong> Check mail now</strong> if someone is waiting on a ticket.
+              </span>
+            )}
           </>
         ) : (
           <span className="font-semibold">No mail check has been recorded yet.</span>
