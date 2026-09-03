@@ -330,8 +330,10 @@ creates the attendee rows (`payment_method='razorpay'`), sends the ticket via
 ### 6a. SQL (GANSID project `gticuvgclbvhwvpzkuez`)
 
 Run migrations `20260901120000_allow_razorpay_payment_method.sql`,
-`20260901120100_add_tscs_email_registrations.sql`, and
-`20260901120200_add_razorpay_txn_unique.sql`.
+`20260901120100_add_tscs_email_registrations.sql`,
+`20260901120200_add_razorpay_txn_unique.sql`,
+`20260902120000_add_tscs_poll_runs.sql`, and
+`20260902130000_tighten_tscs_read_policies.sql`.
 
 SCAGO does not need the `tscs_email_registrations` table (the pipeline is
 GANSID-only), but apply `20260901120000` and `20260901120200` there too —
@@ -348,8 +350,14 @@ supabase secrets set --project-ref gticuvgclbvhwvpzkuez \
   TSCS_IMAP_PORT="993" \
   TSCS_IMAP_USER="<the dedicated IONOS mailbox address>" \
   TSCS_IMAP_PASS="<that mailbox's password>" \
-  TSCS_ALLOWED_SENDERS="@tscsindia.org"
+  TSCS_ALLOWED_SENDERS="@tscsindia.org" \
+  TSCS_ALERT_EMAIL="<who should hear about unreadable emails>"
 ```
+
+`TSCS_ALERT_EMAIL` is optional — it defaults to the existing internal
+address. It receives one summary mail per poll whenever a message cannot be
+parsed, which is what stops a real payment from sitting unnoticed in the
+review queue.
 
 Use a DEDICATED mailbox (e.g. india-registrations@…): the poller marks
 messages read and the password lives in server config. IONOS IMAP is
@@ -382,6 +390,28 @@ Ask TSCS to include in the confirmation email either the machine block
 Total Fee and Razorpay Payment ID. Anything unparseable is queued as
 `needs-review` in `tscs_email_registrations` and can be finished by hand with
 `{"mode":"ingest", …}`.
+
+### 6f. Day-to-day: the India Registrations page
+
+`/admin/india` in the dashboard (GANSID only, visible to any admin with
+dashboard access) is where this pipeline is operated — no CLI needed:
+
+* **Health banner** — time since the last successful *live* poll, who ran it
+  and what it found. Dry runs are excluded so a rehearsal cannot mask a broken
+  cron; over 30 minutes (three missed ticks) reads as stale. Backed by
+  `tscs_poll_runs`, which records one row per attempt — without it a healthy
+  poll of an empty mailbox is indistinguishable from a dead cron.
+* **The queue** — every message TSCS has sent, with status, registrant and
+  amount. Opening one shows the raw email beside the parsed fields, editable:
+  correct what the parser missed and register it by hand, ticket included.
+  Group members read from the email ride along automatically.
+* **Set aside / reopen** — for messages that are not real registrations
+  (partner test payments, duplicates being refunded). Refused on anything that
+  already produced a registration.
+* **Check mail now** — an on-demand poll.
+
+Admins authenticate with their own session; the shared ingest secret stays
+between the cron and the function.
 
 Known limits: email is not cryptographically verifiable (sender allow-list +
 payment-id dedupe are the guards); the designed upgrade is the signed
