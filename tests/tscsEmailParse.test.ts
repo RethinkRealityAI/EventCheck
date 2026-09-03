@@ -4,6 +4,7 @@ import {
   senderAllowed,
   categoryToPricingId,
   parseAmount,
+  paymentStateOf,
 } from '../supabase/functions/_shared/tscsEmailParse';
 
 describe('senderAllowed', () => {
@@ -312,5 +313,96 @@ describe('parseTscsEmail — live TSCS table template', () => {
     expect(categoryToPricingId(r.registration.category)).toBe('patient_org');
     expect(r.registration.total_inr).toBe(4800);
     expect(r.registration.payment_id).toBe('pay_TVz8M4EhmZNXMn');
+  });
+});
+
+// Regression fixtures from LIVE production incidents (2026-09-03). Both bugs
+// below reached real registrants before being caught.
+describe('paymentStateOf — the pending-notice trap', () => {
+  // TSCS mails this for an abandoned checkout. It is structurally identical to
+  // a confirmation: same table, same registrant, same fields. Two of these were
+  // ingested as PAID and had congress tickets emailed.
+  const pendingSubject = '⏳ [PENDING] Incomplete Registration: REG-00022';
+  const confirmedSubject = '✅ [SUCCESS] Registration Confirmed: REG-00022';
+
+  it('treats a [PENDING] notice as unpaid even when it parses perfectly', () => {
+    expect(paymentStateOf({ subject: pendingSubject })).toBe('pending');
+    expect(paymentStateOf({ subject: 'Incomplete Registration: REG-1' })).toBe('pending');
+    // Pending must win even if the body also carries positive-sounding words.
+    expect(paymentStateOf({
+      subject: pendingSubject,
+      text: 'Registration Successful\nPAYMENT CONFIRMED',
+    })).toBe('pending');
+  });
+
+  it('a transaction id is proof of payment', () => {
+    expect(paymentStateOf({ subject: confirmedSubject, paymentId: 'pay_TXTbLRamVUH3bp' })).toBe('confirmed');
+    expect(paymentStateOf({ subject: 'anything', paymentId: 'pay_ABC123' })).toBe('confirmed');
+  });
+
+  it('accepts the [PAID]/[SUCCESS]/PAYMENT CONFIRMED markers without an id', () => {
+    expect(paymentStateOf({ subject: '[PAID] Registration Confirmed: REG-12' })).toBe('confirmed');
+    expect(paymentStateOf({ subject: confirmedSubject })).toBe('confirmed');
+    expect(paymentStateOf({ text: 'PAYMENT CONFIRMED\nRef: REG-9' })).toBe('confirmed');
+  });
+
+  it('anything else is unknown — a human decides, never an auto-register', () => {
+    expect(paymentStateOf({ subject: 'Your registration details' })).toBe('unknown');
+    expect(paymentStateOf({})).toBe('unknown');
+  });
+});
+
+describe('parseTscsEmail — free add-on person', () => {
+  // A complimentary companion on a PAID booking. The block was not parsed, so
+  // Isha was never registered or ticketed despite ₹7,200 being collected.
+  const withAddon = [
+    'PAYMENT CONFIRMED',
+    'Ref: REG-00022  |  Via: Razorpay',
+    'Hello VIvek,',
+    'Registration Details',
+    'Full NameDr. VIvek Gunda Emailsunnyvivek64@gmail.com Phone+918106676343',
+    'CountryIndia CityHyderabad, Moosapet InstitutionYashoda Hospitals RoleConsultant',
+    'Transfusion medicine CategoryAbstract Presenters Pricing TierPromo Total',
+    'Participants1 Attending DaysOct 23, 2026, Oct 24, 2026, Oct 25, 2026',
+    'Presentation Transaction IDpay_TXTbLRamVUH3bp',
+    '',
+    'Free Addon Person',
+    '',
+    'NameIsha PolavarapuEmailishapolavarapu91@gmail.comPhone8978978686',
+    '',
+    'Amount Paid ₹7,200.00 INR',
+    '',
+    'Automated notification from TSCS INDIA',
+  ].join('\n');
+
+  it('extracts the companion from the run-together block', () => {
+    const r = parseTscsEmail({ subject: '✅ [SUCCESS] Registration Confirmed: REG-00022', text: withAddon });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.registration.addon).toEqual({
+      name: 'Isha Polavarapu',
+      email: 'ishapolavarapu91@gmail.com',
+    });
+  });
+
+  it('does not let the add-on block corrupt the primary registrant', () => {
+    const r = parseTscsEmail({ text: withAddon });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.registration.name).toBe('VIvek Gunda');
+    expect(r.registration.email).toBe('sunnyvivek64@gmail.com');
+    // The add-on's phone must not overwrite the primary's, and the amount must
+    // survive the block sitting between Transaction ID and Amount Paid.
+    expect(r.registration.phone).toBe('+918106676343');
+    expect(r.registration.payment_id).toBe('pay_TXTbLRamVUH3bp');
+    expect(r.registration.total_inr).toBe(7200);
+  });
+
+  it('leaves addon unset when there is no such block', () => {
+    const r = parseTscsEmail({
+      text: 'Full NameA B Emaila@b.com CategoryIndustry Partners Transaction IDpay_X1Y2Z3',
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.registration.addon).toBeUndefined();
   });
 });

@@ -48,6 +48,7 @@ import { plainTextToHtml, renderEmailShell } from '../_shared/emailShell.ts';
 import {
   parseTscsEmail,
   senderAllowed,
+  paymentStateOf,
   type TscsRegistration,
 } from '../_shared/tscsEmailParse.ts';
 import { buildTscsAttendeeRows } from '../_shared/tscsIngestRows.ts';
@@ -257,6 +258,7 @@ async function pollMailbox(
   });
 
   const results: any[] = [];
+  let skipped = 0;
   try {
     await client.connect();
     const lock = await client.getMailboxLock('INBOX');
@@ -264,7 +266,14 @@ async function pollMailbox(
       // uid:true everywhere — sequence numbers shift if the mailbox mutates
       // mid-run (another client expunging), which would read or flag the
       // WRONG message. UIDs are stable for the mailbox's lifetime.
-      const unseen = await client.search({ seen: false }, { uid: true });
+      // Narrow the search server-side when the allow-list is a single entry.
+      // The mailbox is a person's WORKING inbox, so unrelated mail should not
+      // even be fetched — and this stops a busy inbox consuming the per-run cap
+      // before the partner's mail is reached.
+      const allowEntries = allowedSenders.split(',').map((x) => x.trim()).filter(Boolean);
+      const query: Record<string, unknown> = { seen: false };
+      if (allowEntries.length === 1) query.from = allowEntries[0].replace(/^@/, '');
+      const unseen = await client.search(query as any, { uid: true });
       const uids: number[] = (unseen || []).slice(0, 25); // bounded per run
       for (const uid of uids) {
         const msg = await client.fetchOne(String(uid), { source: true, envelope: true }, { uid: true });
@@ -278,8 +287,14 @@ async function pollMailbox(
         let outcomeRow: any = { message_id: messageId, from_addr: fromAddr, subject, received_at: receivedAt };
 
         if (!senderAllowed(fromAddr, allowedSenders)) {
-          outcomeRow = { ...outcomeRow, status: 'ignored', error: 'sender not in allow-list' };
-        } else {
+          // NOT the partner's: leave it completely alone — unread, unrecorded,
+          // unflagged. This mailbox belongs to a person, and silently marking
+          // their mail read (a cancellation request, a sponsor thread) is a
+          // worse failure than any parsing bug. Counted, never consumed.
+          skipped++;
+          continue;
+        }
+        {
           const parsed = parseTscsEmail({ subject, text: parsedMail.text || '', html: typeof parsedMail.html === 'string' ? parsedMail.html : '' });
           if (!parsed.ok) {
             outcomeRow = {
@@ -287,6 +302,30 @@ async function pollMailbox(
               status: 'needs-review',
               raw: parsedMail.text || String(parsedMail.html || ''),
               error: parsed.reason,
+            };
+          } else if (paymentStateOf({ subject, text: parsedMail.text || '', html: typeof parsedMail.html === 'string' ? parsedMail.html : '', paymentId: parsed.registration.payment_id }) === 'pending') {
+            // TSCS mails an "[PENDING] Incomplete Registration" notice for
+            // abandoned checkouts that is structurally identical to a real
+            // confirmation. Registering one hands a congress ticket to someone
+            // who never paid, so it is filed, not ingested — and not alerted
+            // on, because an abandoned checkout is a non-event, not a problem.
+            outcomeRow = {
+              ...outcomeRow,
+              status: 'ignored',
+              parsed: parsed.registration,
+              raw: parsedMail.text || String(parsedMail.html || ''),
+              error: 'TSCS pending notice — checkout was not completed, nothing to register',
+            };
+          } else if (paymentStateOf({ subject, text: parsedMail.text || '', html: typeof parsedMail.html === 'string' ? parsedMail.html : '', paymentId: parsed.registration.payment_id }) === 'unknown') {
+            // Parsed fine but carries no transaction id and no payment-confirmed
+            // marker. Could be a template change; could be another non-payment
+            // notice. Either way a human decides — never auto-register.
+            outcomeRow = {
+              ...outcomeRow,
+              status: 'needs-review',
+              parsed: parsed.registration,
+              raw: parsedMail.text || String(parsedMail.html || ''),
+              error: 'no transaction id and no payment-confirmed marker — do not register without checking with TSCS',
             };
           } else {
             const outcome = await ingestRegistration(supabase, parsed.registration, {
@@ -353,7 +392,7 @@ async function pollMailbox(
   }
   await maybeAlert(results);
   await recordRun(supabase, buildPollRunRow({ startedAt, dryRun, ...runCtx, results, ok: true }));
-  return json({ ok: true, processed: results.length, results, dryRun });
+  return json({ ok: true, processed: results.length, skipped, results, dryRun });
 }
 
 serve(async (req) => {
