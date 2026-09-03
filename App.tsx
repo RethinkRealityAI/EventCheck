@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { HashRouter, Routes, Route, Link, useLocation, Navigate, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, QrCode, ClipboardList, LogOut, Settings as SettingsIcon, ExternalLink, Menu, X, ChevronLeft, ChevronRight, Loader2, Rows3, Users, Handshake, UserCircle, Shield, KeyRound, ScanLine, FileText } from 'lucide-react';
+import { LayoutDashboard, QrCode, ClipboardList, LogOut, Settings as SettingsIcon, ExternalLink, Menu, X, ChevronLeft, ChevronRight, Loader2, Rows3, Users, Handshake, UserCircle, Shield, KeyRound, ScanLine, FileText, Inbox } from 'lucide-react';
 import ManualTicketTool from './components/ManualTicketTool';
 import AttendeeList from './components/AttendeeList';
 import Scanner from './components/Scanner';
@@ -13,6 +13,7 @@ import { TicketDownloadPage } from './components/TicketDownload/TicketDownloadPa
 import PayBalancePage from './components/PayBalance/PayBalancePage';
 import SeatingConfigurator from './components/Seating/SeatingConfigurator';
 import SponsorsDashboard from './components/Sponsors/SponsorsDashboard';
+import IndiaIngestPage from './components/IndiaIngest/IndiaIngestPage';
 import { NotificationProvider } from './components/NotificationSystem';
 import { Attendee, Form } from './types';
 import { getAttendees, checkInAttendee, getForms, getAttendee, updateAttendee } from './services/storageService';
@@ -203,6 +204,10 @@ const AdminLayout = () => {
   const canSeeSettings = canAccessPage(profile, 'settings');
   const canSeeContent = CURRENT_SITE.portalEnabled && canAccessPage(profile, 'content');
   const canSeeAdmins = canManageAdmins(profile);
+  // India/TSCS ingest is a GANSID-only pipeline (its tables live on that
+  // project only), and it shows registration data — so it rides the same
+  // permission as the attendee dashboard rather than inventing a new key.
+  const canSeeIndia = CURRENT_SITE.key === 'gansid' && canAccessPage(profile, 'dashboard');
 
   const handleLogout = async () => {
     await signOut();
@@ -421,6 +426,11 @@ const AdminLayout = () => {
             >
               <ScanLine className="w-6 h-6" />
             </button>
+            {canSeeIndia && (
+              <Link to="/admin/india" onClick={() => setIsMobileMenuOpen(false)} className="p-3 text-slate-300 hover:text-white hover:bg-slate-800/80 rounded-xl transition-all" title="India Registrations">
+                <Inbox className="w-6 h-6" />
+              </Link>
+            )}
             {canSeeSettings && (
               <Link to="/admin/settings" onClick={() => setIsMobileMenuOpen(false)} className="p-3 text-slate-300 hover:text-white hover:bg-slate-800/80 rounded-xl transition-all">
                 <SettingsIcon className="w-6 h-6" />
@@ -510,6 +520,7 @@ const AdminLayout = () => {
           {canSeeSponsors && <NavLink to="/admin/sponsors" icon={Handshake} collapsed={isSidebarCollapsed && !isSidebarPinned}>Sponsors</NavLink>}
           {canSeeSeating && <NavLink to="/admin/seating" icon={Rows3} collapsed={isSidebarCollapsed && !isSidebarPinned}>Seating Chart</NavLink>}
           {canSeeGenerateQr && <NavLink to="/admin/generate-qr" icon={QrCode} collapsed={isSidebarCollapsed && !isSidebarPinned}>Generate QR</NavLink>}
+          {canSeeIndia && <NavLink to="/admin/india" icon={Inbox} collapsed={isSidebarCollapsed && !isSidebarPinned}>India Registrations</NavLink>}
           {canSeeSettings && <NavLink to="/admin/settings" icon={SettingsIcon} collapsed={isSidebarCollapsed && !isSidebarPinned}>Settings</NavLink>}
           {canSeeContent && <NavLink to="/admin/content" icon={FileText} collapsed={isSidebarCollapsed && !isSidebarPinned}>Content</NavLink>}
 
@@ -636,6 +647,7 @@ const AdminLayout = () => {
               </ProtectedRoute>
             } />
             <Route path="/settings" element={<ProtectedRoute requirePage="settings"><Settings /></ProtectedRoute>} />
+            <Route path="/india" element={<ProtectedRoute requirePage="dashboard"><IndiaIngestPage /></ProtectedRoute>} />
             <Route
               path="/content"
               element={
