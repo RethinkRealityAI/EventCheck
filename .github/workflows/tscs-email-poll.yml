@@ -10,9 +10,17 @@
 # pipeline is: set the secret here + set the function secrets on Supabase.
 name: tscs-email-poll
 
+# Cadence: every two hours, deliberately. GitHub's scheduled runner is
+# best-effort — it delays and silently drops runs under load — so the '*/10'
+# this used to declare never once ran every ten minutes; observed spacing was
+# 2-5 hours. A schedule that matches reality is worth more than an optimistic
+# one: it makes a genuinely dead poller visible (the dashboard's staleness
+# banner trips at 6h) instead of hiding it in permanent amber. Anyone needing
+# mail read right now presses "Check mail now" on /admin/india, or runs this
+# workflow from the Actions tab.
 on:
   schedule:
-    - cron: '*/10 * * * *'
+    - cron: '0 */2 * * *'
   workflow_dispatch:
     inputs:
       dry_run:

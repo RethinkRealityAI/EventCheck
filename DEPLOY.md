@@ -332,8 +332,16 @@ creates the attendee rows (`payment_method='razorpay'`), sends the ticket via
 Run migrations `20260901120000_allow_razorpay_payment_method.sql`,
 `20260901120100_add_tscs_email_registrations.sql`,
 `20260901120200_add_razorpay_txn_unique.sql`,
-`20260902120000_add_tscs_poll_runs.sql`, and
-`20260902130000_tighten_tscs_read_policies.sql`.
+`20260902120000_add_tscs_poll_runs.sql`,
+`20260902130000_tighten_tscs_read_policies.sql`,
+`20260903204500_require_razorpay_payment_id.sql`, and
+`20260903210000_register_missed_tscs_addon.sql`.
+
+The last two carry one-off data corrections as well as schema changes, and
+each header explains why: `…require_razorpay_payment_id` removes two unpaid
+registrations created from "[PENDING]" notices plus a cancelled test booking,
+and `…register_missed_tscs_addon` registers a free companion the parser could
+not read at the time her booking arrived.
 
 SCAGO does not need the `tscs_email_registrations` table (the pipeline is
 GANSID-only), but apply `20260901120000` and `20260901120200` there too —
@@ -398,7 +406,9 @@ dashboard access) is where this pipeline is operated — no CLI needed:
 
 * **Health banner** — time since the last successful *live* poll, who ran it
   and what it found. Dry runs are excluded so a rehearsal cannot mask a broken
-  cron; over 30 minutes (three missed ticks) reads as stale. Backed by
+  cron; over 6 hours reads as stale — the cron is declared every 2 hours and
+  GitHub's scheduler delays and drops runs, so a tighter threshold sits amber
+  permanently and stops meaning anything. Backed by
   `tscs_poll_runs`, which records one row per attempt — without it a healthy
   poll of an empty mailbox is indistinguishable from a dead cron.
 * **The queue** — every message TSCS has sent, with status, registrant and
@@ -408,10 +418,22 @@ dashboard access) is where this pipeline is operated — no CLI needed:
 * **Set aside / reopen** — for messages that are not real registrations
   (partner test payments, duplicates being refunded). Refused on anything that
   already produced a registration.
-* **Check mail now** — an on-demand poll.
+* **Check mail now** — an on-demand poll. The scheduled one runs every two
+  hours (`.github/workflows/tscs-email-poll.yml`), so this is the button for
+  "a registrant is waiting right now".
 
 Admins authenticate with their own session; the shared ingest secret stays
 between the cron and the function.
+
+Nothing auto-registers without a Razorpay payment id — not even a mail whose
+subject says `[PAID]`. A confirmation that arrives without one lands in the
+queue for a person to check with TSCS. Three layers enforce this: the payment
+gate (`paymentStateOf`), the poller's decision (`classifyTscsMessage`), and a
+CHECK constraint on `attendees` that no code path can get around.
+
+To re-send someone's ticket from outside the browser (a companion registered
+after the fact, a bounced send), POST `{"mode":"send-ticket","attendeeId":"…"}`
+to the function. It refuses any attendee not on the TSCS form.
 
 Known limits: email is not cryptographically verifiable (sender allow-list +
 payment-id dedupe are the guards); the designed upgrade is the signed

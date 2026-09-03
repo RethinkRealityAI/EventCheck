@@ -69,3 +69,56 @@ export function buildPollRunRow(args: {
     ...tallyPollOutcomes(args.results),
   };
 }
+
+/** What the poller should do with one message, and why. */
+export type MessageDisposition =
+  | { action: 'ingest' }
+  | { action: 'ignored'; reason: string }
+  | { action: 'needs-review'; reason: string };
+
+/**
+ * Decide one message's fate from what the parser and the payment gate found.
+ *
+ * Pure on purpose. Every bug this pipeline has shipped has lived in exactly
+ * this decision — a pending notice read as a confirmation, a confirmation with
+ * no transaction id registered on the strength of a subject line — and none of
+ * them were reachable by a test while the logic sat inline in an IMAP loop.
+ *
+ * The invariant it exists to hold: nothing auto-registers without positive,
+ * checkable proof of payment. Ambiguity always routes to a human; it never
+ * defaults to handing out a congress ticket.
+ */
+export function classifyTscsMessage(args: {
+  parseOk: boolean;
+  parseReason?: string;
+  paymentState: 'pending' | 'confirmed' | 'unknown';
+  paymentId?: string;
+}): MessageDisposition {
+  if (!args.parseOk) {
+    return { action: 'needs-review', reason: args.parseReason || 'could not parse this message' };
+  }
+  // TSCS mails a "[PENDING] Incomplete Registration" notice for abandoned
+  // checkouts that is structurally identical to a real confirmation. Filed,
+  // not ingested — and not alerted on, because an abandoned checkout is a
+  // non-event rather than a problem.
+  if (args.paymentState === 'pending') {
+    return { action: 'ignored', reason: 'TSCS pending notice — checkout was not completed, nothing to register' };
+  }
+  if (args.paymentState === 'unknown') {
+    return {
+      action: 'needs-review',
+      reason: 'no transaction id and no payment-confirmed marker — do not register without checking with TSCS',
+    };
+  }
+  // Confirmed by a [PAID]/[SUCCESS]/PAYMENT CONFIRMED marker, but with no
+  // Razorpay id to back it up. A marker is a claim; the payment id is the
+  // receipt. Registering on the claim alone is what put two unpaid rows in
+  // the attendee list, so this waits for a person.
+  if (!args.paymentId) {
+    return {
+      action: 'needs-review',
+      reason: 'marked paid but carries no Razorpay transaction id — confirm the payment with TSCS before registering',
+    };
+  }
+  return { action: 'ingest' };
+}

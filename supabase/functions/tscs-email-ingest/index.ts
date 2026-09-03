@@ -17,6 +17,9 @@
 //   mode 'dismiss' — triage only: park a reviewed message as 'ignored' (a
 //                   partner test payment, a duplicate) or reopen it as
 //                   'needs-review'. Never touches attendees.
+//   mode 'send-ticket' — (re)send one TSCS attendee's ticket email. For a
+//                   companion registered after the fact, or a send that
+//                   bounced. Refuses anyone not on the TSCS form.
 //   mode 'health' — reports which env pieces are configured (no secrets).
 //
 // Every poll attempt writes one row to tscs_poll_runs, success or failure, so
@@ -37,7 +40,9 @@
 // Trust model: email is forgeable, so ingested rows record their evidence
 // (message id, sender, payment id) in answers/admin_notes, the sender must
 // match TSCS_ALLOWED_SENDERS, and payment ids de-duplicate via
-// attendees.transaction_id. This is the accepted v1 tradeoff; a signed
+// attendees.transaction_id. Nothing auto-registers without a Razorpay payment
+// id — not even a mail whose subject says [PAID] — because a subject line is a
+// claim and the payment id is the receipt; see classifyTscsMessage. This is the accepted v1 tradeoff; a signed
 // server-to-server relay from TSCS's WordPress is the designed upgrade path.
 
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
@@ -52,7 +57,7 @@ import {
   type TscsRegistration,
 } from '../_shared/tscsEmailParse.ts';
 import { buildTscsAttendeeRows } from '../_shared/tscsIngestRows.ts';
-import { buildPollRunRow } from '../_shared/tscsPollRun.ts';
+import { buildPollRunRow, classifyTscsMessage } from '../_shared/tscsPollRun.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -119,25 +124,44 @@ async function ingestRegistration(
   }
 
   // Ticket email — same registration-confirmed path every other paid flow uses.
+  // Deliberately unchecked here: the registration is already real, and a mail
+  // that fails to send is recoverable (mode 'send-ticket'), whereas reporting
+  // the whole ingest as failed would have the poller retry and double-register.
+  await sendTicketFor(primaryId, opts.origin);
+
+  return { ok: true, status: 'ingested', attendeeId: primaryId, createdCount: rows.length };
+}
+
+/**
+ * Send one attendee their ticket, through the same registration-confirmed path
+ * every paid flow uses. Never throws.
+ *
+ * Returns the failure rather than only logging it, so the caller that can act
+ * on it does: the ingest ignores the result (see above), while mode
+ * 'send-ticket' reports it to whoever pressed the button.
+ */
+async function sendTicketFor(attendeeId: string, origin: string): Promise<{ ok: boolean; error?: string }> {
   try {
-    const secret = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const token = await signRegistrationToken(primaryId, TSCS_FORM_ID, secret, Date.now(), 180 * 24 * 60 * 60 * 1000);
-    const base = resolveOrigin(opts.origin, Deno.env.get('PUBLIC_SITE_URL'));
+    const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const token = await signRegistrationToken(attendeeId, TSCS_FORM_ID, serviceKey, Date.now(), 180 * 24 * 60 * 60 * 1000);
+    const base = resolveOrigin(origin, Deno.env.get('PUBLIC_SITE_URL'));
     const downloadUrl = base ? buildAppUrl(base, `/#/tickets?token=${encodeURIComponent(token)}`) : '';
     const resp = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/send-ticket-email`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+        'Authorization': `Bearer ${serviceKey}`,
       },
-      body: JSON.stringify({ mode: 'registration-confirmed', primaryAttendeeId: primaryId, downloadUrl }),
+      body: JSON.stringify({ mode: 'registration-confirmed', primaryAttendeeId: attendeeId, downloadUrl }),
     });
-    if (!resp.ok) console.error('[tscs-ingest] ticket email failed', resp.status, await resp.text());
+    if (resp.ok) return { ok: true };
+    const detail = `${resp.status} ${await resp.text()}`.slice(0, 500);
+    console.error('[tscs-ingest] ticket email failed', detail);
+    return { ok: false, error: `ticket email failed: ${detail}` };
   } catch (e) {
     console.error('[tscs-ingest] ticket email threw', String(e));
+    return { ok: false, error: `ticket email threw: ${String(e).slice(0, 500)}` };
   }
-
-  return { ok: true, status: 'ingested', attendeeId: primaryId, createdCount: rows.length };
 }
 
 /** Record the message in the audit/review table (idempotent on message_id). */
@@ -295,49 +319,38 @@ async function pollMailbox(
           continue;
         }
         {
-          const parsed = parseTscsEmail({ subject, text: parsedMail.text || '', html: typeof parsedMail.html === 'string' ? parsedMail.html : '' });
-          if (!parsed.ok) {
-            outcomeRow = {
-              ...outcomeRow,
-              status: 'needs-review',
-              raw: parsedMail.text || String(parsedMail.html || ''),
-              error: parsed.reason,
-            };
-          } else if (paymentStateOf({ subject, text: parsedMail.text || '', html: typeof parsedMail.html === 'string' ? parsedMail.html : '', paymentId: parsed.registration.payment_id }) === 'pending') {
-            // TSCS mails an "[PENDING] Incomplete Registration" notice for
-            // abandoned checkouts that is structurally identical to a real
-            // confirmation. Registering one hands a congress ticket to someone
-            // who never paid, so it is filed, not ingested — and not alerted
-            // on, because an abandoned checkout is a non-event, not a problem.
-            outcomeRow = {
-              ...outcomeRow,
-              status: 'ignored',
-              parsed: parsed.registration,
-              raw: parsedMail.text || String(parsedMail.html || ''),
-              error: 'TSCS pending notice — checkout was not completed, nothing to register',
-            };
-          } else if (paymentStateOf({ subject, text: parsedMail.text || '', html: typeof parsedMail.html === 'string' ? parsedMail.html : '', paymentId: parsed.registration.payment_id }) === 'unknown') {
-            // Parsed fine but carries no transaction id and no payment-confirmed
-            // marker. Could be a template change; could be another non-payment
-            // notice. Either way a human decides — never auto-register.
-            outcomeRow = {
-              ...outcomeRow,
-              status: 'needs-review',
-              parsed: parsed.registration,
-              raw: parsedMail.text || String(parsedMail.html || ''),
-              error: 'no transaction id and no payment-confirmed marker — do not register without checking with TSCS',
-            };
-          } else {
-            const outcome = await ingestRegistration(supabase, parsed.registration, {
-              source: `email-poll (${parsed.via})`, messageId, origin, dryRun,
+          const text = parsedMail.text || '';
+          const html = typeof parsedMail.html === 'string' ? parsedMail.html : '';
+          const raw = text || String(parsedMail.html || '');
+          const parsed = parseTscsEmail({ subject, text, html });
+          const registration = parsed.ok ? parsed.registration : undefined;
+          // One pure decision, one place to test it. See classifyTscsMessage.
+          const disposition = classifyTscsMessage({
+            parseOk: parsed.ok,
+            parseReason: parsed.ok ? undefined : parsed.reason,
+            paymentState: paymentStateOf({ subject, text, html, paymentId: registration?.payment_id }),
+            paymentId: registration?.payment_id,
+          });
+
+          if (disposition.action === 'ingest') {
+            const outcome = await ingestRegistration(supabase, registration!, {
+              source: `email-poll (${parsed.ok ? parsed.via : 'unknown'})`, messageId, origin, dryRun,
             });
             outcomeRow = {
               ...outcomeRow,
               status: outcome.status,
-              parsed: parsed.registration,
-              raw: parsedMail.text || String(parsedMail.html || ''),
+              parsed: registration,
+              raw,
               attendee_id: outcome.attendeeId,
               error: outcome.error,
+            };
+          } else {
+            outcomeRow = {
+              ...outcomeRow,
+              status: disposition.action,
+              parsed: registration,
+              raw,
+              error: disposition.reason,
             };
           }
         }
@@ -493,6 +506,31 @@ serve(async (req) => {
         .eq('message_id', String(body.messageId));
     }
     return json(outcome);
+  }
+
+  // (Re)send one attendee's ticket. The dashboard's own resend builds the PDF
+  // in the browser, which is no help for a companion registered after the fact
+  // or for anything driven from a script. Scoped to this pipeline's own form
+  // so the mode can never be turned into a general-purpose mailer.
+  if (mode === 'send-ticket') {
+    const attendeeId = String(body?.attendeeId || '');
+    if (!attendeeId) return json({ error: 'attendeeId required' }, 400);
+    const { data: attendee } = await supabase
+      .from('attendees').select('id, name, email, form_id, is_test')
+      .eq('id', attendeeId).maybeSingle();
+    if (!attendee) return json({ error: 'no such attendee' }, 404);
+    if ((attendee as any).form_id !== TSCS_FORM_ID) {
+      return json({ error: 'attendee is not on the TSCS registration form' }, 403);
+    }
+    if (!(attendee as any).email) return json({ error: 'attendee has no email address' }, 422);
+    // send-ticket-email skips test rows outright; say so instead of reporting
+    // a send that never happened.
+    if ((attendee as any).is_test === true) {
+      return json({ error: 'attendee is a test registration — no ticket is sent for these' }, 422);
+    }
+    const sent = await sendTicketFor(attendeeId, origin);
+    if (!sent.ok) return json({ error: sent.error }, 502);
+    return json({ ok: true, attendeeId, name: (attendee as any).name, email: (attendee as any).email });
   }
 
   // Triage without ingesting: park a message an admin has judged not to be a

@@ -40,14 +40,21 @@ describe('buildTscsAttendeeRows — solo', () => {
     expect((row.answers as any).f_days).toEqual(['October 23, 2026', 'October 24, 2026']);
   });
 
-  it('falls back to the message id for dedupe when no payment id', () => {
-    const r = buildTscsAttendeeRows({ ...solo, payment_id: undefined }, { ...baseOpts, messageId: 'msg-1' });
-    expect(r.ok).toBe(true);
-    if (r.ok) expect(r.txnBase).toBe('tscs-msg-1');
+  // This used to fall back to `tscs-<message id>` as the dedupe key, which is
+  // how two abandoned-checkout notices became paid rows with tickets: a mail
+  // with no payment id could still be registered as paid. No payment id, no
+  // paid row — a human decides in the review queue instead.
+  it('refuses to build a paid row without a Razorpay payment id', () => {
+    const withMessageId = buildTscsAttendeeRows({ ...solo, payment_id: undefined }, { ...baseOpts, messageId: 'msg-1' });
+    expect(withMessageId.ok).toBe(false);
+    expect((withMessageId as any).error).toMatch(/payment id/i);
+
+    const withNothing = buildTscsAttendeeRows({ ...solo, payment_id: undefined }, baseOpts);
+    expect(withNothing.ok).toBe(false);
   });
 
-  it('refuses when there is nothing to dedupe on', () => {
-    const r = buildTscsAttendeeRows({ ...solo, payment_id: undefined }, baseOpts);
+  it('refuses an empty-string payment id just as firmly', () => {
+    const r = buildTscsAttendeeRows({ ...solo, payment_id: '' }, { ...baseOpts, messageId: 'msg-1' });
     expect(r.ok).toBe(false);
   });
 
@@ -78,11 +85,6 @@ describe('buildTscsAttendeeRows — solo', () => {
     expect(rehearsal.txnBase).toBe('test-pay_ABC123');
     expect(real.txnBase).toBe('pay_ABC123');
     expect((rehearsal.rows[1] as any).transaction_id).toBe('test-pay_ABC123-p2');
-    const fromMsg = buildTscsAttendeeRows(
-      { ...solo, payment_id: undefined },
-      { ...baseOpts, messageId: 'msg-1', isTest: true },
-    );
-    if (fromMsg.ok) expect(fromMsg.txnBase).toBe('test-tscs-msg-1');
   });
 
   it('a non-finite total falls back to the non-monetary marker, never "NaN INR"', () => {
