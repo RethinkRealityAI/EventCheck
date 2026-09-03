@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { tallyPollOutcomes, buildPollRunRow } from '../supabase/functions/_shared/tscsPollRun';
+import { tallyPollOutcomes, buildPollRunRow, classifyTscsMessage } from '../supabase/functions/_shared/tscsPollRun';
 
 describe('tallyPollOutcomes', () => {
   it('counts every outcome into its own bucket', () => {
@@ -71,5 +71,64 @@ describe('buildPollRunRow', () => {
     const row = buildPollRunRow({ ...base, finishedAt: undefined, ok: true });
     expect(typeof row.finished_at).toBe('string');
     expect(Number.isNaN(Date.parse(String(row.finished_at)))).toBe(false);
+  });
+});
+
+describe('classifyTscsMessage — nothing registers without proof of payment', () => {
+  const confirmed = { parseOk: true, paymentState: 'confirmed' as const, paymentId: 'pay_TXTbLRamVUH3bp' };
+
+  it('ingests only a parsed, confirmed message carrying a Razorpay id', () => {
+    expect(classifyTscsMessage(confirmed)).toEqual({ action: 'ingest' });
+  });
+
+  it('files a pending notice rather than registering it', () => {
+    // The live failure: two "[PENDING] Incomplete Registration" mails for
+    // abandoned checkouts, parsed perfectly, registered as paid, ticketed.
+    const d = classifyTscsMessage({ parseOk: true, paymentState: 'pending' });
+    expect(d.action).toBe('ignored');
+    if (d.action === 'ignored') expect(d.reason).toMatch(/not completed/i);
+  });
+
+  it('files a pending notice even when it somehow carries a payment id', () => {
+    expect(classifyTscsMessage({ ...confirmed, paymentState: 'pending' }).action).toBe('ignored');
+  });
+
+  it('queues a [PAID] mail that carries no transaction id', () => {
+    // A subject marker is a claim; the payment id is the receipt. This is the
+    // exact shape the old code registered on the strength of the claim alone.
+    const d = classifyTscsMessage({ parseOk: true, paymentState: 'confirmed' });
+    expect(d.action).toBe('needs-review');
+    if (d.action === 'needs-review') expect(d.reason).toMatch(/no Razorpay transaction id/i);
+  });
+
+  it('queues an empty-string payment id the same way', () => {
+    expect(classifyTscsMessage({ ...confirmed, paymentId: '' }).action).toBe('needs-review');
+  });
+
+  it('queues an unparseable message with the parser reason intact', () => {
+    const d = classifyTscsMessage({ parseOk: false, parseReason: 'no Full Name label', paymentState: 'unknown' });
+    expect(d.action).toBe('needs-review');
+    if (d.action === 'needs-review') expect(d.reason).toBe('no Full Name label');
+  });
+
+  it('queues an unparseable message even when payment looks confirmed', () => {
+    expect(classifyTscsMessage({ ...confirmed, parseOk: false }).action).toBe('needs-review');
+  });
+
+  it('queues an unknown payment state', () => {
+    expect(classifyTscsMessage({ parseOk: true, paymentState: 'unknown' }).action).toBe('needs-review');
+  });
+
+  it('never returns ingest for anything but the one safe combination', () => {
+    const states = ['pending', 'confirmed', 'unknown'] as const;
+    for (const parseOk of [true, false]) {
+      for (const paymentState of states) {
+        for (const paymentId of [undefined, '', 'pay_X1']) {
+          const d = classifyTscsMessage({ parseOk, paymentState, paymentId });
+          const shouldIngest = parseOk && paymentState === 'confirmed' && paymentId === 'pay_X1';
+          expect(d.action === 'ingest').toBe(shouldIngest);
+        }
+      }
+    }
   });
 });

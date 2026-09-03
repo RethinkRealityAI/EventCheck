@@ -39,14 +39,22 @@ export function buildTscsAttendeeRows(reg: TscsRegistration, opts: BuildRowsOpts
   if (!catId) return { ok: false, error: `unrecognized category: ${reg.category}` };
   const ticketType = TSCS_CATEGORY_NAMES[catId];
 
-  // Dedupe key: the Razorpay payment id when present, else a deterministic id
-  // from the email message id — so IMAP re-reads of the same message can
-  // never double-register anyone. Test rehearsals get their own key space:
-  // an is_test dry-run for pay_X must never block (or be blocked by) the
-  // real ingest of pay_X later.
-  const rawBase = reg.payment_id || (opts.messageId ? `tscs-${opts.messageId}` : null);
-  if (!rawBase) return { ok: false, error: 'no payment id and no message id to dedupe on' };
-  const txnBase = opts.isTest ? `test-${rawBase}` : rawBase;
+  // A Razorpay payment id is REQUIRED, and doubles as the dedupe key — so
+  // IMAP re-reads of the same message can never double-register anyone. Test
+  // rehearsals get their own key space: an is_test dry-run for pay_X must
+  // never block (or be blocked by) the real ingest of pay_X later.
+  //
+  // This used to fall back to the email's message id when the mail carried no
+  // transaction id, and that fallback is precisely how two "[PENDING]
+  // Incomplete Registration" notices became paid attendee rows with tickets
+  // attached. A TSCS mail can read as confirmed and still describe a checkout
+  // nobody completed; the payment id is the only thing that cannot. Positive
+  // proof of payment is now the sole way to build a paid row — everything
+  // else is a human's call, made in the review queue.
+  if (!reg.payment_id) {
+    return { ok: false, error: 'no Razorpay payment id — refusing to create a paid registration' };
+  }
+  const txnBase = opts.isTest ? `test-${reg.payment_id}` : reg.payment_id;
 
   const uuid = opts.uuid ?? (() => crypto.randomUUID());
   const nowIso = (opts.now ?? (() => new Date().toISOString()))();
