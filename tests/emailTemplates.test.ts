@@ -58,6 +58,38 @@ describe('resolveEmailTemplate', () => {
     expect(r.body).toBe('G BODY');
   });
 
+  it('lets a caller override outrank the form override and the global', () => {
+    const r = resolveEmailTemplate({
+      ...base, globalSubject: 'G SUB', globalBody: 'G BODY',
+      formOverride: { subject: 'F SUB', body: 'F BODY' },
+      callerOverride: { subject: 'C SUB', body: 'C BODY' },
+    });
+    expect(r.subject).toBe('C SUB');
+    expect(r.body).toBe('C BODY');
+  });
+
+  it('resolves caller subject and body independently', () => {
+    // A one-off send usually replaces the words but keeps the configured
+    // subject line, so a half-filled override must not blank the other half.
+    const r = resolveEmailTemplate({
+      ...base, globalSubject: 'G SUB', globalBody: 'G BODY',
+      callerOverride: { body: 'C BODY' },
+    });
+    expect(r.subject).toBe('G SUB');
+    expect(r.body).toBe('C BODY');
+  });
+
+  it('ignores an empty caller override rather than sending a blank email', () => {
+    // The edge function passes { subject: body.subjectOverride, body: body.bodyOverride }
+    // unconditionally, so the everyday call arrives here with both undefined.
+    const r = resolveEmailTemplate({
+      ...base, globalSubject: 'G SUB', globalBody: 'G BODY',
+      callerOverride: { subject: undefined, body: '   ' },
+    });
+    expect(r.subject).toBe('G SUB');
+    expect(r.body).toBe('G BODY');
+  });
+
   it('exposes the 5 core override keys', () => {
     expect(CORE_OVERRIDE_TEMPLATE_KEYS).toEqual(['ticket', 'table-purchaser', 'guest', 'guest-claim', 'guest-confirmed']);
   });

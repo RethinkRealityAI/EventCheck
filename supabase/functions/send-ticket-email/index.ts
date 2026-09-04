@@ -928,7 +928,8 @@ serve(async (req: Request) => {
 
         // ── STAFF CLAIM COMPLETED (sponsor_exhibitor combined form): send ticket to the
         //    now-claimed staff member. Caller supplies pre-composed fields (to, name,
-        //    orgName, eventName, attachments). Uses app_settings.email_staff_confirmed_*.
+        //    orgName, eventName, attachments). Uses app_settings.email_staff_confirmed_*,
+        //    or `subjectOverride` / `bodyOverride` when the caller brings its own copy.
         //    Supports PDF attachments (base64) — attachment callout shown when present. ──
         if (body.mode === 'staff-claim-completed') {
             const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -962,7 +963,14 @@ serve(async (req: Request) => {
             const formEmailOverrides = (formSettings as any)?.settings?.emailOverrides;
             const overrideOn = formEmailOverrides?.enabled === true;
 
+            // `subjectOverride` / `bodyOverride` let a one-off send carry its own
+            // words while still getting everything below: the branded shell, the
+            // real ticket PDF, the inline QR and the tokenised download link. Only
+            // the copy changes, so an override can never produce a "ticket" email
+            // with no ticket in it — the failure this mode was hardened against in
+            // 2026-08. Either may be omitted to keep the configured one.
             const tpl = resolveEmailTemplate({
+                callerOverride: { subject: body.subjectOverride, body: body.bodyOverride },
                 formOverride: overrideOn ? formEmailOverrides?.templates?.['staff-confirmed'] : undefined,
                 globalSubject: (appSettings as any)?.email_staff_confirmed_subject,
                 globalBody: (appSettings as any)?.email_staff_confirmed_body,
@@ -1198,6 +1206,7 @@ serve(async (req: Request) => {
                 : undefined;
 
             const tpl = resolveEmailTemplate({
+                callerOverride: { subject: body.subjectOverride, body: body.bodyOverride },
                 formOverride: overrideOn ? formEmailOverrides?.templates?.['staff-confirmed'] : undefined,
                 globalSubject: (appSettings as any)?.email_staff_confirmed_subject,
                 globalBody: (appSettings as any)?.email_staff_confirmed_body,
