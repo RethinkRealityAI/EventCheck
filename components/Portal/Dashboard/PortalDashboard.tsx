@@ -8,6 +8,8 @@ import {
   getAttendeesByIds,
   getAttendee,
   updateAttendeeFields,
+  removeStaffMember,
+  relinkAttendeeToAccountByEmail,
 } from '../../../services/storageService';
 import { supabase } from '../../../services/supabaseClient';
 import { CURRENT_SITE } from '../../../config/sites';
@@ -24,6 +26,7 @@ import { TicketsSummaryTile } from './TicketsSummaryTile';
 import { RegisterModal } from './RegisterModal';
 import TeamTable from '../../SponsorExhibitor/TeamTable';
 import { isCompletedPaymentStatus } from '../../../utils/portalUserStatus';
+import { canAssignCategory, isPendingStaff, type StaffCategory } from '../../../utils/teamTickets';
 
 export function PortalDashboard() {
   const { profile, user } = useAuth();
@@ -121,13 +124,40 @@ export function PortalDashboard() {
     return null;
   }, [attendees, primariesById, userPrimary]);
 
+  /**
+   * Save an edit to one staff seat, then tell that person about it.
+   *
+   * Three things were wrong here and each had a visible consequence:
+   *
+   *  1. It always sent a "complete your registration" invite, even to someone
+   *     already registered — whose claim link then dead-ends on the
+   *     already-completed panel. A registered person gets their TICKET.
+   *  2. Changing the email left `user_id` pointing at the previous account, so
+   *     the ticket stayed in the old person's portal and never reached the new
+   *     one. The signup trigger cannot fix that after the fact.
+   *  3. A category change was written with no reference to the booking's seat
+   *     quota, so a gold sponsor (8 Hall-Only + 4 Full Congress) could put all
+   *     twelve of their people on Full Congress.
+   *
+   * Throws on refusal or failure so the caller can show it; the roster is
+   * refreshed on every exit path that changed something.
+   */
   const handleFillIn = async (
     id: string,
     patch: { name: string; email: string; category: string }
   ) => {
+    const existing = await getAttendee(id);
+    if (!existing) throw new Error('That person is no longer on your roster.');
+
+    const nextCategory = patch.category as StaffCategory;
+    const previousCategory = (existing.answers as any)?.staffCategory;
+    if (nextCategory !== previousCategory && (nextCategory === 'hall_only' || nextCategory === 'full_access')) {
+      const verdict = canAssignCategory(userPrimary, staffRows, id, nextCategory);
+      if (!verdict.ok) throw new Error(verdict.reason || 'That seat type is full on your booking.');
+    }
+
     // Merge `staffCategory` into the existing `answers` blob — the storage
     // mapper overwrites the column as a whole, so read-modify-write.
-    const existing = await getAttendee(id);
     const mergedAnswers = {
       ...(existing?.answers || {}),
       staffCategory: patch.category,
@@ -138,44 +168,73 @@ export function PortalDashboard() {
       answers: mergedAnswers,
     });
 
-    // Fire a fresh staff-invite email (bypasses `sendTicketEmail` because
-    // that helper's argument shape doesn't cover the multi-mode body).
+    const emailChanged =
+      (patch.email || '').trim().toLowerCase() !== (existing.email || '').trim().toLowerCase();
+    if (emailChanged) await relinkAttendeeToAccountByEmail(id, patch.email);
+
+    const refresh = async () => {
+      if (userPrimary) setStaffRows(await getStaffForPrimary(userPrimary.id));
+    };
+
+    const staffFormId = existing?.formId;
+    if (!staffFormId) {
+      console.warn('handleFillIn: staff attendee has no formId; cannot construct completeUrl', { id });
+      await refresh();
+      return;
+    }
+
     const categoryLabel =
       patch.category === 'hall_only'
         ? 'Hall-Only'
         : patch.category === 'full_access'
         ? 'Full-Access'
         : 'Sponsor Seat';
-    // The completeUrl MUST point at the public registration form so the staff
-    // member lands on PublicRegistration's pending-claim flow with their info
-    // pre-filled. Pointing at `/` would land them on the GANSID portal
-    // Landing/signup page (the bug we're fixing). The signupUrl (still `/`)
-    // is intentionally a separate optional "create a portal account" link.
-    const staffFormId = existing?.formId;
-    if (!staffFormId) {
-      console.warn('handleFillIn: staff attendee has no formId; cannot construct completeUrl', { id });
-      if (userPrimary) {
-        setStaffRows(await getStaffForPrimary(userPrimary.id));
-      }
-      return;
-    }
-    await supabase.functions.invoke('send-ticket-email', {
-      body: {
-        mode: 'staff-invite',
-        to: patch.email,
-        name: patch.name,
-        purchaser: userPrimary?.companyInfo?.contactName || '',
-        orgName: userPrimary?.companyInfo?.orgName || '',
-        category: categoryLabel,
-        completeUrl: `${window.location.origin}/#/form/${staffFormId}?ref=${id}`,
-        signupUrl: `${window.location.origin}/#/`,
-        eventName: CURRENT_SITE.displayName || 'the Congress',
-      },
-    });
 
-    if (userPrimary) {
-      setStaffRows(await getStaffForPrimary(userPrimary.id));
+    try {
+      if (isPendingStaff(existing)) {
+        // Still owes us their own details — invite them to finish. The
+        // completeUrl MUST point at the public registration form so they land
+        // on PublicRegistration's pending-claim flow with their info
+        // pre-filled; `/` would drop them on the portal signup page instead.
+        await supabase.functions.invoke('send-ticket-email', {
+          body: {
+            mode: 'staff-invite',
+            to: patch.email,
+            name: patch.name,
+            purchaser: userPrimary?.companyInfo?.contactName || '',
+            orgName: userPrimary?.companyInfo?.orgName || '',
+            category: categoryLabel,
+            completeUrl: `${window.location.origin}/#/form/${staffFormId}?ref=${id}`,
+            signupUrl: `${window.location.origin}/#/`,
+            eventName: CURRENT_SITE.displayName || 'the Congress',
+          },
+        });
+      } else {
+        // Already registered: send the ticket that now carries the corrected
+        // details, not an invitation to do something they have done.
+        await supabase.functions.invoke('send-ticket-email', {
+          body: {
+            mode: 'staff-claim-completed',
+            to: patch.email,
+            name: patch.name,
+            orgName: userPrimary?.companyInfo?.orgName || '',
+            eventName: CURRENT_SITE.displayName || 'the Congress',
+            origin: window.location.origin,
+            attendeeId: id,
+          },
+        });
+      }
+    } finally {
+      // The save already happened. Whatever the mail did, the roster on screen
+      // must match the database, or the next edit is made against stale data.
+      await refresh();
     }
+  };
+
+  /** Free a seat. The only way to go over quota is to remove someone first. */
+  const handleRemoveStaff = async (id: string) => {
+    await removeStaffMember(id);
+    if (userPrimary) setStaffRows(await getStaffForPrimary(userPrimary.id));
   };
 
   const handleModalClose = () => {
@@ -213,6 +272,7 @@ export function PortalDashboard() {
                 primary={userPrimary}
                 staff={staffRows}
                 onFillIn={handleFillIn}
+                onRemove={handleRemoveStaff}
               />
             )}
             {pendingStaffRow && (
