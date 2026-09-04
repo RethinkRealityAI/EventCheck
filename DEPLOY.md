@@ -444,3 +444,78 @@ Known limits: email is not cryptographically verifiable (sender allow-list +
 payment-id dedupe are the guards); the designed upgrade is the signed
 WordPress relay (`gansid-payment-relay.php`, shared with TSCS) which replaces
 the mailbox with a server-to-server call and needs no parser at all.
+
+## 7. `attendees` row-level security (**both** projects)
+
+Run `20260904160000_scope_attendees_rls.sql` on both project refs. It replaces
+three blanket policies with ones that actually test who is asking. Applied to
+GANSID and SCAGO on 2026-09-04.
+
+### What it changes
+
+Before, `attendees` carried `"Allow all access to attendees"` (`TO public FOR
+ALL USING (true)`), `admin_full_access` (`TO authenticated`, checking nothing
+but "is signed in") and `anon_can_update_placeholders` (`USING (true)`).
+Policies are OR'd, so the three narrow policies alongside them constrained
+nothing: anyone holding the anon key — which ships in the browser bundle on
+every page load — could read, update and delete every registrant's name, work
+email, phone number and dietary notes.
+
+After, the same key reaches guest and staff seats only, which is the row shape
+the `?ref=` claim flow has to write to:
+
+| Caller | Sees | Can write |
+| --- | --- | --- |
+| `anon` | guest/staff seats (`primary_attendee_id` set, not primary) | UPDATE those seats; INSERT unpaid rows (`anon_can_register`) |
+| signed-in attendee | own rows (by `user_id` or email), seats under bookings they hold, BOGO claims sourced from those | own rows; seats on their own bookings; DELETE a seat from their own booking |
+| admin / super_admin | everything | everything |
+| `service_role` | everything | everything |
+
+Registration is unaffected: every submission goes through the `verify-payment`
+edge function on the service role, as do tickets, BOGO sends and the TSCS
+ingest.
+
+### Verifying
+
+With the project's anon key, against a tenant with 275 rows:
+
+```bash
+K="<anon key>"
+# Total rows reachable without signing in — expect the guest-seat count, not the table.
+curl -s -o /dev/null -D - "https://<ref>.supabase.co/rest/v1/attendees?select=id" \
+  -H "apikey: $K" -H "Authorization: Bearer $K" -H "Prefer: count=exact" -H "Range: 0-0" \
+  | grep -i '^content-range'      # content-range: 0-0/22   (was 0-0/275)
+# Purchasers, sponsors, speakers and admins — expect [].
+curl -s "https://<ref>.supabase.co/rest/v1/attendees?select=id&is_primary=eq.true&limit=3" \
+  -H "apikey: $K" -H "Authorization: Bearer $K"
+```
+
+Then sign in as a sponsor and confirm the roster still lists their delegation,
+and as an admin and confirm the dashboard still lists everyone.
+
+### The two things to know before editing this
+
+**Never write a policy on `attendees` whose `USING` clause selects from
+`attendees`.** That is error 42P17 and every read of the table fails. This repo
+shipped it once (the 2026-05-26 BOGO migration) and blanked every dashboard.
+The ownership test lives in `can_see_attendee(text)`, which is `SECURITY
+DEFINER` precisely so the lookup does not re-enter the policy that called it.
+
+**`anon_can_read_guest_seats` is load-bearing, not leftover.** `mapAttendeeToDb`
+writes `guest_type` on every save, so the moment a guest claims their seat the
+row stops matching `anon_can_read_placeholders`; `saveAttendee` reads the id
+back and treats zero rows as a failed write, so dropping this policy makes the
+claim throw "Attendee was not saved". Closing that exposure means moving the
+claim write behind a `SECURITY DEFINER` RPC the way the reads already are
+(`get_attendee_by_id`, `get_guests_by_primary`) — a client change, and the next
+step rather than part of this one.
+
+To revert, if something unforeseen turns out to have depended on the blanket
+grant:
+
+```sql
+CREATE POLICY "Allow all access to attendees" ON public.attendees
+  FOR ALL TO public USING (true);
+```
+
+That single statement restores the previous behaviour exactly.
