@@ -334,8 +334,13 @@ Run migrations `20260901120000_allow_razorpay_payment_method.sql`,
 `20260901120200_add_razorpay_txn_unique.sql`,
 `20260902120000_add_tscs_poll_runs.sql`,
 `20260902130000_tighten_tscs_read_policies.sql`,
-`20260903204500_require_razorpay_payment_id.sql`, and
-`20260903210000_register_missed_tscs_addon.sql`.
+`20260903204500_require_razorpay_payment_id.sql`,
+`20260903210000_register_missed_tscs_addon.sql`, and
+`20260904150000_add_relink_staff_attendee_rpc.sql`.
+
+The last of those is portal code shared by both tenants, so it goes to SCAGO
+too — without it a SCAGO sponsor correcting a colleague's email calls an RPC
+that isn't there. Applied to both projects 2026-09-04.
 
 The last two carry one-off data corrections as well as schema changes, and
 each header explains why: `…require_razorpay_payment_id` removes two unpaid

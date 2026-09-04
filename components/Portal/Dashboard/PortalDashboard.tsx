@@ -168,13 +168,24 @@ export function PortalDashboard() {
       answers: mergedAnswers,
     });
 
-    const emailChanged =
-      (patch.email || '').trim().toLowerCase() !== (existing.email || '').trim().toLowerCase();
-    if (emailChanged) await relinkAttendeeToAccountByEmail(id, patch.email);
-
+    // Declared before anything else that can fail: the row has already been
+    // written, so every remaining exit path — success, refusal or thrown
+    // error — has to leave the roster on screen matching the database, or the
+    // next edit is made against stale seat counts.
     const refresh = async () => {
       if (userPrimary) setStaffRows(await getStaffForPrimary(userPrimary.id));
     };
+
+    const emailChanged =
+      (patch.email || '').trim().toLowerCase() !== (existing.email || '').trim().toLowerCase();
+    if (emailChanged) {
+      try {
+        await relinkAttendeeToAccountByEmail(id, patch.email);
+      } catch (err) {
+        await refresh();
+        throw err;
+      }
+    }
 
     const staffFormId = existing?.formId;
     if (!staffFormId) {
@@ -190,38 +201,42 @@ export function PortalDashboard() {
         ? 'Full-Access'
         : 'Sponsor Seat';
 
+    // supabase.functions.invoke RESOLVES on a failed send, returning { error }
+    // — so an unchecked call reports success to the sponsor for mail that never
+    // left. Every other caller in this codebase destructures and checks it.
+    const send = async (body: Record<string, unknown>) => {
+      const { error } = await supabase.functions.invoke('send-ticket-email', { body });
+      if (error) throw new Error('Saved, but the email could not be sent. Try again, or send them the ticket yourself.');
+    };
+
     try {
       if (isPendingStaff(existing)) {
         // Still owes us their own details — invite them to finish. The
         // completeUrl MUST point at the public registration form so they land
         // on PublicRegistration's pending-claim flow with their info
         // pre-filled; `/` would drop them on the portal signup page instead.
-        await supabase.functions.invoke('send-ticket-email', {
-          body: {
-            mode: 'staff-invite',
-            to: patch.email,
-            name: patch.name,
-            purchaser: userPrimary?.companyInfo?.contactName || '',
-            orgName: userPrimary?.companyInfo?.orgName || '',
-            category: categoryLabel,
-            completeUrl: `${window.location.origin}/#/form/${staffFormId}?ref=${id}`,
-            signupUrl: `${window.location.origin}/#/`,
-            eventName: CURRENT_SITE.displayName || 'the Congress',
-          },
+        await send({
+          mode: 'staff-invite',
+          to: patch.email,
+          name: patch.name,
+          purchaser: userPrimary?.companyInfo?.contactName || '',
+          orgName: userPrimary?.companyInfo?.orgName || '',
+          category: categoryLabel,
+          completeUrl: `${window.location.origin}/#/form/${staffFormId}?ref=${id}`,
+          signupUrl: `${window.location.origin}/#/`,
+          eventName: CURRENT_SITE.displayName || 'the Congress',
         });
       } else {
         // Already registered: send the ticket that now carries the corrected
         // details, not an invitation to do something they have done.
-        await supabase.functions.invoke('send-ticket-email', {
-          body: {
-            mode: 'staff-claim-completed',
-            to: patch.email,
-            name: patch.name,
-            orgName: userPrimary?.companyInfo?.orgName || '',
-            eventName: CURRENT_SITE.displayName || 'the Congress',
-            origin: window.location.origin,
-            attendeeId: id,
-          },
+        await send({
+          mode: 'staff-claim-completed',
+          to: patch.email,
+          name: patch.name,
+          orgName: userPrimary?.companyInfo?.orgName || '',
+          eventName: CURRENT_SITE.displayName || 'the Congress',
+          origin: window.location.origin,
+          attendeeId: id,
         });
       }
     } finally {

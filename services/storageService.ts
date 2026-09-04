@@ -1558,6 +1558,22 @@ export async function getStaffForPrimary(primaryId: string): Promise<Attendee[]>
  * will assume the seat is free and hand it to someone else.
  */
 export async function removeStaffMember(id: string): Promise<void> {
+  // Two things must never be silently destroyed by a roster tidy-up.
+  const { data: row } = await supabase
+    .from('attendees').select('checked_in_at').eq('id', id).maybeSingle();
+  if ((row as any)?.checked_in_at) {
+    // Deleting the row would erase the only record that they arrived.
+    throw new Error('This person has already checked in — ask the organisers to remove them.');
+  }
+  const { count } = await supabase
+    .from('attendees')
+    .select('id', { count: 'exact', head: true })
+    .eq('bogo_source_attendee_id', id);
+  if ((count ?? 0) > 0) {
+    // bogo_source_attendee_id is ON DELETE SET NULL, so the free guest would
+    // survive as a live ticket with no record of who it came from.
+    throw new Error('This person has a free guest attached — ask the organisers to remove them.');
+  }
   const { error } = await supabase.from('attendees').delete().eq('id', id);
   if (error) {
     console.error('removeStaffMember', error);
@@ -1582,17 +1598,19 @@ export async function relinkAttendeeToAccountByEmail(
   attendeeId: string,
   email: string,
 ): Promise<void> {
-  const trimmed = (email || '').trim();
-  let ownerId: string | null = null;
-  if (trimmed) {
-    const { data, error } = await supabase
-      .from('profiles').select('id').ilike('email', emailIlikePattern(trimmed)).limit(1);
-    if (error) console.error('relinkAttendeeToAccountByEmail lookup', error);
-    else ownerId = (data?.[0] as any)?.id ?? null;
+  // Via RPC, not a direct query: `profiles` is readable only by its own owner
+  // or an admin, so a sponsor looking up a colleague's account here would get
+  // nothing back and the seat would be unlinked from everyone. The function
+  // does the lookup with elevated rights and checks the caller owns the
+  // booking. See 20260904150000_add_relink_staff_attendee_rpc.sql.
+  const { error } = await supabase.rpc('relink_staff_attendee', {
+    p_attendee_id: attendeeId,
+    p_email: (email || '').trim(),
+  });
+  if (error) {
+    console.error('relinkAttendeeToAccountByEmail', error);
+    throw new Error('Saved, but the ticket could not be moved to that address. Tell the organisers.');
   }
-  const { error: updErr } = await supabase
-    .from('attendees').update({ user_id: ownerId }).eq('id', attendeeId);
-  if (updErr) console.error('relinkAttendeeToAccountByEmail update', updErr);
 }
 
 /**

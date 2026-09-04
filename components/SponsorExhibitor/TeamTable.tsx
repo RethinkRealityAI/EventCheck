@@ -313,7 +313,10 @@ export default function TeamTable({ primary, staff, onFillIn, onRemove }: Props)
                         Edit
                       </button>
                     )}
-                    {onRemove && (
+                    {/* Removing someone who has already arrived would delete
+                        the only record that they did. The organisers can, from
+                        the admin side; the sponsor cannot. */}
+                    {onRemove && !s.checkedInAt && (
                       <button
                         type="button"
                         onClick={() => { setConfirmRemoveId(s.id); setError(null); setNotice(null); }}
@@ -321,6 +324,11 @@ export default function TeamTable({ primary, staff, onFillIn, onRemove }: Props)
                       >
                         Remove
                       </button>
+                    )}
+                    {s.checkedInAt && (
+                      <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-800">
+                        Checked in
+                      </span>
                     )}
                   </div>
                 )}
