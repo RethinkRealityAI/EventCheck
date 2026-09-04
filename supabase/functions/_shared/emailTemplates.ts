@@ -2,7 +2,8 @@
 // the Vite client. Callers extract their own global strings (the edge reads
 // snake_case app_settings columns; the client reads camelCase AppSettings), so
 // this module never depends on either field-naming world. It owns ONLY the
-// precedence rule: per-form override → global → hardcoded default.
+// precedence rule: caller override → per-form override → global → hardcoded
+// default.
 
 export type EmailTemplateKey =
   | 'ticket' | 'table-purchaser' | 'guest' | 'guest-claim' | 'guest-confirmed'
@@ -22,6 +23,18 @@ export interface FormTemplateOverride {
 }
 
 export interface ResolveEmailTemplateInput {
+  /**
+   * Copy supplied by the request itself, outranking every stored template.
+   *
+   * For one-off sends whose words belong to that send and nowhere else — an
+   * organiser mailing one delegation about their passes, say. Editing the
+   * stored template instead would change the copy for every future automatic
+   * send, and reverting it afterwards is a step nobody remembers.
+   *
+   * Subject and body resolve independently, so a caller can replace the body
+   * and keep the configured subject.
+   */
+  callerOverride?: FormTemplateOverride;
   /** Per-form override for THIS template (already gated on emailOverrides.enabled). */
   formOverride?: FormTemplateOverride;
   globalSubject?: string | null;
@@ -60,8 +73,8 @@ function usableImageUrl(v: string | null | undefined): string | undefined {
 }
 
 export function resolveEmailTemplate(input: ResolveEmailTemplateInput): ResolvedEmailTemplate {
-  const subject = firstNonEmpty(input.formOverride?.subject, input.globalSubject, input.defaultSubject) ?? input.defaultSubject;
-  const body = firstNonEmpty(input.formOverride?.body, input.globalBody, input.defaultBody) ?? input.defaultBody;
+  const subject = firstNonEmpty(input.callerOverride?.subject, input.formOverride?.subject, input.globalSubject, input.defaultSubject) ?? input.defaultSubject;
+  const body = firstNonEmpty(input.callerOverride?.body, input.formOverride?.body, input.globalBody, input.defaultBody) ?? input.defaultBody;
   const headerImageUrl = usableImageUrl(input.formHeaderImageUrl) ?? usableImageUrl(input.globalHeaderImageUrl);
   const footerText = firstNonEmpty(input.globalFooterText);
   return { subject, body, headerImageUrl, footerText };
