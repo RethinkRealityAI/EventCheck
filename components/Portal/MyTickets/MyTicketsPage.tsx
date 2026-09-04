@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import QRCode from 'react-qr-code';
 import type { Attendee, Form, PricingTemplate } from '../../../types';
-import { getAttendeesForUserWithBogoClaims, getFormById } from '../../../services/storageService';
+import { getAttendeesForUserWithBogoClaims, getFormById, getTeamGroupsForUser } from '../../../services/storageService';
+import TeamTicketsSection, { type TeamGroup } from './TeamTicketsSection';
 import { useAuth } from '../../AuthContext';
 import { useNotifications } from '../../NotificationSystem';
 import { supabase } from '../../../services/supabaseClient';
@@ -28,6 +29,7 @@ export default function MyTicketsPage() {
   const { showNotification } = useNotifications();
   const [loading, setLoading] = useState(true);
   const [cards, setCards] = useState<PaidCard[]>([]);
+  const [teamGroups, setTeamGroups] = useState<TeamGroup[]>([]);
   const [dismissed, setDismissed] = useState<Attendee[]>([]);
   const [showDismissed, setShowDismissed] = useState(false);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
@@ -36,7 +38,13 @@ export default function MyTicketsPage() {
     if (!user?.id) return;
     setLoading(true);
     try {
-      const all = await getAttendeesForUserWithBogoClaims(user.id, profile?.email ?? user.email ?? '');
+      const email = profile?.email ?? user.email ?? '';
+      const all = await getAttendeesForUserWithBogoClaims(user.id, email);
+      // Orgs this user is the primary contact for. Failing to load the team
+      // must not blank the user's OWN tickets, so it is caught separately.
+      getTeamGroupsForUser(user.id, email)
+        .then(setTeamGroups)
+        .catch((e) => { console.error('MyTicketsPage team groups failed', e); setTeamGroups([]); });
       const formIds = Array.from(new Set(all.map(a => a.formId)));
       const forms = await Promise.all(formIds.map(id => getFormById(id).catch(() => null)));
       const formsById: Record<string, Form> = {};
@@ -141,6 +149,8 @@ export default function MyTicketsPage() {
           />
         ))}
       </div>
+
+      <TeamTicketsSection groups={teamGroups} />
 
       {dismissed.length > 0 && (
         <div className="mt-8 pt-6 border-t border-slate-200">
