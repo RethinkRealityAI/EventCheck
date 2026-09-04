@@ -1550,6 +1550,52 @@ export async function getStaffForPrimary(primaryId: string): Promise<Attendee[]>
 }
 
 /**
+ * Remove one staff seat from an org's roster.
+ *
+ * Unlike `deleteAttendee`, which logs and returns, this THROWS — the sponsor
+ * pressing "Remove" needs to be told when it failed, because the row silently
+ * staying put looks identical to a UI that has not refreshed yet, and they
+ * will assume the seat is free and hand it to someone else.
+ */
+export async function removeStaffMember(id: string): Promise<void> {
+  const { error } = await supabase.from('attendees').delete().eq('id', id);
+  if (error) {
+    console.error('removeStaffMember', error);
+    throw new Error(error.message || 'Could not remove this person.');
+  }
+}
+
+/**
+ * Point a staff row at whichever portal account owns its (new) address.
+ *
+ * Editing a staff member's email used to change the address and nothing else,
+ * leaving `user_id` on the previous account: the ticket kept appearing in the
+ * old person's portal and never showed up for the new one. The signup trigger
+ * cannot repair that — it fires only when an account is created, and only for
+ * rows whose user_id is still NULL.
+ *
+ * So: link to the account that already owns the address if there is one, and
+ * otherwise clear the link, which both detaches the wrong owner and re-arms
+ * that trigger for whenever the right person signs up.
+ */
+export async function relinkAttendeeToAccountByEmail(
+  attendeeId: string,
+  email: string,
+): Promise<void> {
+  const trimmed = (email || '').trim();
+  let ownerId: string | null = null;
+  if (trimmed) {
+    const { data, error } = await supabase
+      .from('profiles').select('id').ilike('email', emailIlikePattern(trimmed)).limit(1);
+    if (error) console.error('relinkAttendeeToAccountByEmail lookup', error);
+    else ownerId = (data?.[0] as any)?.id ?? null;
+  }
+  const { error: updErr } = await supabase
+    .from('attendees').update({ user_id: ownerId }).eq('id', attendeeId);
+  if (updErr) console.error('relinkAttendeeToAccountByEmail update', updErr);
+}
+
+/**
  * Every organisation the user is the PRIMARY CONTACT for, with its full staff
  * roster. Returns [] for an ordinary attendee.
  *

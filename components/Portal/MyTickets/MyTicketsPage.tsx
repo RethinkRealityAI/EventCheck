@@ -3,6 +3,7 @@ import QRCode from 'react-qr-code';
 import type { Attendee, Form, PricingTemplate } from '../../../types';
 import { getAttendeesForUserWithBogoClaims, getFormById, getTeamGroupsForUser } from '../../../services/storageService';
 import TeamTicketsSection, { type TeamGroup } from './TeamTicketsSection';
+import { isTeamPrimary } from '../../../utils/teamTickets';
 import { useAuth } from '../../AuthContext';
 import { useNotifications } from '../../NotificationSystem';
 import { supabase } from '../../../services/supabaseClient';
@@ -51,8 +52,12 @@ export default function MyTicketsPage() {
       for (const f of forms) if (f) formsById[f.id] = f;
 
       // Mine = paid attendee rows tied to my user_id (or matched-by-email).
-      // Exclude BOGO claim rows (those are listed under their source's card).
-      const mine = all.filter(a => a.isBogoClaim !== true);
+      // Exclude BOGO claim rows (those are listed under their source's card),
+      // and the org booking itself: a sponsor's "Pfizer, Inc [Sponsor]" row is
+      // the BOOKING, not a badge for a human, and rendering it beside their own
+      // pass made the primary contact look like they held two tickets. It is
+      // already represented — as the heading of their team section below.
+      const mine = all.filter(a => a.isBogoClaim !== true && !isTeamPrimary(a));
       const built: PaidCard[] = [];
       for (const paid of mine) {
         const form = formsById[paid.formId];
