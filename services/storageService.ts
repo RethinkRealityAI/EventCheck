@@ -2,6 +2,7 @@ import { Attendee, Form, AppSettings, DEFAULT_SETTINGS, FormField, PdfSettings, 
 import { supabase } from './supabaseClient';
 import { Database } from './database.types';
 import { checkTableGuestCapacity } from '../utils/tableSeats';
+import { selectTeamPrimaries } from '../utils/teamTickets';
 import { isCompletedPaymentStatus, isPendingPaymentStatus } from '../utils/portalUserStatus';
 import { emailIlikePattern } from '../utils/emailMatch';
 
@@ -1546,6 +1547,37 @@ export async function getStaffForPrimary(primaryId: string): Promise<Attendee[]>
     return [];
   }
   return (data || []).map(mapAttendeeFromDb);
+}
+
+/**
+ * Every organisation the user is the PRIMARY CONTACT for, with its full staff
+ * roster. Returns [] for an ordinary attendee.
+ *
+ * The portal's personal ticket list (getAttendeesForUserWithBogoClaims)
+ * deliberately drops staff rows: they are not the user's own registrations,
+ * and counting them there would misreport what they themselves bought. That
+ * is right for that list — and leaves the person holding the sponsorship with
+ * no single place showing the passes they are responsible for. This is that
+ * place. Sponsor and exhibitor primaries are both included; the flag differs
+ * (sponsorTier vs exhibitorBoothType) but the relationship is identical.
+ */
+export async function getTeamGroupsForUser(
+  userId: string,
+  email: string,
+): Promise<Array<{ primary: Attendee; staff: Attendee[] }>> {
+  const own = await getAttendeesForUser(userId, email);
+  const primaries = selectTeamPrimaries(own);
+  if (primaries.length === 0) return [];
+  const groups = await Promise.all(
+    primaries.map(async (primary) => ({
+      primary,
+      staff: await getStaffForPrimary(primary.id),
+    })),
+  );
+  // An org whose roster is empty has nothing to show; the dashboard's
+  // TeamTable is where staff get added, and an empty section here would just
+  // read as something being broken.
+  return groups.filter((g) => g.staff.length > 0);
 }
 
 /**

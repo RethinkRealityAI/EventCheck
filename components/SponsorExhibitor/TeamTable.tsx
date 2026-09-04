@@ -5,6 +5,7 @@ import { ViscousButton } from '../Portal/ui/ViscousButton';
 import { CredentialBadgeModal } from '../Portal/Dashboard/CredentialBadgeModal';
 import { generateTicketPDF } from '../../utils/pdfGenerator';
 import { getFormById, getSettings } from '../../services/storageService';
+import { isPendingStaff, staffPassLabel } from '../../utils/teamTickets';
 
 interface Props {
   primary: Attendee;
@@ -15,15 +16,6 @@ interface Props {
   ) => Promise<void>;
 }
 
-const categoryLabel = (s: Attendee): string => {
-  const c = (s.answers as any)?.staffCategory;
-  return c === 'hall_only' ? 'Hall-Only'
-    : c === 'full_access' ? 'Full Congress'
-    : '—';
-};
-
-const isPending = (s: Attendee) =>
-  s.guestType === 'staff-pending' || s.guestType === 'exhibitor-staff-pending';
 
 /**
  * Portal-side read + light-edit view of an org's staff roster.
@@ -125,7 +117,7 @@ export default function TeamTable({ primary, staff, onFillIn }: Props) {
           columns including Actions are visible without horizontal scrolling. */}
       <div className="md:hidden space-y-3">
         {staff.map((s) => {
-          const pending = isPending(s);
+          const pending = isPendingStaff(s);
           const editing = editId === s.id;
           return (
             <div
@@ -148,7 +140,7 @@ export default function TeamTable({ primary, staff, onFillIn }: Props) {
                 </span>
               </div>
               <div className="text-xs text-gansid-on-surface/60 mb-3">
-                <span className="font-semibold text-gansid-on-surface/80">Category:</span> {categoryLabel(s)}
+                <span className="font-semibold text-gansid-on-surface/80">Category:</span> {staffPassLabel(s)}
               </div>
               <div className="flex flex-wrap gap-x-4 gap-y-2">
                 {pending ? (
@@ -279,14 +271,14 @@ export default function TeamTable({ primary, staff, onFillIn }: Props) {
           </thead>
           <tbody>
             {staff.map((s) => {
-              const pending = isPending(s);
+              const pending = isPendingStaff(s);
               const editing = editId === s.id;
               return (
                 <React.Fragment key={s.id}>
                   <tr className="border-t border-gansid-on-surface/10 align-top">
                     <td className="py-2 pr-3">{s.name}</td>
                     <td className="pr-3">{s.email || '—'}</td>
-                    <td className="pr-3">{categoryLabel(s)}</td>
+                    <td className="pr-3">{staffPassLabel(s)}</td>
                     <td className="pr-3">
                       <span
                         className={`px-2 py-0.5 rounded-full text-xs ${
