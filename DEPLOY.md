@@ -519,3 +519,65 @@ CREATE POLICY "Allow all access to attendees" ON public.attendees
 ```
 
 That single statement restores the previous behaviour exactly.
+
+## 8. Sending a one-off email that carries a real ticket
+
+`send-ticket-email`'s `staff-claim-completed` and
+`exhibitor-staff-claim-completed` modes accept `subjectOverride` and
+`bodyOverride`, so a one-off send — an organiser mailing one delegation about
+their passes — can carry its own words and still get the branded shell, the
+real ticket PDF, the inline check-in QR and the tokenised download link.
+
+```bash
+curl -X POST https://<ref>.supabase.co/functions/v1/send-ticket-email \
+  -H "apikey: $ANON" -H "Authorization: Bearer $ANON" \
+  -H 'Content-Type: application/json' -d '{
+    "mode": "staff-claim-completed",
+    "attendeeId": "<attendee uuid>",
+    "to": "them@example.com",
+    "origin": "https://gansid.netlify.app",
+    "subjectOverride": "Your pass",
+    "bodyOverride": "<p>Hi …</p>"
+  }'
+```
+
+The response reports what actually got built:
+`{"ok":true,"qrEmbedded":true,"downloadUrl":true}`. Send one recipient first
+and read those two flags before sending the rest — they are the only
+confirmation that the QR resolved and the download token signed.
+
+### Never write "your ticket is attached" into a body you supply
+
+The function decides that sentence, not you. `buildTicketPdfAttachment` catches
+its own errors and returns `null`, so the attachment is best-effort; every send
+in this codebase pairs it with `attachmentNoteFor(hasPdf)` so the claim appears
+only once the file exists. Copy you supply sits outside that machinery.
+
+A body that promises an attachment the send is not carrying is **discarded** —
+`safeCallerBody` in `_shared/ticketClaims.ts` checks it against what was really
+built, logs `bodyOverride rejected`, and falls back to the configured template,
+which `ensureTicketBlocks` still polices. You get a correct email rather than a
+false one, but you lose your copy, so don't write the claim in the first place:
+let the attachment note say it.
+
+The same applies to the QR and the download button, though those need no guard.
+`ensureTicketBlocks` appends whichever you leave out, and `stripDeadLinks`
+degrades an `<a>` whose href resolved to empty into plain text — so a hardcoded
+download button is redundant, not dangerous.
+
+The ordering in both modes is load-bearing: the ticket PDF is built **before**
+the copy is chosen, because nothing can judge "your ticket is attached" until
+the attachment either exists or doesn't. Keep any new claim-checking on that
+side of the build.
+
+Covered by `tests/ticketClaims.test.ts` and the precedence tests in
+`tests/emailTemplates.test.ts`.
+
+### Naming a seat type
+
+Call `staffCategoryLabel()` from `utils/teamTickets.ts`. Do not inline
+`c === 'hall_only' ? … : …`. The dashboard once did, and mailed a sponsor's
+colleague "Full-Access" for a pass the portal, the tickets page, the roster and
+the registration form all called "Full Congress". Same for
+`seatRemovalBlocker()`: the roster's Remove button and `removeStaffMember`
+consult one rule so the UI never offers a button the write refuses.

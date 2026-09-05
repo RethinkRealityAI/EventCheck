@@ -26,7 +26,7 @@ import { TicketsSummaryTile } from './TicketsSummaryTile';
 import { RegisterModal } from './RegisterModal';
 import TeamTable from '../../SponsorExhibitor/TeamTable';
 import { isCompletedPaymentStatus } from '../../../utils/portalUserStatus';
-import { canAssignCategory, isPendingStaff, type StaffCategory } from '../../../utils/teamTickets';
+import { canAssignCategory, isPendingStaff, staffCategoryLabel, type StaffCategory } from '../../../utils/teamTickets';
 
 export function PortalDashboard() {
   const { profile, user } = useAuth();
@@ -194,12 +194,7 @@ export function PortalDashboard() {
       return;
     }
 
-    const categoryLabel =
-      patch.category === 'hall_only'
-        ? 'Hall-Only'
-        : patch.category === 'full_access'
-        ? 'Full-Access'
-        : 'Sponsor Seat';
+    const categoryLabel = staffCategoryLabel(patch.category);
 
     // supabase.functions.invoke RESOLVES on a failed send, returning { error }
     // — so an unchecked call reports success to the sponsor for mail that never

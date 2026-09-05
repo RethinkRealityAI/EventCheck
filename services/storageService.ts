@@ -2,7 +2,7 @@ import { Attendee, Form, AppSettings, DEFAULT_SETTINGS, FormField, PdfSettings, 
 import { supabase } from './supabaseClient';
 import { Database } from './database.types';
 import { checkTableGuestCapacity } from '../utils/tableSeats';
-import { selectTeamPrimaries } from '../utils/teamTickets';
+import { selectTeamPrimaries, seatRemovalBlocker } from '../utils/teamTickets';
 import { isCompletedPaymentStatus, isPendingPaymentStatus } from '../utils/portalUserStatus';
 import { emailIlikePattern } from '../utils/emailMatch';
 
@@ -1561,19 +1561,17 @@ export async function removeStaffMember(id: string): Promise<void> {
   // Two things must never be silently destroyed by a roster tidy-up.
   const { data: row } = await supabase
     .from('attendees').select('checked_in_at').eq('id', id).maybeSingle();
-  if ((row as any)?.checked_in_at) {
-    // Deleting the row would erase the only record that they arrived.
-    throw new Error('This person has already checked in — ask the organisers to remove them.');
-  }
   const { count } = await supabase
     .from('attendees')
     .select('id', { count: 'exact', head: true })
     .eq('bogo_source_attendee_id', id);
-  if ((count ?? 0) > 0) {
-    // bogo_source_attendee_id is ON DELETE SET NULL, so the free guest would
-    // survive as a live ticket with no record of who it came from.
-    throw new Error('This person has a free guest attached — ask the organisers to remove them.');
-  }
+  // Same rule the roster's Remove button consults, so the button is never
+  // offered for a seat this write would refuse.
+  const blocker = seatRemovalBlocker({
+    checkedInAt: (row as any)?.checked_in_at,
+    bogoClaimCount: count ?? 0,
+  });
+  if (blocker) throw new Error(blocker);
   const { error } = await supabase.from('attendees').delete().eq('id', id);
   if (error) {
     console.error('removeStaffMember', error);

@@ -11,6 +11,7 @@ import { buildOpenPixelUrl, appendTrackingPixel } from '../_shared/emailTracking
 import { buildQrImageUrl, fetchQrPng, inlineQrSrc, qrAttachments } from '../_shared/qrEmbed.ts';
 import { HEADER_LOGO_CID, fetchRemoteImage, inlineImageSrc, inlineAttachmentEntry } from '../_shared/imageEmbed.ts';
 import { ensureTicketBlocks, prependReissueNotice, attachmentNoteFor } from '../_shared/ticketBlock.ts';
+import { safeCallerBody } from '../_shared/ticketClaims.ts';
 import { buildEmailFailureRow } from '../_shared/emailFailure.ts';
 import { jsPDF } from 'npm:jspdf@2.5.1';
 import { drawTicketPdf, ticketFromAttendeeRow, ticketPdfFilename, bytesToBase64 } from '../_shared/ticketPdf.ts';
@@ -963,14 +964,41 @@ serve(async (req: Request) => {
             const formEmailOverrides = (formSettings as any)?.settings?.emailOverrides;
             const overrideOn = formEmailOverrides?.enabled === true;
 
+            // Build the ticket BEFORE the copy that describes it — the body
+            // states what is attached, and that claim has to be true. The
+            // ordering is load-bearing now that a caller can supply the words:
+            // safeCallerBody cannot judge "your ticket is attached" until the
+            // attachment either exists or doesn't.
+            // Caller-supplied attachments win (a client that already rendered
+            // the ticket shouldn't produce a second one).
+            let pdfAttachments = (body.attachments || []).map((att: { filename: string; content: string; contentType?: string }) => ({
+                filename: att.filename,
+                content: att.content,
+                encoding: 'base64',
+                contentType: att.contentType || 'application/pdf',
+            }));
+            if (!pdfAttachments.length && staffRow) {
+                const built = await buildTicketPdfAttachment(staffRow, formSettings, appSettings);
+                if (built) pdfAttachments = [built];
+            }
+
             // `subjectOverride` / `bodyOverride` let a one-off send carry its own
-            // words while still getting everything below: the branded shell, the
-            // real ticket PDF, the inline QR and the tokenised download link. Only
-            // the copy changes, so an override can never produce a "ticket" email
-            // with no ticket in it — the failure this mode was hardened against in
-            // 2026-08. Either may be omitted to keep the configured one.
+            // words while still getting everything else this mode builds: the
+            // branded shell, the real ticket PDF, the inline QR and the tokenised
+            // download link. A body promising an attachment this send is not
+            // carrying is dropped here rather than mailed — see ticketClaims.ts.
+            // Either override may be omitted to keep the configured one.
+            const caller = safeCallerBody(body.bodyOverride, {
+                hasPdfAttachment: pdfAttachments.length > 0,
+            });
+            if (caller.rejected.length) {
+                console.error('[send-ticket-email] bodyOverride rejected, falling back to the configured template', JSON.stringify({
+                    mode: body.mode, attendeeId: body.attendeeId, problems: caller.rejected,
+                }));
+            }
+
             const tpl = resolveEmailTemplate({
-                callerOverride: { subject: body.subjectOverride, body: body.bodyOverride },
+                callerOverride: { subject: body.subjectOverride, body: caller.body },
                 formOverride: overrideOn ? formEmailOverrides?.templates?.['staff-confirmed'] : undefined,
                 globalSubject: (appSettings as any)?.email_staff_confirmed_subject,
                 globalBody: (appSettings as any)?.email_staff_confirmed_body,
@@ -990,21 +1018,6 @@ serve(async (req: Request) => {
             const downloadUrl = staffRow
                 ? await buildTicketDownloadUrl(staffRow.id, staffRow.form_id, sendOrigin(body, req))
                 : '';
-
-            // Build the ticket BEFORE the copy that describes it — the body
-            // states what is attached, and that claim has to be true.
-            // Caller-supplied attachments win (a client that already rendered
-            // the ticket shouldn't produce a second one).
-            let pdfAttachments = (body.attachments || []).map((att: { filename: string; content: string; contentType?: string }) => ({
-                filename: att.filename,
-                content: att.content,
-                encoding: 'base64',
-                contentType: att.contentType || 'application/pdf',
-            }));
-            if (!pdfAttachments.length && staffRow) {
-                const built = await buildTicketPdfAttachment(staffRow, formSettings, appSettings);
-                if (built) pdfAttachments = [built];
-            }
 
             // Append whatever the (admin-editable) template is missing, so an
             // edit in Settings can never silently delete the ticket again.
@@ -1205,8 +1218,12 @@ serve(async (req: Request) => {
                 ? { host: appSettings.smtp_host, port: Number(appSettings.smtp_port || 587), user: appSettings.smtp_user, pass: appSettings.smtp_pass, fromName: (appSettings as any).email_from_name || 'GANSID Congress' }
                 : undefined;
 
+            // Subject only here: this mode builds the ticket PDF further down,
+            // inside the per-staff send, and a caller's body cannot be judged
+            // honest until that attachment is known. The body override is
+            // applied at that point instead.
             const tpl = resolveEmailTemplate({
-                callerOverride: { subject: body.subjectOverride, body: body.bodyOverride },
+                callerOverride: { subject: body.subjectOverride },
                 formOverride: overrideOn ? formEmailOverrides?.templates?.['staff-confirmed'] : undefined,
                 globalSubject: (appSettings as any)?.email_staff_confirmed_subject,
                 globalBody: (appSettings as any)?.email_staff_confirmed_body,
@@ -1241,7 +1258,17 @@ serve(async (req: Request) => {
                     const downloadUrl = await buildTicketDownloadUrl(staff.id, staff.form_id, sendOrigin(body, req));
                     // Built before the copy that describes it — see staff-claim-completed.
                     const ticketPdf = await buildTicketPdfAttachment(staff, form, appSettings);
-                    const bodyTemplate = ensureTicketBlocks(tpl.body, {
+                    // Only the staff member's own ticket email takes the caller's
+                    // copy; the organisation notification below keeps its template.
+                    const caller = safeCallerBody(body.bodyOverride, {
+                        hasPdfAttachment: !!ticketPdf,
+                    });
+                    if (caller.rejected.length) {
+                        console.error('[send-ticket-email] bodyOverride rejected, falling back to the configured template', JSON.stringify({
+                            mode: body.mode, attendeeId: staff.id, problems: caller.rejected,
+                        }));
+                    }
+                    const bodyTemplate = ensureTicketBlocks(caller.body ?? tpl.body, {
                         includeQr: true,
                         includeDownload: !!downloadUrl,
                         attachmentNote: attachmentNoteFor(!!ticketPdf),
