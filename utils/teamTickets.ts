@@ -47,6 +47,41 @@ export function staffPassLabel(a: Attendee): string {
   return a.ticketType || '—';
 }
 
+// ── Removing a seat ─────────────────────────────────────────────────────────
+//
+// Two things must never be destroyed by a roster tidy-up, and the rule lived in
+// two places: the dashboard hid the Remove button for a checked-in seat, while
+// storageService threw for that plus a seat with a free guest hanging off it.
+// Two encodings of one rule is how a UI ends up offering a button the server
+// then refuses.
+
+export interface SeatRemovalFacts {
+  /** Set once the person has arrived and been scanned in. */
+  checkedInAt?: string | null;
+  /** Free guests sourced from this seat. Unknown to the browser; pass 0 there. */
+  bogoClaimCount?: number;
+}
+
+/**
+ * Why this seat cannot be removed, phrased for the sponsor, or null if it can.
+ *
+ * The caller decides what to do with it: the roster hides its Remove button,
+ * `removeStaffMember` throws it. Both consult the same rule, so the button is
+ * never offered for something the write would reject.
+ */
+export function seatRemovalBlocker(facts: SeatRemovalFacts): string | null {
+  if (facts.checkedInAt) {
+    // Deleting the row would erase the only record that they arrived.
+    return 'This person has already checked in — ask the organisers to remove them.';
+  }
+  if ((facts.bogoClaimCount ?? 0) > 0) {
+    // bogo_source_attendee_id is ON DELETE SET NULL, so the free guest would
+    // survive as a live ticket with no record of who it came from.
+    return 'This person has a free guest attached — ask the organisers to remove them.';
+  }
+  return null;
+}
+
 // ── Seat quota ──────────────────────────────────────────────────────────────
 //
 // A sponsor tier and an exhibitor booth both grant the same two things: some
@@ -76,6 +111,21 @@ export const CATEGORY_LABELS: Record<StaffCategory, string> = {
   hall_only: 'Hall-Only',
   full_access: 'Full Congress',
 };
+
+/**
+ * What to call a seat type in front of a person.
+ *
+ * `CATEGORY_LABELS` covers the two real categories; this adds the fallback for
+ * a seat carrying no category at all, which the roster editor and the staff
+ * emails both need. It exists because those two disagreed: the dashboard mailed
+ * a colleague "Full-Access" while the portal, the tickets page, the roster and
+ * the registration form all called the same pass "Full Congress". Anything that
+ * names a seat type to a human should call this rather than inline a ternary.
+ */
+export function staffCategoryLabel(category: string | null | undefined): string {
+  if (category === 'hall_only' || category === 'full_access') return CATEGORY_LABELS[category];
+  return 'Sponsor Seat';
+}
 
 /** What the booking entitles this org to. Zero for anything unrecognised. */
 export function quotaForPrimary(primary: Attendee | null | undefined): CategoryQuota {

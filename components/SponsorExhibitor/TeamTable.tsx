@@ -9,6 +9,7 @@ import {
   staffPassLabel,
   seatUsage,
   CATEGORY_LABELS,
+  seatRemovalBlocker,
   type StaffCategory,
 } from '../../utils/teamTickets';
 
@@ -316,7 +317,7 @@ export default function TeamTable({ primary, staff, onFillIn, onRemove }: Props)
                     {/* Removing someone who has already arrived would delete
                         the only record that they did. The organisers can, from
                         the admin side; the sponsor cannot. */}
-                    {onRemove && !s.checkedInAt && (
+                    {onRemove && !seatRemovalBlocker({ checkedInAt: s.checkedInAt }) && (
                       <button
                         type="button"
                         onClick={() => { setConfirmRemoveId(s.id); setError(null); setNotice(null); }}

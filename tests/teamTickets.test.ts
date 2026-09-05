@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   isTeamPrimary,
+  staffCategoryLabel,
+  seatRemovalBlocker,
+  CATEGORY_LABELS,
   selectTeamPrimaries,
   isPendingStaff,
   staffPassLabel,
@@ -92,6 +95,72 @@ describe('staffPassLabel', () => {
 
   it('only shows a dash when there is genuinely nothing to say', () => {
     expect(staffPassLabel(row({ ticketType: '' }))).toBe('—');
+  });
+});
+
+describe('seatRemovalBlocker', () => {
+  it('lets an ordinary seat go', () => {
+    expect(seatRemovalBlocker({})).toBeNull();
+    expect(seatRemovalBlocker({ checkedInAt: null, bogoClaimCount: 0 })).toBeNull();
+  });
+
+  it('refuses someone who has already arrived', () => {
+    // Deleting the row erases the only record that they were ever scanned in.
+    const why = seatRemovalBlocker({ checkedInAt: '2026-10-23T09:14:00.000Z' });
+    expect(why).toMatch(/already checked in/i);
+  });
+
+  it('refuses someone carrying a free guest', () => {
+    // bogo_source_attendee_id is ON DELETE SET NULL — the guest would survive
+    // as a live ticket with nothing recording where it came from.
+    expect(seatRemovalBlocker({ bogoClaimCount: 1 })).toMatch(/free guest/i);
+  });
+
+  it('reports arrival first when both apply', () => {
+    const why = seatRemovalBlocker({ checkedInAt: '2026-10-23T09:14:00.000Z', bogoClaimCount: 2 });
+    expect(why).toMatch(/already checked in/i);
+  });
+
+  it('treats an unknown guest count as none, so the browser can ask too', () => {
+    // TeamTable has no way to count BOGO claims; it passes only what it knows
+    // and lets removeStaffMember catch the rest. That must not make the button
+    // vanish for every seat.
+    expect(seatRemovalBlocker({ checkedInAt: undefined })).toBeNull();
+  });
+});
+
+describe('staffCategoryLabel', () => {
+  it('names the two real categories', () => {
+    expect(staffCategoryLabel('hall_only')).toBe('Hall-Only');
+    expect(staffCategoryLabel('full_access')).toBe('Full Congress');
+  });
+
+  it('never says "Full-Access" — that name reached real recipients once', () => {
+    // PortalDashboard's staff email inlined its own ternary and called this
+    // pass "Full-Access", while the portal, the tickets page, the roster and
+    // the registration form all said "Full Congress". One seat type, two names,
+    // and the one the attendee received by email was the odd one out.
+    expect(staffCategoryLabel('full_access')).not.toMatch(/Full-Access/);
+  });
+
+  it('falls back for a seat carrying no category', () => {
+    expect(staffCategoryLabel(undefined)).toBe('Sponsor Seat');
+    expect(staffCategoryLabel(null)).toBe('Sponsor Seat');
+    expect(staffCategoryLabel('')).toBe('Sponsor Seat');
+    expect(staffCategoryLabel('something_else')).toBe('Sponsor Seat');
+  });
+
+  it('agrees with the labels the roster and seat meter render', () => {
+    // The meter reads CATEGORY_LABELS directly; the emails read this function.
+    // If they ever disagree, a sponsor and their colleague are looking at the
+    // same seat under different names.
+    expect(staffCategoryLabel('hall_only')).toBe(CATEGORY_LABELS.hall_only);
+    expect(staffCategoryLabel('full_access')).toBe(CATEGORY_LABELS.full_access);
+  });
+
+  it('agrees with staffPassLabel for a categorised seat', () => {
+    const s = row({ answers: { staffCategory: 'full_access' } as any });
+    expect(staffPassLabel(s)).toBe(staffCategoryLabel('full_access'));
   });
 });
 

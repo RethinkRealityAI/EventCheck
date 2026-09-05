@@ -26,6 +26,7 @@ import { supabase } from '../../services/supabaseClient';
 import { describePayPalError, payPalErrorReference } from '../../utils/paypalPayer';
 import { logPaymentFailure } from '../../services/paymentDiagnosticsService';
 import { CURRENT_SITE } from '../../config/sites';
+import { staffCategoryLabel } from '../../utils/teamTickets';
 
 interface Props {
   form: Form;
@@ -329,8 +330,7 @@ export default function PublicSponsorExhibitorForm({ form, settings, isEmbedded 
       const complete = (id: string) => `${window.location.origin}/#/form/${staffFormId}?ref=${id}`;
       const signup = `${window.location.origin}/#/`;
       const eventName = (CURRENT_SITE as any).displayName || form.title;
-      const categoryLabel = (c: string) =>
-        c === 'hall_only' ? 'Hall-Only' : 'Full Congress';
+      const categoryLabel = staffCategoryLabel;
 
       for (let i = 0; i < staff.length; i++) {
         const entry = staff[i];
