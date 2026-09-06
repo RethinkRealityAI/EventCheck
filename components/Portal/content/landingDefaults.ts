@@ -95,8 +95,7 @@ export const LANDING_DEFAULTS: LandingContent = {
     // `site_content` overrides this; these values only show if that row is
     // missing, so they must not be allowed to drift.
     periods: [
-      { id: 'early', label: 'Promo', subtitle: 'Ends August 31st, 2026' },
-      { id: 'regular', label: 'Regular', subtitle: 'September 1st – 30th, 2026' },
+      { id: 'regular', label: 'Regular', subtitle: 'Ends September 30th, 2026' },
       { id: 'onsite', label: 'On-site', subtitle: 'October 1st – 25th, 2026' },
     ],
     tiers: [
@@ -105,14 +104,14 @@ export const LANDING_DEFAULTS: LandingContent = {
         label: 'Tier 1',
         subtitle: 'Asia, Africa, South America, Central America, Mexico',
         rows: [
-          { category: 'Physicians / Researchers', early: 150, regular: 200, onsite: 250 },
-          { category: 'Medical Trainees (Residents, Fellows)', early: 100, regular: 175, onsite: 200 },
-          { category: 'Abstract Presenters', early: 75, regular: 100, onsite: 150 },
-          { category: 'Undergraduate, Medical, Graduate Students', early: 25, regular: 50, onsite: 100 },
-          { category: 'Nurses or Allied Health Professionals', early: 75, regular: 100, onsite: 150 },
-          { category: 'Industry Partners', early: 200, regular: 300, onsite: 350 },
-          { category: 'Patient Organizations', early: 50, regular: 75, onsite: 100 },
-          { category: 'Patients or Family Members', early: 25, regular: 40, onsite: 50 },
+          { category: 'Physicians / Researchers', regular: 150, onsite: 200 },
+          { category: 'Medical Trainees (Residents, Fellows)', regular: 100, onsite: 175 },
+          { category: 'Abstract Presenters', regular: 75, onsite: 100 },
+          { category: 'Undergraduate, Medical, Graduate Students', regular: 25, onsite: 50 },
+          { category: 'Nurses or Allied Health Professionals', regular: 75, onsite: 100 },
+          { category: 'Industry Partners', regular: 200, onsite: 300 },
+          { category: 'Patient Organizations', regular: 50, onsite: 75 },
+          { category: 'Patients or Family Members', regular: 25, onsite: 40 },
         ],
       },
       {
@@ -120,14 +119,14 @@ export const LANDING_DEFAULTS: LandingContent = {
         label: 'Tier 2',
         subtitle: 'United States, Canada, Europe, Australia, New Zealand',
         rows: [
-          { category: 'Physicians / Researchers', early: 200, regular: 300, onsite: 400 },
-          { category: 'Medical Trainees (Residents, Fellows)', early: 150, regular: 250, onsite: 275 },
-          { category: 'Abstract Presenters', early: 125, regular: 150, onsite: 200 },
-          { category: 'Undergraduate, Medical, Graduate Students', early: 75, regular: 100, onsite: 125 },
-          { category: 'Nurses or Allied Health Professionals', early: 125, regular: 200, onsite: 250 },
-          { category: 'Industry Partners', early: 300, regular: 350, onsite: 450 },
-          { category: 'Patient Organizations', early: 75, regular: 100, onsite: 125 },
-          { category: 'Patients or Family Members', early: 35, regular: 50, onsite: 60 },
+          { category: 'Physicians / Researchers', regular: 200, onsite: 300 },
+          { category: 'Medical Trainees (Residents, Fellows)', regular: 150, onsite: 250 },
+          { category: 'Abstract Presenters', regular: 125, onsite: 150 },
+          { category: 'Undergraduate, Medical, Graduate Students', regular: 75, onsite: 100 },
+          { category: 'Nurses or Allied Health Professionals', regular: 125, onsite: 200 },
+          { category: 'Industry Partners', regular: 300, onsite: 350 },
+          { category: 'Patient Organizations', regular: 75, onsite: 100 },
+          { category: 'Patients or Family Members', regular: 35, onsite: 50 },
         ],
       },
     ],
@@ -137,8 +136,10 @@ export const LANDING_DEFAULTS: LandingContent = {
     enabled: false,
     label: 'Early Bird',
     colorPreset: 'save-green',
-    promoPeriodId: 'early',
-    comparePeriodId: 'regular',
+    // 'early' is gone: Regular now carries what Promo used to, so the only
+    // saving left to advertise is registering before the on-site rate starts.
+    promoPeriodId: 'regular',
+    comparePeriodId: 'onsite',
     categories: 'all',
     endDate: null,
     showCountdown: false,
