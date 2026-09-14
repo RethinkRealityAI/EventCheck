@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Attendee, Form, AppSettings, SeatingTable } from '../types';
-import { LayoutDashboard, Users, ChevronDown, ChevronRight, UserPlus, CheckCircle, Clock, Search, Calendar, Eye, X, Mail, User, Download, FileSpreadsheet, Check, ChevronLeft, Filter, Loader2, Copy, ChevronsDown, ChevronsRight, Star, Pin, Plus, SlidersHorizontal, Heart, Upload, AlertTriangle } from 'lucide-react';
+import { LayoutDashboard, Users, ChevronDown, ChevronRight, UserPlus, CheckCircle, Clock, Search, Calendar, Eye, X, Mail, User, Download, FileSpreadsheet, Check, ChevronLeft, Filter, Loader2, Copy, ChevronsDown, ChevronsRight, Star, Pin, Plus, SlidersHorizontal, Heart, Upload, AlertTriangle, Send as SendIcon, Building2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { updateAttendee, getSettings, saveSettings, getAllSeatingTablesForForm, createGuestForPrimary, syncAttendeeSeatingToChart } from '../services/storageService';
 import { supabase } from '../services/supabaseClient';
@@ -30,6 +30,23 @@ import {
   type AccountFilter,
 } from '../utils/attendeeQuickFilters';
 import { Settings as SettingsIcon } from 'lucide-react';
+import SponsorsTable from './Sponsors/SponsorsTable';
+import BulkEmailModal from './Email/BulkEmailModal';
+import { buildAttendeeVars, type BulkRecipient } from '../utils/adminEmailCompose';
+import {
+  buildRegistrationIndex,
+  delegateOrgName,
+  delegateStatus,
+  isOrgKind,
+  matchesRegistrationKindFilter,
+  orgDisplayName,
+  REGISTRATION_KIND_FILTERS,
+  REGISTRATION_KIND_FILTER_LABELS,
+  REGISTRATION_KIND_META,
+  type RegistrationKindFilter,
+} from '../utils/registrationKind';
+import { getSponsorTier } from '../config/formTemplates/sponsorTiers';
+import { getBoothType } from '../config/formTemplates/boothTypes';
 
 // ── Group-registration helpers ──────────────────────────────────────────────
 
@@ -131,12 +148,20 @@ interface AttendeeListProps {
   onRefresh?: () => void;
 }
 
+/** Tabs whose visible list is the flat attendee list — where "email everyone
+ *  shown" has an obvious meaning. Tables / Exhibitors / Sponsors are grouped
+ *  views with their own semantics and get no bulk-email button. */
+const BULK_EMAIL_TABS: ReadonlySet<DashboardTabId> = new Set<DashboardTabId>([
+  'live', 'donated', 'sponsor-tickets', 'groups', 'speakers', 'test',
+]);
+
 const STANDARD_COLUMNS: ColumnDef[] = [
   { key: 'name', label: 'Name', group: 'standard' },
   { key: 'email', label: 'Email', group: 'standard' },
   { key: 'country', label: 'Country', group: 'standard' },
   { key: 'formTitle', label: 'Event/Form', group: 'standard' },
   { key: 'ticketType', label: 'Ticket Type', group: 'standard' },
+  { key: 'kind', label: 'Type', group: 'standard' },
   { key: 'seating', label: 'Seating', group: 'standard' },
   { key: 'status', label: 'Check-in Status', group: 'standard' },
   { key: 'account', label: 'Portal Account', group: 'standard' },
@@ -149,7 +174,13 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
   const [searchTerm, setSearchTerm] = useState('');
   // "Who can't sign in?" — the dimension the account-management tools act on.
   const [accountFilter, setAccountFilter] = useState<AccountFilter>('all');
-  const [activeTab, setActiveTab] = useState<'live' | 'test' | 'donated' | 'tables' | 'sponsor-tickets' | 'exhibitors' | 'groups' | 'signups' | 'speakers' | 'contacts'>('live');
+  // "Attendee, sponsor, exhibitor or delegate?" — the dimension that used to
+  // be answered by three different screens.
+  const [kindFilter, setKindFilter] = useState<RegistrationKindFilter>('all');
+  // Mass email to the current view. The audience is captured when the modal
+  // opens so a realtime insert mid-run cannot change who is being emailed.
+  const [bulkAudience, setBulkAudience] = useState<{ label: string; recipients: BulkRecipient[] } | null>(null);
+  const [activeTab, setActiveTab] = useState<DashboardTabId>('live');
   const [tabsConfigOpen, setTabsConfigOpen] = useState(false);
   const [selectedAttendee, setSelectedAttendee] = useState<Attendee | null>(null);
   const { showNotification } = useNotifications();
@@ -246,7 +277,9 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     donatedTables: true,
     donationType: true,
     dietaryPreferences: true,
-    isPrimary: true
+    isPrimary: true,
+    registrationKind: true,
+    organization: true,
   });
 
   const fieldLabels: Record<string, string> = {
@@ -268,7 +301,9 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     donatedTables: 'Donated Tables',
     donationType: 'Donation Type',
     dietaryPreferences: 'Dietary Preferences',
-    isPrimary: 'Primary / Guest'
+    isPrimary: 'Primary / Guest',
+    registrationKind: 'Registration type',
+    organization: 'Organization',
   };
 
   // ── Export scope/filter state ──────────────────────────────────────────────
@@ -362,6 +397,37 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
 
   const selectedForm = useMemo(() => forms.find(f => f.id === selectedFormId), [forms, selectedFormId]);
 
+  // Registration kind per row (attendee / delegate / sponsor / exhibitor) —
+  // one resolver shared with the stats cards and the export.
+  const formTypeById = useMemo(() => new Map(forms.map(f => [f.id, f.formType || 'event'] as const)), [forms]);
+  const registrationIndex = useMemo(
+    () => buildRegistrationIndex(attendees, id => (id ? formTypeById.get(id) : undefined)),
+    [attendees, formTypeById],
+  );
+  const kindOf = useCallback((a: Attendee) => registrationIndex.kindById.get(a.id) ?? 'attendee', [registrationIndex]);
+  // Org name shown for a row: the booking's company for org rows, the parent
+  // booking's company for delegates, nothing for ordinary attendees.
+  const orgNameFor = useCallback((a: Attendee): string | null => {
+    const kind = kindOf(a);
+    if (isOrgKind(kind)) return orgDisplayName(a);
+    if (kind === 'delegate') return delegateOrgName(registrationIndex, a.id);
+    return null;
+  }, [kindOf, registrationIndex]);
+  // Sponsor bookings for the Sponsors tab — the same rows the Sponsors page
+  // lists (primary + sponsor tier), newest first, from data already loaded.
+  const sponsorOrgs = useMemo(
+    () => attendees
+      .filter(a => !a.isTest && a.isPrimary !== false && !a.primaryAttendeeId && !!a.sponsorTier)
+      .slice()
+      .sort((a, b) => String(b.registeredAt).localeCompare(String(a.registeredAt))),
+    [attendees],
+  );
+  const hasSponsorData = sponsorOrgs.length > 0
+    || forms.some(f => f.formType === 'sponsor' || f.formType === 'sponsor_exhibitor');
+  // Env-first SMTP (GANSID keeps the secret in edge config and clears
+  // smtp_pass) — any partial config counts as ready.
+  const smtpReady = !!(settings?.smtpUser || settings?.smtpPass);
+
   const sponsorPrimaryIds = useMemo(
     () => new Set(attendees.filter(a => a.isPrimary && a.sponsorTier).map(a => a.id)),
     [attendees]
@@ -427,8 +493,9 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
       hasExhibitorForms,
       portalEnabled: CURRENT_SITE.portalEnabled,
       hasSpeakers,
+      hasSponsorData,
     }),
-    [settings?.dashboardTabPrefs, hasExhibitorForms, hasSpeakers],
+    [settings?.dashboardTabPrefs, hasExhibitorForms, hasSpeakers, hasSponsorData],
   );
 
   // If the admin hides (or site availability strips) the currently-active tab,
@@ -567,6 +634,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
       (a.appliedPromoCode?.toLowerCase().includes(q) ?? false) ||
       (a.sponsorTier?.toLowerCase().includes(q) ?? false) ||
       (a.guestType?.toLowerCase().includes(q) ?? false) ||
+      (orgNameFor(a)?.toLowerCase().includes(q) ?? false) ||
       (countryName.toLowerCase().includes(q)) ||
       !!(catMeta && (
         catMeta.label.toLowerCase().includes(q) ||
@@ -587,7 +655,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     let matchesTab = false;
     if (activeTab === 'test') matchesTab = isTest;
     else if (activeTab === 'donated') matchesTab = !isTest && ((a.donatedSeats || 0) > 0 || (a.donatedTables || 0) > 0);
-    else if (activeTab === 'tables') matchesTab = !isTest && !isStaffRow;
+    else if (activeTab === 'tables') matchesTab = !isTest;
     // `!isTest` matches every other tab — without it, form-preview submissions
     // leaked into Sponsor Tickets and would be emailed as real guests.
     else if (activeTab === 'sponsor-tickets') matchesTab = !isTest && !a.isPrimary && !!a.primaryAttendeeId && sponsorPrimaryIds.has(a.primaryAttendeeId);
@@ -598,7 +666,13 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     else if (activeTab === 'speakers') {
       matchesTab = !isTest && a.guestType === 'speaker';
     }
-    else matchesTab = !isTest && !isStaffRow;
+    // Live shows EVERY real registration — sponsor / exhibitor delegates
+    // included. They used to be dropped here as "placeholder ghost rows",
+    // which left no single place to see a sponsor's people beside everyone
+    // else. The Type column and filter tell them apart instead.
+    else matchesTab = !isTest;
+
+    const matchesKind = matchesRegistrationKindFilter(kindOf(a), kindFilter);
 
     const matchesStatus = statusFilter === 'all'
       ? true
@@ -621,7 +695,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
       return String(answer || '') === rf.value;
     });
 
-    return matchesSearch && matchesForm && matchesTab && matchesStatus && matchesPayment && matchesAccount && matchesResponseFilters;
+    return matchesSearch && matchesForm && matchesTab && matchesKind && matchesStatus && matchesPayment && matchesAccount && matchesResponseFilters;
   });
 
   // Count donated seats for badge
@@ -743,6 +817,38 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     }
   };
 
+  // Tabs whose visible list IS the flat attendee list — the only views where
+  // "email everyone shown" has an obvious meaning. Tables/Exhibitors/Sponsors
+  // render grouped views with their own semantics.
+  const openBulkEmail = () => {
+    const chips = describeActiveFilters({
+      search: searchTerm, status: statusFilter, payment: paymentFilter, account: accountFilter,
+      kind: kindFilter, responseFilterCount: responseFilters.length,
+    });
+    const tabLabel = visibleTabs.find(t => t.id === activeTab)?.label ?? activeTab;
+    const formLabel = selectedFormId === '_all' ? 'All forms' : (selectedForm?.title ?? 'Form');
+    const label = [tabLabel, formLabel, ...chips.map(c => c.label)].join(' · ');
+    const recipients: BulkRecipient[] = sortedFiltered.map(a => {
+      const kind = kindOf(a);
+      const org = orgNameFor(a);
+      const subtitle = kind === 'delegate'
+        ? `Delegate${org ? ` · ${org}` : ''}`
+        : isOrgKind(kind)
+          ? `${REGISTRATION_KIND_META[kind].label} booking`
+          : a.ticketType || 'Attendee';
+      return {
+        key: a.id,
+        email: a.email,
+        name: a.name,
+        userId: a.userId ?? null,
+        attendeeId: a.id,
+        vars: buildAttendeeVars(a, forms, { orgName: org }),
+        subtitle,
+      };
+    });
+    setBulkAudience({ label, recipients });
+  };
+
   const toggleField = (field: string) => {
     setExportFields(prev => ({ ...prev, [field]: !prev[field] }));
   };
@@ -777,11 +883,11 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
 
       let matchesScope = true;
       switch (exportScope) {
-        case 'all': matchesScope = !isStaffRow; break;
-        case 'live': matchesScope = !isTest && !isStaffRow; break;
+        case 'all': matchesScope = true; break;
+        case 'live': matchesScope = !isTest; break;
         case 'test': matchesScope = isTest; break;
         case 'donated': matchesScope = !isTest && ((a.donatedSeats || 0) > 0 || (a.donatedTables || 0) > 0); break;
-        case 'tables': matchesScope = !isTest && !isStaffRow; break;
+        case 'tables': matchesScope = !isTest; break;
         case 'sponsor-tickets': matchesScope = !a.isPrimary && !!a.primaryAttendeeId && sponsorPrimaryIds.has(a.primaryAttendeeId); break;
         case 'exhibitors': matchesScope = a.ticketType === 'Exhibitor'
           || a.guestType === 'exhibitor-staff-pending'
@@ -837,13 +943,19 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     if (key === 'isPrimary') {
       return attendee.isPrimary === false ? 'Guest' : 'Primary';
     }
+    if (key === 'registrationKind') {
+      return REGISTRATION_KIND_META[kindOf(attendee)].label;
+    }
+    if (key === 'organization') {
+      return orgNameFor(attendee) ?? '';
+    }
     let val = (attendee as any)[key];
     if (val && (key === 'registeredAt' || key === 'checkedInAt')) {
       val = format(new Date(val), 'yyyy-MM-dd HH:mm:ss');
     }
     if (val === undefined || val === null) return '';
     return String(val);
-  }, [forms]);
+  }, [forms, kindOf, orgNameFor]);
 
   const selectedExportKeys = () => Object.entries(exportFields)
     .filter(([_, enabled]) => enabled)
@@ -1007,7 +1119,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
 
           {/* Attendee-table controls — hidden on the Signups + Contacts tabs since
               those views have their own filter + search bars. */}
-          {activeTab !== 'signups' && activeTab !== 'contacts' && (
+          {activeTab !== 'signups' && activeTab !== 'contacts' && activeTab !== 'sponsors' && (
             <div className="flex flex-wrap items-center gap-2">
               <div className="relative flex-1 min-w-[200px]">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -1048,6 +1160,23 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                 </button>
               )}
 
+              {BULK_EMAIL_TABS.has(activeTab) && (
+                <button
+                  onClick={openBulkEmail}
+                  disabled={!settings || !smtpReady || sortedFiltered.length === 0}
+                  className="flex items-center gap-2 px-4 py-2 bg-sky-600 text-white rounded-lg text-sm font-medium hover:bg-sky-700 transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={!smtpReady
+                    ? 'Configure SMTP in Settings first'
+                    : sortedFiltered.length === 0
+                      ? 'No one matches the current filters'
+                      : `Compose one email to the ${sortedFiltered.length} ${sortedFiltered.length === 1 ? 'person' : 'people'} matching the current filters (all pages)`}
+                  data-testid="attendees-email-all"
+                >
+                  <SendIcon className="w-4 h-4" />
+                  <span className="hidden sm:inline">Email ({sortedFiltered.length})</span>
+                </button>
+              )}
+
               {deliveryIssueCount > 0 && (
                 <button
                   onClick={() => setShowDeliveryIssues(true)}
@@ -1076,7 +1205,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
         </div>
 
         {/* Filters Row */}
-        {activeTab === 'signups' || activeTab === 'contacts' ? null : activeTab === 'tables' ? (
+        {activeTab === 'signups' || activeTab === 'contacts' || activeTab === 'sponsors' ? null : activeTab === 'tables' ? (
           <div className="flex flex-wrap items-center gap-2 text-sm bg-white/50 backdrop-blur-sm p-3 rounded-lg border border-white/40">
             <button
               onClick={handleExpandAll}
@@ -1140,6 +1269,21 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
               >
                 {ACCOUNT_FILTERS.map(f => (
                   <option key={f} value={f}>{ACCOUNT_FILTER_LABELS[f]}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Registration type — attendee / sponsor / exhibitor / delegate. */}
+            <div className="flex items-center gap-2">
+              <span className="text-slate-400">Type:</span>
+              <select
+                value={kindFilter}
+                onChange={e => { setKindFilter(e.target.value as RegistrationKindFilter); setCurrentPage(1); }}
+                className="bg-transparent font-medium text-slate-700 outline-none cursor-pointer"
+                data-testid="filter-kind"
+              >
+                {REGISTRATION_KIND_FILTERS.map(f => (
+                  <option key={f} value={f}>{REGISTRATION_KIND_FILTER_LABELS[f]}</option>
                 ))}
               </select>
             </div>
@@ -1271,6 +1415,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
             status: statusFilter,
             payment: paymentFilter,
             account: accountFilter,
+            kind: kindFilter,
             responseFilterCount: responseFilters.length,
           });
           if (chips.length === 0) return null;
@@ -1294,6 +1439,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                   setStatusFilter('all');
                   setPaymentFilter('all');
                   setAccountFilter('all');
+                  setKindFilter('all');
                   setResponseFilters([]);
                   setCurrentPage(1);
                 }}
@@ -1322,6 +1468,26 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
         ) : activeTab === 'contacts' ? (
           <div className="p-4">
             <ImportedContactsTab settings={settings} itemsPerPage={itemsPerPage} />
+          </div>
+        ) : activeTab === 'sponsors' ? (
+          <div className="p-4 space-y-3" data-testid="sponsors-tab">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+              <span>
+                <strong className="text-slate-700">{sponsorOrgs.length}</strong> sponsor booking{sponsorOrgs.length !== 1 ? 's' : ''}
+                {' '}· their delegates appear in <strong className="text-slate-700">Live</strong> (Type: Delegate) and <strong className="text-slate-700">Sponsor Tickets</strong>.
+              </span>
+              <a href="#/admin/sponsors" className="text-indigo-600 font-semibold hover:underline">
+                Prospects, invitations &amp; templates →
+              </a>
+            </div>
+            {settings ? (
+              <SponsorsTable sponsors={sponsorOrgs} settings={settings} onChanged={async () => { onRefresh?.(); }} />
+            ) : (
+              <div className="p-12 text-center text-gray-400">
+                <Loader2 className="w-8 h-8 mx-auto mb-2 animate-spin text-indigo-500" />
+                <p>Loading…</p>
+              </div>
+            )}
           </div>
         ) : activeTab === 'exhibitors' ? (
           <div className="p-4">
@@ -1574,6 +1740,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                 {isColumnVisible('country') && <th className="px-4 py-2.5 min-w-[120px] text-xs font-semibold uppercase tracking-wide text-gray-500">Country</th>}
                 {isColumnVisible('formTitle') && <th className="px-4 py-2.5 min-w-[140px] text-xs font-semibold uppercase tracking-wide text-gray-500">Event/Form</th>}
                 {isColumnVisible('ticketType') && <th className="px-4 py-2.5 min-w-[110px] text-xs font-semibold uppercase tracking-wide text-gray-500">Ticket Type</th>}
+                {isColumnVisible('kind') && <th className="px-4 py-2.5 min-w-[150px] text-xs font-semibold uppercase tracking-wide text-gray-500">Type</th>}
                 {isColumnVisible('seating') && <th className="px-4 py-2.5 min-w-[120px] text-xs font-semibold uppercase tracking-wide text-gray-500">Seating</th>}
                 {isColumnVisible('status') && <th className="px-4 py-2.5 min-w-[120px] text-xs font-semibold uppercase tracking-wide text-gray-500">Check-in Status</th>}
                 {isColumnVisible('account') && <th className="px-4 py-2.5 min-w-[110px] text-xs font-semibold uppercase tracking-wide text-gray-500">Portal Account</th>}
@@ -1674,8 +1841,23 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                                 GROUP OF {1 + (guestCountByPrimary.get(attendee.id) ?? 0)}
                               </span>
                             )}
-                            {attendee.isPrimary === false && !isGuestRow && (
+                            {attendee.isPrimary === false && !isGuestRow && kindOf(attendee) !== 'delegate' && (
                               <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-700">GUEST</span>
+                            )}
+                            {/* Compact kind pills only when the Type column is hidden —
+                                otherwise the column already says it. */}
+                            {!isColumnVisible('kind') && kindOf(attendee) === 'delegate' && (
+                              <span
+                                className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-100 text-sky-800"
+                                title={orgNameFor(attendee) ? `Delegate of ${orgNameFor(attendee)}` : 'Sponsor / exhibitor delegate'}
+                              >
+                                DELEGATE
+                              </span>
+                            )}
+                            {!isColumnVisible('kind') && isOrgKind(kindOf(attendee)) && (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-800">
+                                <Building2 className="w-2.5 h-2.5" />{REGISTRATION_KIND_META[kindOf(attendee)].shortLabel}
+                              </span>
                             )}
                             {isGuestRow && <GuestStatusBadge guest={attendee} />}
                             {attendee.assignedTableId && (() => {
@@ -1784,6 +1966,34 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                           </span>
                         </td>
                       )}
+                      {isColumnVisible('kind') && (() => {
+                        const kind = kindOf(attendee);
+                        const meta = REGISTRATION_KIND_META[kind];
+                        const org = orgNameFor(attendee);
+                        let detail: string | null = null;
+                        if (kind === 'delegate') {
+                          detail = org ? `via ${org}` : null;
+                        } else if (isOrgKind(kind)) {
+                          const tier = attendee.sponsorTier ? (getSponsorTier(attendee.sponsorTier)?.name ?? attendee.sponsorTier) : null;
+                          const booth = attendee.exhibitorBoothType ? (getBoothType(attendee.exhibitorBoothType)?.label ?? attendee.exhibitorBoothType) : null;
+                          detail = [tier ? `${tier} tier` : null, booth ? `Booth: ${booth}` : null].filter(Boolean).join(' · ') || null;
+                        }
+                        const pending = kind === 'delegate' && delegateStatus(attendee) === 'pending';
+                        return (
+                          <td className="px-4 py-3 text-xs" data-testid="cell-kind">
+                            <div className="flex flex-col gap-1 items-start">
+                              <span
+                                className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border ${meta.pillBg} ${meta.pillText} ${meta.pillBorder}`}
+                                title={meta.description}
+                              >
+                                {meta.shortLabel}
+                              </span>
+                              {detail && <span className="text-gray-600 truncate max-w-[220px]" title={detail}>{detail}</span>}
+                              {pending && <span className="text-amber-700 font-semibold" title="Seat reserved by the organization — this person has not completed their own details yet">Awaiting their details</span>}
+                            </div>
+                          </td>
+                        );
+                      })()}
                       {isColumnVisible('seating') && (
                         <td className="px-4 py-3 text-xs text-gray-600">
                           {attendee.assignedTableId ? (() => {
@@ -1890,7 +2100,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
           (each fed by the shared `itemsPerPage` above), so this footer
           (driven by the outer `filtered`/`currentPage`) is hidden there to
           avoid showing a mismatched/duplicate page count. */}
-      {activeTab !== 'signups' && activeTab !== 'contacts' && activeTab !== 'exhibitors' && (
+      {activeTab !== 'signups' && activeTab !== 'contacts' && activeTab !== 'exhibitors' && activeTab !== 'sponsors' && (
       <div className="px-4 py-3 border-t border-white/20 bg-white/60 backdrop-blur-sm flex items-center justify-between">
         <div className="text-xs text-gray-500">
           {activeTab === 'tables' ? (
@@ -1936,6 +2146,18 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
         />
       )}
 
+      {bulkAudience && settings && (
+        <BulkEmailModal
+          audience="attendees"
+          audienceLabel={bulkAudience.label}
+          recipients={bulkAudience.recipients}
+          settings={settings}
+          forms={forms}
+          defaultTemplate="announcement"
+          onClose={() => setBulkAudience(null)}
+        />
+      )}
+
       {/* Add Attendee Modal */}
       {showAddModal && (
         <AddAttendeeModal
@@ -1953,7 +2175,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
       {tabsConfigOpen && settings && (
         <DashboardTabsConfig
           settings={settings}
-          gates={{ hasExhibitorForms, portalEnabled: CURRENT_SITE.portalEnabled }}
+          gates={{ hasExhibitorForms, portalEnabled: CURRENT_SITE.portalEnabled, hasSpeakers, hasSponsorData }}
           onSave={async (next) => {
             const updated = { ...settings, dashboardTabPrefs: next };
             await saveSettings(updated);

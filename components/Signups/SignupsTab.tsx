@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Mail, Search, RefreshCw, CheckCircle2, Clock, Circle, Eye, MousePointerClick, ChevronLeft, ChevronRight, Trash2, KeyRound, X } from 'lucide-react';
+import { Mail, Search, RefreshCw, CheckCircle2, Clock, Circle, Eye, MousePointerClick, ChevronLeft, ChevronRight, Trash2, KeyRound, X, Send as SendIcon } from 'lucide-react';
 import AccountActionsPanel from '../Admins/AccountActionsPanel';
 import { canUseFeature } from '../../utils/adminPermissions';
 import { getPortalUsers, type PortalUser } from '../../services/storageService';
@@ -10,11 +10,31 @@ import { useAuth } from '../AuthContext';
 import { useNotifications } from '../NotificationSystem';
 import type { AppSettings, Form } from '../../types';
 import SendUserEmailModal from './SendUserEmailModal';
+import BulkEmailModal from '../Email/BulkEmailModal';
+import { buildPortalUserVars, type AdminEmailTemplateKey, type BulkRecipient } from '../../utils/adminEmailCompose';
+import { timeAgo } from '../../utils/timeAgo';
 import {
   classifyPortalUser,
   matchesPortalUserFilter,
   type PortalUserFilterKey,
 } from '../../utils/portalUserStatus';
+
+const FILTER_LABELS: Record<PortalUserFilterKey, string> = {
+  all: 'All signups',
+  not_started: 'Not started',
+  in_progress: 'In progress',
+  has_ticket: 'Registered',
+};
+
+/** The template a bulk send to this bucket should open on — a reminder for
+ *  people mid-registration, an invitation for those who never began, news
+ *  for the registered. Mixed buckets start blank. */
+const BULK_TEMPLATE_FOR_FILTER: Record<PortalUserFilterKey, AdminEmailTemplateKey> = {
+  all: 'blank',
+  not_started: 'invitation',
+  in_progress: 'reminder',
+  has_ticket: 'announcement',
+};
 
 const TEMPLATE_SHORT_LABELS: Record<string, string> = {
   reminder: 'Reminder',
@@ -78,22 +98,6 @@ function PaginationBar({ startIndex, pageSize, totalRows, page, totalPages, onPr
 // how registered users ended up listed under "Not started".
 type FilterKey = PortalUserFilterKey;
 
-function timeAgo(iso: string): string {
-  if (!iso) return '';
-  const ms = Date.now() - new Date(iso).getTime();
-  const sec = Math.floor(ms / 1000);
-  if (sec < 60) return 'just now';
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const day = Math.floor(hr / 24);
-  if (day < 30) return `${day}d ago`;
-  const mo = Math.floor(day / 30);
-  if (mo < 12) return `${mo}mo ago`;
-  return `${Math.floor(mo / 12)}y ago`;
-}
-
 export default function SignupsTab({ settings, forms, itemsPerPage }: Props) {
   const { profile } = useAuth();
   const { showNotification } = useNotifications();
@@ -112,6 +116,13 @@ export default function SignupsTab({ settings, forms, itemsPerPage }: Props) {
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const pageSize = itemsPerPage;
+  // Filter-driven mass email: whoever the status filter + search currently
+  // show is the audience.
+  const [bulkOpen, setBulkOpen] = useState(false);
+  // Env-first SMTP (GANSID keeps the secret in edge config and clears
+  // smtp_pass) — any partial config counts as ready; real failures surface
+  // per recipient inside the send run.
+  const smtpReady = !!(settings.smtpUser || settings.smtpPass);
 
   const load = async () => {
     setLoading(true);
@@ -208,6 +219,37 @@ export default function SignupsTab({ settings, forms, itemsPerPage }: Props) {
   const startIndex = (safePage - 1) * pageSize;
   const pagedRows = rows.slice(startIndex, startIndex + pageSize);
 
+  // One sentence per user for the bulk-email recipient list — same wording
+  // the badge shows, so what the admin reviews is what they filtered on.
+  const statusText = (u: PortalUser): string => {
+    const status = classifyPortalUser(u);
+    if (status === 'registered') return 'Registered';
+    if (status === 'in_progress' && !u.draft) return 'Payment not completed';
+    if (u.draft) {
+      const total = stepsByFormId.get(u.draft.formId) ?? u.draft.totalSteps;
+      return total ? `In progress — step ${u.draft.currentIndex + 1} of ${total}` : `In progress — step ${u.draft.currentIndex + 1}`;
+    }
+    return 'Not started';
+  };
+
+  const bulkRecipients = useMemo<BulkRecipient[]>(() => rows.map(u => {
+    // Same event resolution as the one-recipient modal: the draft's form,
+    // else the most recent ticket's form, else the first form.
+    const eventFormId = (forms.find(f => f.id === u.draft?.formId)
+      || forms.find(f => f.id === u.mostRecentTicketFormId)
+      || forms[0])?.id;
+    return {
+      key: u.userId,
+      email: u.email,
+      name: u.fullName,
+      userId: u.userId,
+      vars: buildPortalUserVars(u, forms, eventFormId),
+      subtitle: statusText(u),
+    };
+  }), [rows, forms, stepsByFormId]);
+
+  const bulkAudienceLabel = `Signups · ${FILTER_LABELS[filter]}${search.trim() ? ` · matching "${search.trim()}"` : ''}`;
+
   const statusBadge = (u: PortalUser) => {
     const status = classifyPortalUser(u);
     if (status === 'registered') {
@@ -286,6 +328,21 @@ export default function SignupsTab({ settings, forms, itemsPerPage }: Props) {
         >
           <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           <span className="hidden sm:inline">Refresh</span>
+        </button>
+
+        <button
+          onClick={() => setBulkOpen(true)}
+          disabled={loading || rows.length === 0 || !smtpReady}
+          title={!smtpReady
+            ? 'Configure SMTP in Settings first'
+            : rows.length === 0
+              ? 'No one matches this filter'
+              : `Compose one email to the ${rows.length} ${rows.length === 1 ? 'person' : 'people'} in this view`}
+          className="flex items-center gap-1.5 px-3 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 transition shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
+          data-testid="signups-email-all"
+        >
+          <SendIcon className="w-4 h-4" />
+          Email all ({rows.length})
         </button>
       </div>
 
@@ -513,6 +570,19 @@ export default function SignupsTab({ settings, forms, itemsPerPage }: Props) {
           settings={settings}
           forms={forms}
           onClose={() => setSelected(null)}
+          onSent={reloadEmailSends}
+        />
+      )}
+
+      {bulkOpen && (
+        <BulkEmailModal
+          audience="signups"
+          audienceLabel={bulkAudienceLabel}
+          recipients={bulkRecipients}
+          settings={settings}
+          forms={forms}
+          defaultTemplate={BULK_TEMPLATE_FOR_FILTER[filter]}
+          onClose={() => setBulkOpen(false)}
           onSent={reloadEmailSends}
         />
       )}

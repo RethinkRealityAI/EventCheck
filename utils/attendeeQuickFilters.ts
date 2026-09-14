@@ -14,6 +14,8 @@
 //
 // Pure + data-only so both are unit-tested (CLAUDE.md §16 rule #14).
 
+import { REGISTRATION_KIND_FILTER_LABELS, type RegistrationKindFilter } from './registrationKind';
+
 export const ACCOUNT_FILTERS = ['all', 'linked', 'none'] as const;
 export type AccountFilter = typeof ACCOUNT_FILTERS[number];
 
@@ -41,12 +43,14 @@ export interface ActiveFilterState {
   /** 'all' | 'paid' | 'free' | 'pending' */
   payment?: string;
   account?: AccountFilter;
+  /** 'all' | 'attendees' | 'sponsors' | 'exhibitors' | 'delegates' | 'orgs' */
+  kind?: RegistrationKindFilter;
   /** Count of per-form response filters applied. */
   responseFilterCount?: number;
 }
 
 export interface ActiveFilterChip {
-  key: 'search' | 'status' | 'payment' | 'account' | 'responses';
+  key: 'search' | 'status' | 'payment' | 'account' | 'kind' | 'responses';
   label: string;
 }
 
@@ -77,6 +81,9 @@ export function describeActiveFilters(state: ActiveFilterState): ActiveFilterChi
   }
   if (state.account && state.account !== 'all') {
     chips.push({ key: 'account', label: ACCOUNT_FILTER_LABELS[state.account] });
+  }
+  if (state.kind && state.kind !== 'all') {
+    chips.push({ key: 'kind', label: REGISTRATION_KIND_FILTER_LABELS[state.kind] ?? state.kind });
   }
   const n = state.responseFilterCount ?? 0;
   if (n > 0) chips.push({ key: 'responses', label: `${n} response filter${n > 1 ? 's' : ''}` });

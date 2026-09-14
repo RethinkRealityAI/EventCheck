@@ -17,6 +17,7 @@ import {
   resolveAttendeeCategory,
 } from '../utils/attendeeCategories';
 import { resolveAttendeeDisplayName } from '../utils/resolveAttendeeDisplayName';
+import { DELEGATE_GUEST_TYPES, orgDisplayName } from '../utils/registrationKind';
 import AccountActionsPanel from './Admins/AccountActionsPanel';
 
 interface AttendeeModalProps {
@@ -121,6 +122,11 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
   const isPendingClaimGuest = localAttendee.guestType === 'pending-claim'
     || localAttendee.guestType === 'exhibitor-staff-pending'
     || localAttendee.guestType === 'staff-pending';
+  // A sponsor's or exhibitor's team member is not a "guest" of a purchaser —
+  // they hold a delegate seat under an org booking. Label it as such.
+  const isDelegate = DELEGATE_GUEST_TYPES.has(localAttendee.guestType ?? '')
+    || !!(purchaser && (purchaser.sponsorTier || purchaser.exhibitorBoothType));
+  const delegateOrgLabel = purchaser ? orgDisplayName(purchaser) : null;
 
   // Payment-link send state: idle → sending → the URL (shown for copy/relay).
   const [payLinkState, setPayLinkState] = useState<'idle' | 'sending' | 'sent'>('idle');
@@ -447,6 +453,8 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
             <button
               onClick={() => { onClose(); }}
               className="p-2 sm:p-2.5 text-white/70 hover:text-white hover:bg-white/10 rounded-xl transition-all"
+              aria-label="Close attendee details"
+              title="Close"
             >
               <X className="w-4 h-4 sm:w-5 sm:h-5" />
             </button>
@@ -864,7 +872,10 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
                 )}
 
                 {/* Donated Seats/Tables Info */}
-                {((localAttendee.donatedSeats && localAttendee.donatedSeats > 0) || (localAttendee.donatedTables && localAttendee.donatedTables > 0)) && (
+                {/* Compare numbers, don't short-circuit on them: `0 && …`
+                    evaluates to 0, which React renders as a literal "0"
+                    above the guest panel for every non-donor. */}
+                {((localAttendee.donatedSeats ?? 0) > 0 || (localAttendee.donatedTables ?? 0) > 0) && (
                   <div className="bg-emerald-50/60 rounded-xl p-4 border border-emerald-200/40 shadow-sm">
                     <h4 className="text-[10px] font-bold text-emerald-600 uppercase tracking-[0.15em] mb-2 flex items-center gap-2">
                       <Armchair className="w-3 h-3" />
@@ -1210,7 +1221,13 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
                 {localAttendee.isPrimary === false && (
                   <div className="bg-purple-50/60 rounded-xl p-4 border border-purple-200/40 space-y-2">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="inline-flex items-center px-3 py-1 rounded-xl text-xs font-bold bg-purple-100 text-purple-700 border border-purple-200/50">Guest Ticket</span>
+                      {isDelegate ? (
+                        <span className="inline-flex items-center px-3 py-1 rounded-xl text-xs font-bold bg-sky-100 text-sky-800 border border-sky-200/50" title="Registered through a sponsor / exhibitor booking">
+                          Delegate{delegateOrgLabel ? ` · ${delegateOrgLabel}` : ''}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-3 py-1 rounded-xl text-xs font-bold bg-purple-100 text-purple-700 border border-purple-200/50">Guest Ticket</span>
+                      )}
                       {isPendingClaimGuest ? (
                         <span className="inline-flex items-center px-3 py-1 rounded-xl text-xs font-bold bg-yellow-100 text-yellow-800 border border-yellow-200/50">Pending Claim</span>
                       ) : localAttendee.guestType === 'claimed'
@@ -1224,7 +1241,7 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
                     {localAttendee.primaryAttendeeId && (
                       <div className="flex items-center justify-between gap-2">
                         <div className="text-[11px] text-slate-600">
-                          <span className="text-slate-400 font-bold uppercase tracking-wider mr-2">Purchaser</span>
+                          <span className="text-slate-400 font-bold uppercase tracking-wider mr-2">{isDelegate ? 'Organization' : 'Purchaser'}</span>
                           <span className="font-bold text-slate-700">{purchaser?.name || `${localAttendee.primaryAttendeeId.substring(0, 8)}…`}</span>
                           {purchaser?.email && <span className="text-slate-500"> · {purchaser.email}</span>}
                         </div>
@@ -1234,7 +1251,7 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
                             className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 inline-flex items-center gap-1"
                             title="Open the purchaser's record"
                           >
-                            View purchaser <ExternalLink className="w-3 h-3" />
+                            {isDelegate ? 'View booking' : 'View purchaser'} <ExternalLink className="w-3 h-3" />
                           </button>
                         )}
                       </div>

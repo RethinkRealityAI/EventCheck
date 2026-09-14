@@ -5,6 +5,7 @@ import SponsorDetailModal from './SponsorDetailModal';
 import ChequeReceivedModal from './ChequeReceivedModal';
 import { getBoothType } from '../../config/formTemplates/boothTypes';
 import { supabase } from '../../services/supabaseClient';
+import { delegateStatus } from '../../utils/registrationKind';
 
 interface Props {
   sponsors: Attendee[];
@@ -46,12 +47,11 @@ export const SponsorsTable: React.FC<Props> = ({ sponsors, settings, onChanged }
         if (!pid) continue;
         const bucket = next[pid] ?? { total: 0, claimed: 0, paidExtras: 0 };
         bucket.total += 1;
-        const claimed = row.guest_type === 'claimed'
-          ? true
-          : row.guest_type === 'pending-claim'
-            ? false
-            : !(row.name || '').includes('Guest Ticket #');
-        if (claimed) bucket.claimed += 1;
+        // One rule for "has this seat been claimed" — the combined-form
+        // `staff-pending` / `exhibitor-staff-pending` states used to be
+        // counted as claimed here, so a sponsor with four unclaimed seats
+        // read "4/4 claimed".
+        if (delegateStatus({ guestType: row.guest_type, name: row.name }) === 'registered') bucket.claimed += 1;
         if (row.is_paid_extra) bucket.paidExtras += 1;
         next[pid] = bucket;
       }

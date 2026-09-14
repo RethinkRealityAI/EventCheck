@@ -7,6 +7,7 @@ export type DashboardTabId =
   | 'live'
   | 'donated'
   | 'tables'
+  | 'sponsors'
   | 'sponsor-tickets'
   | 'groups'
   | 'speakers'
@@ -27,14 +28,39 @@ export interface DashboardTabMeta {
    *  `guestType='speaker'` — keeps the tab from cluttering forms that
    *  don't use the speaker promo flow. */
   requiresSpeakerData?: boolean;
+  /** When true, the tab only appears once the site has a sponsor form or at
+   *  least one sponsor booking — a gala with no sponsorship programme never
+   *  sees it. */
+  requiresSponsorData?: boolean;
+}
+
+/** Every gate a tab can be conditioned on. Computed once by the dashboard
+ *  from the loaded forms + attendees and threaded to both the tab strip and
+ *  the customise dialog, so "Not on this site" always agrees with what is
+ *  actually rendered. */
+export interface DashboardTabGates {
+  hasExhibitorForms: boolean;
+  portalEnabled: boolean;
+  hasSpeakers?: boolean;
+  hasSponsorData?: boolean;
+}
+
+/** True when a tab cannot appear on this site regardless of admin prefs. */
+export function isTabUnavailable(meta: DashboardTabMeta, gates: DashboardTabGates): boolean {
+  if (meta.requiresExhibitorForms && !gates.hasExhibitorForms) return true;
+  if (meta.requiresPortal && !gates.portalEnabled) return true;
+  if (meta.requiresSpeakerData && !gates.hasSpeakers) return true;
+  if (meta.requiresSponsorData && !gates.hasSponsorData) return true;
+  return false;
 }
 
 /** Default display order — matches the order the tabs had before this feature landed.
  *  New tabs should be appended here to preserve existing admin preferences. */
 export const DASHBOARD_TAB_META: readonly DashboardTabMeta[] = [
-  { id: 'live', label: 'Live', description: 'Paid + free registrations' },
+  { id: 'live', label: 'Live', description: 'Everyone registered — attendees, sponsor & exhibitor delegates, org bookings' },
   { id: 'donated', label: 'Donations', description: 'Donated seats or tables' },
   { id: 'tables', label: 'Tables', description: 'Grouped table view' },
+  { id: 'sponsors', label: 'Sponsors', description: 'Sponsor bookings — tier, items, payment status, delegation', requiresSponsorData: true },
   { id: 'sponsor-tickets', label: 'Sponsor Tickets', description: 'Guest seats from sponsor purchases' },
   { id: 'groups', label: 'Groups', description: 'Group-registration primaries + their guests' },
   { id: 'speakers', label: 'Speakers', description: 'Registrants tagged as Speaker (via promo code or admin-issued)', requiresSpeakerData: true },
@@ -48,7 +74,7 @@ export const DASHBOARD_TAB_META: readonly DashboardTabMeta[] = [
  *  gates AND admin preferences (order + hidden). Pure — no React state. */
 export function resolveVisibleTabs(
   prefs: AppSettings['dashboardTabPrefs'] | undefined,
-  gates: { hasExhibitorForms: boolean; portalEnabled: boolean; hasSpeakers?: boolean },
+  gates: DashboardTabGates,
 ): DashboardTabMeta[] {
   const knownIds = new Set(DASHBOARD_TAB_META.map(m => m.id));
   const metaById = new Map(DASHBOARD_TAB_META.map(m => [m.id, m]));
@@ -69,18 +95,12 @@ export function resolveVisibleTabs(
   const hidden = new Set(prefs?.hidden ?? []);
   return orderedIds
     .map(id => metaById.get(id)!)
-    .filter(m => {
-      if (hidden.has(m.id)) return false;
-      if (m.requiresExhibitorForms && !gates.hasExhibitorForms) return false;
-      if (m.requiresPortal && !gates.portalEnabled) return false;
-      if (m.requiresSpeakerData && !gates.hasSpeakers) return false;
-      return true;
-    });
+    .filter(m => !hidden.has(m.id) && !isTabUnavailable(m, gates));
 }
 
 interface Props {
   settings: AppSettings;
-  gates: { hasExhibitorForms: boolean; portalEnabled: boolean };
+  gates: DashboardTabGates;
   onSave: (next: AppSettings['dashboardTabPrefs']) => Promise<void>;
   onClose: () => void;
 }
@@ -176,9 +196,7 @@ export default function DashboardTabsConfig({ settings, gates, onSave, onClose }
             const meta = metaById.get(id);
             if (!meta) return null;
             const isHidden = hidden.has(id);
-            const unavailable =
-              (meta.requiresExhibitorForms && !gates.hasExhibitorForms)
-              || (meta.requiresPortal && !gates.portalEnabled);
+            const unavailable = isTabUnavailable(meta, gates);
             return (
               <div
                 key={id}

@@ -21,7 +21,9 @@
     "postdeploy": "npm run smoke:db && npm run check:migrations",
     "check:edge-scope": "node scripts/check-edge-scope.mjs",
     "check:edge-types": "tsc --noEmit -p supabase/functions/tsconfig.json",
-    "check:edge": "npm run check:edge-types && npm run check:edge-scope"
+    "check:edge": "npm run check:edge-types && npm run check:edge-scope",
+    "qa:mock": "node scripts/qa/qa-run.mjs --mode=mock",
+    "qa:live": "node scripts/qa/qa-run.mjs --mode=live"
   },
   "dependencies": {
     "@paypal/react-paypal-js": "^8.9.2",

@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { resolveVisibleTabs, DASHBOARD_TAB_META } from '../components/DashboardTabsConfig';
+import { resolveVisibleTabs, isTabUnavailable, DASHBOARD_TAB_META } from '../components/DashboardTabsConfig';
 
-const ALL_AVAILABLE = { hasExhibitorForms: true, portalEnabled: true, hasSpeakers: true };
-const SCAGO_LIKE = { hasExhibitorForms: false, portalEnabled: false, hasSpeakers: false };
+const ALL_AVAILABLE = { hasExhibitorForms: true, portalEnabled: true, hasSpeakers: true, hasSponsorData: true };
+const SCAGO_LIKE = { hasExhibitorForms: false, portalEnabled: false, hasSpeakers: false, hasSponsorData: false };
 
 describe('resolveVisibleTabs', () => {
   it('returns default order when prefs is undefined', () => {
@@ -102,5 +102,36 @@ describe('resolveVisibleTabs', () => {
     );
     const liveOccurrences = tabs.filter(t => t.id === 'live').length;
     expect(liveOccurrences).toBe(1);
+  });
+});
+
+describe('sponsors tab gate', () => {
+  it('appears only once the site has sponsor data (a sponsor form or a booking)', () => {
+    const withData = resolveVisibleTabs(undefined, { hasExhibitorForms: false, portalEnabled: false, hasSponsorData: true });
+    expect(withData.find(t => t.id === 'sponsors')).toBeDefined();
+    const without = resolveVisibleTabs(undefined, { hasExhibitorForms: false, portalEnabled: false, hasSponsorData: false });
+    expect(without.find(t => t.id === 'sponsors')).toBeUndefined();
+  });
+
+  it('sits next to Sponsor Tickets in the default order', () => {
+    const ids = resolveVisibleTabs(undefined, ALL_AVAILABLE).map(t => t.id);
+    expect(ids.indexOf('sponsors')).toBe(ids.indexOf('sponsor-tickets') - 1);
+  });
+
+  it('is still reachable for admins who saved their tab order before it existed', () => {
+    const ids = resolveVisibleTabs({ order: ['live', 'tables', 'signups'], hidden: [] }, ALL_AVAILABLE).map(t => t.id);
+    expect(ids).toContain('sponsors');
+  });
+});
+
+describe('isTabUnavailable', () => {
+  it('mirrors every gate resolveVisibleTabs applies, so the customise dialog cannot disagree', () => {
+    const byId = Object.fromEntries(DASHBOARD_TAB_META.map(m => [m.id, m]));
+    expect(isTabUnavailable(byId.sponsors, SCAGO_LIKE)).toBe(true);
+    expect(isTabUnavailable(byId.speakers, SCAGO_LIKE)).toBe(true);
+    expect(isTabUnavailable(byId.exhibitors, SCAGO_LIKE)).toBe(true);
+    expect(isTabUnavailable(byId.signups, SCAGO_LIKE)).toBe(true);
+    expect(isTabUnavailable(byId.live, SCAGO_LIKE)).toBe(false);
+    for (const m of DASHBOARD_TAB_META) expect(isTabUnavailable(m, ALL_AVAILABLE)).toBe(false);
   });
 });

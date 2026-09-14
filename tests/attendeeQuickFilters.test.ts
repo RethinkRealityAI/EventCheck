@@ -85,3 +85,20 @@ describe('describeActiveFilters', () => {
     expect(hasActiveFilters({ account: 'all', payment: 'all' })).toBe(false);
   });
 });
+
+describe('registration-type chip', () => {
+  it('names the type filter when it narrows the list, and stays silent on "all"', () => {
+    expect(describeActiveFilters({ kind: 'all' })).toEqual([]);
+    const chips = describeActiveFilters({ kind: 'delegates' });
+    expect(chips).toHaveLength(1);
+    expect(chips[0].key).toBe('kind');
+    expect(chips[0].label).toBe('Sponsor / exhibitor delegates');
+  });
+
+  it('keeps the toolbar order: search, status, payment, account, type, responses', () => {
+    const chips = describeActiveFilters({
+      search: 'pfizer', status: 'pending', payment: 'paid', account: 'none', kind: 'sponsors', responseFilterCount: 1,
+    });
+    expect(chips.map(c => c.key)).toEqual(['search', 'status', 'payment', 'account', 'kind', 'responses']);
+  });
+});

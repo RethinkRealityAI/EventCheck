@@ -35,3 +35,6 @@ AGENTS.md
 .env
 .env.smoke
 .tmp-preview/
+
+# QA agent output (screenshots + reports)
+qa-output/

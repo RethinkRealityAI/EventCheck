@@ -5,6 +5,7 @@ import { supabase } from '../../services/supabaseClient';
 import { generateReceiptPDF } from '../../utils/receiptGenerator';
 import { updateAttendee } from '../../services/storageService';
 import { useNotifications } from '../NotificationSystem';
+import { delegateStatus } from '../../utils/registrationKind';
 
 interface Props {
   attendee: Attendee;
@@ -80,15 +81,11 @@ const SponsorDetailModal: React.FC<Props> = ({ attendee, settings, onClose, onCh
           )}
 
           {guests.length > 0 && (() => {
-            // Prefer the authoritative `guest_type` column; fall back to the
-            // legacy name-pattern heuristic for sponsor rows created before
-            // the placeholder stamping change shipped.
+            // Shared rule (utils/registrationKind): handles the combined-form
+            // staff states as well as legacy `pending-claim` and the
+            // "Guest Ticket #" placeholder-name heuristic.
             const isClaimed = (g: any): boolean =>
-              g.guest_type === 'claimed'
-                ? true
-                : g.guest_type === 'pending-claim'
-                  ? false
-                  : !(g.name || '').includes('Guest Ticket #');
+              delegateStatus({ guestType: g.guest_type, name: g.name }) === 'registered';
             const claimedCount = guests.filter(isClaimed).length;
             return (
               <section>

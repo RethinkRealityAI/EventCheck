@@ -40,6 +40,7 @@ import {
 } from './utils/adminPermissions';
 import { computeDonationPool } from './utils/donationPool';
 import { isCmsPreviewHash } from './utils/cmsPreview';
+import { buildRegistrationIndex, summarizeRegistrations } from './utils/registrationKind';
 
 const NavLink = ({ to, icon: Icon, children, collapsed }: { to: string, icon: any, children?: React.ReactNode, collapsed?: boolean }) => {
   const location = useLocation();
@@ -60,7 +61,7 @@ const NavLink = ({ to, icon: Icon, children, collapsed }: { to: string, icon: an
   );
 };
 
-const DashboardStats = ({ attendees }: { attendees: Attendee[] }) => {
+const DashboardStats = ({ attendees, forms }: { attendees: Attendee[]; forms: Form[] }) => {
   // Stats cards represent REAL registrations only. Test attendees (created via
   // the admin "test submission" flow) live exclusively in the Test tab of the
   // attendee list and must not contaminate Total Registrations, Live
@@ -69,9 +70,17 @@ const DashboardStats = ({ attendees }: { attendees: Attendee[] }) => {
   const realAttendees = attendees.filter(a => a.isTest !== true);
   const total = realAttendees.length;
   const primaryAttendees = realAttendees.filter(a => a.isPrimary !== false);
-  const guestCount = realAttendees.filter(a => a.isPrimary === false).length;
   const checkedIn = realAttendees.filter(a => a.checkedInAt).length;
   const percentage = total === 0 ? 0 : Math.round((checkedIn / total) * 100);
+
+  // Who the total is made of. Sponsor / exhibitor delegations used to be
+  // counted here but shown nowhere on this page — the breakdown makes the
+  // number auditable against the list below it.
+  const formTypeById = new Map(forms.map(f => [f.id, f.formType || 'event'] as const));
+  const registrationIndex = buildRegistrationIndex(attendees, id => (id ? formTypeById.get(id) : undefined));
+  const breakdown = summarizeRegistrations(attendees, registrationIndex);
+  const guestCount = realAttendees.filter(a => a.isPrimary === false && registrationIndex.kindById.get(a.id) === 'attendee').length;
+  const individualCount = breakdown.attendees - guestCount;
 
   const totalDonatedSeats = primaryAttendees.reduce((acc, curr) => acc + (Number(curr.donatedSeats) || 0), 0);
   const totalDonatedTables = primaryAttendees.reduce((acc, curr) => acc + (Number(curr.donatedTables) || 0), 0);
@@ -96,10 +105,20 @@ const DashboardStats = ({ attendees }: { attendees: Attendee[] }) => {
             <Users className="w-16 h-16 transform right-[-10px] top-[-10px]" />
           </div>
           <h3 className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-2">Total Registrations</h3>
-          <p className="text-4xl font-extrabold text-slate-800 drop-shadow-sm">{primaryAttendees.length + guestCount}</p>
+          <p className="text-4xl font-extrabold text-slate-800 drop-shadow-sm" data-testid="stat-total-registrations">{total}</p>
           <div className="flex flex-wrap gap-1.5 mt-2">
-            <span className="text-xs text-indigo-600 font-semibold bg-indigo-50 px-2 py-1 rounded-md">{primaryAttendees.length} registrant{primaryAttendees.length !== 1 ? 's' : ''}</span>
+            <span className="text-xs text-indigo-600 font-semibold bg-indigo-50 px-2 py-1 rounded-md">{individualCount} attendee{individualCount !== 1 ? 's' : ''}</span>
             {guestCount > 0 && <span className="text-xs text-indigo-400 font-semibold bg-indigo-50 px-2 py-1 rounded-md">{guestCount} guest{guestCount !== 1 ? 's' : ''}</span>}
+            {breakdown.delegates > 0 && (
+              <span className="text-xs text-sky-700 font-semibold bg-sky-50 px-2 py-1 rounded-md" title="People registered through a sponsor or exhibitor booking">
+                {breakdown.delegates} delegate{breakdown.delegates !== 1 ? 's' : ''}
+              </span>
+            )}
+            {breakdown.orgs > 0 && (
+              <span className="text-xs text-rose-700 font-semibold bg-rose-50 px-2 py-1 rounded-md" title="Sponsor / exhibitor booking rows (organizations, not people)">
+                {breakdown.orgs} org booking{breakdown.orgs !== 1 ? 's' : ''}
+              </span>
+            )}
           </div>
         </div>
         <div className="bg-white/80 backdrop-blur-2xl p-6 rounded-3xl shadow-xl shadow-indigo-500/10 border border-white/60 hover:shadow-2xl hover:shadow-indigo-500/20 transition-all duration-300 transform hover:-translate-y-1 relative overflow-hidden group">
@@ -142,6 +161,46 @@ const DashboardStats = ({ attendees }: { attendees: Attendee[] }) => {
           </p>
         </div>
       </div>
+
+      {/* Sponsors & exhibitors — on the main dashboard, next to everyone
+          else, instead of only on the separate Sponsors page. */}
+      {breakdown.orgs > 0 && (
+        <div
+          className="bg-white/80 backdrop-blur-2xl rounded-3xl shadow-xl shadow-rose-500/5 border border-white/60 px-6 py-5 flex flex-col md:flex-row md:items-center gap-4 md:gap-8"
+          data-testid="stat-sponsors-exhibitors"
+        >
+          <div className="flex items-center gap-3">
+            <span className="bg-rose-100 text-rose-600 p-2 rounded-xl"><Handshake className="w-5 h-5" /></span>
+            <div>
+              <h3 className="text-slate-500 text-xs font-bold uppercase tracking-wider">Sponsors &amp; Exhibitors</h3>
+              <p className="text-xs text-slate-400">Org bookings and the people registered through them</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-6 md:ml-auto">
+            <div>
+              <div className="text-2xl font-extrabold text-rose-700 leading-none">{breakdown.sponsors}</div>
+              <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mt-1">Sponsor{breakdown.sponsors !== 1 ? 's' : ''}</div>
+            </div>
+            <div>
+              <div className="text-2xl font-extrabold text-teal-700 leading-none">{breakdown.exhibitors}</div>
+              <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mt-1">Exhibitor{breakdown.exhibitors !== 1 ? 's' : ''}</div>
+            </div>
+            <div>
+              <div className="text-2xl font-extrabold text-sky-700 leading-none">{breakdown.delegates}</div>
+              <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mt-1">Delegate{breakdown.delegates !== 1 ? 's' : ''}</div>
+            </div>
+            <div>
+              <div className="text-2xl font-extrabold text-slate-800 leading-none">
+                {breakdown.delegatesRegistered}
+                <span className="text-sm font-bold text-slate-400 ml-1">/ {breakdown.delegates}</span>
+              </div>
+              <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mt-1">
+                Completed{breakdown.delegatesPending > 0 ? ` · ${breakdown.delegatesPending} pending` : ''}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Recent Seat Donors List */}
       {recentDonors.length > 0 && (
@@ -616,7 +675,7 @@ const AdminLayout = () => {
                       </p>
                     </div>
                   </header>
-                  <DashboardStats attendees={attendees} />
+                  <DashboardStats attendees={attendees} forms={forms} />
                   <AttendeeList attendees={attendees} forms={forms} isLoading={loading} onRefresh={refreshAttendees} />
                 </>
               </ProtectedRoute>

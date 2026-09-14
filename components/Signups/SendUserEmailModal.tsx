@@ -14,11 +14,22 @@ import {
   type EmailSend,
 } from '../../services/emailSendsService';
 import { supabase } from '../../services/supabaseClient';
-import { CURRENT_SITE } from '../../config/sites';
-import { renderEmailShell, mergePlaceholders, plainTextToHtml } from '../../utils/emailShell';
-import { classifyPortalUser } from '../../utils/portalUserStatus';
+import { mergePlaceholders } from '../../utils/emailShell';
+import { timeAgo } from '../../utils/timeAgo';
+import {
+  ADMIN_EMAIL_TEMPLATES,
+  ADMIN_EMAIL_TEMPLATE_LABELS,
+  PLACEHOLDER_LABELS,
+  PLACEHOLDER_ORDER,
+  buildPortalUserVars,
+  defaultTemplateForPortalUser,
+  renderAdminEmailHtml,
+  templateOptionsFor,
+  type AdminEmailTemplateKey,
+  type EmailFields,
+} from '../../utils/adminEmailCompose';
 
-type TemplateKey = 'reminder' | 'invitation' | 'blank';
+type TemplateKey = AdminEmailTemplateKey;
 type View = 'compose' | 'analytics';
 
 interface Props {
@@ -29,161 +40,14 @@ interface Props {
   onSent?: () => void;
 }
 
-interface EmailFields {
-  heading: string;
-  message: string;
-  ctaLabel: string;
-  ctaUrl: string;
-  footerNote: string;
-}
-
-const EMPTY_FIELDS: EmailFields = {
-  heading: '',
-  message: '',
-  ctaLabel: '',
-  ctaUrl: '',
-  footerNote: '',
-};
-
-const DEFAULTS: Record<TemplateKey, { subject: string; fields: EmailFields }> = {
-  reminder: {
-    subject: 'Complete your registration for {{event}}',
-    fields: {
-      heading: 'Pick up where you left off',
-      message:
-        "Hi {{name}},\n\n" +
-        "You started registering for {{event}} but didn't quite finish. Your progress " +
-        "(step {{step}} of {{total_steps}}) is saved and waiting for you.",
-      ctaLabel: 'Resume registration',
-      ctaUrl: '{{resume_url}}',
-      footerNote:
-        'If you registered from another device, signing in with the same email will also resume your draft.',
-    },
-  },
-  invitation: {
-    subject: "You're invited to {{event}}",
-    fields: {
-      heading: 'Join us at {{event}}',
-      message:
-        "Hi {{name}},\n\n" +
-        "We'd love to have you at {{event}}. Click below to sign up and reserve your spot — " +
-        "it only takes a minute.",
-      ctaLabel: 'Sign up now',
-      ctaUrl: '{{signup_url}}',
-      footerNote:
-        "Questions? Reply to this email and we'll get back to you shortly.",
-    },
-  },
-  blank: {
-    subject: '',
-    fields: { ...EMPTY_FIELDS },
-  },
-};
-
-const TEMPLATE_OPTIONS: Array<{ key: TemplateKey; label: string; description: string }> = [
-  { key: 'reminder', label: 'Registration Reminder', description: 'Nudge a user who started but did not finish' },
-  { key: 'invitation', label: 'Invitation / Marketing', description: 'Invite a user who has not signed up yet' },
-  { key: 'blank', label: 'Blank / Custom', description: 'Start from scratch' },
-];
-
-const TEMPLATE_LABELS: Record<string, string> = {
-  reminder: 'Registration Reminder',
-  invitation: 'Invitation / Marketing',
-  blank: 'Blank / Custom',
-  custom: 'Custom',
-};
-
-// ---------------------------------------------------------------------------
-// Rendering helpers — thin wrapper over the shared site-aware email shell.
-// ---------------------------------------------------------------------------
-
-function escapeHtmlAttr(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-function trackingEndpoint(): string {
-  const url = (import.meta as any).env?.VITE_SUPABASE_URL || '';
-  if (!url) return '';
-  return `${url.replace(/\/$/, '')}/functions/v1/track-email`;
-}
-
-function buildOpenPixelUrl(trackingId: string): string {
-  const endpoint = trackingEndpoint();
-  if (!endpoint || !trackingId) return '';
-  return `${endpoint}?id=${encodeURIComponent(trackingId)}&type=open`;
-}
-
-function wrapClickUrl(trackingId: string, destination: string): string {
-  const endpoint = trackingEndpoint();
-  if (!endpoint || !trackingId || !destination) return destination;
-  return `${endpoint}?id=${encodeURIComponent(trackingId)}&type=click&to=${encodeURIComponent(destination)}`;
-}
-
-function composeBodyContent(fields: EmailFields, vars: Record<string, string>, opts: { trackingId?: string; previewMode?: boolean }): string {
-  const { trackingId = '', previewMode = false } = opts;
-  const heading = escapeHtmlAttr(mergePlaceholders(fields.heading || '', vars));
-  const bodyHtml = plainTextToHtml(mergePlaceholders(fields.message || '', vars));
-  const ctaLabel = escapeHtmlAttr(mergePlaceholders(fields.ctaLabel || '', vars));
-  const rawCtaUrl = mergePlaceholders(fields.ctaUrl || '', vars);
-  const ctaUrl = !previewMode && trackingId ? wrapClickUrl(trackingId, rawCtaUrl) : rawCtaUrl;
-  const footerNote = escapeHtmlAttr(mergePlaceholders(fields.footerNote || '', vars));
-
-  const ctaBlock = ctaLabel && rawCtaUrl
-    ? `<p style="text-align: center;"><a href="${escapeHtmlAttr(ctaUrl)}" class="button">${ctaLabel}</a></p>`
-    : '';
-  const footerNoteBlock = footerNote
-    ? `<p style="font-size: 13px; opacity: 0.6;">${footerNote}</p>`
-    : '';
-  const headingBlock = heading ? `<h2>${heading}</h2>` : '';
-
-  return `${headingBlock}
-${bodyHtml}
-${ctaBlock}
-${footerNoteBlock}`;
-}
-
-function renderEmailHtml(
-  fields: EmailFields,
-  vars: Record<string, string>,
-  opts: { previewMode?: boolean; trackingId?: string } = {},
-): string {
-  const { previewMode = false, trackingId = '' } = opts;
-  const trackingPixelUrl = !previewMode && trackingId ? buildOpenPixelUrl(trackingId) : undefined;
-  return renderEmailShell({
-    content: composeBodyContent(fields, vars, { trackingId, previewMode }),
-    site: CURRENT_SITE.key,
-    previewMode,
-    trackingPixelUrl,
-  });
-}
-
-// Shim so existing callers that used applyPlaceholders directly still work.
-const applyPlaceholders = mergePlaceholders;
+// Templates, placeholders and the branded renderer live in
+// utils/adminEmailCompose so this one-recipient modal and the bulk sender
+// can never drift apart.
+const SIGNUP_TEMPLATE_OPTIONS = templateOptionsFor('signups');
 
 // ---------------------------------------------------------------------------
 // Analytics tab
 // ---------------------------------------------------------------------------
-
-function timeAgo(iso: string | null | undefined): string {
-  if (!iso) return '—';
-  const ms = Date.now() - new Date(iso).getTime();
-  const sec = Math.floor(ms / 1000);
-  if (sec < 60) return 'just now';
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const day = Math.floor(hr / 24);
-  if (day < 30) return `${day}d ago`;
-  const mo = Math.floor(day / 30);
-  if (mo < 12) return `${mo}mo ago`;
-  return `${Math.floor(mo / 12)}y ago`;
-}
 
 function formatFull(iso: string | null | undefined): string {
   if (!iso) return '—';
@@ -272,7 +136,7 @@ function AnalyticsView({ email, reloadSignal }: { email: string; reloadSignal: n
               <div className="text-sm font-semibold text-gray-900 truncate" title={s.subject}>{s.subject}</div>
               <div className="text-[11px] text-gray-500 mt-0.5 flex items-center gap-2 flex-wrap">
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-[#ba0028]/10 to-[#E0243C]/10 text-[#ba0028] font-medium border border-[#ba0028]/20">
-                  {TEMPLATE_LABELS[s.templateKey || 'custom'] || s.templateKey}
+                  {ADMIN_EMAIL_TEMPLATE_LABELS[s.templateKey || 'custom'] || s.templateKey}
                 </span>
                 {s.eventName && (
                   <span className="inline-flex items-center gap-1 text-gray-500">
@@ -340,29 +204,14 @@ function StatCard({ icon, label, value, sub, tint }: {
 // Component
 // ---------------------------------------------------------------------------
 
-const PLACEHOLDER_LABELS: Record<string, string> = {
-  name: 'Recipient name',
-  email: 'Recipient email',
-  event: 'Event name',
-  resume_url: 'Resume URL',
-  signup_url: 'Signup URL',
-  step: 'Current step',
-  total_steps: 'Total steps',
-  link: 'Generic link',
-};
-
-const PLACEHOLDER_ORDER = ['name', 'email', 'event', 'resume_url', 'signup_url', 'step', 'total_steps', 'link'];
-
 export default function SendUserEmailModal({ user, settings, forms, onClose, onSent }: Props) {
   // Registered means paid OR free — a comped/invited registrant must not be
   // offered the "invitation" (come and register) template.
-  const initialTemplate: TemplateKey = user.draft
-    ? 'reminder'
-    : classifyPortalUser(user) === 'registered' ? 'blank' : 'invitation';
+  const initialTemplate: TemplateKey = defaultTemplateForPortalUser(user);
   const [view, setView] = useState<View>('compose');
   const [template, setTemplate] = useState<TemplateKey>(initialTemplate);
-  const [subject, setSubject] = useState<string>(DEFAULTS[initialTemplate].subject);
-  const [fields, setFields] = useState<EmailFields>({ ...DEFAULTS[initialTemplate].fields });
+  const [subject, setSubject] = useState<string>(ADMIN_EMAIL_TEMPLATES[initialTemplate].subject);
+  const [fields, setFields] = useState<EmailFields>({ ...ADMIN_EMAIL_TEMPLATES[initialTemplate].fields });
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState('');
@@ -378,28 +227,10 @@ export default function SendUserEmailModal({ user, settings, forms, onClose, onS
 
   const [overrides, setOverrides] = useState<Record<string, string>>({});
 
-  const defaultVars = useMemo<Record<string, string>>(() => {
-    const origin = window.location.origin;
-    const eventForm = forms.find(f => f.id === eventFormId) || forms[0];
-    const steps = (eventForm?.settings as any)?.steps;
-    const totalSteps = Array.isArray(steps) ? steps.length : 0;
-
-    const resumeFormId = user.draft?.formId || eventForm?.id;
-    const resumeUrl = resumeFormId
-      ? `${origin}/#/form/${resumeFormId}`
-      : `${origin}/#/portal`;
-
-    return {
-      name: user.fullName || user.email.split('@')[0],
-      email: user.email,
-      event: eventForm?.title || 'the event',
-      resume_url: resumeUrl,
-      signup_url: `${origin}/#/`,
-      step: user.draft ? String(user.draft.currentIndex + 1) : '1',
-      total_steps: totalSteps > 0 ? String(totalSteps) : '5',
-      link: resumeUrl,
-    };
-  }, [user, forms, eventFormId]);
+  const defaultVars = useMemo<Record<string, string>>(
+    () => buildPortalUserVars(user, forms, eventFormId),
+    [user, forms, eventFormId],
+  );
 
   const vars = useMemo<Record<string, string>>(
     () => ({ ...defaultVars, ...overrides }),
@@ -407,7 +238,7 @@ export default function SendUserEmailModal({ user, settings, forms, onClose, onS
   );
 
   const seedTemplate = (key: TemplateKey) => {
-    const d = DEFAULTS[key];
+    const d = ADMIN_EMAIL_TEMPLATES[key];
     setSubject(d.subject);
     setFields({ ...d.fields });
   };
@@ -418,10 +249,10 @@ export default function SendUserEmailModal({ user, settings, forms, onClose, onS
   };
 
   const renderedHtml = useMemo(
-    () => renderEmailHtml(fields, vars, { previewMode: true }),
+    () => renderAdminEmailHtml(fields, vars, { previewMode: true }),
     [fields, vars],
   );
-  const renderedSubject = useMemo(() => applyPlaceholders(subject, vars), [subject, vars]);
+  const renderedSubject = useMemo(() => mergePlaceholders(subject, vars), [subject, vars]);
 
   const handleSend = async () => {
     setError('');
@@ -440,7 +271,7 @@ export default function SendUserEmailModal({ user, settings, forms, onClose, onS
         throw new Error('SMTP credentials are not configured in Settings.');
       }
       const trackingId = generateTrackingId();
-      const renderedHtmlSend = renderEmailHtml(fields, vars, { trackingId });
+      const renderedHtmlSend = renderAdminEmailHtml(fields, vars, { trackingId });
       const eventForm = forms.find(f => f.id === eventFormId) || forms[0];
 
       // Invoke the edge function directly with mode=raw-html so our
@@ -462,8 +293,17 @@ export default function SendUserEmailModal({ user, settings, forms, onClose, onS
           },
         },
       });
-      if (error) throw new Error(error.message || 'Failed to send email');
-      if ((response as any)?.error) throw new Error((response as any).error);
+      // supabase-js only ever exposes the generic "non-2xx" text on
+      // error.message — the provider's real reason (quota, auth, bad
+      // recipient) is on error.context. Surface that, classified into an
+      // actionable sentence, the same way the bulk senders do.
+      if (error) {
+        const raw = await extractInvokeError(error);
+        throw new Error(classifyEmailFailure(raw).message);
+      }
+      if ((response as any)?.error) {
+        throw new Error(classifyEmailFailure(String((response as any).error)).message);
+      }
 
       // Log after successful SMTP — never logs a failed send.
       const { data: { user: authUser } } = await supabase.auth.getUser();
@@ -574,7 +414,7 @@ export default function SendUserEmailModal({ user, settings, forms, onClose, onS
                       onChange={e => handleTemplateChange(e.target.value as TemplateKey)}
                       className={`${inputCls} pr-10 appearance-none bg-white cursor-pointer font-medium`}
                     >
-                      {TEMPLATE_OPTIONS.map(opt => (
+                      {SIGNUP_TEMPLATE_OPTIONS.map(opt => (
                         <option key={opt.key} value={opt.key}>
                           {opt.label}
                         </option>
@@ -583,7 +423,7 @@ export default function SendUserEmailModal({ user, settings, forms, onClose, onS
                     <ChevronDown className="w-4 h-4 text-gray-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                   </div>
                   <p className="text-[11px] text-gray-500 mt-1.5 leading-relaxed">
-                    {TEMPLATE_OPTIONS.find(t => t.key === template)?.description}. The branded
+                    {SIGNUP_TEMPLATE_OPTIONS.find(t => t.key === template)?.description}. The branded
                     shell (header image, colours, footer) is applied automatically.
                   </p>
                 </div>
