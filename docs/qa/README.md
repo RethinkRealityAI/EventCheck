@@ -34,8 +34,19 @@ Starts Vite against an in-process stand-in for Supabase
 GANSID-shaped tenant with individual registrants, a group, a free guest, a
 speaker, a sponsor booking with claimed / pending / inline delegates, an
 exhibitor booking with booth staff, portal signups at every stage, and a
-form-preview test row. Use it for every PR; it needs nothing but
-`node_modules` and Playwright's Chromium.
+form-preview test row. Use it for every PR.
+
+**Playwright is deliberately NOT a dependency of this repo**, so a clean
+checkout cannot run either mode until you install it yourself. `loadPlaywright()`
+in `qa-run.mjs` resolves a GLOBAL install for exactly this reason:
+
+```
+npm i -g playwright
+npx playwright install chromium
+```
+
+If a run dies on `Cannot find package 'playwright'`, that is why — the
+harness is fine.
 
 ### Live mode — the real platform
 

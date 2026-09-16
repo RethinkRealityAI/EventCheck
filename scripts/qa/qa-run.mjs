@@ -314,6 +314,37 @@ async function runFlows({ page, mode, testAddresses, expectRows, expectDelegates
       await modalShot(page, 'signups-bulk-compose');
       await m2.locator('button', { hasText: 'Review recipients' }).click();
       await page.waitForTimeout(500);
+
+      // Repeat-send guard. One seeded signup already has an email_sends row
+      // whose subject is exactly what the Reminder template renders for them,
+      // so the review step must say so and offer to drop them — otherwise
+      // finishing a cancelled run silently double-emails the first batch.
+      // Asserted in mock mode only: the fixture guarantees exactly one such
+      // recipient. On a real tenant whether anyone matches depends on that
+      // tenant's send history, so there is nothing to assert — and nothing is
+      // clicked either, because the live run must not touch the selection of
+      // real people.
+      const repeatWarning = m2.locator('[data-testid="bulk-email-repeat-warning"]');
+      if (mode === 'mock') {
+        const repeatShown = await repeatWarning.isVisible().catch(() => false);
+        check(
+          'Review step warns when someone already got this exact subject',
+          repeatShown,
+          repeatShown ? (await repeatWarning.innerText()).replace(/\s+/g, ' ').slice(0, 130) : 'no warning shown',
+        );
+        if (repeatShown) {
+          const selectedCountText = () => m2.locator('text=/ of \\d+ selected/').first().innerText();
+          const before = parseInt(await selectedCountText(), 10);
+          await m2.locator('[data-testid="bulk-email-deselect-repeats"]').click();
+          await page.waitForTimeout(300);
+          const after = parseInt(await selectedCountText(), 10);
+          check('"Deselect" drops the already-emailed recipients', after < before, `${before} selected → ${after}`);
+          // Put them back — the rest of the run expects the full audience.
+          await m2.locator('label', { hasText: /Select all/ }).locator('input').click();
+          await page.waitForTimeout(300);
+        }
+      }
+
       if (mode === 'live') {
         // Real people: prove the deselect-all path, never confirm.
         await m2.locator('label', { hasText: /Deselect all/ }).locator('input').click();

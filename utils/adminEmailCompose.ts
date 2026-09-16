@@ -323,3 +323,55 @@ export function dedupeRecipients(list: readonly BulkRecipient[]): DedupeResult {
   }
   return { recipients, duplicates, invalid };
 }
+
+// ── Repeat-send guard ─────────────────────────────────────────────────────
+
+/** The one prior send we compare against — the most recent one for an inbox. */
+export interface PriorSend {
+  subject: string;
+  sentAt: string;
+}
+
+/** A recipient paired with the subject line THEY would receive (placeholders
+ *  already merged, so `Hi {{name}}` is compared as the text that went out). */
+export interface SubjectedRecipient {
+  key: string;
+  email: string;
+  subject: string;
+}
+
+function normalizeSubject(s: string): string {
+  return s.replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+/**
+ * Which of these recipients has ALREADY received an email with this exact
+ * subject.
+ *
+ * `dedupeRecipients` stops one run mailing the same inbox twice; this stops
+ * TWO runs doing it. A bulk send that is cancelled part-way — manually, or by
+ * the quota abort — leaves the admin with a half-finished job, and the obvious
+ * next move is to reopen the modal and send again. Nothing in a fresh modal
+ * instance remembers the first run, so without this the people who were
+ * already emailed get a second copy: wasted quota against a daily cap the
+ * provider enforces silently (CLAUDE.md §18), and spam from the recipient's
+ * side.
+ *
+ * Advisory, not a block: it reads the most recent send per inbox, so it can
+ * miss someone whose latest send is a LATER, different email, and it only
+ * covers the sends that were successfully logged. It never hides a recipient —
+ * it marks them and lets the admin decide.
+ */
+export function findAlreadySentKeys(
+  entries: readonly SubjectedRecipient[],
+  priorSends: ReadonlyMap<string, PriorSend> | null | undefined,
+): Set<string> {
+  const hit = new Set<string>();
+  if (!priorSends || priorSends.size === 0) return hit;
+  for (const e of entries) {
+    const prior = priorSends.get((e.email || '').trim().toLowerCase());
+    if (!prior) continue;
+    if (normalizeSubject(prior.subject || '') === normalizeSubject(e.subject || '')) hit.add(e.key);
+  }
+  return hit;
+}

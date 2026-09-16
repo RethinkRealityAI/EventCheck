@@ -6,6 +6,7 @@ import {
   composeBodyContent,
   dedupeRecipients,
   defaultTemplateForPortalUser,
+  findAlreadySentKeys,
   firstNameOf,
   renderAdminEmailHtml,
   templateOptionsFor,
@@ -150,5 +151,67 @@ describe('firstNameOf', () => {
   it('takes the first word, or the mailbox when there is no name', () => {
     expect(firstNameOf('Dana Osei', 'd@x.com')).toBe('Dana');
     expect(firstNameOf('', 'dana.osei@x.com')).toBe('dana.osei');
+  });
+});
+
+describe('findAlreadySentKeys', () => {
+  const prior = new Map([
+    ['sent@x.co', { subject: 'Finish your registration', sentAt: '2026-09-15T10:00:00Z' }],
+    ['other@x.co', { subject: 'A different campaign', sentAt: '2026-09-15T10:00:00Z' }],
+  ]);
+
+  it('flags an inbox that already got this exact subject', () => {
+    const hit = findAlreadySentKeys(
+      [{ key: 'a', email: 'sent@x.co', subject: 'Finish your registration' }],
+      prior,
+    );
+    expect([...hit]).toEqual(['a']);
+  });
+
+  it('leaves an inbox whose last email was a different campaign', () => {
+    const hit = findAlreadySentKeys(
+      [{ key: 'b', email: 'other@x.co', subject: 'Finish your registration' }],
+      prior,
+    );
+    expect(hit.size).toBe(0);
+  });
+
+  it('matches regardless of address case, padding, and subject whitespace', () => {
+    const hit = findAlreadySentKeys(
+      [{ key: 'c', email: '  SENT@X.co ', subject: 'Finish   your\nregistration  ' }],
+      prior,
+    );
+    expect([...hit]).toEqual(['c']);
+  });
+
+  it('compares the MERGED subject, so two recipients of one placeholder subject can differ', () => {
+    // `Hi {{name}}, finish up` renders per person; only the one who was
+    // actually sent that exact line is flagged.
+    const withNames = new Map([
+      ['ada@x.co', { subject: 'Hi Ada, finish up', sentAt: '2026-09-15T10:00:00Z' }],
+    ]);
+    const hit = findAlreadySentKeys(
+      [
+        { key: 'ada', email: 'ada@x.co', subject: 'Hi Ada, finish up' },
+        { key: 'bo', email: 'bo@x.co', subject: 'Hi Bo, finish up' },
+      ],
+      withNames,
+    );
+    expect([...hit]).toEqual(['ada']);
+  });
+
+  it('is inert when no prior sends could be loaded', () => {
+    const entries = [{ key: 'a', email: 'sent@x.co', subject: 'Finish your registration' }];
+    expect(findAlreadySentKeys(entries, undefined).size).toBe(0);
+    expect(findAlreadySentKeys(entries, null).size).toBe(0);
+    expect(findAlreadySentKeys(entries, new Map()).size).toBe(0);
+  });
+
+  it('never flags someone with no logged send at all', () => {
+    const hit = findAlreadySentKeys(
+      [{ key: 'new', email: 'never@x.co', subject: 'Finish your registration' }],
+      prior,
+    );
+    expect(hit.size).toBe(0);
   });
 });

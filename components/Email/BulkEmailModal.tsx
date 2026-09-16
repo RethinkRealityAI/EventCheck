@@ -6,19 +6,21 @@ import {
 } from 'lucide-react';
 import type { AppSettings, Form } from '../../types';
 import { supabase } from '../../services/supabaseClient';
-import { generateTrackingId, logEmailSend } from '../../services/emailSendsService';
+import { generateTrackingId, getLatestEmailSendPerRecipient, logEmailSend } from '../../services/emailSendsService';
 import { classifyEmailFailure, extractInvokeError, shouldAbortBulkSend } from '../../utils/emailSendErrors';
 import { mergePlaceholders } from '../../utils/emailShell';
 import {
   ADMIN_EMAIL_TEMPLATES,
   PLACEHOLDER_LABELS,
   dedupeRecipients,
+  findAlreadySentKeys,
   renderAdminEmailHtml,
   templateOptionsFor,
   type AdminEmailAudience,
   type AdminEmailTemplateKey,
   type BulkRecipient,
   type EmailFields,
+  type PriorSend,
 } from '../../utils/adminEmailCompose';
 
 // ---------------------------------------------------------------------------
@@ -104,8 +106,16 @@ export default function BulkEmailModal({
   const sentAnyRef = useRef(false);
   const campaignIdRef = useRef<string>(generateTrackingId());
 
+  // What each inbox was last sent — powers the repeat-send warning below.
+  // Best-effort: the service swallows its own errors and returns an empty map,
+  // in which case the warning simply never appears.
+  const [priorSends, setPriorSends] = useState<ReadonlyMap<string, PriorSend> | null>(null);
+
   useEffect(() => {
     mountedRef.current = true;
+    getLatestEmailSendPerRecipient()
+      .then(m => { if (mountedRef.current) setPriorSends(m); })
+      .catch(() => { /* advisory only — never block composing on it */ });
     return () => {
       mountedRef.current = false;
       cancelRef.current = true;
@@ -172,6 +182,28 @@ export default function BulkEmailModal({
       || (r.subtitle ?? '').toLowerCase().includes(q),
     );
   }, [deduped.recipients, recipientSearch]);
+
+  // Who has already had an email with THIS subject. A run cancelled part-way
+  // (by the admin, or by the quota abort) is finished by reopening the modal —
+  // a fresh instance that remembers nothing — so without this the first
+  // batch gets a second copy. See findAlreadySentKeys.
+  const alreadySentKeys = useMemo(
+    () => findAlreadySentKeys(
+      deduped.recipients.map(r => ({ key: r.key, email: r.email, subject: mergePlaceholders(subject, varsFor(r)) })),
+      priorSends,
+    ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [deduped.recipients, subject, priorSends, eventForm],
+  );
+  const selectedAlreadySent = useMemo(
+    () => [...selected].filter(k => alreadySentKeys.has(k)),
+    [selected, alreadySentKeys],
+  );
+  const deselectAlreadySent = () => setSelected(prev => {
+    const next = new Set(prev);
+    alreadySentKeys.forEach(k => next.delete(k));
+    return next;
+  });
 
   const allVisibleSelected = visibleRecipients.length > 0 && visibleRecipients.every(r => selected.has(r.key));
   const toggleOne = (key: string) => setSelected(prev => {
@@ -538,6 +570,27 @@ export default function BulkEmailModal({
                   </div>
                 )}
 
+                {selectedAlreadySent.length > 0 && (
+                  <div
+                    className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-900 flex flex-wrap items-center gap-x-3 gap-y-2"
+                    data-testid="bulk-email-repeat-warning"
+                  >
+                    <AlertTriangle className="w-4 h-4 shrink-0" />
+                    <p className="flex-1 min-w-[240px]">
+                      <strong>{selectedAlreadySent.length}</strong> selected {selectedAlreadySent.length === 1 ? 'person has' : 'people have'} already
+                      received an email with this exact subject. Sending now gives them a second copy — right if this is a
+                      deliberate follow-up, wrong if you are finishing a run that was cancelled part-way.
+                    </p>
+                    <button
+                      onClick={deselectAlreadySent}
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold text-amber-900 bg-amber-100 hover:bg-amber-200 border border-amber-300 transition shrink-0"
+                      data-testid="bulk-email-deselect-repeats"
+                    >
+                      Deselect {selectedAlreadySent.length}
+                    </button>
+                  </div>
+                )}
+
                 <div className="flex flex-wrap items-center gap-2">
                   <label className="inline-flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer select-none">
                     <input type="checkbox" checked={allVisibleSelected} onChange={toggleVisible} className="w-4 h-4 rounded border-gray-300 text-indigo-600" />
@@ -563,6 +616,14 @@ export default function BulkEmailModal({
                           <div className={`text-sm font-medium truncate ${on ? 'text-gray-900' : ''}`}>{r.name || <span className="italic">no name</span>}</div>
                           <div className="text-xs truncate">{r.email}</div>
                         </div>
+                        {alreadySentKeys.has(r.key) && (
+                          <span
+                            className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200 shrink-0"
+                            title="This inbox already received an email with this subject"
+                          >
+                            already sent
+                          </span>
+                        )}
                         {r.subtitle && <span className="text-[11px] text-gray-500 shrink-0 max-w-[45%] truncate" title={r.subtitle}>{r.subtitle}</span>}
                       </label>
                     );
@@ -589,7 +650,12 @@ export default function BulkEmailModal({
                 </button>
                 {armed ? (
                   <div className="flex items-center gap-2 flex-wrap justify-end">
-                    <span className="text-sm text-gray-700">Send <strong>{selectedCount}</strong> email{selectedCount !== 1 ? 's' : ''} now?</span>
+                    <span className="text-sm text-gray-700">
+                      Send <strong>{selectedCount}</strong> email{selectedCount !== 1 ? 's' : ''} now?
+                      {selectedAlreadySent.length > 0 && (
+                        <span className="text-amber-700 font-medium"> {selectedAlreadySent.length} would be a second copy.</span>
+                      )}
+                    </span>
                     <button onClick={() => setArmed(false)} className="px-3 py-2 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-200 transition">Not yet</button>
                     <button
                       onClick={() => startSend(false)}
