@@ -150,7 +150,12 @@ const uuid = () => crypto.randomUUID();
 
 function testRows({ eventForm, orgForm, staffFormId, inbox }) {
   const [local, domain] = inbox.split('@');
-  const addr = (tag) => `${local}+${RUN_ID}-${tag}@${domain}`;
+  // An inbox that already carries a +tag (dapo+qa@…) must not get a second
+  // '+' stacked on it — plenty of providers and address validators reject
+  // that, and the run would fail on a bad recipient rather than on anything
+  // under test. Extend the existing tag instead.
+  const sep = local.includes('+') ? '-' : '+';
+  const addr = (tag) => `${local}${sep}${RUN_ID}-${tag}@${domain}`;
   const now = new Date().toISOString();
   const orgId = uuid();
   const marker = { _qa_run: RUN_ID };
@@ -184,6 +189,14 @@ function testRows({ eventForm, orgForm, staffFormId, inbox }) {
   // qr_payload needs the final id; the spread above ran before `id` for
   // generated rows, so restamp.
   for (const r of rows) r.qr_payload = JSON.stringify({ id: r.id });
+  // Every row in a batch must carry an identical key set. Only the sponsor row
+  // has `sponsor_items`, and PostgREST answers that with a flat
+  // 400 PGRST102 "All object keys must match". Where it doesn't reject it
+  // NULL-fills instead, which is the same trap that broke every group
+  // registration in production (see _shared/attendeeRows.ts). Normalise to the
+  // union of keys so neither outcome is possible.
+  const allKeys = [...new Set(rows.flatMap(r => Object.keys(r)))];
+  for (const r of rows) for (const k of allKeys) if (!(k in r)) r[k] = null;
   return { rows, orgId, addresses: rows.map(r => r.email) };
 }
 
@@ -425,6 +438,13 @@ async function main() {
         await rest(`attendees?answers->>_qa_run=eq.${RUN_ID}`, { method: 'DELETE' });
         const left = await rest(`attendees?select=id&answers->>_qa_run=eq.${RUN_ID}`);
         check('Cleanup removed every test row', Array.isArray(left) && left.length === 0, `${left?.length ?? '?'} left`);
+        // The bulk-send flow writes an email_sends row per recipient. Every QA
+        // address carries the run id, so the log rows are addressable without
+        // touching a real send. Runs after the verification step above, which
+        // needs them present.
+        await rest(`email_sends?recipient_email=like.*${RUN_ID}*`, { method: 'DELETE' });
+        const logsLeft = await rest(`email_sends?select=id&recipient_email=like.*${RUN_ID}*`);
+        check('Cleanup removed the run’s email_sends rows', Array.isArray(logsLeft) && logsLeft.length === 0, `${logsLeft?.length ?? '?'} left`);
       };
       await rest('attendees', { method: 'POST', body: seed.rows, prefer: 'return=minimal' });
       check('Seeded test booking, delegates and attendee', true, `${seed.rows.length} rows stamped ${RUN_ID}`);

@@ -81,8 +81,12 @@ npm run qa:live
    everyone, proves Send is disabled, and closes.
 3. After the run it queries `email_sends` since the run started and fails
    if any send went to an address outside the QA inbox.
-4. `email_sends` has no admin delete policy, so the (QA-addressed) log rows
-   stay; they carry `metadata.source = bulk-attendees` and the audience label.
+4. The bulk send writes one `email_sends` row per recipient. Cleanup deletes
+   those too and asserts none remain — every QA address carries the run id, so
+   the log rows are addressable without ever matching a real send. That delete
+   needs the admin DELETE policy added in
+   `20260915120000_allow_admin_delete_email_sends.sql`; before it, a live run
+   left its log rows in the table permanently.
 
 ### Adding a flow
 
