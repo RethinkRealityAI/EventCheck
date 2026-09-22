@@ -7,6 +7,7 @@ import { generateTicketPDF } from './pdfGenerator';
 import { isPlaceholderGuestName, resolveAttendeeDisplayName } from './resolveAttendeeDisplayName';
 import { isTableGuestRow } from './tableSeats';
 import { isPlaceholderEmail } from './registrationKind';
+import { isMultiSeatPurchase } from '../supabase/functions/_shared/purchaseShape';
 
 function guestSortKey(a: Attendee): number {
   const m = (a.name || '').match(/#(\d+)\s*$/);
@@ -108,7 +109,16 @@ export async function resendTicketEmailForAttendee(
        </div>`
     : '';
 
-  const isTable = guests.length > 0;
+  // Template choice follows what was BOUGHT, the same rule the server's
+  // registration-confirmed mode uses (_shared/purchaseShape.ts). "Has guests"
+  // was the old test, and resending to a TSCS registrant with a companion —
+  // or a speaker with a guest place — told them they had bought a table.
+  // Guest PDFs and claim links are still attached whenever guests exist: that
+  // is about who is attending, which is a different question.
+  const isTable = isMultiSeatPurchase(
+    { ticket_type: fresh.ticketType, answers: fresh.answers as Record<string, unknown> | undefined },
+    form?.fields,
+  );
   // Resolve subject/body through the canonical resolver so a per-form override
   // (form.settings.emailOverrides, gated on enabled) wins consistently — the
   // same precedence the edge P4 confirmation applies. Preserves the historical

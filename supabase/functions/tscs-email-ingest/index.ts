@@ -166,7 +166,12 @@ async function sendTicketFor(attendeeId: string, origin: string): Promise<{ ok: 
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${serviceKey}`,
       },
-      body: JSON.stringify({ mode: 'registration-confirmed', primaryAttendeeId: attendeeId, downloadUrl }),
+      // TSCS's page never asks for consents, dietary needs, accessibility or an
+      // emergency contact, so every India registration arrives incomplete. The
+      // ticket email asks for them itself (send-ticket-email mints the link and
+      // adds it only while something required is still missing), so nobody has
+      // to notice and chase India registrants later.
+      body: JSON.stringify({ mode: 'registration-confirmed', primaryAttendeeId: attendeeId, downloadUrl, includeCompletionLink: true }),
     });
     if (resp.ok) return { ok: true };
     const detail = `${resp.status} ${await resp.text()}`.slice(0, 500);

@@ -404,6 +404,39 @@ curl -X POST https://gticuvgclbvhwvpzkuez.supabase.co/functions/v1/tscs-email-in
 #   {"mode":"ingest","isTest":true,"registration":{…}} – creates an is_test row
 ```
 
+### 5y. "Complete your registration" (`registration-complete`)
+
+People are registered and ticketed through doors that ask less than the form:
+the TSCS India page never asks for consents, dietary needs, accessibility or an
+emergency contact, and an admin comping a speaker fills in only what they know.
+At the time this shipped, 70 of 197 GANSID registrants had not agreed to at
+least one required policy.
+
+* **Public page** `/#/complete?token=…` asks ONLY what is still unanswered,
+  consents last. A kind='complete' HMAC token is the credential and cannot be
+  replayed as a ticket-download, pay or invite token.
+* **It can only fill gaps.** Answers already on file cannot be changed, the
+  email (the account identity) is never offered, and nothing `usedForPricing`
+  is either. `_shared/registrationCompleteness.ts` decides what is missing for
+  the admin panel, the page AND the server — one rule, so a required question
+  can never be demanded without being shown.
+* **Admin:** every attendee's Responses tab says what was never answered, with
+  *Send completion link* and *Copy link*. The Live list's **Details
+  incomplete** chip filters to everyone missing a required answer and offers
+  **Ask N for their details**, which shows per-person results and stops on a
+  spent SMTP quota. Sends are logged to `email_sends` (`complete-registration`)
+  with open/click tracking.
+* **TSCS India tickets carry the link automatically** — the ingest passes it to
+  `registration-confirmed`, which adds a "One more step" block to the ticket
+  email. Every future India registrant is asked without anyone chasing them.
+* **Who is never sent one:** unclaimed seats (they need the claim link), sponsor
+  or exhibitor staff (the staff form deliberately hides these questions), and
+  org bookings.
+
+Deploys with the other edge functions on merge; `config.toml` sets
+`verify_jwt = false` because registrants have no session — `link` and `send`
+assert an admin JWT inside the function.
+
 ### 5z. Supabase Auth email templates
 
 The signup-confirmation, magic-link, recovery, invite and email-change mails

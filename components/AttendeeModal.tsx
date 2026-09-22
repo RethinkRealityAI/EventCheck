@@ -19,6 +19,8 @@ import {
 import { resolveAttendeeDisplayName } from '../utils/resolveAttendeeDisplayName';
 import { DELEGATE_GUEST_TYPES, guestContactStatus, isPendingGuest, isPlaceholderEmail, orgDisplayName } from '../utils/registrationKind';
 import AccountActionsPanel from './Admins/AccountActionsPanel';
+import CompletenessPanel from './RegistrationCompleteness/CompletenessPanel';
+import { completionStatus, isInternalAnswerKey } from '../utils/registrationCompletion';
 
 interface AttendeeModalProps {
   attendee: Attendee;
@@ -368,8 +370,14 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
   // `[object Object]`).
   const HIDDEN_ANSWER_KEYS = new Set(['_purchaser_filled', '_guest_country']);
   const answersEntries = localAttendee.answers
-    ? Object.entries(localAttendee.answers).filter(([key]) => !HIDDEN_ANSWER_KEYS.has(key))
+    ? Object.entries(localAttendee.answers).filter(([key]) => !HIDDEN_ANSWER_KEYS.has(key) && !isInternalAnswerKey(key))
     : [];
+
+  // Which of this registration's questions were never answered — the thing a
+  // TSCS India registrant or a comped speaker is missing, and why the Responses
+  // tab leads with it.
+  const completion = completionStatus(localAttendee, form, { isDelegate });
+  const needsDetails = completion.eligible && !completion.report.complete;
 
   // Defensive value-to-string for the Responses cards. `String(val)` on an
   // object produces "[object Object]"; we never want that to leak into the
@@ -475,6 +483,9 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
               className={`px-4 sm:px-5 py-2 sm:py-2.5 text-xs sm:text-sm font-bold rounded-t-xl transition-all border-b-2 flex items-center gap-2 ${activeTab === 'responses' ? 'border-indigo-600 text-indigo-600 bg-white/60' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
             >
               Responses {answersEntries.length > 0 && <span className="text-[10px] bg-indigo-100 text-indigo-600 px-2 py-0.5 rounded-full font-bold">{answersEntries.length}</span>}
+              {needsDetails && (
+                <span className="w-2 h-2 rounded-full bg-amber-500" title="Some registration questions were never answered" aria-label="Details incomplete" />
+              )}
             </button>
           </div>
         )}
@@ -1295,6 +1306,7 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
           ) : (
             /* Responses Tab */
             <div>
+              <CompletenessPanel attendee={localAttendee} status={completion} />
               {answersEntries.length > 0 ? (
                 <div className="space-y-3">
                   {answersEntries.map(([key, val]) => (

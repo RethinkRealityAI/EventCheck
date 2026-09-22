@@ -2,6 +2,12 @@ import { describe, it, expect } from 'vitest';
 import {
   signRegistrationToken,
   verifyRegistrationToken,
+  signCompleteToken,
+  verifyCompleteToken,
+  signPayToken,
+  verifyPayToken,
+  signInviteToken,
+  verifyInviteToken,
 } from '../supabase/functions/_shared/registrationToken';
 
 const SECRET = 'test-service-role-key-abc123';
@@ -49,5 +55,47 @@ describe('registrationToken', () => {
     expect(await verifyRegistrationToken('garbage', SECRET, NOW)).toEqual({ valid: false, reason: 'malformed' });
     expect(await verifyRegistrationToken('', SECRET, NOW)).toEqual({ valid: false, reason: 'malformed' });
     expect(await verifyRegistrationToken('a.b.c', SECRET, NOW)).toEqual({ valid: false, reason: 'malformed' });
+  });
+});
+
+// A completion link fills in someone's outstanding answers. It must never be
+// usable as a ticket download, a payment link or an invite — or the reverse.
+describe('completion token', () => {
+  it('round-trips', async () => {
+    const t = await signCompleteToken('att-1', SECRET, NOW, TTL);
+    expect(await verifyCompleteToken(t, SECRET, NOW)).toEqual({ valid: true, attendeeId: 'att-1' });
+  });
+
+  it('expires', async () => {
+    const t = await signCompleteToken('att-1', SECRET, NOW, 1000);
+    expect(await verifyCompleteToken(t, SECRET, NOW + 2000)).toEqual({ valid: false, reason: 'expired' });
+  });
+
+  it('rejects a tampered attendee id on signature', async () => {
+    const t = await signCompleteToken('att-1', SECRET, NOW, TTL);
+    const [body, sig] = t.split('.');
+    const forged = btoa(atob(body.replace(/-/g, '+').replace(/_/g, '/')).replace('att-1', 'att-2'))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    expect(await verifyCompleteToken(`${forged}.${sig}`, SECRET, NOW)).toMatchObject({ valid: false, reason: 'bad-signature' });
+  });
+
+  it('is refused as a pay token, and a pay token is refused as a completion token', async () => {
+    const complete = await signCompleteToken('att-1', SECRET, NOW, TTL);
+    const pay = await signPayToken('att-1', SECRET, NOW, TTL);
+    expect(await verifyPayToken(complete, SECRET, NOW)).toMatchObject({ valid: false, reason: 'wrong-kind' });
+    expect(await verifyCompleteToken(pay, SECRET, NOW)).toMatchObject({ valid: false, reason: 'wrong-kind' });
+  });
+
+  it('is refused as an invite, and cannot download tickets', async () => {
+    const complete = await signCompleteToken('att-1', SECRET, NOW, TTL);
+    expect(await verifyInviteToken(complete, SECRET, NOW)).toMatchObject({ valid: false, reason: 'wrong-kind' });
+    expect((await verifyRegistrationToken(complete, SECRET, NOW)).valid).toBe(false);
+    const invite = await signInviteToken('c-1', 'form', SECRET, NOW, TTL);
+    expect(await verifyCompleteToken(invite, SECRET, NOW)).toMatchObject({ valid: false, reason: 'wrong-kind' });
+  });
+
+  it('refuses a ticket-download token', async () => {
+    const download = await signRegistrationToken('att-1', 'form', SECRET, NOW, TTL);
+    expect(await verifyCompleteToken(download, SECRET, NOW)).toMatchObject({ valid: false, reason: 'wrong-kind' });
   });
 });

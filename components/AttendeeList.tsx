@@ -32,6 +32,8 @@ import {
 import { Settings as SettingsIcon } from 'lucide-react';
 import SponsorsTable from './Sponsors/SponsorsTable';
 import BulkEmailModal from './Email/BulkEmailModal';
+import CompletionSendDialog from './RegistrationCompleteness/CompletionSendDialog';
+import { completionStatus, needsCompletion, type CompletionStatus } from '../utils/registrationCompletion';
 import { buildAttendeeVars, type BulkRecipient } from '../utils/adminEmailCompose';
 import {
   buildRegistrationIndex,
@@ -222,6 +224,8 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
   // be answered by three different screens.
   const [kindFilter, setKindFilter] = useState<RegistrationKindFilter>('all');
   const [showPendingSeats, setShowPendingSeats] = useState(false);
+  const [showIncompleteOnly, setShowIncompleteOnly] = useState(false);
+  const [completionRecipients, setCompletionRecipients] = useState<Attendee[] | null>(null);
   // Mass email to the current view. The audience is captured when the modal
   // opens so a realtime insert mid-run cannot change who is being emailed.
   const [bulkAudience, setBulkAudience] = useState<{ label: string; recipients: BulkRecipient[] } | null>(null);
@@ -468,6 +472,22 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
   const pendingSeatCount = useMemo(
     () => attendees.filter(a => !a.isTest && isPendingGuest(a)).length,
     [attendees],
+  );
+  // Registrations missing a REQUIRED answer or consent — most often TSCS India
+  // registrants and comped speakers, who came in through a door that asks less
+  // than this form. Optional questions left blank on the real form don't count:
+  // only what the organisers genuinely cannot proceed without.
+  const formById = useMemo(() => new Map(forms.map(f => [f.id, f] as const)), [forms]);
+  const completionById = useMemo(() => {
+    const m = new Map<string, CompletionStatus>();
+    for (const a of attendees) {
+      m.set(a.id, completionStatus(a, formById.get(a.formId), { isDelegate: kindOf(a) === 'delegate' }));
+    }
+    return m;
+  }, [attendees, formById, kindOf]);
+  const incompleteCount = useMemo(
+    () => attendees.filter(a => !a.isTest && needsCompletion(completionById.get(a.id)!)).length,
+    [attendees, completionById],
   );
   // Org name shown for a row: the booking's company for org rows, the parent
   // booking's company for delegates, nothing for ordinary attendees.
@@ -741,6 +761,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     // Unclaimed seats are off the roster unless explicitly asked for. The Test
     // tab is exempt: it exists to show exactly what a rehearsal wrote.
     const matchesPendingSeat = showPendingSeats || activeTab === 'test' || !isPendingGuest(a);
+    const matchesIncomplete = !showIncompleteOnly || needsCompletion(completionById.get(a.id)!);
 
     const matchesStatus = statusFilter === 'all'
       ? true
@@ -763,7 +784,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
       return String(answer || '') === rf.value;
     });
 
-    return matchesSearch && matchesForm && matchesTab && matchesKind && matchesPendingSeat && matchesStatus && matchesPayment && matchesAccount && matchesResponseFilters;
+    return matchesSearch && matchesForm && matchesTab && matchesKind && matchesPendingSeat && matchesIncomplete && matchesStatus && matchesPayment && matchesAccount && matchesResponseFilters;
   });
 
   // Count donated seats for badge
@@ -1387,6 +1408,38 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                 <span className={`w-1.5 h-1.5 rounded-full ${showPendingSeats ? 'bg-amber-500' : 'bg-slate-300'}`} />
                 Unclaimed seats
                 <span className="font-bold">{pendingSeatCount}</span>
+              </button>
+            )}
+
+            {/* Registered but missing required answers or consents. Filters the
+                list to them, and offers to ask them all in one go. */}
+            {incompleteCount > 0 && (
+              <button
+                type="button"
+                onClick={() => { setShowIncompleteOnly(v => !v); setCurrentPage(1); }}
+                aria-pressed={showIncompleteOnly}
+                data-testid="toggle-incomplete"
+                title="Registered, but missing a required answer or consent — usually people who came in through a partner page or an admin comp"
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-semibold transition-colors ${
+                  showIncompleteOnly
+                    ? 'bg-indigo-100 text-indigo-900 border-indigo-300'
+                    : 'bg-white text-slate-500 border-slate-200 hover:border-indigo-300 hover:text-indigo-800'
+                }`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${showIncompleteOnly ? 'bg-indigo-500' : 'bg-slate-300'}`} />
+                Details incomplete
+                <span className="font-bold">{incompleteCount}</span>
+              </button>
+            )}
+            {showIncompleteOnly && sortedFiltered.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setCompletionRecipients(sortedFiltered.filter(a => needsCompletion(completionById.get(a.id)!)))}
+                data-testid="send-completion-links"
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700"
+              >
+                <Mail className="w-3.5 h-3.5" />
+                Ask {sortedFiltered.length} for their details
               </button>
             )}
 
@@ -2256,6 +2309,9 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
         />
       )}
 
+      {completionRecipients && (
+        <CompletionSendDialog recipients={completionRecipients} onClose={() => setCompletionRecipients(null)} />
+      )}
       {bulkAudience && settings && (
         <BulkEmailModal
           audience="attendees"

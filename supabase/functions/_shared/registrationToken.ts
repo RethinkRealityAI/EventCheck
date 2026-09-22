@@ -194,3 +194,55 @@ export async function verifyPayToken(
   if (typeof raw.a !== 'string' || !raw.a) return { valid: false, reason: 'malformed' };
   return { valid: true, attendeeId: raw.a as string };
 }
+
+// ── Completion token (kind='complete') ───────────────────────────────────────
+// Encodes { attendeeId } for the public "complete your registration" page.
+// Same isolation as invite and pay: a completion token is rejected by every
+// other verifier on kind, and they are rejected here, so a link that fills in
+// someone's dietary needs can never download their tickets, claim an invite or
+// take a payment — or the reverse.
+//
+// A completion link can only ADD answers to unanswered, non-identity questions
+// (see _shared/registrationCompleteness.ts applyCompletion), so the worst a
+// forwarded link can do is answer someone else's outstanding questions. It can
+// never change who a ticket belongs to or where it is sent.
+
+export interface CompleteTokenPayload {
+  k: 'complete';
+  a: string; // attendees.id
+  iat: number;
+  exp: number;
+}
+
+export type CompleteVerifyResult =
+  | { valid: true; attendeeId: string }
+  | { valid: false; reason: 'malformed' | 'bad-signature' | 'expired' | 'wrong-kind' };
+
+export async function signCompleteToken(
+  attendeeId: string, secret: string, nowMs: number, ttlMs: number,
+): Promise<string> {
+  const payload: CompleteTokenPayload = { k: 'complete', a: attendeeId, iat: nowMs, exp: nowMs + ttlMs };
+  const body = b64urlEncode(new TextEncoder().encode(JSON.stringify(payload)));
+  const sig = await hmacBase64Url(secret, body);
+  return `${body}.${sig}`;
+}
+
+export async function verifyCompleteToken(
+  token: string, secret: string, nowMs: number,
+): Promise<CompleteVerifyResult> {
+  if (typeof token !== 'string') return { valid: false, reason: 'malformed' };
+  const parts = token.split('.');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return { valid: false, reason: 'malformed' };
+  const [body, sig] = parts;
+  let raw: Record<string, unknown>;
+  try { raw = JSON.parse(b64urlDecodeToString(body)); }
+  catch { return { valid: false, reason: 'malformed' }; }
+  if (!raw || typeof raw.exp !== 'number') return { valid: false, reason: 'malformed' };
+  // Signature check BEFORE k/exp — a forged-kind token still fails on signature first.
+  const expected = await hmacBase64Url(secret, body);
+  if (!timingSafeEqual(sig, expected)) return { valid: false, reason: 'bad-signature' };
+  if (raw.k !== 'complete') return { valid: false, reason: 'wrong-kind' };
+  if (nowMs > (raw.exp as number)) return { valid: false, reason: 'expired' };
+  if (typeof raw.a !== 'string' || !raw.a) return { valid: false, reason: 'malformed' };
+  return { valid: true, attendeeId: raw.a as string };
+}
