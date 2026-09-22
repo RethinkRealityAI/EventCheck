@@ -404,6 +404,17 @@ curl -X POST https://gticuvgclbvhwvpzkuez.supabase.co/functions/v1/tscs-email-in
 #   {"mode":"ingest","isTest":true,"registration":{…}} – creates an is_test row
 ```
 
+### 5z. Supabase Auth email templates
+
+The signup-confirmation, magic-link, recovery, invite and email-change mails
+are sent by Supabase Auth itself, configured in **Authentication → Emails**.
+No code here renders them and nothing in CI checks them — so they drift.
+
+Corrected copies live in `supabase/templates/`. Read that directory's README
+before editing any of them: a `background: linear-gradient(...)` shorthand in
+an email is invisible in Yahoo, Outlook desktop and much of Gmail, which once
+left 64 portal signups unable to find the confirm button at all.
+
 ### 6d-bis. Companion rows (the extra person on a booking)
 
 TSCS validates neither of the two companion blocks their mail can carry
