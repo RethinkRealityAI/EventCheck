@@ -201,7 +201,7 @@ function testRows({ eventForm, orgForm, staffFormId, inbox }) {
 }
 
 // ── The flows ─────────────────────────────────────────────────────────────
-async function runFlows({ page, mode, testAddresses, expectRows, expectDelegates }) {
+async function runFlows({ page, mode, testAddresses, expectRows, expectDelegates, expectHiddenSeats }) {
   // 1. Dashboard + stats
   await page.goto(page.url().split('#')[0] + '#/admin');
   await page.waitForSelector('[data-testid="stat-total-registrations"]', { timeout: 60000 });
@@ -232,6 +232,29 @@ async function runFlows({ page, mode, testAddresses, expectRows, expectDelegates
   check('Active-filter chip names the type filter', chip);
   await shot(page, 'live-tab-filter-delegates');
   await page.locator('[data-testid="filter-kind"]').selectOption('all');
+
+  // 3b. Unclaimed seats are off the roster by default and one click away.
+  //     A seat with no name or no address has nobody to show and nobody to
+  //     send to — but it is paid-for inventory, so it must stay findable.
+  const seatToggle = page.locator('[data-testid="toggle-pending-seats"]');
+  const hasToggle = await seatToggle.isVisible().catch(() => false);
+  check('Unclaimed-seat toggle appears when the tenant has unclaimed seats',
+    hasToggle || expectHiddenSeats === 0,
+    hasToggle ? await seatToggle.innerText() : 'no unclaimed seats in this tenant');
+  if (hasToggle) {
+    const before = await page.locator('table tbody tr', { hasText: 'QA-TEST' }).count();
+    await seatToggle.click();
+    await page.waitForTimeout(500);
+    const after = await page.locator('table tbody tr', { hasText: 'QA-TEST' }).count();
+    check('Turning it on reveals the hidden seats, and only those',
+      after - before === expectHiddenSeats,
+      `${before} → ${after} rows (expected +${expectHiddenSeats})`);
+    await shot(page, 'live-tab-unclaimed-seats');
+    await seatToggle.click();
+    await page.waitForTimeout(400);
+    const restored = await page.locator('table tbody tr', { hasText: 'QA-TEST' }).count();
+    check('Turning it off hides them again', restored === before, `${restored} rows`);
+  }
 
   // 4. Delegate detail modal
   const delegateRow = page.locator('table tbody tr', { hasText: 'QA-TEST Delegate One' }).first();
@@ -417,7 +440,9 @@ async function main() {
         }
       }
       await page.reload();
-      await runFlows({ page, mode: 'mock', testAddresses, expectRows: 6, expectDelegates: 4 });
+      // One fixture delegate — the sponsor's staff slot #3 — has a placeholder
+      // name and no address, so it sits behind the unclaimed-seat toggle.
+      await runFlows({ page, mode: 'mock', testAddresses, expectRows: 5, expectDelegates: 3, expectHiddenSeats: 1 });
       check('Mock transport received bulk sends', mock.calls.functions.filter(c => c.name === 'send-ticket-email').length >= 4, `${mock.calls.functions.length} function calls`);
     } else {
       const SUPA = process.env.VITE_SUPABASE_URL;
@@ -481,7 +506,8 @@ async function main() {
       check('Seeded test booking, delegates and attendee', true, `${seed.rows.length} rows stamped ${RUN_ID}`);
 
       await page.reload();
-      await runFlows({ page, mode: 'live', testAddresses: seed.addresses, expectRows: seed.rows.length, expectDelegates: 2 });
+      // Every seeded row is named and reachable, so none of them is hidden.
+      await runFlows({ page, mode: 'live', testAddresses: seed.addresses, expectRows: seed.rows.length, expectDelegates: 2, expectHiddenSeats: 0 });
 
       // Verify the bulk send was logged for exactly the test addresses.
       const sends = await rest(`email_sends?select=recipient_email,subject,metadata,sent_at&sent_at=gte.${encodeURIComponent(STARTED_AT)}&order=sent_at.desc&limit=50`);

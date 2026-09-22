@@ -19,6 +19,7 @@ import { resolveAttendeeDisplayName } from '../_shared/attendeeDisplayName.ts';
 import { guessImageContentType, isFetchableImageUrl } from '../_shared/imageEmbed.ts';
 import { signRegistrationToken, signPayToken } from '../_shared/registrationToken.ts';
 import { assessPayability } from '../_shared/payBalance.ts';
+import { isPlaceholderEmail } from '../_shared/companionIdentity.ts';
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -505,6 +506,12 @@ serve(async (req: Request) => {
                 .from('attendees').select('*').eq('id', body.primaryAttendeeId).maybeSingle();
             if (pErr || !primary) return jsonResponse({ error: 'Primary not found' }, 404);
             if (!primary.email) return jsonResponse({ ok: true, skipped: 'no-email' });
+            // A seat nobody has claimed yet carries a reserved `.invalid`
+            // address on purpose (see _shared/companionIdentity.ts). Refuse it
+            // here too: this is the last gate before an SMTP handoff, and a
+            // caller looping over "every guest" must not spend the daily quota
+            // bouncing mail at placeholders.
+            if (isPlaceholderEmail(primary.email)) return jsonResponse({ ok: true, skipped: 'placeholder-email' });
             // Don't email a confirmation for test registrations.
             if (primary.is_test === true) return jsonResponse({ ok: true, skipped: 'test' });
 

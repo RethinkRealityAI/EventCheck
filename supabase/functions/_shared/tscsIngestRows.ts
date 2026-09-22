@@ -2,10 +2,18 @@
 //
 // Turns one parsed TSCS registration into the attendees rows to insert.
 // Extracted from the edge function so the row semantics — dedupe keys,
-// payment columns, the NULL-payment_method rule for free companions —
-// are unit-testable under vitest without any Deno/IMAP machinery.
+// payment columns, the NULL-payment_method rule for free companions, and the
+// identified/pending split on companions — are unit-testable under vitest
+// without any Deno/IMAP machinery.
 
 import { categoryToPricingId, type TscsRegistration } from './tscsEmailParse.ts';
+import {
+  isPlaceholderEmail,
+  pendingGuestName,
+  placeholderEmailFor,
+  resolveCompanionIdentity,
+  type CompanionIdentity,
+} from './companionIdentity.ts';
 
 /** Category id → display name used as ticket_type (mirrors the pricing template). */
 export const TSCS_CATEGORY_NAMES: Record<string, string> = {
@@ -19,6 +27,8 @@ export const TSCS_CATEGORY_NAMES: Record<string, string> = {
   patient: 'Patients or Family Members',
 };
 
+export const FREE_ADDON_TICKET_TYPE = 'Registration (Free Add-on)';
+
 export interface BuildRowsOpts {
   source: string;
   messageId?: string;
@@ -30,8 +40,19 @@ export interface BuildRowsOpts {
   now?: () => string;
 }
 
+/** One companion the caller may need to act on after the insert. */
+export interface CompanionSummary {
+  attendeeId: string;
+  /** 'identified' — a real person on the roster. 'pending' — a booked seat with nobody named yet. */
+  status: 'identified' | 'pending';
+  /** True only when the row carries the companion's OWN deliverable address. */
+  hasOwnEmail: boolean;
+  name: string;
+  email: string;
+}
+
 export type BuildRowsResult =
-  | { ok: true; rows: Record<string, unknown>[]; primaryId: string; txnBase: string }
+  | { ok: true; rows: Record<string, unknown>[]; primaryId: string; txnBase: string; companions: CompanionSummary[] }
   | { ok: false; error: string };
 
 export function buildTscsAttendeeRows(reg: TscsRegistration, opts: BuildRowsOpts): BuildRowsResult {
@@ -62,6 +83,7 @@ export function buildTscsAttendeeRows(reg: TscsRegistration, opts: BuildRowsOpts
 
   const primaryId = uuid();
   const rows: Record<string, unknown>[] = [];
+  const companions: CompanionSummary[] = [];
 
   const splitName = (n: string) => {
     const parts = n.trim().split(/\s+/);
@@ -78,6 +100,59 @@ export function buildTscsAttendeeRows(reg: TscsRegistration, opts: BuildRowsOpts
       else out.push(part);
     }
     return out;
+  };
+
+  /**
+   * The bit every companion row shares: who they are, where their mail goes,
+   * and what we keep so a human can repair a bad one.
+   *
+   * Only the NAME decides pending vs identified. A companion with a real name
+   * and no address of their own is a real registrant whose mail routes through
+   * the purchaser — hiding them from the roster would take them off the
+   * check-in list for a seat that was paid for.
+   */
+  const companionShape = (id: string, identity: CompanionIdentity) => {
+    const pending = identity.name === null;
+    const name = pending ? pendingGuestName(reg.name) : identity.name!;
+    // An unclaimed seat gets an address nothing can deliver to, so no bug can
+    // ever mail a placeholder to the purchaser as if it were a person. A named
+    // companion without their own address routes through the purchaser, which
+    // is what leaving the field blank asks for.
+    const email = pending ? placeholderEmailFor(id) : (identity.email ?? reg.email);
+    const { first, last } = identity.name ? splitName(identity.name) : { first: '', last: '' };
+    return {
+      pending,
+      name,
+      email,
+      guest_type: pending ? 'pending-claim' : null,
+      answers: {
+        f_fname: first || null,
+        f_lname: last || null,
+        // NULL is the durable signal for "this row's inbox is not theirs" —
+        // the dashboard and every bulk send read it rather than guessing by
+        // comparing addresses.
+        f_email: identity.email,
+        f_country: 'IN',
+        tscs_source: opts.source,
+        tscs_email_source: identity.email ? 'own' : 'inherited',
+        tscs_companion_status: pending ? 'pending' : 'identified',
+        // Verbatim, so whoever fixes a typo can see what the partner sent.
+        tscs_raw_name: identity.rawName,
+        tscs_raw_email: identity.rawEmail,
+        tscs_name_issue: identity.nameReason === 'ok' ? null : identity.nameReason,
+        tscs_email_issue: identity.emailReason === 'ok' ? null : identity.emailReason,
+      } as Record<string, unknown>,
+    };
+  };
+
+  const track = (id: string, shape: ReturnType<typeof companionShape>, ownEmail: boolean) => {
+    companions.push({
+      attendeeId: id,
+      status: shape.pending ? 'pending' : 'identified',
+      hasOwnEmail: ownEmail && !isPlaceholderEmail(shape.email),
+      name: shape.name,
+      email: shape.email,
+    });
   };
 
   // Primary carries the collected TOTAL; group members carry their own fee
@@ -120,16 +195,20 @@ export function buildTscsAttendeeRows(reg: TscsRegistration, opts: BuildRowsOpts
     admin_notes: evidence,
   });
 
-  for (let i = 0; i < (reg.group?.length || 0); i++) {
+  const groupCount = reg.group?.length || 0;
+
+  for (let i = 0; i < groupCount; i++) {
     const g = reg.group![i];
     const gCat = categoryToPricingId(g.category || reg.category) || catId;
     const gid = uuid();
-    const { first, last } = splitName(g.name);
+    const identity = resolveCompanionIdentity({ name: g.name, email: g.email }, reg.email);
+    const shape = companionShape(gid, identity);
     rows.push({
       id: gid,
       form_id: opts.formId,
-      name: g.name,
-      email: g.email || reg.email,
+      name: shape.name,
+      email: shape.email,
+      guest_type: shape.guest_type,
       ticket_type: TSCS_CATEGORY_NAMES[gCat],
       qr_payload: JSON.stringify({ id: gid }),
       payment_status: 'paid',
@@ -145,42 +224,53 @@ export function buildTscsAttendeeRows(reg: TscsRegistration, opts: BuildRowsOpts
       primary_attendee_id: primaryId,
       registered_at: nowIso,
       answers: {
-        f_fname: first,
-        f_lname: last,
-        f_email: g.email || null,
+        ...shape.answers,
         f_org: g.institution || null,
         f_role: g.role || null,
         f_days: days(g.attending_days),
-        f_country: 'IN',
-        tscs_source: opts.source,
       },
       admin_notes: evidence,
     });
+    track(gid, shape, !!identity.email);
   }
 
   // Free add-on person: payment_method stays NULL — the CHECK constraint
-  // reserves non-null values for actual payment paths (see issuedTicket.ts).
-  if (reg.addon && (reg.addon.name || '').trim()) {
+  // reserves non-null values for actual payment paths (see issuedTicket.ts) —
+  // and so does pricing_category_id, because a complimentary seat was not sold
+  // at any of the template's paid rates and must not be counted as one.
+  //
+  // The block runs whenever TSCS sent an add-on section at all, even an empty
+  // one: the buyer paid for that seat either way, and a seat with nobody named
+  // is `pending-claim`, not a seat we quietly drop.
+  if (reg.addon && (reg.addon.name || reg.addon.email)) {
     const aid = uuid();
+    const identity = resolveCompanionIdentity(reg.addon, reg.email);
+    const shape = companionShape(aid, identity);
     rows.push({
       id: aid,
       form_id: opts.formId,
-      name: reg.addon.name!.trim(),
-      email: (reg.addon.email || reg.email).trim().toLowerCase(),
-      ticket_type: 'Registration (Free Add-on)',
+      name: shape.name,
+      email: shape.email,
+      guest_type: shape.guest_type,
+      ticket_type: FREE_ADDON_TICKET_TYPE,
       qr_payload: JSON.stringify({ id: aid }),
       payment_status: 'free',
       payment_method: null,
       payment_amount: '0',
+      // Not uniqueness-enforced (the partial index covers razorpay rows only),
+      // but it ties the free seat back to the payment that bought it, which is
+      // what an admin reconciling a booking actually needs.
+      transaction_id: `${txnBase}-p${groupCount + 2}`,
       pricing_template_id: opts.pricingTemplateId,
       is_test: !!opts.isTest,
       is_primary: false,
       primary_attendee_id: primaryId,
       registered_at: nowIso,
-      answers: { f_country: 'IN', tscs_source: opts.source },
+      answers: shape.answers,
       admin_notes: evidence,
     });
+    track(aid, shape, !!identity.email);
   }
 
-  return { ok: true, rows, primaryId, txnBase };
+  return { ok: true, rows, primaryId, txnBase, companions };
 }

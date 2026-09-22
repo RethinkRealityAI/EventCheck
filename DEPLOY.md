@@ -364,11 +364,20 @@ supabase secrets set --project-ref gticuvgclbvhwvpzkuez \
   TSCS_IMAP_USER="<the dedicated IONOS mailbox address>" \
   TSCS_IMAP_PASS="<that mailbox's password>" \
   TSCS_ALLOWED_SENDERS="@tscsindia.org" \
-  TSCS_ALERT_EMAIL="<who should hear about unreadable emails>"
+  TSCS_ALERT_EMAIL="<who should hear about unreadable emails>" \
+  TSCS_IMAP_LOOKBACK_DAYS="14"
 ```
 
 `TSCS_ALERT_EMAIL` is optional — it defaults to the existing internal
-address. It receives one summary mail per poll whenever a message cannot be
+address.
+
+`TSCS_IMAP_LOOKBACK_DAYS` is optional (default 14). It is how far back each
+poll re-examines the mailbox **including mail that has already been opened**.
+Unread-only polling used to mean that a human reading a TSCS confirmation in a
+mail client before the cron did made that registration invisible forever — no
+attendee row, no audit row, no alert. The audit table (`message_id` is unique)
+now decides what is new, so reading the mailbox is harmless. Raise it if the
+poller has been down for longer than two weeks; there is no reason to lower it. It receives one summary mail per poll whenever a message cannot be
 parsed, which is what stops a real payment from sitting unnoticed in the
 review queue.
 
@@ -394,6 +403,32 @@ curl -X POST https://gticuvgclbvhwvpzkuez.supabase.co/functions/v1/tscs-email-in
 #   {"mode":"poll","dryRun":true}   – reads mail, parses, writes nothing
 #   {"mode":"ingest","isTest":true,"registration":{…}} – creates an is_test row
 ```
+
+### 6d-bis. Companion rows (the extra person on a booking)
+
+TSCS validates neither of the two companion blocks their mail can carry
+("Additional Participants", "Free Addon Person"), so the ingest decides two
+things separately — the rules live in
+`supabase/functions/_shared/companionIdentity.ts`:
+
+* **Is there a person here?** No usable name (`- -`, `None None`, anything with
+  fewer than two letters) means the seat is booked and unclaimed. It is written
+  as `guest_type = 'pending-claim'` with a `…@placeholder.invalid` address, so
+  nothing can ever mail it, and it is hidden from the live roster behind the
+  **Unclaimed seats** toggle while staying visible on its purchaser's record
+  with a claim link.
+* **Can we write to them directly?** A missing, malformed, doubled-TLD
+  (`gmail.com.com`) or purchaser-identical address means their mail routes
+  through the purchaser. They stay on the roster — they are a real registrant
+  with a real badge — with `answers.f_email = NULL` and
+  `answers.tscs_email_source = 'inherited'`, which is what keeps them out of
+  bulk sends and off the "Hello - -" path.
+
+Companions who gave their own address now get their own ticket at ingest time.
+
+Run `20260922100000_repair_tscs_companion_rows.sql` once on the GANSID project
+to apply the same rules to rows written before this existed. It is idempotent
+and derives every value from columns already on the row.
 
 ### 6e. Parsing contract with TSCS
 

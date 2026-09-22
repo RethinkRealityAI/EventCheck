@@ -6,6 +6,7 @@ import { resolveEmailTemplate } from './emailTemplates';
 import { generateTicketPDF } from './pdfGenerator';
 import { isPlaceholderGuestName, resolveAttendeeDisplayName } from './resolveAttendeeDisplayName';
 import { isTableGuestRow } from './tableSeats';
+import { isPlaceholderEmail } from './registrationKind';
 
 function guestSortKey(a: Attendee): number {
   const m = (a.name || '').match(/#(\d+)\s*$/);
@@ -43,6 +44,16 @@ export async function resendTicketEmailForAttendee(
   const fresh = await getAttendee(attendeeId);
   if (!fresh) {
     throw new Error('Attendee record not found.');
+  }
+
+  // A seat nobody has claimed carries a reserved `.invalid` address by design,
+  // so "resend" has no inbox to aim at. Say what to do instead rather than
+  // letting it fail at the SMTP layer as an unexplained bounce.
+  if (isPlaceholderEmail(fresh.email)) {
+    throw new Error(
+      'This seat has no contact details yet, so there is nowhere to send a ticket. '
+      + 'Copy its claim link from the purchaser\'s record and send that to the purchaser instead.',
+    );
   }
 
   const settings = await getSettings();

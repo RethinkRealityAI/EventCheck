@@ -100,7 +100,7 @@ async function ingestRegistration(
     pricingTemplateId: PRICING_TEMPLATE_ID,
   });
   if (!built.ok) return { ok: false, status: 'error', error: built.error };
-  const { rows, primaryId, txnBase } = built;
+  const { rows, primaryId, txnBase, companions } = built;
 
   const { data: existing } = await supabase
     .from('attendees').select('id').eq('transaction_id', txnBase).limit(1);
@@ -128,6 +128,20 @@ async function ingestRegistration(
   // that fails to send is recoverable (mode 'send-ticket'), whereas reporting
   // the whole ingest as failed would have the poller retry and double-register.
   await sendTicketFor(primaryId, opts.origin);
+
+  // Companions who gave their OWN address get their own ticket. Until now only
+  // the purchaser was ever mailed, so a named companion with a real inbox —
+  // nine of them live, on real payments — was registered for a congress and
+  // never told. Anyone without their own address is covered by the purchaser's
+  // mail (its download link carries the whole booking), and an unclaimed
+  // `pending-claim` seat has nobody to write to at all.
+  //
+  // Unchecked, like the purchaser's: the registration is already real, and a
+  // send that fails is recoverable through mode 'send-ticket'.
+  for (const c of companions) {
+    if (c.status !== 'identified' || !c.hasOwnEmail) continue;
+    await sendTicketFor(c.attendeeId, opts.origin);
+  }
 
   return { ok: true, status: 'ingested', attendeeId: primaryId, createdCount: rows.length };
 }
@@ -283,6 +297,7 @@ async function pollMailbox(
 
   const results: any[] = [];
   let skipped = 0;
+  let alreadyRecorded = 0;
   try {
     await client.connect();
     const lock = await client.getMailboxLock('INBOX');
@@ -295,10 +310,69 @@ async function pollMailbox(
       // even be fetched — and this stops a busy inbox consuming the per-run cap
       // before the partner's mail is reached.
       const allowEntries = allowedSenders.split(',').map((x) => x.trim()).filter(Boolean);
-      const query: Record<string, unknown> = { seen: false };
-      if (allowEntries.length === 1) query.from = allowEntries[0].replace(/^@/, '');
-      const unseen = await client.search(query as any, { uid: true });
-      const uids: number[] = (unseen || []).slice(0, 25); // bounded per run
+      const fromFilter = allowEntries.length === 1 ? allowEntries[0].replace(/^@/, '') : null;
+
+      // \Seen is NOT the source of truth for "have we handled this".
+      //
+      // This mailbox belongs to a person. Searching only for unseen mail meant
+      // that anyone who opened a TSCS confirmation in a mail client before the
+      // cron did made that registration invisible FOREVER — no attendee row,
+      // no audit row, no needs-review alert, nothing to notice. A paid
+      // registrant simply never existed.
+      //
+      // So the candidate set is now everything unseen PLUS everything from the
+      // partner in the last TSCS_IMAP_LOOKBACK_DAYS, read or not, and the
+      // audit table decides what is actually new. Re-processing is harmless
+      // anyway (message_id is unique, transaction_id de-duplicates the
+      // attendee), but skipping on a known message id keeps the run cheap.
+      const lookbackDays = Math.max(1, Number(Deno.env.get('TSCS_IMAP_LOOKBACK_DAYS') || 14));
+      const since = new Date(Date.now() - lookbackDays * 86_400_000);
+      const { data: knownRows } = await supabase
+        .from('tscs_email_registrations')
+        .select('message_id')
+        // A slightly wider window than the IMAP search, so a message that sat
+        // in the mailbox for a day before delivery still matches its own row.
+        .gte('received_at', new Date(Date.now() - (lookbackDays + 7) * 86_400_000).toISOString());
+      const knownMessageIds = new Set<string>((knownRows || []).map((r: any) => r.message_id));
+
+      const searchUids = async (extra: Record<string, unknown>): Promise<number[]> => {
+        const q: Record<string, unknown> = { ...extra };
+        if (fromFilter) q.from = fromFilter;
+        try {
+          return (await client.search(q as any, { uid: true })) || [];
+        } catch (e) {
+          console.error('[tscs-ingest] IMAP search failed', JSON.stringify(extra), String(e));
+          return [];
+        }
+      };
+      const [unseenUids, recentUids] = await Promise.all([
+        searchUids({ seen: false }),
+        searchUids({ since }),
+      ]);
+      const candidates = [...new Set<number>([...unseenUids, ...recentUids])].sort((a, b) => a - b);
+
+      // Cheap pre-filter: pull envelopes only, and drop the ones already in the
+      // audit table before fetching any full message source. Best-effort — if
+      // the bulk fetch fails we just fall through and check per message.
+      const uids: number[] = [];
+      const envelopeIdByUid = new Map<number, string>();
+      if (candidates.length > 0) {
+        try {
+          for await (const m of client.fetch(candidates.join(','), { envelope: true, uid: true } as any, { uid: true } as any)) {
+            const mid = (m?.envelope?.messageId || '').slice(0, 250);
+            if (mid) envelopeIdByUid.set(m.uid, mid);
+          }
+        } catch (e) {
+          console.error('[tscs-ingest] envelope pre-fetch failed, falling back to full fetch', String(e));
+        }
+        for (const uid of candidates) {
+          const mid = envelopeIdByUid.get(uid);
+          if (mid && knownMessageIds.has(mid)) { alreadyRecorded++; continue; }
+          if (uids.length >= 25) break; // bounded per run
+          uids.push(uid);
+        }
+      }
+
       for (const uid of uids) {
         const msg = await client.fetchOne(String(uid), { source: true, envelope: true }, { uid: true });
         if (!msg?.source) continue;
@@ -307,6 +381,10 @@ async function pollMailbox(
         const messageId = (parsedMail.messageId || msg.envelope?.messageId || `uid-${uid}-${host}`).slice(0, 250);
         const subject = parsedMail.subject || msg.envelope?.subject || '';
         const receivedAt = (parsedMail.date || new Date()).toISOString();
+
+        // The envelope pre-filter can miss (no Message-ID in the envelope, or
+        // the bulk fetch failed) — the parsed header is the last word.
+        if (knownMessageIds.has(messageId)) { alreadyRecorded++; continue; }
 
         let outcomeRow: any = { message_id: messageId, from_addr: fromAddr, subject, received_at: receivedAt };
 
@@ -405,7 +483,7 @@ async function pollMailbox(
   }
   await maybeAlert(results);
   await recordRun(supabase, buildPollRunRow({ startedAt, dryRun, ...runCtx, results, ok: true }));
-  return json({ ok: true, processed: results.length, skipped, results, dryRun });
+  return json({ ok: true, processed: results.length, skipped, alreadyRecorded, results, dryRun });
 }
 
 serve(async (req) => {

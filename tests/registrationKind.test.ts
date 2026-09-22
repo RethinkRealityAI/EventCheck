@@ -8,6 +8,9 @@ import {
   resolveOrgKind,
   resolveRegistrationKind,
   summarizeRegistrations,
+  guestContactStatus,
+  isEmailableRecipient,
+  isPendingGuest,
   REGISTRATION_KIND_FILTERS,
   REGISTRATION_KIND_META,
   type KindInput,
@@ -172,5 +175,99 @@ describe('summarizeRegistrations', () => {
     expect(s.orgs).toBe(1);
     expect(s.sponsors).toBe(1);
     expect(s.exhibitors).toBe(1);
+  });
+});
+
+// ── Reachability ──────────────────────────────────────────────────────────
+//
+// Two separate questions that used to be conflated: is there a person on this
+// row at all, and can we write to them independently of the purchaser?
+
+describe('isPendingGuest', () => {
+  // Every case is a COMPANION row; a booking's own row is never hidden.
+  const seat = (over: Record<string, unknown>) => ({ isPrimary: false, primaryAttendeeId: 'p', ...over });
+
+  it('recognises every placeholder name the platform issues', () => {
+    expect(isPendingGuest(seat({ name: 'Acme - Guest Ticket #3', email: 'x@y.com' }))).toBe(true);
+    expect(isPendingGuest(seat({ name: 'aditi - Free Guest (pending)', email: 'x@y.com' }))).toBe(true);
+    expect(isPendingGuest(seat({ name: 'Varun - Guest (pending)', email: 'x@y.com' }))).toBe(true);
+    expect(isPendingGuest(seat({ name: 'Acme — Staff slot #3', email: 'x@y.com' }))).toBe(true);
+    // "- -" — the live REG-00061 row.
+    expect(isPendingGuest(seat({ name: '- -', email: 'x@y.com' }))).toBe(true);
+  });
+
+  it('recognises a seat with no way to reach it', () => {
+    expect(isPendingGuest(seat({ name: 'Real Name', email: '' }))).toBe(true);
+    expect(isPendingGuest(seat({ name: 'Real Name', email: 'guest-abc@placeholder.invalid' }))).toBe(true);
+    expect(isPendingGuest(seat({ name: 'Real Name', email: 'x@y.com', answers: { tscs_companion_status: 'pending' } }))).toBe(true);
+  });
+
+  it('keeps a named, reachable delegate on the roster even while their claim is open', () => {
+    // A sponsor listing their staff by name and address has given us real
+    // people. Dropping them is the regression the unified dashboard undid.
+    expect(isPendingGuest(seat({ guestType: 'staff-pending', name: 'Tomás Rivera', email: 'tomas@x.com' }))).toBe(false);
+    expect(isPendingGuest(seat({ guestType: 'pending-claim', name: 'Dana Osei', email: 'dana@x.com' }))).toBe(false);
+  });
+
+  it('never hides a booking own row', () => {
+    expect(isPendingGuest({ isPrimary: true, name: '', email: '' })).toBe(false);
+  });
+});
+
+describe('guestContactStatus', () => {
+  it('trusts the recorded source when the ingest wrote one', () => {
+    expect(guestContactStatus({ email: 'a@x.com', answers: { tscs_email_source: 'inherited' } })).toBe('shared-inbox');
+    expect(guestContactStatus({ email: 'a@x.com', answers: { tscs_email_source: 'own' } })).toBe('reachable');
+  });
+
+  it('falls back to comparing addresses, so rows written before the marker still read true', () => {
+    expect(guestContactStatus({ email: 'Buyer@X.com' }, 'buyer@x.com')).toBe('shared-inbox');
+    expect(guestContactStatus({ email: 'guest@x.com' }, 'buyer@x.com')).toBe('reachable');
+  });
+
+  it('reports an unclaimed seat as pending, never as reachable', () => {
+    expect(guestContactStatus({
+      isPrimary: false, primaryAttendeeId: 'p', guestType: 'pending-claim',
+      name: 'Buyer - Guest (pending)', email: 'guest-a@placeholder.invalid',
+    })).toBe('pending');
+  });
+
+  it('treats a booking own row with no address as sharing nothing it can be blamed for', () => {
+    // Only companions can inherit an inbox; a primary with no address is a
+    // data problem for the booking itself, not a shared-inbox case.
+    expect(guestContactStatus({ isPrimary: true, email: '' })).toBe('shared-inbox');
+  });
+
+  it('does not mistake an ordinary attendee with no purchaser for a shared inbox', () => {
+    expect(guestContactStatus({ email: 'solo@x.com' })).toBe('reachable');
+  });
+});
+
+describe('isEmailableRecipient', () => {
+  it('excludes unclaimed seats and rows with no address', () => {
+    expect(isEmailableRecipient({ name: 'Dana', email: 'dana@x.com' })).toBe(true);
+    expect(isEmailableRecipient({
+      isPrimary: false, primaryAttendeeId: 'p',
+      name: 'Buyer - Guest (pending)', email: 'guest-a@placeholder.invalid',
+    })).toBe(false);
+    expect(isEmailableRecipient({ name: 'Dana', email: '   ' })).toBe(false);
+  });
+});
+
+describe('summarizeRegistrations — unclaimed seats', () => {
+  it('counts them separately so the roster can hide them without losing them', () => {
+    const rows = [
+      { id: 'p', isPrimary: true, name: 'Buyer', email: 'buyer@x.com' },
+      { id: 'g', isPrimary: false, primaryAttendeeId: 'p', guestType: 'pending-claim', name: 'Buyer - Guest (pending)', email: 'guest-g@placeholder.invalid' },
+      { id: 'r', isPrimary: false, primaryAttendeeId: 'p', name: 'Real Guest', email: 'real@x.com' },
+    ];
+    const s = summarizeRegistrations(rows, buildRegistrationIndex(rows));
+    expect(s.total).toBe(3);
+    expect(s.pendingGuests).toBe(1);
+  });
+
+  it('ignores test rows, like every other number on the cards', () => {
+    const rows = [{ id: 'g', isTest: true, isPrimary: false, primaryAttendeeId: 'p', guestType: 'pending-claim', name: 'x', email: 'guest-g@placeholder.invalid' }];
+    expect(summarizeRegistrations(rows, buildRegistrationIndex(rows)).pendingGuests).toBe(0);
   });
 });

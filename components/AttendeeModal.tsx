@@ -17,7 +17,7 @@ import {
   resolveAttendeeCategory,
 } from '../utils/attendeeCategories';
 import { resolveAttendeeDisplayName } from '../utils/resolveAttendeeDisplayName';
-import { DELEGATE_GUEST_TYPES, orgDisplayName } from '../utils/registrationKind';
+import { DELEGATE_GUEST_TYPES, guestContactStatus, isPendingGuest, isPlaceholderEmail, orgDisplayName } from '../utils/registrationKind';
 import AccountActionsPanel from './Admins/AccountActionsPanel';
 
 interface AttendeeModalProps {
@@ -1034,16 +1034,47 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
                     {/* Existing linked guests */}
                     {existingGuests.length > 0 && (
                       <div className="space-y-1.5 mb-3">
-                        {existingGuests.map(g => (
-                          <div key={g.id} className="flex items-center justify-between bg-indigo-50/60 px-3 py-2 rounded-xl border border-indigo-100/60 group">
+                        {existingGuests.map(g => {
+                          // The purchaser's record is the ONE place an unclaimed
+                          // seat is meant to show up — it is their seat to fill,
+                          // and the claim link is the only way to fill it.
+                          const guestPending = isPendingGuest(g);
+                          const guestContact = guestContactStatus(g, localAttendee.email);
+                          return (
+                          <div key={g.id} className={`flex items-center justify-between px-3 py-2 rounded-xl border group ${guestPending ? 'bg-amber-50/70 border-amber-200/70' : 'bg-indigo-50/60 border-indigo-100/60'}`}>
                             <div className="flex items-center gap-2 min-w-0 flex-1">
-                              <User className="w-3.5 h-3.5 text-indigo-400 flex-shrink-0" />
+                              <User className={`w-3.5 h-3.5 flex-shrink-0 ${guestPending ? 'text-amber-500' : 'text-indigo-400'}`} />
                               <div className="min-w-0 flex-1">
-                                <span className="text-sm font-bold text-slate-800 truncate block">{g.name}</span>
-                                <span className="text-[11px] text-slate-500 truncate block">{g.email}</span>
+                                <span className="text-sm font-bold text-slate-800 truncate block">
+                                  {g.name}
+                                  {guestPending && (
+                                    <span className="ml-2 align-middle text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">
+                                      Guest pending
+                                    </span>
+                                  )}
+                                </span>
+                                <span className="text-[11px] text-slate-500 truncate block">
+                                  {guestPending
+                                    ? 'No name or contact details yet — send the claim link to collect them'
+                                    : guestContact === 'shared-inbox'
+                                      ? `${g.email} · shares your inbox`
+                                      : g.email}
+                                </span>
                               </div>
                             </div>
                             <div className="flex items-center gap-1 ml-2 flex-shrink-0">
+                              {guestPending && (
+                                <button
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(`${window.location.origin}/#/form/${g.formId}?ref=${g.id}`);
+                                    showNotification('Claim link copied — send it to the purchaser to fill in', 'success');
+                                  }}
+                                  className="text-[11px] font-bold text-amber-700 hover:text-amber-900 px-2 py-1 rounded-lg hover:bg-amber-100/70 transition-all"
+                                  title="Copy the link this guest uses to fill in their own details"
+                                >
+                                  Copy claim link
+                                </button>
+                              )}
                               {onOpenAttendee && (
                                 <button
                                   onClick={() => onOpenAttendee(g)}
@@ -1063,7 +1094,8 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
                               </button>
                             </div>
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
 

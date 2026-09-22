@@ -145,6 +145,37 @@ describe('dedupeRecipients', () => {
     const out = dedupeRecipients([r('a', '  a@b.co ')]);
     expect(out.recipients[0].email).toBe('a@b.co');
   });
+
+  it('gives a shared inbox to its owner, whichever row was listed first', () => {
+    // A TSCS purchaser and their free companion are inserted in one statement
+    // with the same registered_at, so list order was effectively arbitrary —
+    // which is how a booking could go out addressed "Hello - -".
+    const companion: BulkRecipient = { key: 'companion', email: 'buyer@example.com', name: '- -', vars: {}, priority: 2 };
+    const buyer: BulkRecipient = { key: 'buyer', email: 'buyer@example.com', name: 'Varun Trivedi', vars: {}, priority: 1 };
+    for (const order of [[companion, buyer], [buyer, companion]]) {
+      const out = dedupeRecipients(order);
+      expect(out.recipients.map(x => x.key)).toEqual(['buyer']);
+      expect(out.duplicates.map(x => x.key)).toEqual(['companion']);
+    }
+  });
+
+  it('still falls back to arrival order when nobody claims the inbox', () => {
+    const out = dedupeRecipients([r('a', 'x@example.com'), r('b', 'x@example.com')]);
+    expect(out.recipients.map(x => x.key)).toEqual(['a']);
+  });
+
+  it('preserves the order recipients were given in', () => {
+    const out = dedupeRecipients([r('a', 'a@x.com'), r('b', 'b@x.com'), r('c', 'c@x.com')]);
+    expect(out.recipients.map(x => x.key)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('never spends a send on an unclaimed seat placeholder', () => {
+    // `guest-…@placeholder.invalid` passes every syntax check and reaches
+    // nobody — it marks a seat, not a person.
+    const out = dedupeRecipients([r('seat', 'guest-abc@placeholder.invalid'), r('ok', 'ok@example.com')]);
+    expect(out.invalid.map(x => x.key)).toEqual(['seat']);
+    expect(out.recipients.map(x => x.key)).toEqual(['ok']);
+  });
 });
 
 describe('firstNameOf', () => {

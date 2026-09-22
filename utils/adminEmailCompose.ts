@@ -14,6 +14,7 @@ import { buildOpenPixelUrl, wrapClickUrl } from './emailTracking';
 import { CURRENT_SITE } from '../config/sites';
 import { classifyPortalUser } from './portalUserStatus';
 import { isValidEmail } from './csv';
+import { isPlaceholderEmail } from './registrationKind';
 import type { PortalUser } from '../services/storageService';
 import type { Attendee, Form } from '../types';
 
@@ -291,6 +292,12 @@ export interface BulkRecipient {
   vars: Record<string, string>;
   /** Short context line shown in the recipient list ("In progress — step 2 of 5", "Delegate · Pfizer"). */
   subtitle?: string;
+  /**
+   * Who owns this inbox. When several rows share an address the owner wins,
+   * so a booking is never addressed by the name of a companion who merely
+   * inherited the purchaser's inbox. Lower sorts first; default 1.
+   */
+  priority?: number;
 }
 
 export interface DedupeResult {
@@ -307,19 +314,41 @@ export interface DedupeResult {
  * and the guest they typed their own email for; partners); sending both
  * copies reads as spam and doubles the provider bill. Case-insensitive, and
  * whitespace-tolerant because addresses arrive from forms and CSVs.
+ *
+ * Which row wins an inbox used to be whichever the caller happened to list
+ * first — and a TSCS purchaser and their free companion are inserted in the
+ * same statement with the SAME `registered_at`, so the order was effectively
+ * arbitrary. That is how a booking could go out addressed "Hello - -". The
+ * inbox now goes to its owner (lowest `priority`), and ties fall back to
+ * arrival order so every other caller behaves exactly as before.
  */
 export function dedupeRecipients(list: readonly BulkRecipient[]): DedupeResult {
-  const seen = new Set<string>();
   const recipients: BulkRecipient[] = [];
   const duplicates: BulkRecipient[] = [];
   const invalid: BulkRecipient[] = [];
+
+  const usable: Array<{ r: BulkRecipient; email: string; at: number }> = [];
   for (const r of list) {
     const email = (r.email || '').trim();
-    if (!email || !isValidEmail(email)) { invalid.push(r); continue; }
-    const key = email.toLowerCase();
-    if (seen.has(key)) { duplicates.push(r); continue; }
-    seen.add(key);
-    recipients.push({ ...r, email });
+    // A placeholder is syntactically valid and deliverable to nobody: an
+    // unclaimed seat, not a person. Never spend a send on one.
+    if (!email || !isValidEmail(email) || isPlaceholderEmail(email)) { invalid.push(r); continue; }
+    usable.push({ r, email, at: usable.length });
+  }
+
+  const winners = new Map<string, { r: BulkRecipient; email: string; at: number }>();
+  for (const entry of usable) {
+    const key = entry.email.toLowerCase();
+    const held = winners.get(key);
+    if (!held) { winners.set(key, entry); continue; }
+    const heldRank = held.r.priority ?? 1;
+    const rank = entry.r.priority ?? 1;
+    if (rank < heldRank) { duplicates.push(held.r); winners.set(key, entry); }
+    else duplicates.push(entry.r);
+  }
+
+  for (const entry of [...winners.values()].sort((a, b) => a.at - b.at)) {
+    recipients.push({ ...entry.r, email: entry.email });
   }
   return { recipients, duplicates, invalid };
 }
