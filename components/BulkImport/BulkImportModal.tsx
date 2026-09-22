@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import type { AppSettings, Form } from '../../types';
 import { parseCsv, isValidEmail } from '../../utils/csv';
-import { renderEmailShell, mergePlaceholders, plainTextToHtml } from '../../utils/emailShell';
+import { renderEmailShell, mergePlaceholders, plainTextToHtml, emailButtonStyle } from '../../utils/emailShell';
 import { buildOpenPixelUrl, wrapClickUrl } from '../../utils/emailTracking';
 import { CURRENT_SITE } from '../../config/sites';
 import { supabase } from '../../services/supabaseClient';
@@ -151,7 +151,7 @@ function composeBodyContent(fields: EmailFields, vars: Record<string, string>, o
 
   const headingBlock = heading ? `<h2>${heading}</h2>` : '';
   const ctaBlock = ctaLabel && rawCtaUrl
-    ? `<p style="text-align:center;"><a href="${escapeHtmlAttr(ctaUrl)}" class="button">${ctaLabel}</a></p>`
+    ? `<p style="text-align:center;"><a href="${escapeHtmlAttr(ctaUrl)}" class="button" style="${emailButtonStyle(CURRENT_SITE.key)}">${ctaLabel}</a></p>`
     : '';
   const footerNoteBlock = footerNote ? `<p style="font-size:13px;opacity:0.6;">${footerNote}</p>` : '';
   return `${headingBlock}\n${bodyHtml}\n${ctaBlock}\n${footerNoteBlock}`;

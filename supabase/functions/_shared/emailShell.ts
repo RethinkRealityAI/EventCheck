@@ -103,6 +103,32 @@ export function stripDeadLinks(html: string): string {
   );
 }
 
+/**
+ * The same button, as an inline `style` attribute.
+ *
+ * The rule above lives in a `<style>` block, and Gmail's mobile app, Outlook.com
+ * and any forwarded message strip `<style>` wholesale — leaving `class="button"`
+ * styling nothing. Callers that build a CTA should emit BOTH: the class (so an
+ * admin editing the template still gets the themed button) and these inline
+ * styles (so it survives a client that kept only what is on the element).
+ */
+export function emailButtonStyle(site: SiteKey): string {
+  const p = EMAIL_PALETTES[site];
+  return [
+    'display:inline-block',
+    // Solid first — see the note on the .button rule. Never collapse these two
+    // into one `background:` shorthand.
+    `background-color:${p.buttonColor}`,
+    `background-image:${p.buttonGradient}`,
+    'color:#ffffff',
+    'padding:14px 32px',
+    'border-radius:999px',
+    'text-decoration:none',
+    'font-weight:600',
+    'font-size:16px',
+  ].join(';') + ';';
+}
+
 export function renderEmailShell(opts: EmailShellOptions): string {
   const palette = EMAIL_PALETTES[opts.site];
   const previewCss = opts.previewMode
@@ -145,7 +171,16 @@ export function renderEmailShell(opts: EmailShellOptions): string {
     .body h2 { font-size: 22px; }
     .body p { font-size: 16px; line-height: 1.6; color: #1a1c1c; opacity: 0.85; margin: 0 0 20px; }
     .body a { color: ${palette.buttonColor}; }
-    .body .button, .body a.button { display: inline-block; background: ${palette.buttonGradient}; color: white !important; padding: 14px 32px; border-radius: 999px; text-decoration: none; font-weight: 600; font-size: 16px; }
+    /* background-COLOR and background-IMAGE are split on purpose, and must
+       stay split. As one \`background: linear-gradient(...)\` shorthand, any
+       client that does not support CSS gradients — Yahoo Mail, Outlook
+       desktop, Gmail in several contexts — dropped the whole declaration and
+       left the button transparent, while \`color: white\` still applied. The
+       result was white text on the white card: a button that took up space and
+       could not be seen or found, which is what an unconfirmed portal signup
+       looks like from the registrant's side. The solid colour now always
+       lands; the gradient is decoration on top of it. */
+    .body .button, .body a.button { display: inline-block; background-color: ${palette.buttonColor}; background-image: ${palette.buttonGradient}; color: #ffffff !important; padding: 14px 32px; border-radius: 999px; text-decoration: none; font-weight: 600; font-size: 16px; }
     .body ul, .body ol { padding-left: 22px; margin: 0 0 20px; line-height: 1.6; color: #1a1c1c; opacity: 0.85; }
     .body blockquote { border-left: 3px solid ${palette.buttonColor}; margin: 0 0 20px; padding: 4px 16px; color: #4b5563; background: rgba(0,0,0,0.02); }
     .footer { padding: 28px 32px; background: ${palette.footerGradient}; text-align: center; font-size: 12px; color: rgba(255,255,255,0.92); }

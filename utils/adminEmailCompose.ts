@@ -9,7 +9,7 @@
 // Everything here is pure apart from reading `import.meta.env` for the
 // tracking endpoint (via utils/emailTracking), which keeps it unit-testable.
 
-import { renderEmailShell, mergePlaceholders, plainTextToHtml } from './emailShell';
+import { renderEmailShell, mergePlaceholders, plainTextToHtml, emailButtonStyle } from './emailShell';
 import { buildOpenPixelUrl, wrapClickUrl } from './emailTracking';
 import { CURRENT_SITE } from '../config/sites';
 import { classifyPortalUser } from './portalUserStatus';
@@ -249,8 +249,10 @@ export function composeBodyContent(
   const ctaUrl = !previewMode && trackingId ? wrapClickUrl(trackingId, rawCtaUrl) : rawCtaUrl;
   const footerNote = escapeHtmlAttr(mergePlaceholders(fields.footerNote || '', vars));
 
+  // Class AND inline styles: the class themes it for an admin editing the
+  // template, the inline styles are what survive a client that strips <style>.
   const ctaBlock = ctaLabel && rawCtaUrl
-    ? `<p style="text-align: center;"><a href="${escapeHtmlAttr(ctaUrl)}" class="button">${ctaLabel}</a></p>`
+    ? `<p style="text-align: center;"><a href="${escapeHtmlAttr(ctaUrl)}" class="button" style="${emailButtonStyle(CURRENT_SITE.key)}">${ctaLabel}</a></p>`
     : '';
   const footerNoteBlock = footerNote
     ? `<p style="font-size: 13px; opacity: 0.6;">${footerNote}</p>`
