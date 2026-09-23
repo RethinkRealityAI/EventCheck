@@ -88,3 +88,11 @@ verify_jwt = false
 # touches nothing.
 [functions.tscs-email-ingest]
 verify_jwt = false
+
+# Public, token-gated "complete your registration". Registrants have no
+# session, so the gateway must be open: `resolve` and `complete` verify a
+# kind='complete' HMAC token, which can only ADD answers to unanswered,
+# non-identity, non-pricing questions. The `link` and `send` actions assert an
+# admin/super_admin JWT inside the function before minting anything.
+[functions.registration-complete]
+verify_jwt = false

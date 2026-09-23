@@ -1438,8 +1438,8 @@ export async function getAttendeesForUser(userId: string, email: string): Promis
   const [byUserId, byEmail] = await Promise.all([
     supabase.from('attendees').select('*').eq('user_id', userId).order('registered_at', { ascending: false }),
     // ILIKE, not EQ: Supabase lowercases auth emails while an attendee row
-    // keeps whatever was typed into the form, so `Sikha.Singh@x.org` would
-    // never match `sikha.singh@x.org` and the owner's portal showed no ticket.
+    // keeps whatever was typed into the form, so `Asha.Grant@x.org` would
+    // never match `asha.grant@x.org` and the owner's portal showed no ticket.
     // The pattern is wildcard-escaped — `_` is common in real addresses.
     email
       ? supabase.from('attendees').select('*').ilike('email', emailIlikePattern(email)).order('registered_at', { ascending: false })

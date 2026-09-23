@@ -261,7 +261,22 @@ export function AuthPanel() {
               {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
             </button>
           </div>
-          <div className="flex justify-end">
+          <div className="flex flex-wrap justify-between gap-x-4 gap-y-2">
+            {/* Resending used to appear only AFTER a failed sign-in, which asked
+                someone who never got a usable verification email to first guess
+                their password and fail. Anyone who suspects the email never
+                arrived can now say so directly. */}
+            <button
+              type="button"
+              onClick={() => {
+                setError('');
+                setResendMsg(null);
+                setShowResendOnSignin(true);
+              }}
+              className="text-sm text-gansid-secondary hover:underline"
+            >
+              Didn't get the verification email?
+            </button>
             <button
               type="button"
               onClick={async () => {
@@ -279,6 +294,11 @@ export function AuthPanel() {
           {error && <p className="text-sm text-gansid-primary">{error}</p>}
           {showResendOnSignin && (
             <>
+              {!error && (
+                <p className="text-sm font-body text-gansid-on-surface/70">
+                  Enter your email address above and we'll send the verification link again.
+                </p>
+              )}
               <ViscousButton
                 type="button"
                 variant="primary"

@@ -9,6 +9,7 @@ import {
   getTscsEmails, getTscsPollRuns, runTscsPoll, ingestTscsRegistration, setTscsEmailStatus, getTscsEmailBody,
   type TscsEmailRow, type TscsEmailStatus, type TscsPollRun,
 } from '../../services/tscsIngestService';
+import { findAbandonedCheckouts, abandonedValueInr } from '../../utils/tscsAbandoned';
 
 const STATUS_META: Record<TscsEmailStatus, { cls: string; icon: React.ReactNode; label: string }> = {
   'ingested':     { cls: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: <CheckCircle2 className="w-3 h-3" />,  label: 'Registered' },
@@ -133,6 +134,12 @@ const IndiaIngestPage: React.FC = () => {
   };
 
   const needsReviewCount = counts['needs-review'] || 0;
+
+  // People who reached a payment page and never came back. Derived from the
+  // same rows the queue already holds, so it needs no extra query.
+  const abandoned = useMemo(() => findAbandonedCheckouts(emails), [emails]);
+  const abandonedValue = abandonedValueInr(abandoned);
+  const [showAbandoned, setShowAbandoned] = useState(false);
 
   return (
     <>
@@ -265,6 +272,68 @@ const IndiaIngestPage: React.FC = () => {
             <strong>{needsReviewCount}</strong> message{needsReviewCount === 1 ? '' : 's'} could not be read automatically.
             {' '}These are real payments with nobody registered yet — open one to finish it by hand.
           </span>
+        </div>
+      )}
+
+      {/* Started, never finished. These are not errors — the pipeline was right
+          to refuse them — but they are the warmest leads the congress has, and
+          before this they were invisible dead rows in the queue. */}
+      {abandoned.length > 0 && (
+        <div className="mb-4 rounded-xl bg-white border border-sky-200 overflow-hidden">
+          <button
+            onClick={() => setShowAbandoned(v => !v)}
+            aria-expanded={showAbandoned}
+            data-testid="abandoned-toggle"
+            className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-sky-50/60 transition"
+          >
+            <span className="flex items-center gap-2 text-sm text-sky-900">
+              <RotateCcw className="w-4 h-4 shrink-0 text-sky-600" />
+              <span>
+                <strong>{abandoned.length}</strong> {abandoned.length === 1 ? 'person' : 'people'} started a registration and never finished
+                {abandonedValue > 0 && <> — about <strong>₹{abandonedValue.toLocaleString('en-IN')}</strong> uncollected</>}
+              </span>
+            </span>
+            <ChevronDown className={`w-4 h-4 text-sky-600 shrink-0 transition-transform ${showAbandoned ? 'rotate-180' : ''}`} />
+          </button>
+          {showAbandoned && (
+            <div className="border-t border-sky-100 overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-sky-50/70 text-sky-900 uppercase text-[10px] tracking-wide">
+                  <tr>
+                    <th className="text-left px-4 py-2 font-bold">Name</th>
+                    <th className="text-left px-4 py-2 font-bold">Email</th>
+                    <th className="text-left px-4 py-2 font-bold">Category</th>
+                    <th className="text-right px-4 py-2 font-bold">Would have paid</th>
+                    <th className="text-right px-4 py-2 font-bold">Attempts</th>
+                    <th className="text-left px-4 py-2 font-bold">Last tried</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-sky-50">
+                  {abandoned.map(a => (
+                    <tr key={a.email} className="hover:bg-sky-50/40">
+                      <td className="px-4 py-2 font-semibold text-gray-800">
+                        {a.name}
+                        {a.ref && <span className="ml-2 text-[10px] text-gray-400 font-mono">{a.ref}</span>}
+                      </td>
+                      <td className="px-4 py-2">
+                        <a href={`mailto:${a.email}`} className="text-indigo-600 hover:underline">{a.email}</a>
+                      </td>
+                      <td className="px-4 py-2 text-gray-600">{a.category || <span className="text-gray-300">—</span>}</td>
+                      <td className="px-4 py-2 text-right text-gray-700">
+                        {a.amountInr ? `₹${a.amountInr.toLocaleString('en-IN')}` : <span className="text-gray-300">—</span>}
+                      </td>
+                      <td className="px-4 py-2 text-right text-gray-600">{a.attempts}</td>
+                      <td className="px-4 py-2 text-gray-500">{a.lastAttemptAt ? timeAgo(a.lastAttemptAt) : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="px-4 py-2.5 text-[11px] text-gray-500 bg-sky-50/40 border-t border-sky-100">
+                Anyone who later completed a registration — on this reference or another — is already excluded.
+                Payment is collected by TSCS, so a follow-up should point them back at the TSCS registration page.
+              </p>
+            </div>
+          )}
         </div>
       )}
 

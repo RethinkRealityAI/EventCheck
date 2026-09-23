@@ -18,7 +18,7 @@ describe('escapeLikePattern', () => {
   });
 
   it('leaves ordinary email characters untouched', () => {
-    expect(escapeLikePattern('sikha.singh+tag@aphl.org')).toBe('sikha.singh+tag@aphl.org');
+    expect(escapeLikePattern('asha.grant+tag@example.org')).toBe('asha.grant+tag@example.org');
   });
 
   it('handles nullish input', () => {
@@ -29,7 +29,7 @@ describe('escapeLikePattern', () => {
 
 describe('emailIlikePattern', () => {
   it('trims surrounding whitespace from form input', () => {
-    expect(emailIlikePattern('  sikha.singh@aphl.org \n')).toBe('sikha.singh@aphl.org');
+    expect(emailIlikePattern('  asha.grant@example.org \n')).toBe('asha.grant@example.org');
   });
 
   it('escapes an underscore so it cannot act as a single-char wildcard', () => {
@@ -38,17 +38,17 @@ describe('emailIlikePattern', () => {
   });
 
   it('preserves case (ILIKE does the case folding, not the pattern)', () => {
-    expect(emailIlikePattern('Sikha.Singh@APHL.org')).toBe('Sikha.Singh@APHL.org');
+    expect(emailIlikePattern('Asha.Grant@EXAMPLE.org')).toBe('Asha.Grant@EXAMPLE.org');
   });
 });
 
 describe('emailsMatch', () => {
   it('matches regardless of case and surrounding whitespace', () => {
-    expect(emailsMatch('Sikha.Singh@APHL.org', ' sikha.singh@aphl.org ')).toBe(true);
+    expect(emailsMatch('Asha.Grant@EXAMPLE.org', ' asha.grant@example.org ')).toBe(true);
   });
 
   it('does not match different addresses', () => {
-    expect(emailsMatch('sikha.singh@aphl.org', 'jelili.ojodu@aphl.org')).toBe(false);
+    expect(emailsMatch('asha.grant@example.org', 'tunde.bello@example.org')).toBe(false);
   });
 
   it('treats blank/nullish as never matching (two empties are not "the same person")', () => {

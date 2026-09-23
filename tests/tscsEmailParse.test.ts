@@ -71,13 +71,13 @@ describe('categoryToPricingId', () => {
 describe('parseTscsEmail — GANSID-JSON block', () => {
   it('parses the embedded machine block', () => {
     const r = parseTscsEmail({
-      text: `Thank you for registering!\n<!-- GANSID-JSON {"first_name":"Sathwika","last_name":"Maheswarapu","email":"S@Example.com","category":"Undergraduate, Medical, Graduate Students","total_inr":2400,"payment_id":"pay_ABC123xyz","attending_days":"October 23, 2026,October 24, 2026"} -->`,
+      text: `Thank you for registering!\n<!-- GANSID-JSON {"first_name":"Kavitha","last_name":"Ramaswamy","email":"S@Example.com","category":"Undergraduate, Medical, Graduate Students","total_inr":2400,"payment_id":"pay_ABC123xyz","attending_days":"October 23, 2026,October 24, 2026"} -->`,
     });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.via).toBe('json');
     expect(r.registration.email).toBe('s@example.com');
-    expect(r.registration.name).toBe('Sathwika Maheswarapu');
+    expect(r.registration.name).toBe('Kavitha Ramaswamy');
     expect(r.registration.total_inr).toBe(2400);
     expect(r.registration.payment_id).toBe('pay_ABC123xyz');
   });
@@ -213,11 +213,11 @@ describe('parseTscsEmail — live TSCS table template', () => {
     '',
     'Your registration has been successfully completed.',
     '',
-    'Hello Sathwika,',
+    'Hello Kavitha,',
     '',
     'Registration Details',
     '',
-    'Full NameDr. Sathwika Maheswarapu Emailsathwika.mbbs@gmail.com Phone9390585989',
+    'Full NameDr. Kavitha Ramaswamy Emailkavitha.mbbs@gmail.com Phone9000000001',
     'CountryIndia CityHanamkonda InstitutionChelmeda Anand Rao institute of medical',
     'science RoleMedical officer CategoryUndergraduate, Medical, Graduate Students',
     'Pricing TierPromo Total Participants1 Attending DaysOct 23, 2026, Oct 24, 2026,',
@@ -234,9 +234,9 @@ describe('parseTscsEmail — live TSCS table template', () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.via).toBe('table');
-    expect(r.registration.name).toBe('Sathwika Maheswarapu'); // honorific stripped
-    expect(r.registration.email).toBe('sathwika.mbbs@gmail.com');
-    expect(r.registration.phone).toBe('9390585989');
+    expect(r.registration.name).toBe('Kavitha Ramaswamy'); // honorific stripped
+    expect(r.registration.email).toBe('kavitha.mbbs@gmail.com');
+    expect(r.registration.phone).toBe('9000000001');
     expect(r.registration.city).toBe('Hanamkonda');
     expect(r.registration.institution).toBe('Chelmeda Anand Rao institute of medical science');
     expect(r.registration.role).toBe('Medical officer');
@@ -368,7 +368,7 @@ describe('parseTscsEmail — free add-on person', () => {
     '',
     'Free Addon Person',
     '',
-    'NameIsha PolavarapuEmailishapolavarapu91@gmail.comPhone8978978686',
+    'NameUma VenkatesanEmailumavenkatesan91@gmail.comPhone9000000002',
     '',
     'Amount Paid ₹7,200.00 INR',
     '',
@@ -380,8 +380,8 @@ describe('parseTscsEmail — free add-on person', () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.registration.addon).toEqual({
-      name: 'Isha Polavarapu',
-      email: 'ishapolavarapu91@gmail.com',
+      name: 'Uma Venkatesan',
+      email: 'umavenkatesan91@gmail.com',
     });
   });
 

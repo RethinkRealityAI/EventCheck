@@ -17,8 +17,11 @@ import { jsPDF } from 'npm:jspdf@2.5.1';
 import { drawTicketPdf, ticketFromAttendeeRow, ticketPdfFilename, bytesToBase64 } from '../_shared/ticketPdf.ts';
 import { resolveAttendeeDisplayName } from '../_shared/attendeeDisplayName.ts';
 import { guessImageContentType, isFetchableImageUrl } from '../_shared/imageEmbed.ts';
-import { signRegistrationToken, signPayToken } from '../_shared/registrationToken.ts';
+import { signRegistrationToken, signPayToken, signCompleteToken } from '../_shared/registrationToken.ts';
+import { assessCompleteness } from '../_shared/registrationCompleteness.ts';
 import { assessPayability } from '../_shared/payBalance.ts';
+import { isPlaceholderEmail } from '../_shared/companionIdentity.ts';
+import { isMultiSeatPurchase } from '../_shared/purchaseShape.ts';
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -505,6 +508,12 @@ serve(async (req: Request) => {
                 .from('attendees').select('*').eq('id', body.primaryAttendeeId).maybeSingle();
             if (pErr || !primary) return jsonResponse({ error: 'Primary not found' }, 404);
             if (!primary.email) return jsonResponse({ ok: true, skipped: 'no-email' });
+            // A seat nobody has claimed yet carries a reserved `.invalid`
+            // address on purpose (see _shared/companionIdentity.ts). Refuse it
+            // here too: this is the last gate before an SMTP handoff, and a
+            // caller looping over "every guest" must not spend the daily quota
+            // bouncing mail at placeholders.
+            if (isPlaceholderEmail(primary.email)) return jsonResponse({ ok: true, skipped: 'placeholder-email' });
             // Don't email a confirmation for test registrations.
             if (primary.is_test === true) return jsonResponse({ ok: true, skipped: 'test' });
 
@@ -513,11 +522,15 @@ serve(async (req: Request) => {
             const eventName = form?.title || 'the event';
             const formEmailOverrides = (form as any)?.settings?.emailOverrides;
 
-            // Table/group purchaser? Pick the table-purchaser template if linked guests exist.
-            const { count: guestCount } = await supabase
-                .from('attendees').select('id', { count: 'exact', head: true })
-                .eq('primary_attendee_id', primary.id);
-            const isTableOrGroup = (guestCount ?? 0) > 0;
+            // Table/group purchaser? Decide from what was BOUGHT, never from
+            // whether other rows point at this one. "Has linked rows" used to
+            // be the test, and linked rows are not purchases: every GANSID
+            // registrant who ever received the table-purchaser template —
+            // nineteen TSCS India bookings with a free companion, and an
+            // invited speaker given a guest place — was told "Thank you for
+            // purchasing a table" at a congress that sells no tables. See
+            // _shared/purchaseShape.ts.
+            const isTableOrGroup = isMultiSeatPurchase(primary, (form as any)?.fields);
 
             const { data: appSettings } = await supabase
                 .from('app_settings').select('*').eq('id', 1).maybeSingle();
@@ -563,6 +576,40 @@ serve(async (req: Request) => {
                    </div>`
                 : '';
 
+            // "One more step" — when the caller knows this registration came in
+            // through a door that asks less than our form (the TSCS India page
+            // never asks for consents, dietary needs or an emergency contact),
+            // it sets includeCompletionLink and the SAME email asks for them.
+            // One email, not a ticket followed by a chaser.
+            //
+            // The link is minted HERE, never taken from the request: this
+            // function is gateway-open, and accepting a caller-supplied URL
+            // would let anyone who knows an attendee id send that person a
+            // branded email pointing wherever they liked. And it is added only
+            // when something required is genuinely still missing, so a resend
+            // never nags someone who has already completed.
+            let completeUrl = '';
+            if (body.includeCompletionLink === true && !isPlaceholderEmail(primary.email)) {
+                const report = assessCompleteness(Array.isArray(form?.fields) ? form.fields : [], primary.answers ?? {});
+                const linkOrigin = resolveOrigin(
+                    Deno.env.get('PUBLIC_SITE_URL'),
+                    downloadUrl ? new URL(downloadUrl).origin : '',
+                );
+                if (!report.complete && linkOrigin) {
+                    const completeToken = await signCompleteToken(primary.id, supabaseServiceKey, Date.now(), 180 * 24 * 60 * 60 * 1000);
+                    completeUrl = buildAppUrl(linkOrigin, `/#/complete?token=${encodeURIComponent(completeToken)}`);
+                }
+            }
+            // Solid background colour on purpose (see the note on .button in emailShell.ts).
+            const completeBlock = completeUrl
+                ? `<div style="margin-top:20px;padding:16px 18px;background:#fff8eb;border-left:3px solid #b45309;border-radius:6px;">
+                     <p style="margin:0 0 10px;font-weight:600;">One more step — a few details we still need</p>
+                     <p style="margin:0 0 12px;font-size:14px;color:#475569;">Your place is confirmed. Some questions we ask every attendee — dietary needs, accessibility, an emergency contact, and your agreement to the event terms — were not part of the page you registered on. It takes about two minutes.</p>
+                     <p style="text-align:center;margin:8px 0;"><a href="${completeUrl}" style="display:inline-block;padding:12px 24px;background-color:#b45309;color:#fff;text-decoration:none;border-radius:6px;font-weight:600;">Complete my registration</a></p>
+                     <p style="margin:10px 0 0;font-size:12px;color:#6b7280;word-break:break-all;">Or open: <a href="${completeUrl}" style="color:#b45309;">${completeUrl}</a></p>
+                   </div>`
+                : '';
+
             // This email is the highest-volume one we send — it fires on EVERY
             // registration — and its live template says "your ticket is attached
             // to this email" / "bring the attached PDF". Until now it attached
@@ -589,7 +636,7 @@ serve(async (req: Request) => {
                 ticket_download_url: downloadUrl,
             };
             const subject = applyPlaceholders(tpl.subject, vars, body.mode);
-            const contentHtml = applyPlaceholders(bodyTemplate, vars, body.mode) + downloadBlock;
+            const contentHtml = applyPlaceholders(bodyTemplate, vars, body.mode) + downloadBlock + completeBlock;
             const html = generateEmailTemplate({
                 title: eventName,
                 content: contentHtml,

@@ -364,11 +364,20 @@ supabase secrets set --project-ref gticuvgclbvhwvpzkuez \
   TSCS_IMAP_USER="<the dedicated IONOS mailbox address>" \
   TSCS_IMAP_PASS="<that mailbox's password>" \
   TSCS_ALLOWED_SENDERS="@tscsindia.org" \
-  TSCS_ALERT_EMAIL="<who should hear about unreadable emails>"
+  TSCS_ALERT_EMAIL="<who should hear about unreadable emails>" \
+  TSCS_IMAP_LOOKBACK_DAYS="14"
 ```
 
 `TSCS_ALERT_EMAIL` is optional — it defaults to the existing internal
-address. It receives one summary mail per poll whenever a message cannot be
+address.
+
+`TSCS_IMAP_LOOKBACK_DAYS` is optional (default 14). It is how far back each
+poll re-examines the mailbox **including mail that has already been opened**.
+Unread-only polling used to mean that a human reading a TSCS confirmation in a
+mail client before the cron did made that registration invisible forever — no
+attendee row, no audit row, no alert. The audit table (`message_id` is unique)
+now decides what is new, so reading the mailbox is harmless. Raise it if the
+poller has been down for longer than two weeks; there is no reason to lower it. It receives one summary mail per poll whenever a message cannot be
 parsed, which is what stops a real payment from sitting unnoticed in the
 review queue.
 
@@ -394,6 +403,76 @@ curl -X POST https://gticuvgclbvhwvpzkuez.supabase.co/functions/v1/tscs-email-in
 #   {"mode":"poll","dryRun":true}   – reads mail, parses, writes nothing
 #   {"mode":"ingest","isTest":true,"registration":{…}} – creates an is_test row
 ```
+
+### 5y. "Complete your registration" (`registration-complete`)
+
+People are registered and ticketed through doors that ask less than the form:
+the TSCS India page never asks for consents, dietary needs, accessibility or an
+emergency contact, and an admin comping a speaker fills in only what they know.
+At the time this shipped, 70 of 197 GANSID registrants had not agreed to at
+least one required policy.
+
+* **Public page** `/#/complete?token=…` asks ONLY what is still unanswered,
+  consents last. A kind='complete' HMAC token is the credential and cannot be
+  replayed as a ticket-download, pay or invite token.
+* **It can only fill gaps.** Answers already on file cannot be changed, the
+  email (the account identity) is never offered, and nothing `usedForPricing`
+  is either. `_shared/registrationCompleteness.ts` decides what is missing for
+  the admin panel, the page AND the server — one rule, so a required question
+  can never be demanded without being shown.
+* **Admin:** every attendee's Responses tab says what was never answered, with
+  *Send completion link* and *Copy link*. The Live list's **Details
+  incomplete** chip filters to everyone missing a required answer and offers
+  **Ask N for their details**, which shows per-person results and stops on a
+  spent SMTP quota. Sends are logged to `email_sends` (`complete-registration`)
+  with open/click tracking.
+* **TSCS India tickets carry the link automatically** — the ingest passes it to
+  `registration-confirmed`, which adds a "One more step" block to the ticket
+  email. Every future India registrant is asked without anyone chasing them.
+* **Who is never sent one:** unclaimed seats (they need the claim link), sponsor
+  or exhibitor staff (the staff form deliberately hides these questions), and
+  org bookings.
+
+Deploys with the other edge functions on merge; `config.toml` sets
+`verify_jwt = false` because registrants have no session — `link` and `send`
+assert an admin JWT inside the function.
+
+### 5z. Supabase Auth email templates
+
+The signup-confirmation, magic-link, recovery, invite and email-change mails
+are sent by Supabase Auth itself, configured in **Authentication → Emails**.
+No code here renders them and nothing in CI checks them — so they drift.
+
+Corrected copies live in `supabase/templates/`. Read that directory's README
+before editing any of them: a `background: linear-gradient(...)` shorthand in
+an email is invisible in Yahoo, Outlook desktop and much of Gmail, which once
+left 64 portal signups unable to find the confirm button at all.
+
+### 6d-bis. Companion rows (the extra person on a booking)
+
+TSCS validates neither of the two companion blocks their mail can carry
+("Additional Participants", "Free Addon Person"), so the ingest decides two
+things separately — the rules live in
+`supabase/functions/_shared/companionIdentity.ts`:
+
+* **Is there a person here?** No usable name (`- -`, `None None`, anything with
+  fewer than two letters) means the seat is booked and unclaimed. It is written
+  as `guest_type = 'pending-claim'` with a `…@placeholder.invalid` address, so
+  nothing can ever mail it, and it is hidden from the live roster behind the
+  **Unclaimed seats** toggle while staying visible on its purchaser's record
+  with a claim link.
+* **Can we write to them directly?** A missing, malformed, doubled-TLD
+  (`gmail.com.com`) or purchaser-identical address means their mail routes
+  through the purchaser. They stay on the roster — they are a real registrant
+  with a real badge — with `answers.f_email = NULL` and
+  `answers.tscs_email_source = 'inherited'`, which is what keeps them out of
+  bulk sends and off the "Hello - -" path.
+
+Companions who gave their own address now get their own ticket at ingest time.
+
+Run `20260922100000_repair_tscs_companion_rows.sql` once on the GANSID project
+to apply the same rules to rows written before this existed. It is idempotent
+and derives every value from columns already on the row.
 
 ### 6e. Parsing contract with TSCS
 

@@ -51,14 +51,14 @@ describe('describeActiveFilters', () => {
 
   it('describes each active filter in toolbar order', () => {
     const chips = describeActiveFilters({
-      search: 'ojodu',
+      search: 'bello',
       status: 'checked-in',
       payment: 'paid',
       account: 'none',
       responseFilterCount: 2,
     });
     expect(chips.map(c => c.key)).toEqual(['search', 'status', 'payment', 'account', 'responses']);
-    expect(chips[0].label).toBe('Search: "ojodu"');
+    expect(chips[0].label).toBe('Search: "bello"');
     expect(chips[1].label).toBe('Checked in');
     expect(chips[3].label).toBe('No portal login');
     expect(chips[4].label).toBe('2 response filters');

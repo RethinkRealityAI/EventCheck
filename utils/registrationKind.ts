@@ -41,6 +41,8 @@ export interface KindInput {
   guestType?: string | null;
   companyInfo?: { orgName?: string | null; contactName?: string | null } | null;
   name?: string | null;
+  email?: string | null;
+  answers?: Record<string, unknown> | null;
   isTest?: boolean | null;
 }
 
@@ -167,6 +169,86 @@ export function delegateStatus(a: Pick<KindInput, 'guestType' | 'name'>): Delega
   return 'registered';
 }
 
+// ── Can we reach this person? ─────────────────────────────────────────────
+//
+// A companion row answers to two different questions, and conflating them is
+// what put an attendee literally named "- -" in the live roster:
+//
+//   IS THERE A PERSON HERE?  No name means the seat is booked and unclaimed.
+//                            Nothing to show on the roster, nothing to send.
+//   CAN WE WRITE TO THEM?    A named companion whose mail routes through the
+//                            purchaser is still a real registrant with a real
+//                            badge — they just are not an independent inbox,
+//                            so a mass send must not address them.
+
+export type GuestContactStatus = 'pending' | 'shared-inbox' | 'reachable';
+
+export type GuestContactInput = Pick<
+  KindInput, 'guestType' | 'name' | 'email' | 'answers' | 'isPrimary' | 'primaryAttendeeId'
+>;
+
+/**
+ * `.invalid` is reserved by RFC 2606 and resolves to nothing, which is exactly
+ * why unclaimed seats carry an address in it. Mirrors the server-side rule in
+ * supabase/functions/_shared/companionIdentity.ts.
+ */
+export function isPlaceholderEmail(email: string | null | undefined): boolean {
+  return /@placeholder\.invalid$/i.test((email ?? '').trim());
+}
+
+/**
+ * Placeholder names the platform issues for a seat nobody has filled in:
+ * ManualTicketTool's "…- Guest Ticket #3", the BOGO flow's "…- Free Guest
+ * (pending)", the TSCS ingest's "…- Guest (pending)", and the sponsor staff
+ * form's "…— Staff slot #3".
+ */
+const PLACEHOLDER_NAME_RE = /Guest Ticket #|Guest \(pending\)|Staff slot #/i;
+
+/**
+ * A booked seat with nobody reachable on it.
+ *
+ * Deliberately NOT "guest_type says pending". A sponsor who has listed their
+ * staff by name and address has given us real people who merely have not
+ * completed their own details — they belong on the roster, and dropping them
+ * is the exact regression the unified dashboard was built to undo. What does
+ * not belong is a row with no name, or no address, or both: there is nobody to
+ * show and nobody to send to.
+ */
+export function isPendingGuest(a: GuestContactInput): boolean {
+  // A booking's own row always belongs on the roster, however thin it looks.
+  if (a.isPrimary !== false && !a.primaryAttendeeId) return false;
+  if (a.answers?.tscs_companion_status === 'pending') return true;
+  if (isPlaceholderEmail(a.email)) return true;
+  if (!(a.email ?? '').trim()) return true;
+  const name = (a.name ?? '').trim();
+  if (!name || PLACEHOLDER_NAME_RE.test(name)) return true;
+  // The same two-letter floor the ingest applies, so "- -" reads the same on
+  // both sides of the wire.
+  return name.toLowerCase().replace(/[^a-z\u00C0-\u024F]/g, '').length < 2;
+}
+
+/**
+ * `purchaserEmail` is what makes this work without a backfill: rows written
+ * before the ingest recorded `tscs_email_source` carry no marker at all, and
+ * comparing against the booking's own address still tells the truth.
+ */
+export function guestContactStatus(a: GuestContactInput, purchaserEmail?: string | null): GuestContactStatus {
+  if (isPendingGuest(a)) return 'pending';
+  const declared = a.answers?.tscs_email_source;
+  if (declared === 'inherited') return 'shared-inbox';
+  if (declared === 'own') return 'reachable';
+  const email = (a.email ?? '').trim().toLowerCase();
+  if (!email) return 'shared-inbox';
+  const buyer = (purchaserEmail ?? '').trim().toLowerCase();
+  if (buyer && email === buyer) return 'shared-inbox';
+  return 'reachable';
+}
+
+/** Never put one of these in a recipient list. */
+export function isEmailableRecipient(a: GuestContactInput): boolean {
+  return !isPendingGuest(a) && !!(a.email ?? '').trim();
+}
+
 // ── Presentation metadata ─────────────────────────────────────────────────
 
 export interface KindMeta {
@@ -263,6 +345,8 @@ export interface RegistrationBreakdown {
   orgs: number;
   sponsors: number;
   exhibitors: number;
+  /** Booked seats with nobody named yet — hidden from the roster by default. */
+  pendingGuests: number;
 }
 
 /** Counts for the stats cards. Test rows are excluded — the same rule the
@@ -270,11 +354,12 @@ export interface RegistrationBreakdown {
 export function summarizeRegistrations(rows: readonly KindInput[], index: RegistrationIndex): RegistrationBreakdown {
   const out: RegistrationBreakdown = {
     total: 0, attendees: 0, delegates: 0, delegatesRegistered: 0, delegatesPending: 0,
-    orgs: 0, sponsors: 0, exhibitors: 0,
+    orgs: 0, sponsors: 0, exhibitors: 0, pendingGuests: 0,
   };
   for (const a of rows) {
     if (a.isTest) continue;
     out.total += 1;
+    if (isPendingGuest(a)) out.pendingGuests += 1;
     const kind = resolveRegistrationKind(index, a.id);
     if (kind === 'attendee') out.attendees += 1;
     else if (kind === 'delegate') {

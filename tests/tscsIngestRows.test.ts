@@ -11,10 +11,10 @@ const baseOpts = {
 };
 
 const solo: TscsRegistration = {
-  name: 'Sathwika Maheswarapu',
-  first_name: 'Sathwika',
-  last_name: 'Maheswarapu',
-  email: 'sathwika@example.com',
+  name: 'Kavitha Ramaswamy',
+  first_name: 'Kavitha',
+  last_name: 'Ramaswamy',
+  email: 'kavitha@example.com',
   category: 'Undergraduate, Medical, Graduate Students',
   total_inr: 2400,
   payment_id: 'pay_ABC123',
@@ -150,5 +150,123 @@ describe('buildTscsAttendeeRows — group + addon', () => {
     expect(addon.payment_method).toBeNull();
     expect(addon.payment_amount).toBe('0');
     expect(addon.email).toBe('comp@x.in');
+  });
+});
+
+// ── Companions: who is on the roster, and who can we write to? ─────────────
+//
+// The add-on block used to accept whatever TSCS sent. Two live rows show the
+// cost: an attendee literally named "- -" holding the purchaser's inbox
+// (REG-00061), and a companion stored at a doubled-TLD address that can never
+// be delivered (REG-00058).
+
+const withAddon = (addon: { name?: string; email?: string } | undefined): TscsRegistration => ({
+  ...solo,
+  payment_id: 'pay_ADDON1',
+  addon,
+});
+
+describe('buildTscsAttendeeRows — free add-on companion', () => {
+  const build = (reg: TscsRegistration) => {
+    const r = buildTscsAttendeeRows(reg, { ...baseOpts, uuid: (() => { let i = 0; return () => `id-${++i}`; })() });
+    if (r.ok === false) throw new Error(r.error);
+    return r;
+  };
+
+  it('registers a fully identified companion as a normal person with their own ticket', () => {
+    const r = build(withAddon({ name: 'Meera Devi Thomas', email: 'Meera@Example.com' }));
+    const addon: any = r.rows[1];
+    expect(addon.name).toBe('Meera Devi Thomas');
+    expect(addon.email).toBe('meera@example.com');
+    expect(addon.guest_type).toBeNull();
+    expect(addon.ticket_type).toBe('Registration (Free Add-on)');
+    expect(addon.payment_status).toBe('free');
+    expect(addon.payment_method).toBeNull();
+    // A complimentary seat was not sold at any of the template's paid rates,
+    // so it must not be counted as one.
+    expect(addon.pricing_category_id).toBeUndefined();
+    // …but it IS traceable to the payment that bought it.
+    expect(addon.transaction_id).toBe('pay_ADDON1-p2');
+    expect(addon.answers).toMatchObject({
+      f_fname: 'Meera', f_lname: 'Devi Thomas',
+      f_email: 'meera@example.com',
+      tscs_email_source: 'own',
+      tscs_companion_status: 'identified',
+    });
+    expect(r.companions).toEqual([
+      expect.objectContaining({ status: 'identified', hasOwnEmail: true, attendeeId: 'id-2' }),
+    ]);
+  });
+
+  it('turns an unnamed companion into an unclaimed seat rather than a roster ghost', () => {
+    const r = build(withAddon({ name: '- -', email: '' }));
+    const addon: any = r.rows[1];
+    expect(addon.guest_type).toBe('pending-claim');
+    expect(addon.name).toBe('Kavitha Ramaswamy - Guest (pending)');
+    // Never the purchaser's inbox: `.invalid` reaches nobody by design.
+    expect(addon.email).toBe('guest-id-2@placeholder.invalid');
+    expect(addon.answers.tscs_companion_status).toBe('pending');
+    expect(addon.answers.tscs_raw_name).toBe('- -');
+    expect(addon.answers.tscs_name_issue).toBe('placeholder');
+    expect(r.companions[0]).toMatchObject({ status: 'pending', hasOwnEmail: false });
+  });
+
+  it('keeps a named companion on the roster when only their address is unusable', () => {
+    // Kavya N arrived with "companion@gmail.com.com". She is a real
+    // person on a paid booking — hiding her would take her off check-in.
+    const r = build(withAddon({ name: 'Kavya N', email: 'companion@gmail.com.com' }));
+    const addon: any = r.rows[1];
+    expect(addon.guest_type).toBeNull();
+    expect(addon.name).toBe('Kavya N');
+    expect(addon.email).toBe('kavitha@example.com'); // purchaser's, deliverable
+    expect(addon.answers.f_email).toBeNull();
+    expect(addon.answers.tscs_email_source).toBe('inherited');
+    expect(addon.answers.tscs_email_issue).toBe('doubled-tld');
+    expect(addon.answers.tscs_raw_email).toBe('companion@gmail.com.com');
+    // No own inbox → no separate ticket; the purchaser's mail covers them.
+    expect(r.companions[0]).toMatchObject({ status: 'identified', hasOwnEmail: false });
+  });
+
+  it('marks a companion who reused the purchaser address as sharing that inbox', () => {
+    const r = build(withAddon({ name: 'Arun Menon', email: 'KAVITHA@example.com' }));
+    const addon: any = r.rows[1];
+    expect(addon.email).toBe('kavitha@example.com');
+    expect(addon.answers.f_email).toBeNull();
+    expect(addon.answers.tscs_email_source).toBe('inherited');
+    expect(addon.answers.tscs_email_issue).toBe('same-as-purchaser');
+  });
+
+  it('still books the seat when TSCS sends an add-on block with only an email', () => {
+    // The buyer paid for that seat either way — dropping it loses inventory.
+    const r = build(withAddon({ name: '', email: 'someone@example.com' }));
+    expect(r.rows).toHaveLength(2);
+    expect((r.rows[1] as any).guest_type).toBe('pending-claim');
+  });
+
+  it('creates no companion row when there was no add-on block at all', () => {
+    expect(build(withAddon(undefined)).rows).toHaveLength(1);
+    expect(build(withAddon({ name: '', email: '' })).rows).toHaveLength(1);
+  });
+
+  it('numbers the free seat after the paid participants', () => {
+    const r = build({
+      ...withAddon({ name: 'Free Person', email: 'free@example.com' }),
+      group: [{ name: 'Paid One', email: 'one@example.com' }, { name: 'Paid Two' }],
+    });
+    expect(r.rows.map((x: any) => x.transaction_id)).toEqual([
+      'pay_ADDON1', 'pay_ADDON1-p2', 'pay_ADDON1-p3', 'pay_ADDON1-p4',
+    ]);
+  });
+
+  it('applies the same identity rules to paid group members', () => {
+    const r = build({ ...withAddon(undefined), group: [{ name: 'None None' }, { name: 'Real Person' }] });
+    const [, ghost, real]: any[] = r.rows;
+    expect(ghost.guest_type).toBe('pending-claim');
+    expect(ghost.email).toBe('guest-id-2@placeholder.invalid');
+    expect(real.guest_type).toBeNull();
+    expect(real.email).toBe('kavitha@example.com');
+    expect(real.answers.tscs_email_source).toBe('inherited');
+    // Paid participants DO carry a category — they were sold at a rate.
+    expect(real.pricing_category_id).toBe('student');
   });
 });

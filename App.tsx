@@ -11,6 +11,7 @@ import { ContentCms } from './components/ContentCms/ContentCms';
 import PublicRegistration from './components/PublicRegistration';
 import { TicketDownloadPage } from './components/TicketDownload/TicketDownloadPage';
 import PayBalancePage from './components/PayBalance/PayBalancePage';
+import CompleteRegistrationPage from './components/CompleteRegistration/CompleteRegistrationPage';
 import SeatingConfigurator from './components/Seating/SeatingConfigurator';
 import SponsorsDashboard from './components/Sponsors/SponsorsDashboard';
 import IndiaIngestPage from './components/IndiaIngest/IndiaIngestPage';
@@ -880,6 +881,14 @@ export default function App() {
                 /tickets: the signed token is the credential, and the amount is
                 resolved server-side from the attendee row. */}
             <Route path="/pay" element={<PayBalancePage />} />
+
+            {/* Public "complete your registration" page — opened from a
+                completion email for someone already registered who never
+                answered all of our questions (TSCS India registrants, comped
+                speakers). Same trust model as /tickets and /pay: the signed
+                token is the credential, and it can only add answers to
+                unanswered, non-identity, non-pricing questions. */}
+            <Route path="/complete" element={<CompleteRegistrationPage />} />
 
             {/* Change password — any signed-in user can reach this. Primarily
                 used by SCAGO admins (no portal surface) + as a fallback link

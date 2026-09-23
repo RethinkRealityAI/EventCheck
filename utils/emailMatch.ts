@@ -1,8 +1,8 @@
 // Case-insensitive email matching for PostgREST queries.
 //
 // Email addresses are case-insensitive in every practical sense, but a plain
-// `.eq('email', …)` is a byte comparison: a row stored as `Sikha.Singh@aphl.org`
-// does NOT match a query for `sikha.singh@aphl.org`. That silently hid a
+// `.eq('email', …)` is a byte comparison: a row stored as `Asha.Grant@example.org`
+// does NOT match a query for `asha.grant@example.org`. That silently hid a
 // claimed ticket from its owner's portal, because Supabase normalises auth
 // emails to lowercase while the attendee row keeps whatever the person typed
 // into the form.

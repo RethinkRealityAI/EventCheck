@@ -214,9 +214,9 @@ const TABLE_LABELS: Array<[label: string, field: string]> = [
 const HONORIFIC_RE = /^(?:mr|mrs|ms|miss|dr|prof|mx)\.?\s+/i;
 
 /** Match an address at the START of run-together template text, e.g.
- *  'isha@gmail.comPhone8978' → 'isha@gmail.com'.
+ *  'uma@gmail.comPhone9000' → 'uma@gmail.com'.
  *  Anchored on purpose: unanchored, the local-part would greedily run
- *  BACKWARDS through the preceding label ('...PolavarapuEmailisha@gmail.com').
+ *  BACKWARDS through the preceding label ('...VenkatesanEmailuma@gmail.com').
  *  The lookahead is what stops the TLD swallowing the next label. */
 function emailAtStart(s: string): string | undefined {
   const m = s.match(/^\s*([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+?\.[A-Za-z]{2,63})(?=[A-Z]|\s|$)/);
@@ -228,7 +228,7 @@ function emailAtStart(s: string): string | undefined {
  *  registered or ticketed, so it is parsed from the same run-together text as
  *  everything else:
  *    Free Addon Person
- *    NameIsha PolavarapuEmailisha@gmail.comPhone8978978686 */
+ *    NameUma VenkatesanEmailuma@gmail.comPhone9000000002 */
 function tryAddon(source: string): { name?: string; email?: string } | null {
   const block = source.match(
     /Free\s*Add-?on\s*Person([\s\S]*?)(?:Amount\s*Paid|Additional\s*Participants|Automated\s*notification|$)/i,

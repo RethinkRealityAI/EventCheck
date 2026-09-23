@@ -32,12 +32,18 @@ import {
 import { Settings as SettingsIcon } from 'lucide-react';
 import SponsorsTable from './Sponsors/SponsorsTable';
 import BulkEmailModal from './Email/BulkEmailModal';
+import CompletionSendDialog from './RegistrationCompleteness/CompletionSendDialog';
+import { completionStatus, needsCompletion, type CompletionStatus } from '../utils/registrationCompletion';
 import { buildAttendeeVars, type BulkRecipient } from '../utils/adminEmailCompose';
 import {
   buildRegistrationIndex,
   delegateOrgName,
   delegateStatus,
+  guestContactStatus,
   isOrgKind,
+  isPendingGuest,
+  isPlaceholderEmail,
+  type GuestContactStatus,
   matchesRegistrationKindFilter,
   orgDisplayName,
   REGISTRATION_KIND_FILTERS,
@@ -86,6 +92,36 @@ function groupByPrimary(attendees: Attendee[]): GroupedAttendee[] {
   }));
 }
 
+/**
+ * Why a row's inbox may not reach the person named on it.
+ *
+ * `reachable` renders nothing — the overwhelmingly common case should add no
+ * visual noise. The other two are the states that used to be invisible and
+ * cost real sends: a seat with nobody on it, and a companion whose mail lands
+ * in the purchaser's inbox because they never gave one of their own.
+ */
+function ContactStatusChip({ status }: { status: GuestContactStatus }) {
+  if (status === 'reachable') return null;
+  if (status === 'pending') {
+    return (
+      <span
+        className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200 whitespace-nowrap"
+        title="Seat booked and paid for, but no name or contact details have been given yet"
+      >
+        Guest pending
+      </span>
+    );
+  }
+  return (
+    <span
+      className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-600 border border-slate-200 whitespace-nowrap"
+      title="No address of their own — mail for this guest goes to the purchaser's inbox"
+    >
+      Shared inbox
+    </span>
+  );
+}
+
 function GuestStatusBadge({ guest }: { guest: Attendee }) {
   const t = guest.guestType;
   if (t === 'pending-claim') {
@@ -124,12 +160,22 @@ function GuestActions({ guest, formId, onRefresh }: { guest: Attendee; formId: s
   };
 
   if (guest.guestType !== 'pending-claim') return null;
+  // A seat nobody has claimed carries a reserved `.invalid` address, so there
+  // is no inbox to resend to — the link has to be handed to the purchaser.
+  const unreachable = isPlaceholderEmail(guest.email);
   return (
     <div className="flex gap-1 justify-end">
       <button onClick={copyLink} title="Copy registration link" className="p-1 hover:bg-slate-200 rounded">
         <Copy className="w-3.5 h-3.5" />
       </button>
-      <button onClick={resend} title="Resend invitation" className="p-1 hover:bg-slate-200 rounded">
+      <button
+        onClick={resend}
+        disabled={unreachable}
+        title={unreachable
+          ? 'No address for this seat yet — copy the link and send it to the purchaser'
+          : 'Resend invitation'}
+        className="p-1 hover:bg-slate-200 rounded disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+      >
         <Mail className="w-3.5 h-3.5" />
       </button>
       <button onClick={markComplete} title="Mark as completed" className="p-1 hover:bg-slate-200 rounded">
@@ -177,6 +223,9 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
   // "Attendee, sponsor, exhibitor or delegate?" — the dimension that used to
   // be answered by three different screens.
   const [kindFilter, setKindFilter] = useState<RegistrationKindFilter>('all');
+  const [showPendingSeats, setShowPendingSeats] = useState(false);
+  const [showIncompleteOnly, setShowIncompleteOnly] = useState(false);
+  const [completionRecipients, setCompletionRecipients] = useState<Attendee[] | null>(null);
   // Mass email to the current view. The audience is captured when the modal
   // opens so a realtime insert mid-run cannot change who is being emailed.
   const [bulkAudience, setBulkAudience] = useState<{ label: string; recipients: BulkRecipient[] } | null>(null);
@@ -405,6 +454,41 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     [attendees, formTypeById],
   );
   const kindOf = useCallback((a: Attendee) => registrationIndex.kindById.get(a.id) ?? 'attendee', [registrationIndex]);
+  // Who bought each companion's seat — the only reliable way to tell "gave us
+  // their own address" from "inherited the purchaser's" on rows written before
+  // the ingest started recording it.
+  const emailById = useMemo(
+    () => new Map(attendees.map(a => [a.id, a.email] as const)),
+    [attendees],
+  );
+  const contactStatusOf = useCallback(
+    (a: Attendee) => guestContactStatus(a, a.primaryAttendeeId ? emailById.get(a.primaryAttendeeId) : null),
+    [emailById],
+  );
+  // Seats that are booked and paid for but have nobody named on them. They are
+  // real inventory, so they are never deleted or hidden from their purchaser —
+  // they are just kept out of the roster, where an attendee literally called
+  // "- -" is noise with no one to send anything to.
+  const pendingSeatCount = useMemo(
+    () => attendees.filter(a => !a.isTest && isPendingGuest(a)).length,
+    [attendees],
+  );
+  // Registrations missing a REQUIRED answer or consent — most often TSCS India
+  // registrants and comped speakers, who came in through a door that asks less
+  // than this form. Optional questions left blank on the real form don't count:
+  // only what the organisers genuinely cannot proceed without.
+  const formById = useMemo(() => new Map(forms.map(f => [f.id, f] as const)), [forms]);
+  const completionById = useMemo(() => {
+    const m = new Map<string, CompletionStatus>();
+    for (const a of attendees) {
+      m.set(a.id, completionStatus(a, formById.get(a.formId), { isDelegate: kindOf(a) === 'delegate' }));
+    }
+    return m;
+  }, [attendees, formById, kindOf]);
+  const incompleteCount = useMemo(
+    () => attendees.filter(a => !a.isTest && needsCompletion(completionById.get(a.id)!)).length,
+    [attendees, completionById],
+  );
   // Org name shown for a row: the booking's company for org rows, the parent
   // booking's company for delegates, nothing for ordinary attendees.
   const orgNameFor = useCallback((a: Attendee): string | null => {
@@ -674,6 +758,11 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
 
     const matchesKind = matchesRegistrationKindFilter(kindOf(a), kindFilter);
 
+    // Unclaimed seats are off the roster unless explicitly asked for. The Test
+    // tab is exempt: it exists to show exactly what a rehearsal wrote.
+    const matchesPendingSeat = showPendingSeats || activeTab === 'test' || !isPendingGuest(a);
+    const matchesIncomplete = !showIncompleteOnly || needsCompletion(completionById.get(a.id)!);
+
     const matchesStatus = statusFilter === 'all'
       ? true
       : statusFilter === 'checked-in' ? !!a.checkedInAt : !a.checkedInAt;
@@ -695,7 +784,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
       return String(answer || '') === rf.value;
     });
 
-    return matchesSearch && matchesForm && matchesTab && matchesKind && matchesStatus && matchesPayment && matchesAccount && matchesResponseFilters;
+    return matchesSearch && matchesForm && matchesTab && matchesKind && matchesPendingSeat && matchesIncomplete && matchesStatus && matchesPayment && matchesAccount && matchesResponseFilters;
   });
 
   // Count donated seats for badge
@@ -828,24 +917,35 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     const tabLabel = visibleTabs.find(t => t.id === activeTab)?.label ?? activeTab;
     const formLabel = selectedFormId === '_all' ? 'All forms' : (selectedForm?.title ?? 'Form');
     const label = [tabLabel, formLabel, ...chips.map(c => c.label)].join(' · ');
-    const recipients: BulkRecipient[] = sortedFiltered.map(a => {
-      const kind = kindOf(a);
-      const org = orgNameFor(a);
-      const subtitle = kind === 'delegate'
-        ? `Delegate${org ? ` · ${org}` : ''}`
-        : isOrgKind(kind)
-          ? `${REGISTRATION_KIND_META[kind].label} booking`
-          : a.ticketType || 'Attendee';
-      return {
-        key: a.id,
-        email: a.email,
-        name: a.name,
-        userId: a.userId ?? null,
-        attendeeId: a.id,
-        vars: buildAttendeeVars(a, forms, { orgName: org }),
-        subtitle,
-      };
-    });
+    const recipients: BulkRecipient[] = sortedFiltered
+      // An unclaimed seat has no name and no inbox — there is nobody to write
+      // to. It stays visible under its purchaser; it is never a recipient.
+      .filter(a => !isPendingGuest(a))
+      .map(a => {
+        const kind = kindOf(a);
+        const org = orgNameFor(a);
+        const contact = contactStatusOf(a);
+        const subtitle = kind === 'delegate'
+          ? `Delegate${org ? ` · ${org}` : ''}`
+          : isOrgKind(kind)
+            ? `${REGISTRATION_KIND_META[kind].label} booking`
+            : contact === 'shared-inbox'
+              ? `${a.ticketType || 'Attendee'} · shares purchaser's inbox`
+              : a.ticketType || 'Attendee';
+        return {
+          key: a.id,
+          email: a.email,
+          name: a.name,
+          userId: a.userId ?? null,
+          attendeeId: a.id,
+          vars: buildAttendeeVars(a, forms, { orgName: org }),
+          subtitle,
+          // When a companion shares the purchaser's address, the purchaser owns
+          // that inbox and must be the one addressed — otherwise dedupe picks
+          // whichever row happened to sort first and the mail opens "Hello - -".
+          priority: contact === 'shared-inbox' ? 2 : 1,
+        };
+      });
     setBulkAudience({ label, recipients });
   };
 
@@ -1287,6 +1387,61 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                 ))}
               </select>
             </div>
+
+            {/* Unclaimed seats — booked and paid, nobody named yet. Off by
+                default so the roster only shows people you can actually reach. */}
+            {pendingSeatCount > 0 && (
+              <button
+                type="button"
+                onClick={() => { setShowPendingSeats(v => !v); setCurrentPage(1); }}
+                aria-pressed={showPendingSeats}
+                data-testid="toggle-pending-seats"
+                title={showPendingSeats
+                  ? 'Hide seats that are booked but have no name or contact details yet'
+                  : 'Show seats that are booked but have no name or contact details yet'}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-semibold transition-colors ${
+                  showPendingSeats
+                    ? 'bg-amber-100 text-amber-900 border-amber-300'
+                    : 'bg-white text-slate-500 border-slate-200 hover:border-amber-300 hover:text-amber-800'
+                }`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${showPendingSeats ? 'bg-amber-500' : 'bg-slate-300'}`} />
+                Unclaimed seats
+                <span className="font-bold">{pendingSeatCount}</span>
+              </button>
+            )}
+
+            {/* Registered but missing required answers or consents. Filters the
+                list to them, and offers to ask them all in one go. */}
+            {incompleteCount > 0 && (
+              <button
+                type="button"
+                onClick={() => { setShowIncompleteOnly(v => !v); setCurrentPage(1); }}
+                aria-pressed={showIncompleteOnly}
+                data-testid="toggle-incomplete"
+                title="Registered, but missing a required answer or consent — usually people who came in through a partner page or an admin comp"
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-semibold transition-colors ${
+                  showIncompleteOnly
+                    ? 'bg-indigo-100 text-indigo-900 border-indigo-300'
+                    : 'bg-white text-slate-500 border-slate-200 hover:border-indigo-300 hover:text-indigo-800'
+                }`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${showIncompleteOnly ? 'bg-indigo-500' : 'bg-slate-300'}`} />
+                Details incomplete
+                <span className="font-bold">{incompleteCount}</span>
+              </button>
+            )}
+            {showIncompleteOnly && sortedFiltered.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setCompletionRecipients(sortedFiltered.filter(a => needsCompletion(completionById.get(a.id)!)))}
+                data-testid="send-completion-links"
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700"
+              >
+                <Mail className="w-3.5 h-3.5" />
+                Ask {sortedFiltered.length} for their details
+              </button>
+            )}
 
             {/* Response Filters */}
             {selectedFormId !== '_all' && selectedForm && (
@@ -1934,12 +2089,20 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                             )}
                           </div>
                           {!isColumnVisible('email') && (
-                            <div className="text-gray-400 text-xs">{attendee.email}</div>
+                            <div className="text-gray-400 text-xs flex items-center gap-1.5">
+                              {attendee.email}
+                              <ContactStatusChip status={contactStatusOf(attendee)} />
+                            </div>
                           )}
                         </td>
                       )}
                       {isColumnVisible('email') && (
-                        <td className="px-4 py-3 text-gray-600 text-xs">{attendee.email}</td>
+                        <td className="px-4 py-3 text-gray-600 text-xs">
+                          <span className="inline-flex items-center gap-1.5">
+                            {attendee.email}
+                            <ContactStatusChip status={contactStatusOf(attendee)} />
+                          </span>
+                        </td>
                       )}
                       {isColumnVisible('country') && (() => {
                         const countryCode = resolveAttendeeCountryCode(attendee, forms.find(f => f.id === attendee.formId));
@@ -2146,6 +2309,9 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
         />
       )}
 
+      {completionRecipients && (
+        <CompletionSendDialog recipients={completionRecipients} onClose={() => setCompletionRecipients(null)} />
+      )}
       {bulkAudience && settings && (
         <BulkEmailModal
           audience="attendees"

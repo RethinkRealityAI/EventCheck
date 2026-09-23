@@ -201,7 +201,7 @@ function testRows({ eventForm, orgForm, staffFormId, inbox }) {
 }
 
 // ── The flows ─────────────────────────────────────────────────────────────
-async function runFlows({ page, mode, testAddresses, expectRows, expectDelegates }) {
+async function runFlows({ page, mode, testAddresses, expectRows, expectDelegates, expectHiddenSeats }) {
   // 1. Dashboard + stats
   await page.goto(page.url().split('#')[0] + '#/admin');
   await page.waitForSelector('[data-testid="stat-total-registrations"]', { timeout: 60000 });
@@ -232,6 +232,29 @@ async function runFlows({ page, mode, testAddresses, expectRows, expectDelegates
   check('Active-filter chip names the type filter', chip);
   await shot(page, 'live-tab-filter-delegates');
   await page.locator('[data-testid="filter-kind"]').selectOption('all');
+
+  // 3b. Unclaimed seats are off the roster by default and one click away.
+  //     A seat with no name or no address has nobody to show and nobody to
+  //     send to — but it is paid-for inventory, so it must stay findable.
+  const seatToggle = page.locator('[data-testid="toggle-pending-seats"]');
+  const hasToggle = await seatToggle.isVisible().catch(() => false);
+  check('Unclaimed-seat toggle appears when the tenant has unclaimed seats',
+    hasToggle || expectHiddenSeats === 0,
+    hasToggle ? await seatToggle.innerText() : 'no unclaimed seats in this tenant');
+  if (hasToggle) {
+    const before = await page.locator('table tbody tr', { hasText: 'QA-TEST' }).count();
+    await seatToggle.click();
+    await page.waitForTimeout(500);
+    const after = await page.locator('table tbody tr', { hasText: 'QA-TEST' }).count();
+    check('Turning it on reveals the hidden seats, and only those',
+      after - before === expectHiddenSeats,
+      `${before} → ${after} rows (expected +${expectHiddenSeats})`);
+    await shot(page, 'live-tab-unclaimed-seats');
+    await seatToggle.click();
+    await page.waitForTimeout(400);
+    const restored = await page.locator('table tbody tr', { hasText: 'QA-TEST' }).count();
+    check('Turning it off hides them again', restored === before, `${restored} rows`);
+  }
 
   // 4. Delegate detail modal
   const delegateRow = page.locator('table tbody tr', { hasText: 'QA-TEST Delegate One' }).first();
@@ -373,6 +396,129 @@ async function runFlows({ page, mode, testAddresses, expectRows, expectDelegates
   await page.setViewportSize({ width: 1440, height: 1000 });
 }
 
+// ── Complete your registration (mock only) ────────────────────────────────
+//
+// Mock only, deliberately. The real registration-complete function ships when
+// this merges, and even then the live run must never tick a real registrant's
+// consent boxes or email them a link. The fixture speaker, Dr. Lena Fischer,
+// has the shape of the case that motivated the feature: comped, ticketed, and
+// never asked for her name or consents.
+async function runCompletionFlows({ page, base, mock }) {
+  await page.goto(base + '/#/admin');
+  await page.waitForSelector('[data-testid="stat-total-registrations"]', { timeout: 60000 });
+  await tabButton(page, 'Live').click();
+  await page.locator('input[placeholder="Search..."]').fill('');
+  await page.waitForTimeout(500);
+
+  // 1. The dashboard names the gap and filters to it.
+  const toggle = page.locator('[data-testid="toggle-incomplete"]');
+  const toggleShown = await toggle.isVisible().catch(() => false);
+  check('"Details incomplete" appears when someone is missing required answers', toggleShown,
+    toggleShown ? (await toggle.innerText()).replace(/\s+/g, ' ') : 'not shown');
+  if (!toggleShown) return;
+  await toggle.click();
+  await page.waitForTimeout(500);
+  const rows = page.locator('table tbody tr');
+  const names = (await rows.allInnerTexts()).map(t => t.split('\n')[0]).join(' | ');
+  check('It filters to exactly the incomplete registration', (await rows.count()) === 1 && /Lena Fischer/.test(names), names);
+  await shot(page, 'live-tab-details-incomplete');
+
+  // 2. The attendee record says what is missing and offers to ask.
+  await rows.first().locator('button[title="View Details"]').click();
+  await page.waitForTimeout(700);
+  await page.locator('button', { hasText: /^Responses/ }).first().click();
+  await page.waitForTimeout(400);
+  const panel = page.locator('[data-testid="completeness-panel"]');
+  const panelText = (await panel.innerText().catch(() => '')).replace(/\s+/g, ' ');
+  check('The attendee record lists the unanswered questions', /never answered/.test(panelText) && /full name/i.test(panelText), panelText.slice(0, 140));
+  check('It flags the consents she has not given', /required polic/.test(panelText));
+  await modalShot(page, 'attendee-completeness-panel');
+  await page.locator('button[aria-label="Close attendee details"]').click();
+  await page.waitForTimeout(400);
+
+  // 3. Asking everyone at once shows who was sent, skipped, and why.
+  await page.locator('[data-testid="send-completion-links"]').click();
+  const dialog = page.locator('[data-testid="completion-send-dialog"]');
+  await dialog.waitFor({ timeout: 10000 });
+  await modalShot(page, 'completion-send-confirm');
+  await dialog.locator('[data-testid="completion-send-confirm"]').click();
+  await dialog.locator('text=/\\d+ sent · \\d+ skipped/').waitFor({ timeout: 20000 });
+  const summary = (await dialog.innerText()).replace(/\s+/g, ' ');
+  check('Bulk completion send reports each outcome', /1 sent · 0 skipped · 0 failed/.test(summary), summary.slice(0, 120));
+  const sendCall = mock.calls.functions.find(c => c.name === 'registration-complete' && c.body?.action === 'send');
+  check('It asked the server to send exactly that registrant', JSON.stringify(sendCall?.body?.attendeeIds ?? []) === JSON.stringify([LENA_ID]));
+  await modalShot(page, 'completion-send-results');
+  await dialog.locator('button', { hasText: 'Done' }).click();
+  await page.locator('[data-testid="toggle-incomplete"]').click();
+
+  // 4. The registrant's side: only what is missing, consents last.
+  await page.goto(base + '/#/complete?token=qa-mock-token');
+  await page.locator('text=/you.re registered for/').waitFor({ timeout: 20000 });
+  const pageText = (await page.locator('body').innerText()).replace(/\s+/g, ' ');
+  check('The completion page greets the registrant', /Hello Lena/.test(pageText));
+  // Labels are CSS-uppercased and innerText returns them transformed — match case-insensitively.
+  check('It asks what is missing and nothing they already gave', /full name/i.test(pageText) && !/professional role/i.test(pageText.split(/what we already have/i)[0]));
+  check('It never offers the email address for editing', (await page.locator('input[type="email"]').count()) === 0);
+  await shot(page, 'complete-registration-form');
+
+  await page.locator('button', { hasText: 'Save my details' }).click();
+  await page.waitForTimeout(300);
+  const blocked = await page.locator('[role="alert"]').innerText().catch(() => '');
+  check('Saving without the required answers is refused, with a reason', /Please answer|Please confirm/.test(blocked), blocked);
+
+  await page.locator('input[type="text"]').first().fill('Lena Fischer');
+  await page.locator('textarea').first().fill('Vegetarian, no nuts');
+  for (const box of await page.locator('fieldset input[type="checkbox"]').all()) await box.check();
+  await page.locator('button', { hasText: 'Save my details' }).click();
+  await page.locator("text=/you.re all set/").waitFor({ timeout: 20000 });
+  const completeCall = mock.calls.functions.find(c => c.name === 'registration-complete' && c.body?.action === 'complete');
+  const sentAnswers = completeCall?.body?.answers ?? {};
+  check('Completion submits the answers and both consents',
+    sentAnswers.f_name === 'Lena Fischer' && sentAnswers.f_consent_photo === true && sentAnswers.f_consent_terms === true,
+    JSON.stringify(sentAnswers));
+  check('It never submits an answer that was already on file', !('f_role' in sentAnswers) && !('f_country' in sentAnswers));
+  await shot(page, 'complete-registration-done');
+}
+
+const LENA_ID = '00000000-0000-4000-8000-000000000104';
+
+/** Mock of supabase/functions/registration-complete for the fixture tenant. */
+function completionMock(tables) {
+  const lena = () => tables.attendees.find(a => a.id === LENA_ID);
+  const form = () => tables.forms.find(f => f.id === 'gansid-congress-2026');
+  return (name, body) => {
+    if (name !== 'registration-complete') return null;
+    const f = form();
+    const row = lena();
+    const askable = f.fields.filter(x => !['email', 'ticket', 'registration-mode-selector'].includes(x.type) && !x.usedForPricing);
+    const answered = (x, v) => x.type === 'boolean' ? (x.required ? v === true : true)
+      : Array.isArray(v) ? v.length > 0 : v !== undefined && v !== null && String(v).trim() !== '';
+    if (body?.action === 'resolve') {
+      return { body: {
+        ok: true, site: 'gansid', eventName: f.title,
+        attendee: { firstName: 'Lena', name: row.name, email: row.email },
+        complete: false, completedAt: null,
+        fields: askable,
+        outstandingIds: askable.filter(x => !answered(x, row.answers?.[x.id])).map(x => x.id),
+        answers: row.answers,
+        summary: f.fields.filter(x => answered(x, row.answers?.[x.id])).map(x => ({ label: x.label, value: String(row.answers[x.id]) })),
+      } };
+    }
+    if (body?.action === 'complete') {
+      const a = body.answers ?? {};
+      const missing = askable.find(x => x.required && !answered(x, a[x.id]) && !answered(x, row.answers?.[x.id]));
+      if (missing) return { status: 422, body: { error: 'validation', message: `"${missing.label}" is required.`, fieldId: missing.id } };
+      row.answers = { ...row.answers, ...a, _completed_at: new Date().toISOString() };
+      return { body: { ok: true, complete: true } };
+    }
+    if (body?.action === 'send') {
+      return { body: { ok: true, results: (body.attendeeIds ?? []).map(id => ({ attendeeId: id, status: 'sent', email: tables.attendees.find(x => x.id === id)?.email })) } };
+    }
+    if (body?.action === 'link') return { body: { ok: true, url: 'http://localhost/#/complete?token=qa-mock-token' } };
+    return { status: 400, body: { error: 'unknown action' } };
+  };
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────
 async function main() {
   log(`mode=${MODE} run=${RUN_ID} out=${OUT}`);
@@ -391,7 +537,7 @@ async function main() {
       const tables = fx.buildTables();
       const user = { id: fx.ADMIN_USER.id, email: fx.ADMIN_USER.email, aud: 'authenticated', role: 'authenticated', app_metadata: {}, user_metadata: { full_name: fx.ADMIN_USER.full_name }, created_at: new Date().toISOString() };
       const token = fakeJwt(user);
-      const mock = createMockSupabase({ tables, user, accessToken: token });
+      const mock = createMockSupabase({ tables, user, accessToken: token, onFunctionCall: completionMock(tables) });
 
       browser = await chromium.launch();
       const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
@@ -417,8 +563,11 @@ async function main() {
         }
       }
       await page.reload();
-      await runFlows({ page, mode: 'mock', testAddresses, expectRows: 6, expectDelegates: 4 });
+      // One fixture delegate — the sponsor's staff slot #3 — has a placeholder
+      // name and no address, so it sits behind the unclaimed-seat toggle.
+      await runFlows({ page, mode: 'mock', testAddresses, expectRows: 5, expectDelegates: 3, expectHiddenSeats: 1 });
       check('Mock transport received bulk sends', mock.calls.functions.filter(c => c.name === 'send-ticket-email').length >= 4, `${mock.calls.functions.length} function calls`);
+      await runCompletionFlows({ page, base, mock });
     } else {
       const SUPA = process.env.VITE_SUPABASE_URL;
       const ANON = process.env.VITE_SUPABASE_ANON_KEY;
@@ -481,7 +630,8 @@ async function main() {
       check('Seeded test booking, delegates and attendee', true, `${seed.rows.length} rows stamped ${RUN_ID}`);
 
       await page.reload();
-      await runFlows({ page, mode: 'live', testAddresses: seed.addresses, expectRows: seed.rows.length, expectDelegates: 2 });
+      // Every seeded row is named and reachable, so none of them is hidden.
+      await runFlows({ page, mode: 'live', testAddresses: seed.addresses, expectRows: seed.rows.length, expectDelegates: 2, expectHiddenSeats: 0 });
 
       // Verify the bulk send was logged for exactly the test addresses.
       const sends = await rest(`email_sends?select=recipient_email,subject,metadata,sent_at&sent_at=gte.${encodeURIComponent(STARTED_AT)}&order=sent_at.desc&limit=50`);

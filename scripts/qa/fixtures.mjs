@@ -40,8 +40,15 @@ export const FORMS = [
     fields: [
       { id: 'f_name', type: 'text', label: 'Full Name', required: true },
       { id: 'f_email', type: 'email', label: 'Email Address', required: true },
-      { id: 'f_country', type: 'country', label: 'Country', required: true },
+      // usedForPricing, as on the live GANSID form — country set the price paid.
+      { id: 'f_country', type: 'country', label: 'Country', required: true, usedForPricing: true },
       { id: 'f_role', type: 'select', label: 'Professional role', options: ['Physician', 'Nurse', 'Researcher', 'Patient advocate'] },
+      // The questions a TSCS India registrant or a comped speaker never gets
+      // asked — what "complete your registration" exists to collect.
+      { id: 'f_diet', type: 'textarea', label: 'Do you have any dietary restrictions or allergies?', required: false },
+      { id: 'f_emerg_name', type: 'text', label: 'Emergency contact name', required: false },
+      { id: 'f_consent_photo', type: 'boolean', label: 'I understand that photos or videos may be taken at the event.', required: true },
+      { id: 'f_consent_terms', type: 'boolean', label: 'I have read and agree to the event terms and conditions.', required: true },
     ],
     settings: { renderMode: 'stepped', steps: [{ id: 's1' }, { id: 's2' }, { id: 's3' }, { id: 's4' }, { id: 's5' }], currency: 'USD' },
   },
@@ -121,13 +128,13 @@ const ORG_FORM = 'gansid-sponsor-exhibitor';
 
 export const ATTENDEES = [
   // ── Ordinary registrants ──
-  base({ id: uuid(100), form_id: CONGRESS, form_title: 'GANSID Congress 2026', name: 'Grace Mensah', email: plus('grace'), ticket_type: 'Physician — Regular', registered_at: iso(3), user_id: uuid(1001), answers: { f_country: 'GH', f_role: 'Physician' }, checked_in_at: iso(1), payment_amount: '150.00 USD', pricing_template_id: 'tpl', pricing_tier: 'tier2', pricing_bracket: 'regular', pricing_category_id: 'physician' }),
-  base({ id: uuid(101), form_id: CONGRESS, form_title: 'GANSID Congress 2026', name: 'Ravi Iyer', email: plus('ravi'), ticket_type: 'Researcher — Regular', registered_at: iso(30), user_id: uuid(1002), answers: { f_country: 'IN', f_role: 'Researcher' }, payment_amount: '150.00 USD', pricing_template_id: 'tpl', pricing_tier: 'tier2', pricing_bracket: 'regular', pricing_category_id: 'physician' }),
-  base({ id: uuid(102), form_id: CONGRESS, form_title: 'GANSID Congress 2026', name: 'Priya Iyer', email: plus('priya'), ticket_type: 'Nurse — Regular', registered_at: iso(30), primary_attendee_id: uuid(101), is_primary: false, guest_type: 'claimed', answers: { f_country: 'IN', f_role: 'Nurse' }, payment_amount: '100.00 USD' }),
-  base({ id: uuid(103), form_id: CONGRESS, form_title: 'GANSID Congress 2026', name: 'Amaka Obi', email: plus('amaka'), ticket_type: 'Free guest', registered_at: iso(28), payment_status: 'free', payment_method: 'bogo', is_bogo_claim: true, bogo_source_attendee_id: uuid(100), answers: { _guest_country: 'NG' }, payment_amount: '0' }),
+  base({ id: uuid(100), form_id: CONGRESS, form_title: 'GANSID Congress 2026', name: 'Grace Mensah', email: plus('grace'), ticket_type: 'Physician — Regular', registered_at: iso(3), user_id: uuid(1001), answers: { f_name: 'Grace Mensah', f_consent_photo: true, f_consent_terms: true, f_country: 'GH', f_role: 'Physician' }, checked_in_at: iso(1), payment_amount: '150.00 USD', pricing_template_id: 'tpl', pricing_tier: 'tier2', pricing_bracket: 'regular', pricing_category_id: 'physician' }),
+  base({ id: uuid(101), form_id: CONGRESS, form_title: 'GANSID Congress 2026', name: 'Ravi Iyer', email: plus('ravi'), ticket_type: 'Researcher — Regular', registered_at: iso(30), user_id: uuid(1002), answers: { f_name: 'Ravi Iyer', f_consent_photo: true, f_consent_terms: true, f_country: 'IN', f_role: 'Researcher' }, payment_amount: '150.00 USD', pricing_template_id: 'tpl', pricing_tier: 'tier2', pricing_bracket: 'regular', pricing_category_id: 'physician' }),
+  base({ id: uuid(102), form_id: CONGRESS, form_title: 'GANSID Congress 2026', name: 'Priya Iyer', email: plus('priya'), ticket_type: 'Nurse — Regular', registered_at: iso(30), primary_attendee_id: uuid(101), is_primary: false, guest_type: 'claimed', answers: { f_name: 'Priya Iyer', f_consent_photo: true, f_consent_terms: true, f_country: 'IN', f_role: 'Nurse' }, payment_amount: '100.00 USD' }),
+  base({ id: uuid(103), form_id: CONGRESS, form_title: 'GANSID Congress 2026', name: 'Amaka Obi', email: plus('amaka'), ticket_type: 'Free guest', registered_at: iso(28), payment_status: 'free', payment_method: 'bogo', is_bogo_claim: true, bogo_source_attendee_id: uuid(100), answers: { _guest_country: 'NG', f_name: 'Amaka Obi', f_consent_photo: true, f_consent_terms: true }, payment_amount: '0' }),
   base({ id: uuid(104), form_id: CONGRESS, form_title: 'GANSID Congress 2026', name: 'Dr. Lena Fischer', email: plus('lena'), ticket_type: 'Speaker', registered_at: iso(60), payment_status: 'free', payment_method: 'promo', guest_type: 'speaker', attendee_category: 'speaker', applied_promo_code: 'SPEAKER2026', answers: { f_country: 'DE', f_role: 'Physician' }, payment_amount: '0' }),
-  base({ id: uuid(105), form_id: CONGRESS, form_title: 'GANSID Congress 2026', name: 'Kofi Boateng', email: plus('kofi'), ticket_type: 'Patient advocate — Regular', registered_at: iso(72), payment_status: 'pending', payment_method: 'flutterwave', answers: { f_country: 'GH', f_role: 'Patient advocate' }, user_id: uuid(1003) }),
-  base({ id: uuid(106), form_id: CONGRESS, form_title: 'GANSID Congress 2026', name: 'Samuel Okafor', email: plus('samuel'), ticket_type: 'Physician — Regular', registered_at: iso(100), answers: { f_country: 'NG', f_role: 'Physician' }, payment_amount: '150.00 USD', checked_in_at: iso(2) }),
+  base({ id: uuid(105), form_id: CONGRESS, form_title: 'GANSID Congress 2026', name: 'Kofi Boateng', email: plus('kofi'), ticket_type: 'Patient advocate — Regular', registered_at: iso(72), payment_status: 'pending', payment_method: 'flutterwave', answers: { f_name: 'Kofi Boateng', f_consent_photo: true, f_consent_terms: true, f_country: 'GH', f_role: 'Patient advocate' }, user_id: uuid(1003) }),
+  base({ id: uuid(106), form_id: CONGRESS, form_title: 'GANSID Congress 2026', name: 'Samuel Okafor', email: plus('samuel'), ticket_type: 'Physician — Regular', registered_at: iso(100), answers: { f_name: 'Samuel Okafor', f_consent_photo: true, f_consent_terms: true, f_country: 'NG', f_role: 'Physician' }, payment_amount: '150.00 USD', checked_in_at: iso(2) }),
 
   // ── Pfizer: sponsor booking + delegation (the reported case) ──
   base({

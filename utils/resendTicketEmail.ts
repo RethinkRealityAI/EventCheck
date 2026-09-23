@@ -6,6 +6,8 @@ import { resolveEmailTemplate } from './emailTemplates';
 import { generateTicketPDF } from './pdfGenerator';
 import { isPlaceholderGuestName, resolveAttendeeDisplayName } from './resolveAttendeeDisplayName';
 import { isTableGuestRow } from './tableSeats';
+import { isPlaceholderEmail } from './registrationKind';
+import { isMultiSeatPurchase } from '../supabase/functions/_shared/purchaseShape';
 
 function guestSortKey(a: Attendee): number {
   const m = (a.name || '').match(/#(\d+)\s*$/);
@@ -43,6 +45,16 @@ export async function resendTicketEmailForAttendee(
   const fresh = await getAttendee(attendeeId);
   if (!fresh) {
     throw new Error('Attendee record not found.');
+  }
+
+  // A seat nobody has claimed carries a reserved `.invalid` address by design,
+  // so "resend" has no inbox to aim at. Say what to do instead rather than
+  // letting it fail at the SMTP layer as an unexplained bounce.
+  if (isPlaceholderEmail(fresh.email)) {
+    throw new Error(
+      'This seat has no contact details yet, so there is nowhere to send a ticket. '
+      + 'Copy its claim link from the purchaser\'s record and send that to the purchaser instead.',
+    );
   }
 
   const settings = await getSettings();
@@ -97,7 +109,16 @@ export async function resendTicketEmailForAttendee(
        </div>`
     : '';
 
-  const isTable = guests.length > 0;
+  // Template choice follows what was BOUGHT, the same rule the server's
+  // registration-confirmed mode uses (_shared/purchaseShape.ts). "Has guests"
+  // was the old test, and resending to a TSCS registrant with a companion —
+  // or a speaker with a guest place — told them they had bought a table.
+  // Guest PDFs and claim links are still attached whenever guests exist: that
+  // is about who is attending, which is a different question.
+  const isTable = isMultiSeatPurchase(
+    { ticket_type: fresh.ticketType, answers: fresh.answers as Record<string, unknown> | undefined },
+    form?.fields,
+  );
   // Resolve subject/body through the canonical resolver so a per-form override
   // (form.settings.emailOverrides, gated on enabled) wins consistently — the
   // same precedence the edge P4 confirmation applies. Preserves the historical
