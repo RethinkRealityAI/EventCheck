@@ -59,8 +59,28 @@ brought back here is how these drift.
 | File | Dashboard template | Project |
 |---|---|---|
 | `confirm-signup.html` | Confirm signup | GANSID (`gticuvgclbvhwvpzkuez`) |
+| `reset-password.html` | Reset password | GANSID (`gticuvgclbvhwvpzkuez`) |
+| `magic-link.html` | Magic link | GANSID (`gticuvgclbvhwvpzkuez`) |
 
-The other GANSID templates (magic link, recovery, invite, email change) were
-authored from the same markup and have not been captured here yet. Check each
-one for the `background:` shorthand before trusting it, and add it to this
-directory once corrected.
+Invite user and Change email address are still Supabase's plain defaults on
+GANSID (no gradient, so no invisible button). The app does not send the
+invite template at all — `admin-invite` creates accounts with a temporary
+password and mails through our own pipeline.
+
+## Links: token_hash, never `{{ .ConfirmationURL }}`
+
+The browser client runs with `flowType: 'pkce'`. A `{{ .ConfirmationURL }}`
+link completes only in the browser that started the flow; opened on a phone
+it fails with "session not found" (the 2026-06-30 incident). Every template
+here links to the app with `token_hash={{ .TokenHash }}&amp;type=<kind>`
+instead, which `utils/authHashCallback.ts` resolves with `verifyOtp` on any
+device — the same shape `admin-user-actions` mints for admin-sent links.
+
+| Template | Link |
+|---|---|
+| Confirm signup | `{{ .SiteURL }}/#/portal?token_hash={{ .TokenHash }}&amp;type=signup` |
+| Reset password | `{{ .SiteURL }}/#/reset-password?token_hash={{ .TokenHash }}&amp;type=recovery` |
+| Magic link | `{{ .SiteURL }}/#/portal?token_hash={{ .TokenHash }}&amp;type=magiclink` |
+
+No current app flow sends the magic-link template (nothing calls
+`signInWithOtp`); it is corrected anyway so it is safe the day something does.
