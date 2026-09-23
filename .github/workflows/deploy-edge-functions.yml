@@ -97,12 +97,36 @@ jobs:
             ! -name '_shared' -printf '%f\n' | sort)
           echo "Functions: $(echo "$FUNCTIONS" | tr '\n' ' ')"
 
+          # --use-api bundles on Supabase's servers. Without it the CLI pulls
+          # its edge-runtime bundler image from ghcr.io for every function,
+          # and on 2026-09-23 a registry rate limit ("toomanyrequests")
+          # aborted a deploy before a single function shipped — leaving a
+          # merged security fix undeployed. No Docker pull, no registry limit.
+          #
+          # Each function also gets three attempts with a growing pause, so a
+          # transient API hiccup cannot stop the loop halfway and leave the
+          # two tenants running different versions of the code.
+          deploy_one() {
+            local fn="$1" ref="$2" attempt
+            for attempt in 1 2 3; do
+              if supabase functions deploy "$fn" --project-ref "$ref" --use-api; then
+                return 0
+              fi
+              if [ "$attempt" -lt 3 ]; then
+                echo "::warning::$fn failed to deploy (attempt $attempt of 3) — retrying in $((attempt * 15))s"
+                sleep $((attempt * 15))
+              fi
+            done
+            echo "::error::$fn did not deploy to $ref after 3 attempts"
+            return 1
+          }
+
           deploy_to() {
             local ref="$1" label="$2"
             echo "::group::Deploying to $label ($ref)"
             for fn in $FUNCTIONS; do
               echo "→ $fn"
-              supabase functions deploy "$fn" --project-ref "$ref"
+              deploy_one "$fn" "$ref"
             done
             echo "::endgroup::"
           }
@@ -133,6 +157,22 @@ jobs:
               *'"ok":true'*) echo "  ✓ new code is live" ;;
               *) echo "::error::$label smoke test failed — old code may still be running. Response: $body"; return 1 ;;
             esac
+
+            # send-ticket-email must refuse caller-written HTML from an
+            # unauthenticated caller (_shared/senderAuth.ts). Anything but a
+            # 401 means the open-relay fix is not running on this tenant.
+            # The probe address is RFC 2606 `.invalid`, so even old code
+            # could not deliver it anywhere.
+            local code
+            code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "https://${ref}.supabase.co/functions/v1/send-ticket-email" \
+              -H "Content-Type: application/json" \
+              -d '{"mode":"raw-html","to":"ci-smoke@example.invalid","subject":"ci smoke","html":"<p>ci smoke</p>"}' || true)
+            if [ "$code" = "401" ]; then
+              echo "  ✓ unauthenticated raw-html send refused (401)"
+            else
+              echo "::error::$label send-ticket-email accepted an unauthenticated raw-html send (HTTP $code) — the relay fix is not live"
+              return 1
+            fi
           }
           rc=0
           case "$TARGET" in
