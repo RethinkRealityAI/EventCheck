@@ -7,7 +7,7 @@
 //
 //   REG-00061  "Free Addon Person / Name- -Email"     → attendee named "- -"
 //              with the BUYER's inbox, sitting in the live roster.
-//   REG-00058  addon email "vaishalimare@gmail.com.com" → a doubled TLD that
+//   REG-00058  addon email "companion@gmail.com.com" → a doubled TLD that
 //              can never be delivered, stored as if it were reachable.
 //
 // So the decision is split in two, because they have different consequences:

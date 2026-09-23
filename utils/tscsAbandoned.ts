@@ -15,7 +15,7 @@
 // Two things make it non-trivial, and both are visible in live data:
 //
 //   RETRIES      One person can generate several pending notices before
-//                succeeding (REG-00052 / 53 / 54 are all UDAYAKUMAR DS, who
+//                succeeding (REG-00052 / 53 / 54 are all one person, who
 //                paid on the third). Their earlier attempts are not leads.
 //   ORDERING     The pending notice often arrives AFTER the confirmation —
 //                seven of sixteen paired registrations in production — so

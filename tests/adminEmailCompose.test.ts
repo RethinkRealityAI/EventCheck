@@ -151,7 +151,7 @@ describe('dedupeRecipients', () => {
     // with the same registered_at, so list order was effectively arbitrary —
     // which is how a booking could go out addressed "Hello - -".
     const companion: BulkRecipient = { key: 'companion', email: 'buyer@example.com', name: '- -', vars: {}, priority: 2 };
-    const buyer: BulkRecipient = { key: 'buyer', email: 'buyer@example.com', name: 'Varun Trivedi', vars: {}, priority: 1 };
+    const buyer: BulkRecipient = { key: 'buyer', email: 'buyer@example.com', name: 'Karan Mehta', vars: {}, priority: 1 };
     for (const order of [[companion, buyer], [buyer, companion]]) {
       const out = dedupeRecipients(order);
       expect(out.recipients.map(x => x.key)).toEqual(['buyer']);

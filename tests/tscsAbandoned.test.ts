@@ -17,35 +17,35 @@ const success = (ref: string, email: string, at: string): TscsAbandonedInput => 
 
 describe('findAbandonedCheckouts', () => {
   it('lists someone who only ever started', () => {
-    const out = findAbandonedCheckouts([pending('REG-00047', 'naresh@example.com', '2026-09-17T14:37:02Z')]);
+    const out = findAbandonedCheckouts([pending('REG-00047', 'buyer-a@example.com', '2026-09-17T14:37:02Z')]);
     expect(out).toHaveLength(1);
-    expect(out[0]).toMatchObject({ ref: 'REG-00047', email: 'naresh@example.com', attempts: 1, amountInr: 7200 });
+    expect(out[0]).toMatchObject({ ref: 'REG-00047', email: 'buyer-a@example.com', attempts: 1, amountInr: 7200 });
   });
 
   it('drops the reference that later succeeded, even though the pending mail arrived AFTER it', () => {
     // Seven of sixteen live pairs land in this order, which is exactly why
     // "the newest mail was a pending one" cannot be the test.
     const out = findAbandonedCheckouts([
-      success('REG-00062', 'galeeb@example.com', '2026-09-21T13:13:19Z'),
-      pending('REG-00062', 'galeeb@example.com', '2026-09-21T13:14:16Z'),
+      success('REG-00062', 'buyer-b@example.com', '2026-09-21T13:13:19Z'),
+      pending('REG-00062', 'buyer-b@example.com', '2026-09-21T13:14:16Z'),
     ]);
     expect(out).toEqual([]);
   });
 
   it('drops a person who abandoned twice and then paid on a third reference', () => {
-    // UDAYAKUMAR DS: REG-00052 and REG-00053 abandoned, REG-00054 paid.
+    // One person: REG-00052 and REG-00053 abandoned, REG-00054 paid.
     const out = findAbandonedCheckouts([
-      pending('REG-00052', 'uday@example.com', '2026-09-20T00:39:45Z'),
-      pending('REG-00053', 'uday@example.com', '2026-09-20T00:42:49Z'),
-      success('REG-00054', 'uday@example.com', '2026-09-20T00:46:34Z'),
+      pending('REG-00052', 'buyer-c@example.com', '2026-09-20T00:39:45Z'),
+      pending('REG-00053', 'buyer-c@example.com', '2026-09-20T00:42:49Z'),
+      success('REG-00054', 'buyer-c@example.com', '2026-09-20T00:46:34Z'),
     ]);
     expect(out).toEqual([]);
   });
 
   it('counts repeat attempts by the same person as one lead', () => {
     const out = findAbandonedCheckouts([
-      pending('REG-00059', 'joseph@example.com', '2026-09-21T01:53:06Z'),
-      pending('REG-00060', 'joseph@example.com', '2026-09-21T01:57:25Z'),
+      pending('REG-00059', 'buyer-d@example.com', '2026-09-21T01:53:06Z'),
+      pending('REG-00060', 'buyer-d@example.com', '2026-09-21T01:57:25Z'),
     ]);
     expect(out).toHaveLength(1);
     expect(out[0].attempts).toBe(2);
@@ -56,9 +56,9 @@ describe('findAbandonedCheckouts', () => {
   it('takes the freshest details, since a retry often fixes what made them abandon', () => {
     const out = findAbandonedCheckouts([
       pending('REG-00059', 'j@example.com', '2026-09-21T01:53:06Z', { name: 'J', category: 'Patients or Family Members', total_inr: 2400 }),
-      pending('REG-00060', 'j@example.com', '2026-09-21T01:57:25Z', { name: 'M Joseph John', category: 'Physicians / Researchers', total_inr: 7200 }),
+      pending('REG-00060', 'j@example.com', '2026-09-21T01:57:25Z', { name: 'A Example Speaker', category: 'Physicians / Researchers', total_inr: 7200 }),
     ]);
-    expect(out[0]).toMatchObject({ name: 'M Joseph John', category: 'Physicians / Researchers', amountInr: 7200 });
+    expect(out[0]).toMatchObject({ name: 'A Example Speaker', category: 'Physicians / Researchers', amountInr: 7200 });
   });
 
   it('treats an ingested row as completed even if its subject is unusual', () => {

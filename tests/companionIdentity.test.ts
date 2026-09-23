@@ -10,7 +10,7 @@ import {
 
 describe('readCompanionName', () => {
   it('accepts an ordinary name', () => {
-    expect(readCompanionName('Niharika Gali Mary')).toEqual({ name: 'Niharika Gali Mary', reason: 'ok' });
+    expect(readCompanionName('Meera Devi Thomas')).toEqual({ name: 'Meera Devi Thomas', reason: 'ok' });
   });
 
   it('strips an honorific and collapses whitespace, like the parser does', () => {
@@ -51,14 +51,14 @@ describe('readCompanionName', () => {
 
 describe('readCompanionEmail', () => {
   it('accepts and normalises a real address', () => {
-    expect(readCompanionEmail('  Aishu.Tummala@Gmail.com ')).toEqual({
-      email: 'aishu.tummala@gmail.com', reason: 'ok',
+    expect(readCompanionEmail('  Jane.Example@Gmail.com ')).toEqual({
+      email: 'jane.example@gmail.com', reason: 'ok',
     });
   });
 
   it('rejects the doubled TLD that is valid, undeliverable, and quota-burning', () => {
     // REG-00058 stored this as if it were reachable.
-    expect(readCompanionEmail('vaishalimare@gmail.com.com')).toEqual({
+    expect(readCompanionEmail('companion@gmail.com.com')).toEqual({
       email: null, reason: 'doubled-tld',
     });
   });
@@ -75,9 +75,9 @@ describe('readCompanionEmail', () => {
   });
 
   it('treats the purchaser own address as "not theirs", case-insensitively', () => {
-    // SATYENDRA SINGH arrived as THALASSAEMIAFREEMP@GMAIL.COM against a
+    // A companion arrived as CLINIC.OFFICE@GMAIL.COM against a
     // lowercase purchaser address.
-    expect(readCompanionEmail('THALASSAEMIAFREEMP@GMAIL.COM', 'thalassaemiafreemp@gmail.com')).toEqual({
+    expect(readCompanionEmail('CLINIC.OFFICE@GMAIL.COM', 'clinic.office@gmail.com')).toEqual({
       email: null, reason: 'same-as-purchaser',
     });
   });
@@ -93,8 +93,8 @@ describe('resolveCompanionIdentity', () => {
   });
 
   it('separates the two verdicts — a named person with no inbox is still named', () => {
-    const id = resolveCompanionIdentity({ name: 'Atul Kulkarni', email: 'buyer@example.com' }, 'buyer@example.com');
-    expect(id.name).toBe('Atul Kulkarni');
+    const id = resolveCompanionIdentity({ name: 'Arun Menon', email: 'buyer@example.com' }, 'buyer@example.com');
+    expect(id.name).toBe('Arun Menon');
     expect(id.email).toBeNull();
     expect(id.emailReason).toBe('same-as-purchaser');
   });
@@ -121,7 +121,7 @@ describe('placeholder addresses', () => {
 
 describe('pendingGuestName', () => {
   it('names the seat after its purchaser', () => {
-    expect(pendingGuestName('Varun Trivedi')).toBe('Varun Trivedi - Guest (pending)');
+    expect(pendingGuestName('Karan Mehta')).toBe('Karan Mehta - Guest (pending)');
   });
 
   it('never produces a leading separator when the purchaser has no name', () => {

@@ -189,8 +189,8 @@ describe('isPendingGuest', () => {
 
   it('recognises every placeholder name the platform issues', () => {
     expect(isPendingGuest(seat({ name: 'Acme - Guest Ticket #3', email: 'x@y.com' }))).toBe(true);
-    expect(isPendingGuest(seat({ name: 'aditi - Free Guest (pending)', email: 'x@y.com' }))).toBe(true);
-    expect(isPendingGuest(seat({ name: 'Varun - Guest (pending)', email: 'x@y.com' }))).toBe(true);
+    expect(isPendingGuest(seat({ name: 'kavya - Free Guest (pending)', email: 'x@y.com' }))).toBe(true);
+    expect(isPendingGuest(seat({ name: 'Karan - Guest (pending)', email: 'x@y.com' }))).toBe(true);
     expect(isPendingGuest(seat({ name: 'Acme — Staff slot #3', email: 'x@y.com' }))).toBe(true);
     // "- -" — the live REG-00061 row.
     expect(isPendingGuest(seat({ name: '- -', email: 'x@y.com' }))).toBe(true);

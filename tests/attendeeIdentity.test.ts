@@ -20,7 +20,7 @@ describe('normalizePersonName', () => {
 describe('namesLookLikeSamePerson', () => {
   it('matches identical and differently-punctuated names', () => {
     expect(namesLookLikeSamePerson('Jane Doe', 'jane  doe')).toBe(true);
-    expect(namesLookLikeSamePerson('Jelili Ojodu', 'jelili.ojodu')).toBe(true);
+    expect(namesLookLikeSamePerson('Tunde Bello', 'tunde.bello')).toBe(true);
   });
 
   it('matches when one name is a token-subset (title/middle name added)', () => {
@@ -30,7 +30,7 @@ describe('namesLookLikeSamePerson', () => {
 
   it('does NOT match two different people sharing an address', () => {
     expect(namesLookLikeSamePerson('Jane Doe', 'John Smith')).toBe(false);
-    expect(namesLookLikeSamePerson('Sikha Singh', 'Jelili Ojodu')).toBe(false);
+    expect(namesLookLikeSamePerson('Asha Grant', 'Tunde Bello')).toBe(false);
   });
 
   it('never matches when either name is blank', () => {
@@ -55,10 +55,10 @@ describe('pickAttendeeForContact', () => {
 
   it('picks the NAME-matching row when a partner shares the address', () => {
     const r = pickAttendeeForContact({
-      contactName: 'Sikha Singh',
+      contactName: 'Asha Grant',
       candidates: [
-        { id: 'payer', name: 'Jelili Ojodu', email: 'shared@aphl.org' },
-        { id: 'guest', name: 'Sikha Singh', email: 'shared@aphl.org' },
+        { id: 'payer', name: 'Tunde Bello', email: 'shared@example.org' },
+        { id: 'guest', name: 'Asha Grant', email: 'shared@example.org' },
       ],
     });
     expect(r).toEqual({ action: 'reuse', attendeeId: 'guest', reason: 'name-match' });
@@ -66,8 +66,8 @@ describe('pickAttendeeForContact', () => {
 
   it('creates a NEW row rather than hijacking a different person on the same email', () => {
     const r = pickAttendeeForContact({
-      contactName: 'Sikha Singh',
-      candidates: [{ id: 'payer', name: 'Jelili Ojodu', email: 'shared@aphl.org' }],
+      contactName: 'Asha Grant',
+      candidates: [{ id: 'payer', name: 'Tunde Bello', email: 'shared@example.org' }],
     });
     expect(r).toEqual({ action: 'create', reason: 'different-person' });
   });
