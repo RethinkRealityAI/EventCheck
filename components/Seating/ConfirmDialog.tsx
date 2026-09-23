@@ -1,6 +1,7 @@
 // components/Seating/ConfirmDialog.tsx
 import React, { useState } from 'react';
 import { AlertTriangle, X } from 'lucide-react';
+import ModalPortal from '../ModalPortal';
 
 interface ConfirmDialogProps {
     open: boolean;
@@ -50,6 +51,7 @@ export default function ConfirmDialog({
         : 'bg-indigo-600 hover:bg-indigo-700';
 
     return (
+        <ModalPortal>
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onKeyDown={handleKeyDown}>
             <div className="bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6 animate-in fade-in zoom-in-95">
                 <div className="flex items-start gap-3 mb-4">
@@ -94,5 +96,6 @@ export default function ConfirmDialog({
                 </div>
             </div>
         </div>
+        </ModalPortal>
     );
 }

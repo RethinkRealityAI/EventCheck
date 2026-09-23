@@ -6,6 +6,7 @@ import {
   sendCompletionLinks,
   type CompletionSendResult,
 } from '../../services/registrationCompletion';
+import ModalPortal from '../ModalPortal';
 
 /**
  * Confirm → progress → results for sending completion links to many people.
@@ -40,6 +41,7 @@ export default function CompletionSendDialog({ recipients, onClose }: { recipien
   const quotaHit = results.some(r => r.reason === 'quota' || (r.status === 'failed' && /quota|rate limit|too many/i.test(r.reason || '')));
 
   return (
+    <ModalPortal>
     <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="completion-send-title" data-testid="completion-send-dialog">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden">
         <div className="flex items-start justify-between px-5 py-4 border-b border-slate-100">
@@ -135,5 +137,6 @@ export default function CompletionSendDialog({ recipients, onClose }: { recipien
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }

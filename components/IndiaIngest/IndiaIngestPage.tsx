@@ -10,6 +10,7 @@ import {
   type TscsEmailRow, type TscsEmailStatus, type TscsPollRun,
 } from '../../services/tscsIngestService';
 import { findAbandonedCheckouts, abandonedValueInr } from '../../utils/tscsAbandoned';
+import ModalPortal from '../ModalPortal';
 
 const STATUS_META: Record<TscsEmailStatus, { cls: string; icon: React.ReactNode; label: string }> = {
   'ingested':     { cls: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: <CheckCircle2 className="w-3 h-3" />,  label: 'Registered' },
@@ -540,6 +541,7 @@ const ReviewModal: React.FC<{
   };
 
   return (
+    <ModalPortal>
     <div
       className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center backdrop-blur-sm bg-black/20 p-0 sm:p-6"
       onClick={onClose}
@@ -663,6 +665,7 @@ const ReviewModal: React.FC<{
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 };
 

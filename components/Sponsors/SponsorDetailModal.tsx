@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Attendee, AppSettings } from '../../types';
 import { X, Download, CheckCircle } from 'lucide-react';
 import { supabase } from '../../services/supabaseClient';
@@ -6,6 +6,7 @@ import { generateReceiptPDF } from '../../utils/receiptGenerator';
 import { updateAttendee } from '../../services/storageService';
 import { useNotifications } from '../NotificationSystem';
 import { delegateStatus } from '../../utils/registrationKind';
+import ModalPortal from '../ModalPortal';
 
 interface Props {
   attendee: Attendee;
@@ -19,6 +20,20 @@ const SponsorDetailModal: React.FC<Props> = ({ attendee, settings, onClose, onCh
   const [guests, setGuests] = useState<any[]>([]);
   const [notes, setNotes] = useState(attendee.adminNotes || '');
   const { showNotification } = useNotifications();
+  // Only a press that both starts and ends on the dimmed backdrop closes the
+  // dialog, so a text selection dragged out of the panel doesn't.
+  const backdropPressed = useRef(false);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      // Blur first so an in-progress Admin Notes edit is saved by its onBlur.
+      (document.activeElement as HTMLElement | null)?.blur();
+      onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
 
   useEffect(() => {
     (async () => {
@@ -44,14 +59,22 @@ const SponsorDetailModal: React.FC<Props> = ({ attendee, settings, onClose, onCh
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <ModalPortal>
+    <div
+      className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="sponsor-detail-title"
+      onMouseDown={e => { backdropPressed.current = e.target === e.currentTarget; }}
+      onClick={e => { if (backdropPressed.current && e.target === e.currentTarget) onClose(); }}
+    >
       <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-start p-6 border-b sticky top-0 bg-white">
           <div>
-            <h2 className="text-2xl font-bold">{attendee.companyInfo?.orgName || attendee.name}</h2>
+            <h2 id="sponsor-detail-title" className="text-2xl font-bold">{attendee.companyInfo?.orgName || attendee.name}</h2>
             <p className="text-sm text-slate-500">{attendee.companyInfo?.contactName} • {attendee.email}</p>
           </div>
-          <button onClick={onClose}><X className="w-5 h-5" /></button>
+          <button onClick={onClose} aria-label="Close"><X className="w-5 h-5" /></button>
         </div>
 
         <div className="p-6 space-y-5">
@@ -137,6 +160,7 @@ const SponsorDetailModal: React.FC<Props> = ({ attendee, settings, onClose, onCh
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 };
 

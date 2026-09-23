@@ -2,6 +2,7 @@ import React from 'react';
 import { X } from 'lucide-react';
 import { availableTemplatesForSite, type FormTemplate } from '../../config/formTemplates';
 import { CURRENT_SITE } from '../../config/sites';
+import ModalPortal from '../ModalPortal';
 
 interface Props {
   onPick: (t: FormTemplate) => void;
@@ -11,6 +12,7 @@ interface Props {
 export default function TemplatePickerModal({ onPick, onClose }: Props) {
   const templates = availableTemplatesForSite(CURRENT_SITE.key);
   return (
+    <ModalPortal>
     <div className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl max-w-3xl w-full shadow-2xl" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between p-5 border-b">
@@ -30,5 +32,6 @@ export default function TemplatePickerModal({ onPick, onClose }: Props) {
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }

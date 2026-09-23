@@ -3,6 +3,7 @@ import jsQR from 'jsqr';
 import { Camera, X, CheckCircle, AlertTriangle, Volume2, VolumeX, Armchair, Utensils, LogOut, UserPlus, Loader2 } from 'lucide-react';
 import { Attendee } from '../types';
 import { getSeatingTables } from '../services/storageService';
+import ModalPortal from './ModalPortal';
 
 type ScanOutcome =
   | Attendee
@@ -322,6 +323,7 @@ const Scanner: React.FC<ScannerProps> = ({ onScan, onCapturePlaceholder, onClose
   const pendingAttendee = scanResult?.status === 'pending-capture' ? scanResult.attendee : null;
 
   return (
+    <ModalPortal>
     <div className="fixed inset-0 z-50 bg-black flex flex-col">
       {/* Header */}
       <div className="flex items-center justify-between p-4 bg-black/50 absolute top-0 w-full z-10 text-white">
@@ -545,6 +547,7 @@ const Scanner: React.FC<ScannerProps> = ({ onScan, onCapturePlaceholder, onClose
         }
       `}</style>
     </div>
+    </ModalPortal>
   );
 };
 

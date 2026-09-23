@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Loader2 } from 'lucide-react';
+import ModalPortal from '../ModalPortal';
 
 interface ConsentCheckboxProps {
   id: string;
@@ -82,6 +83,7 @@ export default function ConsentCheckbox({
       </label>
 
       {modalOpen && (
+        <ModalPortal>
         <div
           className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4"
           onClick={closeModal}
@@ -135,6 +137,7 @@ export default function ConsentCheckbox({
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
     </>
   );

@@ -1,4 +1,5 @@
 import { useEffect, type ReactNode } from 'react';
+import ModalPortal from '../../ModalPortal';
 
 interface GlassDialogProps {
   open: boolean;
@@ -21,6 +22,7 @@ export function GlassDialog({ open, onClose, children }: GlassDialogProps) {
   if (!open) return null;
 
   return (
+    <ModalPortal>
     <div
       role="dialog"
       aria-modal="true"
@@ -35,5 +37,6 @@ export function GlassDialog({ open, onClose, children }: GlassDialogProps) {
         {children}
       </div>
     </div>
+    </ModalPortal>
   );
 }
