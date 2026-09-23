@@ -423,7 +423,7 @@ export default function EmailTemplatesTab({
           headerImageUrl: settings.emailHeaderLogo || undefined,
           footerText: settings.emailFooterText,
         });
-        await sendEmail(t.email, mergedSubject, html);
+        await sendEmail(t.email, mergedSubject, html, settings);
         sent++;
       }
       onNotify(`Sent ${sent} test email${sent === 1 ? '' : 's'}.`, 'success');
