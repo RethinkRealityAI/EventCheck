@@ -18,7 +18,10 @@ interface Props {
 }
 
 export default function ExhibitorsTab({ attendees, forms, onRefresh, itemsPerPage }: Props) {
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // Staff are shown under their organisation by default — seeing who is
+  // registered shouldn't take a click per exhibitor. The set holds what the
+  // admin has folded away.
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(1);
   const { showNotification } = useNotifications();
 
@@ -133,7 +136,7 @@ export default function ExhibitorsTab({ attendees, forms, onRefresh, itemsPerPag
     }
   }
 
-  const toggleExpand = (id: string) => setExpanded(prev => {
+  const toggleExpand = (id: string) => setCollapsed(prev => {
     const next = new Set(prev);
     if (next.has(id)) next.delete(id); else next.add(id);
     return next;
@@ -192,7 +195,7 @@ export default function ExhibitorsTab({ attendees, forms, onRefresh, itemsPerPag
               return c === 'full_access' || c === 'full_congress';
             });
             const paidExtras = staff.filter(s => s.isPaidExtra === true);
-            const isExpanded = expanded.has(org.id);
+            const isExpanded = !collapsed.has(org.id);
             const tierOrBoothLabel = org.exhibitorBoothType
               ? (booth?.label ?? org.exhibitorBoothType)
               : (tier?.name ?? info.tier ?? '—');
@@ -203,7 +206,12 @@ export default function ExhibitorsTab({ attendees, forms, onRefresh, itemsPerPag
               <React.Fragment key={org.id}>
                 <tr className="border-t hover:bg-slate-50">
                   <td className="px-2 py-2">
-                    <button onClick={() => toggleExpand(org.id)} className="p-1 hover:bg-slate-100 rounded">
+                    <button
+                      onClick={() => toggleExpand(org.id)}
+                      className="p-1 hover:bg-slate-100 rounded"
+                      aria-expanded={isExpanded}
+                      aria-label={`${isExpanded ? 'Hide' : 'Show'} staff of ${info.orgName || org.name}`}
+                    >
                       {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                     </button>
                   </td>

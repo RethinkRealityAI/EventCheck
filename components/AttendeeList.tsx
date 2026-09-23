@@ -34,6 +34,8 @@ import SponsorsTable from './Sponsors/SponsorsTable';
 import BulkEmailModal from './Email/BulkEmailModal';
 import CompletionSendDialog from './RegistrationCompleteness/CompletionSendDialog';
 import { completionStatus, needsCompletion, type CompletionStatus } from '../utils/registrationCompletion';
+import { nestUnderParents } from '../utils/rowNesting';
+import ModalPortal from './ModalPortal';
 import { buildAttendeeVars, type BulkRecipient } from '../utils/adminEmailCompose';
 import {
   buildRegistrationIndex,
@@ -122,6 +124,10 @@ function ContactStatusChip({ status }: { status: GuestContactStatus }) {
   );
 }
 
+/** Claim state of a nested guest row. Says nothing for guests with no claim
+ *  flow — a TSCS companion, a BOGO guest, a delegate (whose Type cell already
+ *  carries "Awaiting their details") — rather than labelling them all
+ *  "Pre-filled", which is only true of the purchaser-entered adult/child rows. */
 function GuestStatusBadge({ guest }: { guest: Attendee }) {
   const t = guest.guestType;
   if (t === 'pending-claim') {
@@ -130,7 +136,10 @@ function GuestStatusBadge({ guest }: { guest: Attendee }) {
   if (t === 'claimed') {
     return <span className="ml-2 text-xs px-2 py-0.5 bg-green-100 text-green-900 rounded-full">Completed</span>;
   }
-  return <span className="ml-2 text-xs px-2 py-0.5 bg-blue-100 text-blue-900 rounded-full">Pre-filled</span>;
+  if (t === 'adult' || t === 'child') {
+    return <span className="ml-2 text-xs px-2 py-0.5 bg-blue-100 text-blue-900 rounded-full">Pre-filled</span>;
+  }
+  return null;
 }
 
 function GuestActions({ guest, formId, onRefresh }: { guest: Attendee; formId: string; onRefresh: () => void }) {
@@ -277,9 +286,11 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
   // Collapsed state for tables
   const [expandedTables, setExpandedTables] = useState<Record<string, boolean>>({});
 
-  // Collapsed state for primary/guest groups in the flat live list
-  const [expandedPrimaries, setExpandedPrimaries] = useState<Set<string>>(new Set());
-  const toggleExpandPrimary = (id: string) => setExpandedPrimaries(prev => {
+  // Guests and delegates are shown under their parent row by default — an
+  // admin should see everyone in a party or delegation without opening
+  // anything. So the state records what has been COLLAPSED, not expanded.
+  const [collapsedParents, setCollapsedParents] = useState<Set<string>>(new Set());
+  const toggleParent = (id: string) => setCollapsedParents(prev => {
     const next = new Set(prev);
     if (next.has(id)) next.delete(id);
     else next.add(id);
@@ -799,10 +810,17 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
       })
     : filtered;
 
+  // Guests and delegates nest under their parent whenever the parent is in
+  // view (utils/rowNesting). Pagination counts registrations — top-level rows —
+  // so a party or delegation is never split across two pages.
+  const nested = nestUnderParents(sortedFiltered, (x, y) => guestSortKey(x) - guestSortKey(y));
+  const parentIdsWithChildren = [...nested.childrenOf.keys()];
+  const allParentsCollapsed = parentIdsWithChildren.length > 0 && parentIdsWithChildren.every(id => collapsedParents.has(id));
+
   // Pagination Logic
-  const totalPages = Math.ceil(sortedFiltered.length / itemsPerPage);
+  const totalPages = Math.ceil(nested.top.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
-  const paginatedItems = sortedFiltered.slice(startIndex, startIndex + itemsPerPage);
+  const paginatedItems = nested.top.slice(startIndex, startIndex + itemsPerPage);
 
   // Grouping Logic for "Tables" view
   const groupedByTable = useMemo(() => {
@@ -1411,6 +1429,26 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
               </button>
             )}
 
+            {/* Guests and delegates sit under their booking and are shown by
+                default; one click folds every party so the list reads as
+                bookings only. */}
+            {BULK_EMAIL_TABS.has(activeTab) && parentIdsWithChildren.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setCollapsedParents(allParentsCollapsed ? new Set() : new Set(parentIdsWithChildren))}
+                aria-pressed={!allParentsCollapsed}
+                data-testid="toggle-all-children"
+                title={allParentsCollapsed
+                  ? 'Show every guest and delegate under their booking'
+                  : 'Fold every party so the list shows bookings only'}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-semibold transition-colors bg-white text-slate-600 border-slate-200 hover:border-indigo-300 hover:text-indigo-800"
+              >
+                {allParentsCollapsed ? <ChevronsDown className="w-3.5 h-3.5" /> : <ChevronsRight className="w-3.5 h-3.5" />}
+                {allParentsCollapsed ? 'Show guests' : 'Hide guests'}
+                <span className="font-bold">{sortedFiltered.length - nested.top.length}</span>
+              </button>
+            )}
+
             {/* Registered but missing required answers or consents. Filters the
                 list to them, and offers to ask them all in one go. */}
             {incompleteCount > 0 && (
@@ -1481,6 +1519,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                   </button>
 
                   {showFilterPicker && (
+                    <ModalPortal>
                     <div className="fixed inset-0 z-[100]" onClick={() => { setShowFilterPicker(false); setFilterFieldSelection(null); }}>
                       <div
                         className="absolute bg-white rounded-xl shadow-2xl border border-gray-200 w-[360px] max-h-[320px] overflow-hidden flex flex-col animate-in fade-in slide-in-from-top-1 duration-150"
@@ -1554,6 +1593,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                         )}
                       </div>
                     </div>
+                    </ModalPortal>
                   )}
                 </div>
               </>
@@ -1930,67 +1970,45 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                 </tr>
               ) : (
                 (() => {
-                  // Build a set of group-path guest IDs so they aren't rendered as standalone rows.
-                  // Mirrors the inclusion rule below for groupGuestsByPrimary — keep these two in sync
-                  // or guests will render twice.
-                  //
-                  // Only suppress a guest if their primary is ALSO in paginatedItems. When a search
-                  // matches a guest but not their primary (e.g. searching a guest name), the primary
-                  // won't be in paginatedItems and the guest would otherwise disappear entirely.
-                  const paginatedItemIds = new Set(paginatedItems.map(a => a.id));
-                  const groupGuestIds = new Set(
-                    paginatedItems
-                      .filter(a =>
-                        a.primaryAttendeeId &&
-                        paginatedItemIds.has(a.primaryAttendeeId) &&
-                        (a.guestType === 'pending-claim' ||
-                          a.guestType === 'claimed' ||
-                          a.guestType === 'adult' ||
-                          a.guestType === 'child'),
-                      )
-                      .map(a => a.id)
-                  );
-
-                  // For each primary, collect its group-path guests that appear in paginatedItems.
-                  // Includes pending-claim/claimed guests AND inline adult/child guests so the
-                  // primary's full party expands together as one coherent group on the live tab.
-                  // Each list is sorted ascending by seat number (resolved via getSeatNumber).
-                  const groupGuestsByPrimary = new Map<string, Attendee[]>();
-                  for (const a of paginatedItems) {
-                    if (
-                      a.primaryAttendeeId &&
-                      (a.guestType === 'pending-claim' ||
-                        a.guestType === 'claimed' ||
-                        a.guestType === 'adult' ||
-                        a.guestType === 'child')
-                    ) {
-                      const arr = groupGuestsByPrimary.get(a.primaryAttendeeId) ?? [];
-                      arr.push(a);
-                      groupGuestsByPrimary.set(a.primaryAttendeeId, arr);
-                    }
-                  }
-                  for (const arr of groupGuestsByPrimary.values()) {
-                    arr.sort((x, y) => guestSortKey(x) - guestSortKey(y));
-                  }
-
-                  const renderAttendeeRow = (attendee: Attendee, isGuestRow = false) => (
-                    <tr key={attendee.id} className={`hover:bg-white/60 transition${isGuestRow ? ' bg-slate-50/60' : ''}`}>
+                  const renderAttendeeRow = (attendee: Attendee, isGuestRow = false) => {
+                    const children = isGuestRow ? [] : (nested.childrenOf.get(attendee.id) ?? []);
+                    const collapsed = collapsedParents.has(attendee.id);
+                    const childNoun = isOrgKind(kindOf(attendee)) ? 'delegate' : 'guest';
+                    return (
+                    <tr
+                      key={attendee.id}
+                      data-testid={isGuestRow ? 'row-child' : 'row-top'}
+                      className={`hover:bg-white/60 transition${isGuestRow ? ' bg-slate-50/70' : ''}`}
+                    >
                       {isColumnVisible('name') && (
-                        <td className={`px-4 py-3${isGuestRow ? ' pl-10' : ''}`}>
+                        <td className={`px-4 py-3${isGuestRow ? ' pl-11 border-l-2 border-indigo-100' : ''}`}>
                           <div className="flex items-center gap-2">
-                            {!isGuestRow && (groupGuestsByPrimary.get(attendee.id) ?? []).length > 0 && (
+                            {children.length > 0 ? (
                               <button
-                                onClick={() => toggleExpandPrimary(attendee.id)}
+                                onClick={() => toggleParent(attendee.id)}
                                 className="p-0.5 hover:bg-slate-100 rounded flex-shrink-0"
-                                title={expandedPrimaries.has(attendee.id) ? 'Collapse guests' : 'Expand guests'}
+                                aria-expanded={!collapsed}
+                                aria-label={`${collapsed ? 'Show' : 'Hide'} ${children.length} ${childNoun}${children.length === 1 ? '' : 's'} of ${attendee.name}`}
+                                data-testid="toggle-children"
                               >
-                                {expandedPrimaries.has(attendee.id)
-                                  ? <ChevronDown className="w-4 h-4 text-slate-400" />
-                                  : <ChevronRight className="w-4 h-4 text-slate-400" />
+                                {collapsed
+                                  ? <ChevronRight className="w-4 h-4 text-slate-500" />
+                                  : <ChevronDown className="w-4 h-4 text-slate-500" />
                                 }
                               </button>
-                            )}
+                            ) : (!isGuestRow && parentIdsWithChildren.length > 0 && (
+                              // Keeps names aligned down the column when some rows have a toggle.
+                              <span className="w-5 flex-shrink-0" aria-hidden="true" />
+                            ))}
                             <div className="font-medium text-gray-900">{attendee.name}</div>
+                            {children.length > 0 && !groupPrimaryIds.has(attendee.id) && (
+                              <span
+                                className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200 whitespace-nowrap"
+                                data-testid="children-count"
+                              >
+                                {children.length} {childNoun}{children.length === 1 ? '' : 's'}
+                              </span>
+                            )}
                             {!isGuestRow && groupPrimaryIds.has(attendee.id) && (
                               <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-700">
                                 GROUP OF {1 + (guestCountByPrimary.get(attendee.id) ?? 0)}
@@ -2240,18 +2258,16 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                         </td>
                       )}
                     </tr>
-                  );
+                    );
+                  };
 
-                  return paginatedItems
-                    .filter(a => !groupGuestIds.has(a.id))
-                    .flatMap(attendee => {
-                      const groupGuests = groupGuestsByPrimary.get(attendee.id) ?? [];
-                      const rows: React.ReactNode[] = [renderAttendeeRow(attendee, false)];
-                      if (expandedPrimaries.has(attendee.id) && groupGuests.length > 0) {
-                        groupGuests.forEach(g => rows.push(renderAttendeeRow(g, true)));
-                      }
-                      return rows;
-                    });
+                  return paginatedItems.flatMap(attendee => {
+                    const rows: React.ReactNode[] = [renderAttendeeRow(attendee, false)];
+                    if (!collapsedParents.has(attendee.id)) {
+                      for (const child of nested.childrenOf.get(attendee.id) ?? []) rows.push(renderAttendeeRow(child, true));
+                    }
+                    return rows;
+                  });
                 })()
               )}
             </tbody>
@@ -2269,7 +2285,10 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
           {activeTab === 'tables' ? (
             <>Showing {groupedByTable.length > 0 ? startIndex + 1 : 0} to {Math.min(startIndex + itemsPerPage, groupedByTable.length)} of {groupedByTable.length} tables</>
           ) : (
-            <>Showing {filtered.length > 0 ? startIndex + 1 : 0} to {Math.min(startIndex + itemsPerPage, filtered.length)} of {filtered.length} records</>
+            <>
+              Showing {nested.top.length > 0 ? startIndex + 1 : 0} to {Math.min(startIndex + itemsPerPage, nested.top.length)} of {nested.top.length} registrations
+              {nested.top.length !== sortedFiltered.length && ` · ${sortedFiltered.length} people including guests and delegates`}
+            </>
           )}
         </div>
 
@@ -2371,6 +2390,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
       )}
 
       {showExportModal && canExport && (
+        <ModalPortal>
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
           {/* max-h + flex column so the body scrolls and the footer stays
               pinned/visible — previously the modal had no height cap and its
@@ -2542,6 +2562,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
     </div>
   );
