@@ -101,12 +101,14 @@ supabase login
 supabase link --project-ref <YOUR_PROJECT_REF>
 
 # Deploy each function. They're independent, so you can do them all
-# in one go or one at a time.
-supabase functions deploy admin-invite
-supabase functions deploy send-ticket-email
-supabase functions deploy verify-payment
-supabase functions deploy confirm-sponsor-cheque
-supabase functions deploy track-email
+# in one go or one at a time. --use-api bundles on Supabase's servers
+# instead of pulling a Docker image from ghcr.io, which can be rate-limited
+# (it aborted the CI deploy of PR #42 before anything shipped).
+supabase functions deploy admin-invite --use-api
+supabase functions deploy send-ticket-email --use-api
+supabase functions deploy verify-payment --use-api
+supabase functions deploy confirm-sponsor-cheque --use-api
+supabase functions deploy track-email --use-api
 ```
 
 Each deploy takes ~10 seconds. Watch the output for "Function deployed
@@ -237,7 +239,7 @@ Only `verify-payment` changed (it now verifies both PayPal and Flutterwave).
 No `config.toml` change — it stays `verify_jwt = false`.
 
 ```bash
-supabase functions deploy verify-payment   # run for both project refs
+supabase functions deploy verify-payment --use-api   # run for both project refs
 ```
 
 ### 4f. Verify end-to-end
