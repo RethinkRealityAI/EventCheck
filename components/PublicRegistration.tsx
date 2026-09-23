@@ -67,6 +67,7 @@ import {
   buildDynamicSingleExtras,
   buildDynamicGroupExtras,
 } from '../utils/paypalOrderMeta';
+import ModalPortal from './ModalPortal';
 
 interface PublicRegistrationProps {
   /** Override the formId that would otherwise come from route params (used when embedded in a modal). */
@@ -2505,9 +2506,11 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
         <div className="absolute inset-0 bg-black/10 pointer-events-none"></div>
       )}
 
-      {/* Loading Overlay */}
+      {/* Loading Overlay. Portalled, so its z-index must beat RegisterModal's
+          z-[90] (the portal dashboard hosts this form inside that modal). */}
       {loading && (
-        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/50 backdrop-blur-sm animate-fade-in">
+        <ModalPortal>
+        <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-black/50 backdrop-blur-sm animate-fade-in">
           <div className="bg-white p-8 rounded-2xl shadow-2xl flex flex-col items-center gap-4">
             <Loader2 className="w-12 h-12 text-indigo-600 animate-spin" />
             <div className="text-center">
@@ -2516,6 +2519,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
 
       {step === 'form' && showIndiaGate && indiaChoice === 'unset' && (
@@ -3517,9 +3521,10 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
         </div>
       )}
 
-      {/* PDF Preview Modal */}
+      {/* PDF Preview Modal (z above RegisterModal's z-[90], as above) */}
       {showPreviewModal && previewPdfUrl && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+        <ModalPortal>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl h-[80vh] flex flex-col relative">
             <div className="flex justify-between items-center p-4 border-b">
               <h3 className="font-bold text-lg">Ticket Preview</h3>
@@ -3538,6 +3543,7 @@ const PublicRegistration = ({ formId: propFormId, onComplete, onSaveAndClose }: 
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
     </div>
   );

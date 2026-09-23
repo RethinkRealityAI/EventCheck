@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { SponsorProspect, Form } from '../../types';
 import { X } from 'lucide-react';
 import { saveProspect, getForms } from '../../services/storageService';
+import ModalPortal from '../ModalPortal';
 
 interface Props {
   prospect?: SponsorProspect;
@@ -32,6 +33,7 @@ const AddProspectModal: React.FC<Props> = ({ prospect, onClose, onSaved }) => {
   };
 
   return (
+    <ModalPortal>
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full">
         <div className="flex justify-between items-center p-6 border-b">
@@ -59,6 +61,7 @@ const AddProspectModal: React.FC<Props> = ({ prospect, onClose, onSaved }) => {
       </div>
       <style>{`.input-field { width: 100%; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 12px; font-size: 14px; }`}</style>
     </div>
+    </ModalPortal>
   );
 };
 

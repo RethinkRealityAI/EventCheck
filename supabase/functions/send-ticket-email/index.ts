@@ -22,6 +22,7 @@ import { assessCompleteness } from '../_shared/registrationCompleteness.ts';
 import { assessPayability } from '../_shared/payBalance.ts';
 import { isPlaceholderEmail } from '../_shared/companionIdentity.ts';
 import { isMultiSeatPurchase } from '../_shared/purchaseShape.ts';
+import { authorizeCallerContentSend, CALLER_CONTENT_MODES } from '../_shared/senderAuth.ts';
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -317,6 +318,26 @@ serve(async (req: Request) => {
             attendeeId: body?.attendeeId ?? body?.primaryAttendeeId,
             subject: body?.subject ?? body?.email?.subject,
         };
+
+        // ── Caller-written content needs a trusted caller ─────────────────────
+        // raw-html and contact-register-invite deliver HTML the caller wrote to
+        // an address the caller chose. With the gateway open, that was an open
+        // relay under our sender name. Only another edge function (service-role
+        // key) or a signed-in admin may use them. See _shared/senderAuth.ts.
+        if (CALLER_CONTENT_MODES.has(body?.mode)) {
+            const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+            const verdict = await authorizeCallerContentSend(req.headers.get('Authorization'), serviceKey, async (jwt) => {
+                const svc = createClient(Deno.env.get('SUPABASE_URL')!, serviceKey);
+                const { data: { user } } = await svc.auth.getUser(jwt);
+                if (!user) return null;
+                const { data: profile } = await svc.from('profiles').select('role').eq('id', user.id).maybeSingle();
+                return (profile as { role?: string } | null)?.role ?? null;
+            });
+            if (verdict === 'denied') {
+                console.warn('[send-ticket-email] refused unauthenticated caller-content send', JSON.stringify({ mode: body.mode }));
+                return jsonResponse({ error: 'Not authorized to send this email.' }, 401);
+            }
+        }
 
         // ── RAW HTML: send a fully pre-rendered email with no extra templating ──
         // Used by admin tools (SendUserEmailModal) that generate their own branded

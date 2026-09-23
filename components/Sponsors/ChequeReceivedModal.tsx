@@ -7,6 +7,7 @@ import { generateTicketPDF } from '../../utils/pdfGenerator';
 import { sendTicketEmail, arrayBufferToBase64 } from '../../services/smtpService';
 import { buildSponsorEmailContext, mergeTemplate } from '../../utils/sponsorEmailTemplates';
 import { useNotifications } from '../NotificationSystem';
+import ModalPortal from '../ModalPortal';
 
 interface Props {
   attendee: Attendee;
@@ -65,6 +66,7 @@ const ChequeReceivedModal: React.FC<Props> = ({ attendee, settings, onClose, onC
   };
 
   return (
+    <ModalPortal>
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center p-6 border-b">
@@ -91,6 +93,7 @@ const ChequeReceivedModal: React.FC<Props> = ({ attendee, settings, onClose, onC
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 };
 

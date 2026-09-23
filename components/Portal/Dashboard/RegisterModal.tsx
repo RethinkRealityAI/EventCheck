@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import PublicRegistration from '../../PublicRegistration';
 import { X } from 'lucide-react';
+import ModalPortal from '../../ModalPortal';
 
 interface Props {
   formId: string;
@@ -27,6 +28,7 @@ export function RegisterModal({ formId, onClose, onSaveAndClose }: Props) {
   }, [onClose]);
 
   return (
+    <ModalPortal>
     <div className="fixed inset-0 z-[90] portal-root flex items-center justify-center p-2 sm:p-4" role="dialog" aria-modal="true" onClick={onClose}>
       <div className="absolute inset-0 bg-gansid-on-surface/50 backdrop-blur-md" aria-hidden="true" />
       {/* Card: fixed height, flex-col. Children control their own scroll. */}
@@ -45,5 +47,6 @@ export function RegisterModal({ formId, onClose, onSaveAndClose }: Props) {
         <PublicRegistration formId={formId} onComplete={onClose} onSaveAndClose={onSaveAndClose ?? onClose} />
       </div>
     </div>
+    </ModalPortal>
   );
 }

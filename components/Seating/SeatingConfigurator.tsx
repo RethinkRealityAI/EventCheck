@@ -25,6 +25,7 @@ import { Form } from '../../types';
 import jsPDF from 'jspdf';
 import ConfirmDialog from './ConfirmDialog';
 import { useNotifications } from '../NotificationSystem';
+import ModalPortal from '../ModalPortal';
 
 const ELEMENT_TYPES: { value: SceneElementType; label: string; icon: string }[] = [
     { value: 'stage', label: 'Stage', icon: '🎤' },
@@ -694,6 +695,7 @@ export default function SeatingConfigurator() {
     const assignedCount = assignments.length;
 
     return (
+        <ModalPortal>
         <div className="fixed inset-0 z-40 flex flex-col bg-slate-950 overflow-hidden">
             {/* Top Bar */}
             <div className="flex-shrink-0 bg-slate-900 border-b border-slate-700/50">
@@ -1455,5 +1457,6 @@ export default function SeatingConfigurator() {
                 />
             )}
         </div>
+        </ModalPortal>
     );
 }

@@ -474,6 +474,16 @@ Run `20260922100000_repair_tscs_companion_rows.sql` once on the GANSID project
 to apply the same rules to rows written before this existed. It is idempotent
 and derives every value from columns already on the row.
 
+**Order matters: repair after the ingest code is live, not before.** The
+repair above ran on 22 Sep; the fixed ingest only deployed when its PR merged
+(23 Sep, 16:03 UTC). Mail ingested in between was written by the old code, and
+a `- -` companion reached the roster again the next morning.
+`20260923170000_repair_tscs_companions_from_deploy_gap.sql` is the same
+statement, re-run for that gap; its `tscs_companion_status IS NULL` guard means
+it only touches rows nothing has judged. Whenever a data repair depends on new
+ingest or edge-function code, apply it (or re-apply it) once the
+**Deploy edge functions** workflow for that merge has gone green.
+
 ### 6e. Parsing contract with TSCS
 
 Ask TSCS to include in the confirmation email either the machine block

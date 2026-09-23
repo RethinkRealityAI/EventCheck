@@ -6,6 +6,7 @@ import { getForms, saveForm, deleteForm } from '../services/storageService';
 import { useNotifications } from './NotificationSystem';
 import TemplatePickerModal from './FormBuilder/TemplatePickerModal';
 import { type FormTemplate } from '../config/formTemplates';
+import ModalPortal from './ModalPortal';
 
 const FormsManager: React.FC = () => {
   const [forms, setForms] = useState<Form[]>([]);
@@ -188,6 +189,7 @@ const FormsManager: React.FC = () => {
 
       {/* Embed Modal */}
       {showEmbedModal && (
+        <ModalPortal>
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden">
             <div className="p-4 border-b border-gray-100 flex justify-between items-center">
@@ -220,6 +222,7 @@ const FormsManager: React.FC = () => {
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
     </div>
   );

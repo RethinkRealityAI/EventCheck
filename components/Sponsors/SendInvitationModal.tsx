@@ -5,6 +5,7 @@ import { sendTicketEmail } from '../../services/smtpService';
 import { logProspectEmail } from '../../services/storageService';
 import { buildProspectEmailContext, mergeTemplate } from '../../utils/sponsorEmailTemplates';
 import { useNotifications } from '../NotificationSystem';
+import ModalPortal from '../ModalPortal';
 
 interface Props {
   prospects: SponsorProspect[];
@@ -60,6 +61,7 @@ const SendInvitationModal: React.FC<Props> = ({ prospects, settings, onClose, on
   };
 
   return (
+    <ModalPortal>
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center p-6 border-b">
@@ -91,6 +93,7 @@ const SendInvitationModal: React.FC<Props> = ({ prospects, settings, onClose, on
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 };
 

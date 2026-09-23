@@ -31,6 +31,7 @@ import {
 } from '../../utils/adminPermissions';
 import { useAuth } from '../AuthContext';
 import { useNotifications } from '../NotificationSystem';
+import ModalPortal from '../ModalPortal';
 
 // ---------------------------------------------------------------------------
 // Permissions checkbox grid — used by Invite, Promote, and Edit
@@ -317,6 +318,7 @@ function AddAdminModal({
 
   if (credentials) {
     return (
+      <ModalPortal>
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
         <div className="bg-white rounded-2xl shadow-2xl max-w-xl w-full max-h-[90vh] overflow-y-auto">
           <div className="flex items-center justify-between p-5 border-b">
@@ -333,10 +335,12 @@ function AddAdminModal({
           </div>
         </div>
       </div>
+      </ModalPortal>
     );
   }
 
   return (
+    <ModalPortal>
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
       <div className="bg-white rounded-2xl shadow-2xl max-w-xl w-full max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between p-5 border-b">
@@ -485,6 +489,7 @@ function AddAdminModal({
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }
 
@@ -520,6 +525,7 @@ function EditPermissionsModal({
   };
 
   return (
+    <ModalPortal>
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
       <div className="bg-white rounded-2xl shadow-2xl max-w-xl w-full">
         <div className="flex items-center justify-between p-5 border-b">
@@ -545,6 +551,7 @@ function EditPermissionsModal({
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }
 
@@ -704,6 +711,7 @@ export default function AdminsManagement() {
       {showAdd && <AddAdminModal onClose={() => setShowAdd(false)} onDone={() => { setShowAdd(false); refresh(); }} />}
       {editing && <EditPermissionsModal profile={editing} onClose={() => setEditing(null)} onDone={() => { setEditing(null); refresh(); }} />}
       {demoting && (
+        <ModalPortal>
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
             <h3 className="text-lg font-bold text-slate-800 mb-3 flex items-center gap-2">
@@ -726,6 +734,7 @@ export default function AdminsManagement() {
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
 
       <p className="mt-6 text-xs text-slate-400 text-center">

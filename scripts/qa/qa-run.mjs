@@ -223,6 +223,41 @@ async function runFlows({ page, mode, testAddresses, expectRows, expectDelegates
   check('Type column labels org / delegate / attendee', kinds.includes('SPONSOR') && kinds.includes('DELEGATE') && kinds.includes('ATTENDEE'), kinds.join(', '));
   await shot(page, 'live-tab-unified-search');
 
+  // 2b. Delegates sit directly under their organisation — not loose in the
+  //     list — and fold away per booking or all at once.
+  const rowsUnderOrg = () => page.evaluate(() => {
+    const rows = [...document.querySelectorAll('table tbody tr')];
+    const i = rows.findIndex(r => r.getAttribute('data-testid') === 'row-top' && r.textContent.includes('QA-TEST Acme Health'));
+    if (i < 0) return null;
+    const under = [];
+    for (const r of rows.slice(i + 1)) {
+      if (r.getAttribute('data-testid') !== 'row-child') break;
+      under.push(r.textContent);
+    }
+    return under;
+  });
+  const underOrg = await rowsUnderOrg();
+  check('Delegates are listed directly under their organisation',
+    !!underOrg && underOrg.some(t => t.includes('QA-TEST Delegate One')) && underOrg.some(t => t.includes('QA-TEST Delegate Two')),
+    underOrg ? `${underOrg.length} rows under the booking` : 'booking row not found');
+  const orgRow = page.locator('tr[data-testid="row-top"]', { hasText: 'QA-TEST Acme Health' }).first();
+  const countPill = await orgRow.locator('[data-testid="children-count"]').innerText().catch(() => '');
+  check('The booking row says how many delegates it has', /\d+ delegates?/.test(countPill), countPill);
+  await orgRow.locator('[data-testid="toggle-children"]').click();
+  await page.waitForTimeout(300);
+  const folded = await rowsUnderOrg();
+  check('Its toggle folds that booking\'s delegates away', Array.isArray(folded) && folded.length === 0, `${folded?.length} rows under the booking`);
+  await orgRow.locator('[data-testid="toggle-children"]').click();
+  await page.waitForTimeout(300);
+  const allChildrenToggle = page.locator('[data-testid="toggle-all-children"]');
+  await allChildrenToggle.click();
+  await page.waitForTimeout(300);
+  const nestedVisible = await page.locator('tr[data-testid="row-child"]').count();
+  check('"Hide guests" folds every party at once', nestedVisible === 0, `${nestedVisible} nested rows visible`);
+  await allChildrenToggle.click();
+  await page.waitForTimeout(300);
+  await shot(page, 'live-tab-nested-delegates');
+
   // 3. Type filter → delegates only
   await page.locator('[data-testid="filter-kind"]').selectOption('delegates');
   await page.waitForTimeout(500);
@@ -306,7 +341,41 @@ async function runFlows({ page, mode, testAddresses, expectRows, expectDelegates
   const sponsorsTab = page.locator('[data-testid="sponsors-tab"]');
   const sponsorsText = await sponsorsTab.innerText().catch(() => '');
   check('Sponsors tab lists the sponsor booking on the main dashboard', sponsorsText.includes('QA-TEST Acme Health'));
+  const delegateLines = await sponsorsTab.locator('[data-testid="sponsor-delegate"]').allInnerTexts();
+  check('Each organisation\'s delegates are listed under it without opening anything',
+    delegateLines.some(t => t.includes('QA-TEST Delegate One')) && delegateLines.some(t => t.includes('QA-TEST Delegate Two')),
+    `${delegateLines.length} delegate lines`);
   await shot(page, 'sponsors-tab');
+  const sponsorRow = sponsorsTab.locator('tr[data-testid="sponsor-row"]', { hasText: 'QA-TEST Acme Health' }).first();
+  await sponsorRow.locator('[data-testid="sponsor-toggle-delegates"]').click();
+  await page.waitForTimeout(300);
+  const afterFold = await sponsorsTab.locator('[data-testid="sponsor-delegate"]', { hasText: 'QA-TEST Delegate' }).count();
+  check('Folding an organisation hides its delegates', afterFold === 0, `${afterFold} still shown`);
+  await sponsorRow.locator('[data-testid="sponsor-toggle-delegates"]').click();
+  await page.waitForTimeout(300);
+
+  // The incident: this modal rendered trapped inside the table card. It must
+  // be a direct child of <body> and cover the whole viewport.
+  await sponsorRow.locator('button', { hasText: /^View$/ }).click();
+  await page.waitForTimeout(600);
+  const overlay = await page.evaluate(() => {
+    const dialog = [...document.querySelectorAll('[role="dialog"]')].find(d => d.textContent.includes('Admin Notes'));
+    let el = dialog;
+    while (el && getComputedStyle(el).position !== 'fixed') el = el.parentElement;
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    const de = document.documentElement;
+    return { parentIsBody: el.parentElement === document.body, x: r.x, y: r.y, w: Math.round(r.width), h: Math.round(r.height), vw: de.clientWidth, vh: de.clientHeight };
+  });
+  check('Sponsor detail opens over the whole page, not inside the table card',
+    !!overlay && overlay.parentIsBody && overlay.x === 0 && overlay.y === 0
+      && Math.abs(overlay.w - overlay.vw) <= 1 && Math.abs(overlay.h - overlay.vh) <= 1,
+    JSON.stringify(overlay));
+  await modalShot(page, 'sponsor-detail-modal');
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  const stillOpen = await page.locator('[role="dialog"]', { hasText: 'Admin Notes' }).count();
+  check('Escape closes it', stillOpen === 0);
 
   // 7. Exhibitors tab (when the site has exhibitor forms)
   if (await tabButton(page, 'Exhibitors').isVisible().catch(() => false)) {
