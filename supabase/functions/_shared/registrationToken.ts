@@ -246,3 +246,56 @@ export async function verifyCompleteToken(
   if (typeof raw.a !== 'string' || !raw.a) return { valid: false, reason: 'malformed' };
   return { valid: true, attendeeId: raw.a as string };
 }
+
+// ── Account token (kind='account') ───────────────────────────────────────────
+// Encodes { attendeeId } for the public "create your account" page
+// (/#/account?token=…). It lets the holder of ONE ticket create the portal
+// account that ticket belongs to — including a companion whose registration
+// was made under the purchaser's email, who needs their own address first.
+//
+// Same isolation as every other kind: it is rejected by the download, invite,
+// pay and completion verifiers, and they are rejected here. What it can do is
+// deliberately narrow (see supabase/functions/account-claim): create an account
+// for the ticket's own address, or move a ticket that has no account of its own
+// to a new address. It can never touch a ticket already linked to someone
+// else's account, and it cannot change the name, category or payment.
+
+export interface AccountTokenPayload {
+  k: 'account';
+  a: string; // attendees.id
+  iat: number;
+  exp: number;
+}
+
+export type AccountVerifyResult =
+  | { valid: true; attendeeId: string }
+  | { valid: false; reason: 'malformed' | 'bad-signature' | 'expired' | 'wrong-kind' };
+
+export async function signAccountToken(
+  attendeeId: string, secret: string, nowMs: number, ttlMs: number,
+): Promise<string> {
+  const payload: AccountTokenPayload = { k: 'account', a: attendeeId, iat: nowMs, exp: nowMs + ttlMs };
+  const body = b64urlEncode(new TextEncoder().encode(JSON.stringify(payload)));
+  const sig = await hmacBase64Url(secret, body);
+  return `${body}.${sig}`;
+}
+
+export async function verifyAccountToken(
+  token: string, secret: string, nowMs: number,
+): Promise<AccountVerifyResult> {
+  if (typeof token !== 'string') return { valid: false, reason: 'malformed' };
+  const parts = token.split('.');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return { valid: false, reason: 'malformed' };
+  const [body, sig] = parts;
+  let raw: Record<string, unknown>;
+  try { raw = JSON.parse(b64urlDecodeToString(body)); }
+  catch { return { valid: false, reason: 'malformed' }; }
+  if (!raw || typeof raw.exp !== 'number') return { valid: false, reason: 'malformed' };
+  // Signature check BEFORE k/exp — a forged-kind token still fails on signature first.
+  const expected = await hmacBase64Url(secret, body);
+  if (!timingSafeEqual(sig, expected)) return { valid: false, reason: 'bad-signature' };
+  if (raw.k !== 'account') return { valid: false, reason: 'wrong-kind' };
+  if (nowMs > (raw.exp as number)) return { valid: false, reason: 'expired' };
+  if (typeof raw.a !== 'string' || !raw.a) return { valid: false, reason: 'malformed' };
+  return { valid: true, attendeeId: raw.a as string };
+}

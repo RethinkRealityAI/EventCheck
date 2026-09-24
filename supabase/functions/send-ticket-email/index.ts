@@ -17,7 +17,9 @@ import { jsPDF } from 'npm:jspdf@2.5.1';
 import { drawTicketPdf, ticketFromAttendeeRow, ticketPdfFilename, bytesToBase64 } from '../_shared/ticketPdf.ts';
 import { resolveAttendeeDisplayName } from '../_shared/attendeeDisplayName.ts';
 import { guessImageContentType, isFetchableImageUrl } from '../_shared/imageEmbed.ts';
-import { signRegistrationToken, signPayToken, signCompleteToken } from '../_shared/registrationToken.ts';
+import { signRegistrationToken, signPayToken, signCompleteToken, signAccountToken } from '../_shared/registrationToken.ts';
+import { claimStateOf } from '../_shared/accountClaim.ts';
+import { renderConditionals, strayConditionalTokens, buildCompanionListHtml, eventDisplayName, type CompanionTicket } from '../_shared/customTicket.ts';
 import { assessCompleteness } from '../_shared/registrationCompleteness.ts';
 import { assessPayability } from '../_shared/payBalance.ts';
 import { isPlaceholderEmail } from '../_shared/companionIdentity.ts';
@@ -993,6 +995,205 @@ serve(async (req: Request) => {
 
             await sendSimpleEmail({ to, subject, html, smtpConfig, headerImageUrl: tpl.headerImageUrl });
             return jsonResponse({ ok: true });
+        }
+
+        // ── CUSTOM TICKET: admin-written copy + the recipient's real ticket ──────
+        // For one-off batches the configured templates don't fit — e.g. people
+        // registered offline through TSCS India who need to hear that the QR
+        // works without an account, and how to make one. The admin writes the
+        // words; this mode supplies everything else a ticket email must carry:
+        // the server-built PDF, inline QR and download link for the recipient,
+        // the PDFs of anyone they booked for, and a signed /#/account link per
+        // person so a companion registered under the booker's email can still
+        // get an account of their own.
+        //
+        // Body: { mode:'custom-ticket', attendeeId, subject, body, preview?,
+        //         origin?, trackingId? }. `body` may branch on has_account,
+        // is_companion and has_companions ({{#if x}}…{{else}}…{{/if}}, see
+        // _shared/customTicket.ts). `preview: true` renders without sending.
+        // Caller-written content, so admin / service-role only (CALLER_CONTENT_MODES).
+        if (body.mode === 'custom-ticket') {
+            const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+            const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+            const preview = body.preview === true;
+
+            if (typeof body.subject !== 'string' || !body.subject.trim() || typeof body.body !== 'string' || !body.body.trim()) {
+                return jsonResponse({ error: 'custom-ticket: subject and body are required' }, 400);
+            }
+            const { data: row } = await supabase.from('attendees').select('*').eq('id', body.attendeeId).maybeSingle();
+            if (!row) return jsonResponse({ error: 'custom-ticket: attendee not found' }, 404);
+            if (isPlaceholderEmail(row.email)) {
+                return jsonResponse({ error: 'custom-ticket: this seat has no email address yet — send the claim link instead' }, 400);
+            }
+            const origin = sendOrigin(body, req);
+            if (!origin) return missingOriginResponse('custom-ticket');
+
+            const { data: appSettings } = await supabase.from('app_settings').select('*').eq('id', 1).maybeSingle();
+            const smtpConfig = appSettings
+                ? { host: appSettings.smtp_host, port: Number(appSettings.smtp_port || 587), user: appSettings.smtp_user, pass: appSettings.smtp_pass, fromName: (appSettings as any).email_from_name || 'GANSID Congress' }
+                : undefined;
+            const { data: form } = await supabase.from('forms').select('title, settings, fields').eq('id', row.form_id).maybeSingle();
+            const formEmailOverrides = (form as any)?.settings?.emailOverrides;
+            const overrideOn = formEmailOverrides?.enabled === true;
+
+            // Who booked this ticket. `companion_of_id` names the person inside a
+            // group booking who brought them (groups nest one level, so a guest of
+            // a paid group member still hangs off the booking's primary).
+            const bookerId = (row.answers?.companion_of_id as string) || row.primary_attendee_id || null;
+            const { data: booker } = bookerId
+                ? await supabase.from('attendees').select('id, name, email').eq('id', bookerId).maybeSingle()
+                : { data: null };
+            const { data: primaryRow } = row.primary_attendee_id && row.primary_attendee_id !== bookerId
+                ? await supabase.from('attendees').select('email').eq('id', row.primary_attendee_id).maybeSingle()
+                : { data: booker };
+
+            // Everyone this person booked for: their direct guests, plus anyone
+            // recorded as their companion inside a group booking.
+            const [{ data: direct }, { data: tagged }] = await Promise.all([
+                supabase.from('attendees').select('*').eq('primary_attendee_id', row.id),
+                supabase.from('attendees').select('*').eq('answers->>companion_of_id', row.id),
+            ]);
+            const seen = new Set<string>();
+            const companionRows = [...(direct ?? []), ...(tagged ?? [])]
+                .filter((c: any) => c.id !== row.id && !seen.has(c.id) && seen.add(c.id))
+                .filter((c: any) => !isPlaceholderEmail(c.email))
+                .sort((a: any, b: any) => String(a.name ?? '').localeCompare(String(b.name ?? '')));
+
+            const TTL = 180 * 24 * 60 * 60 * 1000;
+            const accountUrlFor = async (id: string) =>
+                buildAppUrl(origin, `/#/account?token=${encodeURIComponent(await signAccountToken(id, serviceKey, Date.now(), TTL))}`);
+            const norm = (e: unknown) => String(e ?? '').trim().toLowerCase();
+
+            // PDFs: the recipient's own first, then each companion's. Capped so a
+            // large group cannot push the message past provider size limits —
+            // anyone beyond the cap still gets their line, just no attachment.
+            const MAX_COMPANION_PDFS = 6;
+            const ownPdf = await buildTicketPdfAttachment(row, form, appSettings);
+            const companionPdfs: any[] = [];
+            const companions: CompanionTicket[] = [];
+            for (const c of companionRows) {
+                const pdf = companionPdfs.length < MAX_COMPANION_PDFS ? await buildTicketPdfAttachment(c, form, appSettings) : null;
+                if (pdf) companionPdfs.push(pdf);
+                const shares = norm(c.email) === norm(row.email);
+                companions.push({
+                    name: c.name || 'Guest',
+                    ticketType: c.ticket_type ?? null,
+                    sharesRecipientEmail: shares,
+                    email: shares ? null : c.email,
+                    hasOwnAccount: !shares && !!c.user_id,
+                    accountUrl: await accountUrlFor(c.id),
+                    pdfAttached: !!pdf,
+                });
+            }
+
+            // Same rule the account page applies: a companion's user_id that is
+            // really the booker's (shared address) is not an account of their own.
+            const hasAccount = claimStateOf(row, (primaryRow as any)?.email).kind === 'linked';
+            const isCompanion = !!row.primary_attendee_id && row.payment_status === 'free';
+
+            const flags = {
+                has_account: hasAccount,
+                is_companion: isCompanion,
+                has_companions: companions.length > 0,
+            };
+            const conditioned = renderConditionals(body.body, flags);
+            const stray = strayConditionalTokens(conditioned);
+            if (stray.length) {
+                return jsonResponse({ error: `custom-ticket: unbalanced {{#if}} block in the body (${stray.join(', ')})` }, 400);
+            }
+            const caller = safeCallerBody(conditioned, { hasPdfAttachment: !!ownPdf });
+            if (caller.rejected.length || !caller.body) {
+                return jsonResponse({ error: `custom-ticket: not sent — ${caller.rejected.join('; ') || 'empty body'}` }, 500);
+            }
+
+            const qrData = row.qr_payload || row.id;
+            const qrImageUrl = buildQrImageUrl(qrData);
+            const downloadUrl = await buildTicketDownloadUrl(row.id, row.form_id, origin);
+            const bodyTemplate = ensureTicketBlocks(caller.body, {
+                includeQr: true,
+                includeDownload: !!downloadUrl,
+                attachmentNote: attachmentNoteFor(!!ownPdf),
+            });
+
+            const displayName = resolveAttendeeDisplayName(
+                ticketFromAttendeeRow(row, (form as any)?.title),
+                { fields: (form as any)?.fields } as any,
+            ) || row.name || '';
+            const firstName = (typeof row.answers?.f_fname === 'string' && row.answers.f_fname.trim())
+                || String(displayName).trim().split(/\s+/)[0] || 'there';
+            const vars = {
+                name: displayName || 'there',
+                first_name: firstName,
+                email: row.email || '',
+                event: eventDisplayName((form as any)?.title),
+                ticket_type: row.ticket_type || '',
+                registration_id: row.id,
+                booking_ref: (row.answers?.tscs_ref as string) || row.transaction_id || '',
+                purchaser: (booker as any)?.name || '',
+                account_url: hasAccount ? '' : await accountUrlFor(row.id),
+                portal_url: buildAppUrl(origin, '/#/portal'),
+                ticket_download_url: downloadUrl,
+                qr_image_url: qrImageUrl,
+                companions: buildCompanionListHtml(companions, 'color:#1E4A8C;font-weight:600;text-decoration:underline;'),
+            };
+            const subject = applyPlaceholders(body.subject, vars, body.mode);
+            const content = applyPlaceholders(bodyTemplate, vars, body.mode);
+            const trackingId = typeof body.trackingId === 'string' && body.trackingId.trim()
+                ? body.trackingId.trim()
+                : crypto.randomUUID().replace(/-/g, '').slice(0, 24);
+            const headerImageUrl = (overrideOn ? formEmailOverrides?.headerImageUrl : undefined) || (appSettings as any)?.email_header_logo;
+            const html = generateEmailTemplate({
+                title: vars.event,
+                content,
+                fromName: smtpConfig?.fromName,
+                headerImageUrl,
+                footerText: (appSettings as any)?.email_footer_text,
+                trackingId: preview ? undefined : trackingId,
+            });
+            const pdfs = [...(ownPdf ? [ownPdf] : []), ...companionPdfs];
+
+            if (preview) {
+                return jsonResponse({
+                    ok: true,
+                    preview: {
+                        to: row.email,
+                        subject,
+                        html,
+                        attachments: pdfs.map((p: any) => p.filename),
+                        flags,
+                        companions: companions.map(c => c.name),
+                    },
+                });
+            }
+
+            const embedded = await embedQrForEmail(html, qrData, qrImageUrl, pdfs.length === 0);
+            await sendSimpleEmail({
+                to: row.email,
+                subject,
+                html: embedded.html,
+                smtpConfig,
+                attachments: [...embedded.attachments, ...pdfs],
+                headerImageUrl,
+            });
+
+            // Best-effort bookkeeping — the email has gone; never fail it now.
+            try {
+                await supabase.from('attendees').update({ last_ticket_email_at: new Date().toISOString() }).eq('id', row.id);
+            } catch (e) { console.warn('[custom-ticket] stamp failed', String(e)); }
+            try {
+                await supabase.from('email_sends').insert({
+                    tracking_id: trackingId,
+                    recipient_email: row.email,
+                    recipient_attendee_id: row.id,
+                    subject,
+                    template_key: 'custom-ticket',
+                    form_id: row.form_id,
+                    event_name: vars.event,
+                    metadata: { source: 'custom-ticket', companions: companionRows.map((c: any) => c.id), flags },
+                });
+            } catch (e) { console.warn('[custom-ticket] email_sends log failed', String(e)); }
+
+            return jsonResponse({ ok: true, to: row.email, subject, attachments: pdfs.length });
         }
 
         // ── STAFF CLAIM COMPLETED (sponsor_exhibitor combined form): send ticket to the

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Attendee, Form, AppSettings, SeatingTable } from '../types';
-import { LayoutDashboard, Users, ChevronDown, ChevronRight, UserPlus, CheckCircle, Clock, Search, Calendar, Eye, X, Mail, User, Download, FileSpreadsheet, Check, ChevronLeft, Filter, Loader2, Copy, ChevronsDown, ChevronsRight, Star, Pin, Plus, SlidersHorizontal, Heart, Upload, AlertTriangle, Send as SendIcon, Building2 } from 'lucide-react';
+import { LayoutDashboard, Users, ChevronDown, ChevronRight, UserPlus, CheckCircle, Clock, Search, Calendar, Eye, X, Mail, User, Download, FileSpreadsheet, Check, ChevronLeft, Filter, Loader2, Copy, ChevronsDown, ChevronsRight, Star, Pin, Plus, SlidersHorizontal, Heart, Upload, AlertTriangle, Send as SendIcon, Building2, Ticket as TicketIcon } from 'lucide-react';
 import { format } from 'date-fns';
 import { updateAttendee, getSettings, saveSettings, getAllSeatingTablesForForm, createGuestForPrimary, syncAttendeeSeatingToChart } from '../services/storageService';
 import { supabase } from '../services/supabaseClient';
@@ -32,6 +32,7 @@ import {
 import { Settings as SettingsIcon } from 'lucide-react';
 import SponsorsTable from './Sponsors/SponsorsTable';
 import BulkEmailModal from './Email/BulkEmailModal';
+import CustomTicketEmailModal from './Email/CustomTicketEmailModal';
 import CompletionSendDialog from './RegistrationCompleteness/CompletionSendDialog';
 import { completionStatus, needsCompletion, type CompletionStatus } from '../utils/registrationCompletion';
 import { nestUnderParents } from '../utils/rowNesting';
@@ -235,6 +236,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
   const [showPendingSeats, setShowPendingSeats] = useState(false);
   const [showIncompleteOnly, setShowIncompleteOnly] = useState(false);
   const [completionRecipients, setCompletionRecipients] = useState<Attendee[] | null>(null);
+  const [showCustomTicketEmail, setShowCustomTicketEmail] = useState(false);
   // Mass email to the current view. The audience is captured when the modal
   // opens so a realtime insert mid-run cannot change who is being emailed.
   const [bulkAudience, setBulkAudience] = useState<{ label: string; recipients: BulkRecipient[] } | null>(null);
@@ -1295,6 +1297,18 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                 </button>
               )}
 
+              {BULK_EMAIL_TABS.has(activeTab) && (
+                <button
+                  onClick={() => setShowCustomTicketEmail(true)}
+                  className="flex items-center gap-2 px-4 py-2 bg-white border border-sky-300 text-sky-700 rounded-lg text-sm font-medium hover:bg-sky-50 transition shadow-sm"
+                  title="Write your own email and send it with each person's ticket attached"
+                  data-testid="attendees-custom-ticket-email"
+                >
+                  <TicketIcon className="w-4 h-4" />
+                  <span className="hidden sm:inline">Ticket email</span>
+                </button>
+              )}
+
               {deliveryIssueCount > 0 && (
                 <button
                   onClick={() => setShowDeliveryIssues(true)}
@@ -2330,6 +2344,16 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
 
       {completionRecipients && (
         <CompletionSendDialog recipients={completionRecipients} onClose={() => setCompletionRecipients(null)} />
+      )}
+      {showCustomTicketEmail && (
+        <CustomTicketEmailModal
+          // Everyone in the selected form with an inbox — independent of the
+          // tab filters, since the composer has its own search and picker.
+          candidates={attendees.filter(a =>
+            !a.isTest && !isPendingGuest(a)
+            && (selectedFormId === '_all' || a.formId === selectedFormId))}
+          onClose={() => setShowCustomTicketEmail(false)}
+        />
       )}
       {bulkAudience && settings && (
         <BulkEmailModal

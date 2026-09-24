@@ -61,6 +61,6 @@ describe('helpers', () => {
   });
 
   it('guards exactly the modes that send caller-written content', () => {
-    expect([...CALLER_CONTENT_MODES].sort()).toEqual(['contact-register-invite', 'raw-html']);
+    expect([...CALLER_CONTENT_MODES].sort()).toEqual(['contact-register-invite', 'custom-ticket', 'raw-html']);
   });
 });
