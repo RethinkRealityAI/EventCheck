@@ -62,6 +62,12 @@ npm run qa:live
 - **`QA_ADMIN_EMAIL`** is a dedicated admin account for the agent (create it
   from Admins → Invite; never reuse a person's login). It only needs the
   Dashboard page permission.
+  One exists on both GANSID and SCAGO: `dapo+claude-qa@rethinkreality.ai`
+  ("Claude QA (automated testing)", role `admin`, not `super_admin`), so any
+  mail it triggers lands in the owner's inbox. Its password is random, lives
+  only with whoever runs QA, and is never committed. Only its bcrypt hash is in
+  the database. To revoke it, delete the user in Authentication → Users on each
+  project, or set its `profiles.role` back to `attendee`.
 - **`QA_TEST_INBOX`** is an inbox you control. Every test registrant's
   address is a `+tag` on it, so any email the run sends lands with you.
 - `QA_BASE_URL=https://deploy-preview-…netlify.app` drives a deployed build
