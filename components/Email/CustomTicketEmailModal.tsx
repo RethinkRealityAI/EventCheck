@@ -1,17 +1,18 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  X, Send, Loader2, CheckCircle2, AlertTriangle, Search, Paperclip, RefreshCw, ChevronDown, Users, Mail, RotateCcw,
+  X, Send, Loader2, CheckCircle2, AlertTriangle, Search, Paperclip, RefreshCw, Users, Mail, RotateCcw,
 } from 'lucide-react';
 import type { Attendee } from '../../types';
 import ModalPortal from '../ModalPortal';
 import {
-  CUSTOM_TICKET_HELP,
   CUSTOM_TICKET_PRESETS,
   previewCustomTicket,
   sendCustomTickets,
   type CustomTicketPreview,
   type CustomTicketResult,
 } from '../../services/customTicketEmail';
+import TicketEmailEditor from './TicketEmailEditor/TicketEmailEditor';
+import { TEMPLATE_VARIABLES } from '../../utils/emailTemplateDoc';
 
 /**
  * Custom ticket email — admin-written words, real tickets.
@@ -28,7 +29,8 @@ import {
  * {{#if}} block that person falls into — and refreshes itself after edits.
  */
 
-const DRAFT_KEY = 'custom-ticket-email-draft-v1';
+// v2: the body is now edited visually; v1 drafts predate the block markup.
+const DRAFT_KEY = 'custom-ticket-email-draft-v2';
 const PREVIEW_DEBOUNCE_MS = 700;
 
 type Phase = 'compose' | 'confirm' | 'sending' | 'done';
@@ -65,7 +67,15 @@ export default function CustomTicketEmailModal({ candidates, onClose }: { candid
   const [phase, setPhase] = useState<Phase>('compose');
   const [results, setResults] = useState<CustomTicketResult[]>([]);
   const [sendList, setSendList] = useState<string[]>([]);
-  const [showHelp, setShowHelp] = useState(false);
+  const subjectRef = useRef<HTMLInputElement>(null);
+  const insertIntoSubject = (key: string) => {
+    const el = subjectRef.current;
+    const token = `{{${key}}}`;
+    const at = el?.selectionStart ?? subject.length;
+    const end = el?.selectionEnd ?? at;
+    setSubject(subject.slice(0, at) + token + subject.slice(end));
+    requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(at + token.length, at + token.length); });
+  };
   const previewSeq = useRef(0);
 
   useEffect(() => {
@@ -172,7 +182,7 @@ export default function CustomTicketEmailModal({ candidates, onClose }: { candid
           {(phase === 'compose' || phase === 'confirm') && (
             <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden">
               {/* ── Left: composer ─────────────────────────────────────── */}
-              <div className="lg:w-[44%] xl:w-[40%] shrink-0 min-w-0 lg:overflow-y-auto lg:border-r border-slate-200">
+              <div className="lg:w-1/2 shrink-0 min-w-0 lg:overflow-y-auto lg:border-r border-slate-200">
                 {/* Recipients */}
                 <section aria-labelledby="ct-recipients" className="p-5 border-b border-slate-100">
                   <div className="flex items-center justify-between gap-2">
@@ -236,36 +246,20 @@ export default function CustomTicketEmailModal({ candidates, onClose }: { candid
                       {CUSTOM_TICKET_PRESETS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
                     </select>
                   </div>
-                  <label htmlFor="ct-subject" className="block mt-3 text-xs font-semibold text-slate-600">Subject</label>
-                  <input id="ct-subject" value={subject} onChange={e => setSubject(e.target.value)} className={`mt-1 ${inputClass}`} />
-                  <label htmlFor="ct-body" className="block mt-4 text-xs font-semibold text-slate-600">Body (HTML)</label>
-                  <textarea id="ct-body" value={body} onChange={e => setBody(e.target.value)} spellCheck
-                    className="mt-1 block w-full h-80 resize-y rounded-lg border border-slate-300 px-3 py-2 font-mono text-xs leading-relaxed outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
-
-                  <div className="mt-3 rounded-lg border border-slate-200">
-                    <button type="button" onClick={() => setShowHelp(v => !v)} aria-expanded={showHelp}
-                      className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-slate-700">
-                      Placeholders & conditions
-                      <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${showHelp ? 'rotate-180' : ''}`} />
-                    </button>
-                    {showHelp && (
-                      <div className="border-t border-slate-100 px-3 py-3 text-[11px] text-slate-600 space-y-3">
-                        <dl className="grid grid-cols-[minmax(0,auto)_minmax(0,1fr)] gap-x-3 gap-y-1">
-                          {CUSTOM_TICKET_HELP.placeholders.map(([k, v]) => (
-                            <React.Fragment key={k}><dt className="font-mono text-slate-800 break-all">{k}</dt><dd>{v}</dd></React.Fragment>
-                          ))}
-                        </dl>
-                        <p>
-                          Branch with <code className="font-mono bg-slate-100 rounded px-1">{'{{#if flag}}…{{else}}…{{/if}}'}</code> (no nesting):
-                        </p>
-                        <dl className="grid grid-cols-[minmax(0,auto)_minmax(0,1fr)] gap-x-3 gap-y-1">
-                          {CUSTOM_TICKET_HELP.flags.map(([k, v]) => (
-                            <React.Fragment key={k}><dt className="font-mono text-slate-800">{k}</dt><dd>{v}</dd></React.Fragment>
-                          ))}
-                        </dl>
-                      </div>
-                    )}
+                  <div className="mt-3 flex items-center justify-between gap-2">
+                    <label htmlFor="ct-subject" className="text-xs font-semibold text-slate-600">Subject</label>
+                    <select aria-label="Add a personal detail to the subject" value="" className="text-[11px] border border-slate-200 rounded-md px-1.5 py-1 bg-white text-slate-600"
+                      onChange={e => { if (e.target.value) insertIntoSubject(e.target.value); }}>
+                      <option value="">+ Add a detail…</option>
+                      {TEMPLATE_VARIABLES.map(v => <option key={v.key} value={v.key}>{v.label}</option>)}
+                    </select>
                   </div>
+                  <input id="ct-subject" ref={subjectRef} value={subject} onChange={e => setSubject(e.target.value)} className={`mt-1 ${inputClass}`} />
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Details in <span className="font-mono">{'{{…}}'}</span> are filled in per person — see the preview.
+                  </p>
+                  <p className="block mt-4 mb-1 text-xs font-semibold text-slate-600">Email</p>
+                  <TicketEmailEditor value={body} onChange={setBody} />
                 </section>
               </div>
 

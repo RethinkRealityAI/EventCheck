@@ -55,4 +55,4 @@ export async function sendCustomTickets(
   return results;
 }
 
-export { CUSTOM_TICKET_PRESETS, CUSTOM_TICKET_HELP, type CustomTicketPreset } from '../utils/customTicketPresets';
+export { CUSTOM_TICKET_PRESETS, type CustomTicketPreset } from '../utils/customTicketPresets';
