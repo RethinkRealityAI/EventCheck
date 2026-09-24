@@ -1,15 +1,18 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { X, Send, Loader2, CheckCircle2, AlertTriangle, Eye, Search, Paperclip } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  X, Send, Loader2, CheckCircle2, AlertTriangle, Search, Paperclip, RefreshCw, Users, Mail, RotateCcw,
+} from 'lucide-react';
 import type { Attendee } from '../../types';
 import ModalPortal from '../ModalPortal';
 import {
-  CUSTOM_TICKET_HELP,
   CUSTOM_TICKET_PRESETS,
   previewCustomTicket,
   sendCustomTickets,
   type CustomTicketPreview,
   type CustomTicketResult,
 } from '../../services/customTicketEmail';
+import TicketEmailEditor from './TicketEmailEditor/TicketEmailEditor';
+import { TEMPLATE_VARIABLES } from '../../utils/emailTemplateDoc';
 
 /**
  * Custom ticket email — admin-written words, real tickets.
@@ -20,12 +23,15 @@ import {
  * download link, adds the tickets of anyone they booked for, and gives each
  * person a create-account link already tied to their ticket.
  *
- * Preview is per recipient and comes from the SAME server code that sends, so
- * what the admin reads is exactly what that person receives — including which
- * branch of each {{#if}} block they fall into.
+ * Layout: composer (recipients + message) on the left, a live preview filling
+ * the right on large screens; stacked below `lg`. Preview is per recipient and
+ * comes from the SAME server code that sends — including which branch of each
+ * {{#if}} block that person falls into — and refreshes itself after edits.
  */
 
-const DRAFT_KEY = 'custom-ticket-email-draft-v1';
+// v2: the body is now edited visually; v1 drafts predate the block markup.
+const DRAFT_KEY = 'custom-ticket-email-draft-v2';
+const PREVIEW_DEBOUNCE_MS = 700;
 
 type Phase = 'compose' | 'confirm' | 'sending' | 'done';
 
@@ -35,6 +41,16 @@ function loadDraft(): { subject: string; body: string } | null {
     return raw ? JSON.parse(raw) : null;
   } catch { return null; }
 }
+
+const Badge: React.FC<{ tone: 'slate' | 'emerald' | 'amber' | 'indigo'; children: React.ReactNode }> = ({ tone, children }) => {
+  const tones = {
+    slate: 'bg-slate-100 text-slate-700',
+    emerald: 'bg-emerald-50 text-emerald-700',
+    amber: 'bg-amber-50 text-amber-800',
+    indigo: 'bg-indigo-50 text-indigo-700',
+  } as const;
+  return <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${tones[tone]}`}>{children}</span>;
+};
 
 export default function CustomTicketEmailModal({ candidates, onClose }: { candidates: Attendee[]; onClose: () => void }) {
   const preset = CUSTOM_TICKET_PRESETS[0];
@@ -50,11 +66,30 @@ export default function CustomTicketEmailModal({ candidates, onClose }: { candid
   const [previewing, setPreviewing] = useState(false);
   const [phase, setPhase] = useState<Phase>('compose');
   const [results, setResults] = useState<CustomTicketResult[]>([]);
-  const [showHelp, setShowHelp] = useState(false);
+  const [sendList, setSendList] = useState<string[]>([]);
+  const subjectRef = useRef<HTMLInputElement>(null);
+  const insertIntoSubject = (key: string) => {
+    const el = subjectRef.current;
+    const token = `{{${key}}}`;
+    const at = el?.selectionStart ?? subject.length;
+    const end = el?.selectionEnd ?? at;
+    setSubject(subject.slice(0, at) + token + subject.slice(end));
+    requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(at + token.length, at + token.length); });
+  };
+  const previewSeq = useRef(0);
 
   useEffect(() => {
     try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ subject, body })); } catch { /* private mode */ }
   }, [subject, body]);
+
+  const busy = phase === 'sending';
+
+  // Escape closes, except mid-send (closing would hide which sends failed).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !busy) onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [busy, onClose]);
 
   const byId = useMemo(() => new Map(candidates.map(a => [a.id, a])), [candidates]);
   const shown = useMemo(() => {
@@ -67,7 +102,7 @@ export default function CustomTicketEmailModal({ candidates, onClose }: { candid
 
   // Keep the preview pointed at someone who is actually selected.
   useEffect(() => {
-    if (!chosen.length) { setPreviewId(''); setPreview(null); return; }
+    if (!chosen.length) { setPreviewId(''); setPreview(null); setPreviewError(''); return; }
     if (!chosen.some(a => a.id === previewId)) setPreviewId(chosen[0].id);
   }, [chosen, previewId]);
 
@@ -83,205 +118,252 @@ export default function CustomTicketEmailModal({ candidates, onClose }: { candid
     return n;
   });
 
+  // Live preview: re-render (debounced) whenever the copy or the person changes.
+  // A sequence number drops responses that arrive after a newer request.
   const runPreview = async () => {
-    if (!previewId) return;
+    if (!previewId || !subject.trim() || !body.trim()) return;
+    const seq = ++previewSeq.current;
     setPreviewing(true);
     setPreviewError('');
     try {
-      setPreview(await previewCustomTicket(previewId, subject, body));
+      const p = await previewCustomTicket(previewId, subject, body);
+      if (seq === previewSeq.current) setPreview(p);
     } catch (e) {
-      setPreview(null);
-      setPreviewError((e as Error).message);
+      if (seq === previewSeq.current) { setPreview(null); setPreviewError((e as Error).message); }
     } finally {
-      setPreviewing(false);
+      if (seq === previewSeq.current) setPreviewing(false);
     }
   };
+  useEffect(() => {
+    if (!previewId || phase !== 'compose') return;
+    const t = window.setTimeout(runPreview, PREVIEW_DEBOUNCE_MS);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewId, subject, body, phase]);
 
-  // Any edit makes the last preview stale; clear it rather than show old copy.
-  useEffect(() => { setPreview(null); }, [subject, body, previewId]);
-
-  const send = async () => {
+  const send = async (ids: string[]) => {
+    setSendList(ids);
     setPhase('sending');
     setResults([]);
-    await sendCustomTickets(chosen.map(a => a.id), subject, body, setResults);
+    await sendCustomTickets(ids, subject, body, setResults);
     setPhase('done');
   };
 
   const sent = results.filter(r => r.status === 'sent').length;
-  const failed = results.filter(r => r.status === 'failed').length;
-  const busy = phase === 'sending';
+  const failedIds = results.filter(r => r.status === 'failed').map(r => r.attendeeId);
+  const previewIndex = chosen.findIndex(a => a.id === previewId);
+  const step = (dir: 1 | -1) => {
+    if (!chosen.length) return;
+    const next = (previewIndex + dir + chosen.length) % chosen.length;
+    setPreviewId(chosen[next].id);
+  };
+
+  const inputClass = 'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100';
+  const sectionTitle = 'flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-500';
 
   return (
     <ModalPortal>
-      <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4" role="dialog" aria-modal="true" aria-labelledby="custom-ticket-title" data-testid="custom-ticket-modal">
-        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[94vh] flex flex-col overflow-hidden">
-          <div className="flex items-start justify-between px-5 py-4 border-b border-slate-100">
-            <div>
+      <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-0 sm:p-4" role="dialog" aria-modal="true" aria-labelledby="custom-ticket-title" data-testid="custom-ticket-modal">
+        <div className="bg-white shadow-2xl w-full h-full sm:h-[92vh] sm:max-w-7xl sm:rounded-2xl flex flex-col overflow-hidden">
+          {/* Header */}
+          <div className="flex items-start justify-between gap-4 px-5 py-4 border-b border-slate-200 shrink-0">
+            <div className="min-w-0">
               <h2 id="custom-ticket-title" className="text-base font-bold text-slate-900">Custom ticket email</h2>
               <p className="text-xs text-slate-500 mt-0.5">
                 Your words, their real ticket. Each person gets their own ticket PDF and QR, the tickets of anyone they
                 booked for, and a create-account link already tied to their ticket.
               </p>
             </div>
-            <button onClick={onClose} disabled={busy} aria-label="Close" className="p-1 text-slate-400 hover:text-slate-600 disabled:opacity-40">
+            <button onClick={onClose} disabled={busy} aria-label="Close" className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 disabled:opacity-40">
               <X className="w-5 h-5" />
             </button>
           </div>
 
           {(phase === 'compose' || phase === 'confirm') && (
-            <div className="flex-1 overflow-y-auto grid grid-cols-1 lg:grid-cols-[320px,1fr,1fr] gap-0 lg:divide-x divide-slate-100">
-              {/* Recipients */}
-              <section className="p-4 flex flex-col min-h-0" aria-label="Recipients">
-                <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500">1 · Recipients ({chosen.length} selected)</h3>
-                <div className="relative mt-2">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                  <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search name, email, category, notes"
-                    className="w-full pl-8 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-200 outline-none" />
-                </div>
-                <label className="mt-2 flex items-center gap-2 text-xs text-slate-600">
-                  <input type="checkbox" checked={onlyNeverSent} onChange={e => setOnlyNeverSent(e.target.checked)} />
-                  Only people never sent a ticket email
-                </label>
-                <button type="button" onClick={toggleAllShown} disabled={!shown.length}
-                  className="mt-2 self-start text-xs font-semibold text-indigo-600 hover:underline disabled:opacity-40">
-                  {allShownSelected ? 'Clear' : 'Select'} all {shown.length} shown
-                </button>
-                <ul className="mt-2 flex-1 min-h-[160px] max-h-[50vh] overflow-y-auto border border-slate-100 rounded-lg divide-y divide-slate-100">
-                  {shown.map(a => (
-                    <li key={a.id}>
-                      <label className="flex items-start gap-2 px-3 py-2 text-xs cursor-pointer hover:bg-slate-50">
-                        <input type="checkbox" className="mt-0.5" checked={selected.has(a.id)} onChange={() => toggle(a.id)} />
-                        <span className="min-w-0">
-                          <span className="block font-medium text-slate-800 truncate">{a.name}</span>
-                          <span className="block text-slate-500 truncate">{a.email}</span>
-                          <span className="block text-slate-400 truncate">
-                            {a.ticketType}{a.lastTicketEmailAt ? ' · ticket emailed before' : ''}
-                          </span>
-                        </span>
-                      </label>
-                    </li>
-                  ))}
-                  {!shown.length && <li className="px-3 py-6 text-center text-xs text-slate-400">No one matches.</li>}
-                </ul>
-                <p className="mt-2 text-[11px] text-slate-500">
-                  Not listed: unclaimed seats (no email yet), and companions who share their booker's email — their
-                  ticket goes out with the booker's.
-                </p>
-              </section>
-
-              {/* Compose */}
-              <section className="p-4 flex flex-col min-h-0" aria-label="Message">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500">2 · Message</h3>
-                  <select aria-label="Start from a preset" className="text-xs border border-slate-300 rounded-md px-2 py-1"
-                    value="" onChange={e => {
-                      const p = CUSTOM_TICKET_PRESETS.find(x => x.id === e.target.value);
-                      if (p && window.confirm(`Replace the current message with "${p.label}"?`)) { setSubject(p.subject); setBody(p.body); }
-                    }}>
-                    <option value="">Start from…</option>
-                    {CUSTOM_TICKET_PRESETS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
-                  </select>
-                </div>
-                <label htmlFor="ct-subject" className="mt-3 text-xs font-semibold text-slate-600">Subject</label>
-                <input id="ct-subject" value={subject} onChange={e => setSubject(e.target.value)}
-                  className="mt-1 w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-200 outline-none" />
-                <label htmlFor="ct-body" className="mt-3 text-xs font-semibold text-slate-600">Body (HTML)</label>
-                <textarea id="ct-body" value={body} onChange={e => setBody(e.target.value)} spellCheck
-                  className="mt-1 w-full flex-1 min-h-[280px] px-3 py-2 text-xs font-mono border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-200 outline-none" />
-                <button type="button" onClick={() => setShowHelp(v => !v)} aria-expanded={showHelp}
-                  className="mt-2 self-start text-xs font-semibold text-indigo-600 hover:underline">
-                  {showHelp ? 'Hide' : 'Show'} placeholders & conditions
-                </button>
-                {showHelp && (
-                  <div className="mt-2 text-[11px] text-slate-600 bg-slate-50 border border-slate-100 rounded-lg p-3 space-y-2">
-                    <dl className="grid grid-cols-[auto,1fr] gap-x-3 gap-y-1">
-                      {CUSTOM_TICKET_HELP.placeholders.map(([k, v]) => (
-                        <React.Fragment key={k}><dt className="font-mono">{k}</dt><dd>{v}</dd></React.Fragment>
-                      ))}
-                    </dl>
-                    <p>
-                      Branch with <code className="font-mono">{'{{#if flag}}…{{else}}…{{/if}}'}</code> (no nesting). Flags:
-                    </p>
-                    <dl className="grid grid-cols-[auto,1fr] gap-x-3 gap-y-1">
-                      {CUSTOM_TICKET_HELP.flags.map(([k, v]) => (
-                        <React.Fragment key={k}><dt className="font-mono">{k}</dt><dd>{v}</dd></React.Fragment>
-                      ))}
-                    </dl>
+            <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden">
+              {/* ── Left: composer ─────────────────────────────────────── */}
+              <div className="lg:w-1/2 shrink-0 min-w-0 lg:overflow-y-auto lg:border-r border-slate-200">
+                {/* Recipients */}
+                <section aria-labelledby="ct-recipients" className="p-5 border-b border-slate-100">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 id="ct-recipients" className={sectionTitle}><Users className="w-3.5 h-3.5" /> 1 · Recipients</h3>
+                    <Badge tone={chosen.length ? 'indigo' : 'slate'}>{chosen.length} selected</Badge>
                   </div>
-                )}
-              </section>
+                  <div className="relative mt-3">
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search name, email, category or notes"
+                      aria-label="Search recipients" className={`${inputClass} pl-9`} />
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                    <label className="flex items-center gap-2 text-xs text-slate-600">
+                      <input type="checkbox" className="rounded" checked={onlyNeverSent} onChange={e => setOnlyNeverSent(e.target.checked)} />
+                      Never sent a ticket email
+                    </label>
+                    <div className="flex items-center gap-3 text-xs font-semibold">
+                      <button type="button" onClick={toggleAllShown} disabled={!shown.length}
+                        className="text-indigo-600 hover:underline disabled:opacity-40">
+                        {allShownSelected ? 'Deselect' : 'Select'} all {shown.length} shown
+                      </button>
+                      {selected.size > 0 && (
+                        <button type="button" onClick={() => setSelected(new Set())} className="text-slate-500 hover:underline">Clear</button>
+                      )}
+                    </div>
+                  </div>
+                  <ul className="mt-2 h-56 overflow-y-auto rounded-lg border border-slate-200 divide-y divide-slate-100" aria-label="People">
+                    {shown.map(a => (
+                      <li key={a.id}>
+                        <label className={`flex items-start gap-3 px-3 py-2 cursor-pointer hover:bg-slate-50 ${selected.has(a.id) ? 'bg-indigo-50/60' : ''}`}>
+                          <input type="checkbox" className="mt-1 rounded shrink-0" checked={selected.has(a.id)} onChange={() => toggle(a.id)} />
+                          <span className="min-w-0 flex-1">
+                            <span className="flex items-center gap-2">
+                              <span className="text-sm font-medium text-slate-800 truncate">{a.name}</span>
+                              {a.lastTicketEmailAt && <span className="shrink-0 text-[10px] font-semibold text-slate-400 uppercase">Emailed before</span>}
+                            </span>
+                            <span className="block text-xs text-slate-500 truncate">{a.email}</span>
+                            <span className="block text-[11px] text-slate-400 truncate">{a.ticketType}</span>
+                          </span>
+                        </label>
+                      </li>
+                    ))}
+                    {!shown.length && <li className="px-3 py-8 text-center text-xs text-slate-400">No one matches.</li>}
+                  </ul>
+                  <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
+                    Not listed: unclaimed seats (no email yet), and companions who share their booker's email — their
+                    ticket goes out with the booker's.
+                  </p>
+                </section>
 
-              {/* Preview */}
-              <section className="p-4 flex flex-col min-h-0" aria-label="Preview">
-                <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500">3 · Preview as each recipient</h3>
-                <div className="mt-2 flex gap-2">
-                  <select aria-label="Preview as" value={previewId} onChange={e => setPreviewId(e.target.value)} disabled={!chosen.length}
-                    className="flex-1 min-w-0 text-xs border border-slate-300 rounded-lg px-2 py-2">
-                    {!chosen.length && <option value="">Select recipients first</option>}
-                    {chosen.map(a => <option key={a.id} value={a.id}>{a.name} — {a.email}</option>)}
-                  </select>
-                  <button type="button" onClick={runPreview} disabled={!previewId || previewing}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40">
-                    {previewing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Eye className="w-3.5 h-3.5" />} Preview
-                  </button>
-                </div>
-                {previewError && (
-                  <p className="mt-3 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2" role="alert">{previewError}</p>
-                )}
-                {preview ? (
-                  <>
-                    <div className="mt-3 text-xs text-slate-600 space-y-1">
-                      <p><span className="text-slate-400">To:</span> {preview.to}</p>
-                      <p><span className="text-slate-400">Subject:</span> <strong className="text-slate-800">{preview.subject}</strong></p>
-                      <p className="flex items-start gap-1">
+                {/* Message */}
+                <section aria-labelledby="ct-message" className="p-5">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 id="ct-message" className={sectionTitle}><Mail className="w-3.5 h-3.5" /> 2 · Message</h3>
+                    <select aria-label="Start from a preset" className="text-xs border border-slate-300 rounded-lg px-2 py-1.5 bg-white max-w-[55%]"
+                      value="" onChange={e => {
+                        const p = CUSTOM_TICKET_PRESETS.find(x => x.id === e.target.value);
+                        if (p && window.confirm(`Replace the current message with "${p.label}"?`)) { setSubject(p.subject); setBody(p.body); }
+                      }}>
+                      <option value="">Start from a preset…</option>
+                      {CUSTOM_TICKET_PRESETS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+                    </select>
+                  </div>
+                  <div className="mt-3 flex items-center justify-between gap-2">
+                    <label htmlFor="ct-subject" className="text-xs font-semibold text-slate-600">Subject</label>
+                    <select aria-label="Add a personal detail to the subject" value="" className="text-[11px] border border-slate-200 rounded-md px-1.5 py-1 bg-white text-slate-600"
+                      onChange={e => { if (e.target.value) insertIntoSubject(e.target.value); }}>
+                      <option value="">+ Add a detail…</option>
+                      {TEMPLATE_VARIABLES.map(v => <option key={v.key} value={v.key}>{v.label}</option>)}
+                    </select>
+                  </div>
+                  <input id="ct-subject" ref={subjectRef} value={subject} onChange={e => setSubject(e.target.value)} className={`mt-1 ${inputClass}`} />
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Details in <span className="font-mono">{'{{…}}'}</span> are filled in per person — see the preview.
+                  </p>
+                  <p className="block mt-4 mb-1 text-xs font-semibold text-slate-600">Email</p>
+                  <TicketEmailEditor value={body} onChange={setBody} />
+                </section>
+              </div>
+
+              {/* ── Right: live preview ───────────────────────────────── */}
+              <section aria-labelledby="ct-preview" className="flex-1 min-w-0 min-h-[640px] lg:min-h-0 flex flex-col bg-slate-50 border-t lg:border-t-0 border-slate-200">
+                <div className="px-5 pt-5 pb-3 shrink-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 id="ct-preview" className={sectionTitle}>3 · Preview as each recipient</h3>
+                    {previewing && <span className="flex items-center gap-1.5 text-xs text-slate-500"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Updating…</span>}
+                  </div>
+                  <div className="mt-3 flex items-center gap-2">
+                    <button type="button" onClick={() => step(-1)} disabled={chosen.length < 2} aria-label="Previous recipient"
+                      className="px-2.5 py-2 rounded-lg border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40">‹</button>
+                    <select aria-label="Preview as" value={previewId} onChange={e => setPreviewId(e.target.value)} disabled={!chosen.length}
+                      className="flex-1 min-w-0 text-sm border border-slate-300 rounded-lg px-2 py-2 bg-white truncate">
+                      {!chosen.length && <option value="">Select recipients to preview</option>}
+                      {chosen.map((a, i) => <option key={a.id} value={a.id}>{i + 1}/{chosen.length} · {a.name} — {a.email}</option>)}
+                    </select>
+                    <button type="button" onClick={() => step(1)} disabled={chosen.length < 2} aria-label="Next recipient"
+                      className="px-2.5 py-2 rounded-lg border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40">›</button>
+                    <button type="button" onClick={runPreview} disabled={!previewId || previewing} aria-label="Refresh preview" title="Refresh preview"
+                      className="p-2 rounded-lg border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40">
+                      <RefreshCw className={`w-4 h-4 ${previewing ? 'animate-spin' : ''}`} />
+                    </button>
+                  </div>
+
+                  {preview && (
+                    <div className="mt-3 rounded-lg bg-white border border-slate-200 px-3 py-2.5 text-xs text-slate-600 space-y-1.5 min-w-0">
+                      <p className="truncate"><span className="text-slate-400">To</span> <span className="text-slate-800">{preview.to}</span></p>
+                      <p className="truncate"><span className="text-slate-400">Subject</span> <strong className="text-slate-900">{preview.subject}</strong></p>
+                      <p className="flex items-start gap-1.5 min-w-0">
                         <Paperclip className="w-3.5 h-3.5 mt-0.5 text-slate-400 shrink-0" />
-                        {preview.attachments.length ? preview.attachments.join(', ') : 'No ticket PDF could be built — check this attendee'}
+                        <span className={`min-w-0 break-words ${preview.attachments.length ? '' : 'text-red-700 font-semibold'}`}>
+                          {preview.attachments.length ? preview.attachments.join(' · ') : 'No ticket PDF could be built — check this attendee before sending'}
+                        </span>
                       </p>
-                      <p className="text-slate-400">
-                        {preview.flags.has_account ? 'Has an account' : 'No account yet'} ·{' '}
-                        {preview.flags.is_companion ? 'Companion' : 'Booker'} ·{' '}
-                        {preview.companions.length ? `Booked for ${preview.companions.join(', ')}` : 'Booked for no one else'}
+                      <div className="flex flex-wrap gap-1.5 pt-0.5">
+                        <Badge tone={preview.flags.has_account ? 'emerald' : 'amber'}>{preview.flags.has_account ? 'Has an account' : 'No account yet'}</Badge>
+                        <Badge tone="slate">{preview.flags.is_companion ? 'Companion' : 'Booker'}</Badge>
+                        {preview.companions.length > 0 && <Badge tone="indigo">Booked for {preview.companions.join(', ')}</Badge>}
+                      </div>
+                    </div>
+                  )}
+                  {previewError && (
+                    <p className="mt-3 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 break-words" role="alert">{previewError}</p>
+                  )}
+                </div>
+
+                <div className="relative flex-1 min-h-0 px-5 pb-5">
+                  {preview ? (
+                    <iframe title="Email preview" sandbox="" srcDoc={preview.html}
+                      className={`w-full h-full min-h-[480px] rounded-lg border border-slate-200 bg-white transition-opacity ${previewing ? 'opacity-60' : ''}`} />
+                  ) : (
+                    <div className="h-full min-h-[320px] rounded-lg border-2 border-dashed border-slate-200 flex items-center justify-center p-6 text-center">
+                      <p className="text-sm text-slate-400 max-w-xs">
+                        {previewing ? 'Rendering…' : chosen.length
+                          ? 'The preview appears here and updates as you edit.'
+                          : 'Select recipients on the left to see exactly what each of them will receive.'}
                       </p>
                     </div>
-                    <iframe title="Email preview" sandbox="" srcDoc={preview.html}
-                      className="mt-3 w-full flex-1 min-h-[420px] border border-slate-200 rounded-lg bg-white" />
-                  </>
-                ) : !previewError && (
-                  <p className="mt-6 text-xs text-slate-400 text-center">
-                    {chosen.length ? 'Press Preview to see exactly what this person will receive.' : 'Pick at least one recipient.'}
-                  </p>
-                )}
+                  )}
+                </div>
               </section>
             </div>
           )}
 
           {(phase === 'sending' || phase === 'done') && (
-            <div className="flex-1 overflow-y-auto px-5 py-4">
-              <div className="flex items-center gap-3 text-sm">
-                {busy && <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />}
-                <span className="text-slate-700" role="status" aria-live="polite">
-                  {busy ? `Sending… ${results.length} of ${chosen.length}` : `${sent} sent · ${failed} failed`}
-                </span>
+            <div className="flex-1 min-h-0 overflow-y-auto px-5 py-5">
+              <div className="max-w-2xl mx-auto">
+                <div className="flex items-center gap-3">
+                  {busy
+                    ? <Loader2 className="w-5 h-5 animate-spin text-indigo-600" />
+                    : failedIds.length ? <AlertTriangle className="w-5 h-5 text-amber-600" /> : <CheckCircle2 className="w-5 h-5 text-emerald-600" />}
+                  <p className="text-sm font-semibold text-slate-800" role="status" aria-live="polite">
+                    {busy ? `Sending… ${results.length} of ${sendList.length}` : `${sent} sent · ${failedIds.length} failed`}
+                  </p>
+                </div>
+                <div className="mt-3 h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                  <div className="h-full bg-indigo-500 transition-all" style={{ width: `${sendList.length ? (results.length / sendList.length) * 100 : 0}%` }} />
+                </div>
+                <ul className="mt-4 divide-y divide-slate-100 border border-slate-200 rounded-lg">
+                  {results.map(r => (
+                    <li key={r.attendeeId} className="px-3 py-2 text-xs flex items-center gap-2 min-w-0">
+                      {r.status === 'sent'
+                        ? <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        : <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />}
+                      <span className="font-medium text-slate-800 truncate">{byId.get(r.attendeeId)?.name ?? r.attendeeId}</span>
+                      <span className={`ml-auto truncate text-right ${r.status === 'sent' ? 'text-slate-500' : 'text-red-700'}`}>
+                        {r.status === 'sent' ? `Sent to ${r.to}` : r.reason}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
               </div>
-              <ul className="mt-3 divide-y divide-slate-100 border border-slate-100 rounded-lg">
-                {results.map(r => (
-                  <li key={r.attendeeId} className="px-3 py-1.5 text-xs flex items-center gap-2">
-                    {r.status === 'sent'
-                      ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                      : <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0" />}
-                    <span className="font-medium text-slate-800 truncate">{byId.get(r.attendeeId)?.name ?? r.attendeeId}</span>
-                    <span className="ml-auto text-slate-500 truncate text-right">
-                      {r.status === 'sent' ? `Sent to ${r.to}` : r.reason}
-                    </span>
-                  </li>
-                ))}
-              </ul>
             </div>
           )}
 
-          <div className="px-5 py-3 border-t border-slate-100 flex items-center justify-end gap-2">
+          {/* Footer */}
+          <div className="px-5 py-3 border-t border-slate-200 flex flex-wrap items-center justify-end gap-2 shrink-0 bg-white">
             {phase === 'compose' && (
               <>
+                <span className="mr-auto text-xs text-slate-500">
+                  {chosen.length ? `${chosen.length} ${chosen.length === 1 ? 'person' : 'people'} will each get their own email.` : 'No recipients selected yet.'}
+                </span>
                 <button onClick={onClose} className="px-4 py-2 rounded-lg border border-slate-300 text-sm font-semibold text-slate-700 hover:bg-slate-50">Cancel</button>
                 <button onClick={() => setPhase('confirm')} disabled={!chosen.length || !subject.trim() || !body.trim()}
                   className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-40">
@@ -291,21 +373,29 @@ export default function CustomTicketEmailModal({ candidates, onClose }: { candid
             )}
             {phase === 'confirm' && (
               <>
-                <span className="mr-auto text-xs text-slate-600">
+                <span className="mr-auto text-sm text-slate-700">
                   Send this email and their tickets to <strong>{chosen.length}</strong> {chosen.length === 1 ? 'person' : 'people'} now?
                 </span>
                 <button onClick={() => setPhase('compose')} className="px-4 py-2 rounded-lg border border-slate-300 text-sm font-semibold text-slate-700 hover:bg-slate-50">Back</button>
-                <button onClick={send} data-testid="custom-ticket-send"
+                <button onClick={() => send(chosen.map(a => a.id))} data-testid="custom-ticket-send" autoFocus
                   className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700">
                   <Send className="w-4 h-4" /> Yes, send
                 </button>
               </>
             )}
             {(phase === 'sending' || phase === 'done') && (
-              <button onClick={onClose} disabled={busy}
-                className="px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800 disabled:opacity-50">
-                {busy ? 'Sending…' : 'Done'}
-              </button>
+              <>
+                {phase === 'done' && failedIds.length > 0 && (
+                  <button onClick={() => send(failedIds)}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-slate-300 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                    <RotateCcw className="w-4 h-4" /> Retry {failedIds.length} failed
+                  </button>
+                )}
+                <button onClick={onClose} disabled={busy}
+                  className="px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800 disabled:opacity-50">
+                  {busy ? 'Sending…' : 'Done'}
+                </button>
+              </>
             )}
           </div>
         </div>
