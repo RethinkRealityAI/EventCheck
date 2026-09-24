@@ -49,7 +49,8 @@ describe('buildCompanionListHtml', () => {
     const html = buildCompanionListHtml([base], 'color:#1E4A8C');
     expect(html).toContain('Anuj &lt;Patel&gt;');
     expect(html).toContain('attached to this email');
-    expect(html).toContain('need their own email address');
+    expect(html).toContain('their own email address');
+    expect(html).toContain('stays in yours as well');
     expect(html).toContain('href="https://x/#/account?token=a.b"');
     expect(html).not.toContain('We have also sent it');
   });

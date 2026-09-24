@@ -61,7 +61,7 @@ export default function CustomTicketEmailModal({ candidates, onClose }: { candid
     const q = query.trim().toLowerCase();
     return candidates.filter(a =>
       (!onlyNeverSent || !a.lastTicketEmailAt)
-      && (!q || `${a.name} ${a.email} ${a.ticketType}`.toLowerCase().includes(q)));
+      && (!q || `${a.name} ${a.email} ${a.ticketType} ${a.adminNotes ?? ''}`.toLowerCase().includes(q)));
   }, [candidates, query, onlyNeverSent]);
   const chosen = useMemo(() => candidates.filter(a => selected.has(a.id)), [candidates, selected]);
 
@@ -135,7 +135,7 @@ export default function CustomTicketEmailModal({ candidates, onClose }: { candid
                 <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500">1 · Recipients ({chosen.length} selected)</h3>
                 <div className="relative mt-2">
                   <Search className="w-4 h-4 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                  <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search name, email, category"
+                  <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search name, email, category, notes"
                     className="w-full pl-8 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-200 outline-none" />
                 </div>
                 <label className="mt-2 flex items-center gap-2 text-xs text-slate-600">
@@ -164,8 +164,8 @@ export default function CustomTicketEmailModal({ candidates, onClose }: { candid
                   {!shown.length && <li className="px-3 py-6 text-center text-xs text-slate-400">No one matches.</li>}
                 </ul>
                 <p className="mt-2 text-[11px] text-slate-500">
-                  Unclaimed seats (no email yet) are not listed. Companions who share the booker's email are covered
-                  by the booker's email — select the booker.
+                  Not listed: unclaimed seats (no email yet), and companions who share their booker's email — their
+                  ticket goes out with the booker's.
                 </p>
               </section>
 

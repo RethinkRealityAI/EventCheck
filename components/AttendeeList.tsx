@@ -2349,9 +2349,14 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
         <CustomTicketEmailModal
           // Everyone in the selected form with an inbox — independent of the
           // tab filters, since the composer has its own search and picker.
+          // A companion registered under the booker's address is covered by
+          // the booker's email (their ticket rides along), so they are not a
+          // recipient of their own — that would be a duplicate to one inbox.
           candidates={attendees.filter(a =>
             !a.isTest && !isPendingGuest(a)
-            && (selectedFormId === '_all' || a.formId === selectedFormId))}
+            && (selectedFormId === '_all' || a.formId === selectedFormId)
+            && !(a.primaryAttendeeId
+              && (emailById.get(a.primaryAttendeeId) ?? '').toLowerCase() === (a.email ?? '').toLowerCase()))}
           onClose={() => setShowCustomTicketEmail(false)}
         />
       )}

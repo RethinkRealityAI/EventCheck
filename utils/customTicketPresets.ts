@@ -23,7 +23,7 @@ export const CUSTOM_TICKET_PRESETS: CustomTicketPreset[] = [
     id: 'tscs-india',
     label: 'TSCS India registration',
     subject: 'Your GANSID Congress 2026 ticket — {{name}}',
-    body: `<p>Hello {{first_name}},</p>
+    body: `<p>Dear {{name}},</p>
 {{#if is_companion}}<p><strong>{{purchaser}}</strong> has registered you for the <strong>GANSID Congress 2026</strong> (October 23–25, Hyderabad, India) through the Thalassemia and Sickle Cell Society (TSCS). Your place is confirmed and there is nothing to pay.</p>{{else}}<p>Thank you for registering for the <strong>GANSID Congress 2026</strong> (October 23–25, Hyderabad, India) through the Thalassemia and Sickle Cell Society (TSCS). Your registration is paid and confirmed.</p>{{/if}}
 <p><strong>Your ticket is attached to this email.</strong> At check-in, show the attached PDF or the QR code below, either on your phone or printed. You do not need an account to attend: the ticket and QR code are all you need.</p>
 <p style="background:#f3f6fb;border-radius:8px;padding:12px 16px;margin:16px 0;"><strong>Registration details</strong><br>Name: {{name}}<br>Category: {{ticket_type}}<br>TSCS reference: {{booking_ref}}</p>

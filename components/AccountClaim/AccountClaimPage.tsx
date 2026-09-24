@@ -16,7 +16,8 @@ import {
 // this only gives them a portal account that holds that ticket. It matters most
 // for a companion registered under the purchaser's email: they cannot sign up
 // at that address (it is the purchaser's account), so this page takes their
-// own address and moves the ticket there. Same trust model as /tickets and
+// own address and the ticket is re-addressed there (the purchaser keeps it
+// too: the portal lists a booking's companions by booking, not by email). Same trust model as /tickets and
 // /complete: the signed token is the credential. Rules:
 // supabase/functions/_shared/accountClaim.ts.
 
@@ -173,8 +174,9 @@ export const AccountClaimPage: React.FC = () => {
               {state.data.sharedEmail && (
                 <p className="mt-4 text-sm text-gray-700 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
                   {state.data.purchaserName ? <><strong>{state.data.purchaserName}</strong> booked</> : 'This ticket was booked'} your
-                  ticket using their email address. Enter <strong>your own</strong> email below — your ticket will be
-                  moved to it and linked to your new account.
+                  ticket using their email address. Enter <strong>your own</strong> email below and your ticket will be
+                  linked to your new account. {state.data.purchaserName ? 'They' : 'The booker'} will still see it in
+                  their account too.
                 </p>
               )}
 

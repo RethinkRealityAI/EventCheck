@@ -81,7 +81,7 @@ export function buildCompanionListHtml(companions: CompanionTicket[], linkStyle:
       parts.push('They already have their own account.');
     } else if (c.accountUrl) {
       parts.push(c.sharesRecipientEmail
-        ? `Their ticket is registered under your email, so it sits in your account alongside yours. If they would like an account of their own, they will need their own email address: send them <a href="${escapeHtml(c.accountUrl)}" style="${linkStyle}">this link</a> and their ticket will move to it.`
+        ? `Their ticket is registered under your email, so it sits in your account alongside yours. If they would like an account of their own, send them <a href="${escapeHtml(c.accountUrl)}" style="${linkStyle}">this link</a>: they sign up with their own email address and their ticket is linked to their new account. It stays in yours as well.`
         : `They can create their own account with <a href="${escapeHtml(c.accountUrl)}" style="${linkStyle}">this link</a>.`);
     }
     return `<li style="margin:0 0 10px;">${parts.join(' ')}</li>`;

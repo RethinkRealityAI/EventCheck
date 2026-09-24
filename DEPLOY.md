@@ -450,10 +450,11 @@ address — it is the purchaser's account.
   refuses it and it refuses theirs. Rules in `_shared/accountClaim.ts`:
   * own, emailed address → a pre-verified account there (the link reaching that
     inbox proves it), then sign-in;
-  * a new address (always, for a shared-address companion) → the ticket moves
-    there with the purchaser's account cleared from it, then a normal
-    confirm-by-email sign-up. An existing account at that address just gets the
-    ticket;
+  * a new address (always, for a shared-address companion) → the ticket is
+    re-addressed there with the purchaser's account cleared from it, then a
+    normal confirm-by-email sign-up. An existing account at that address just
+    gets the ticket. The purchaser still sees it: My Tickets lists a booking's
+    companions by `primary_attendee_id`, not by email;
   * never: a ticket already linked at its own address, the purchaser's address
     as a destination, or a pre-verified account for a typed address.
 * **Custom ticket email** — Attendees → **Ticket email**. The admin picks
