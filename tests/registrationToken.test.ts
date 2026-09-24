@@ -8,6 +8,8 @@ import {
   verifyPayToken,
   signInviteToken,
   verifyInviteToken,
+  signAccountToken,
+  verifyAccountToken,
 } from '../supabase/functions/_shared/registrationToken';
 
 const SECRET = 'test-service-role-key-abc123';
@@ -97,5 +99,40 @@ describe('completion token', () => {
   it('refuses a ticket-download token', async () => {
     const download = await signRegistrationToken('att-1', 'form', SECRET, NOW, TTL);
     expect(await verifyCompleteToken(download, SECRET, NOW)).toMatchObject({ valid: false, reason: 'wrong-kind' });
+  });
+
+  describe('account token', () => {
+    it('round-trips', async () => {
+      const t = await signAccountToken('att-1', SECRET, NOW, TTL);
+      expect(await verifyAccountToken(t, SECRET, NOW)).toEqual({ valid: true, attendeeId: 'att-1' });
+    });
+
+    it('expires', async () => {
+      const t = await signAccountToken('att-1', SECRET, NOW, 1000);
+      expect(await verifyAccountToken(t, SECRET, NOW + 2000)).toEqual({ valid: false, reason: 'expired' });
+    });
+
+    it('rejects a token signed with another secret', async () => {
+      const t = await signAccountToken('att-1', 'other-secret', NOW, TTL);
+      expect(await verifyAccountToken(t, SECRET, NOW)).toMatchObject({ valid: false, reason: 'bad-signature' });
+    });
+
+    it('cannot stand in for any other kind, and no other kind stands in for it', async () => {
+      const account = await signAccountToken('att-1', SECRET, NOW, TTL);
+      expect(await verifyCompleteToken(account, SECRET, NOW)).toMatchObject({ valid: false, reason: 'wrong-kind' });
+      expect(await verifyPayToken(account, SECRET, NOW)).toMatchObject({ valid: false, reason: 'wrong-kind' });
+      expect(await verifyInviteToken(account, SECRET, NOW)).toMatchObject({ valid: false, reason: 'wrong-kind' });
+      expect((await verifyRegistrationToken(account, SECRET, NOW)).valid).toBe(false);
+
+      const others = [
+        await signCompleteToken('att-1', SECRET, NOW, TTL),
+        await signPayToken('att-1', SECRET, NOW, TTL),
+        await signInviteToken('c-1', 'form', SECRET, NOW, TTL),
+        await signRegistrationToken('att-1', 'form', SECRET, NOW, TTL),
+      ];
+      for (const t of others) {
+        expect(await verifyAccountToken(t, SECRET, NOW)).toMatchObject({ valid: false, reason: 'wrong-kind' });
+      }
+    });
   });
 });

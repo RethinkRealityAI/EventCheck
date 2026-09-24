@@ -12,6 +12,7 @@ import PublicRegistration from './components/PublicRegistration';
 import { TicketDownloadPage } from './components/TicketDownload/TicketDownloadPage';
 import PayBalancePage from './components/PayBalance/PayBalancePage';
 import CompleteRegistrationPage from './components/CompleteRegistration/CompleteRegistrationPage';
+import AccountClaimPage from './components/AccountClaim/AccountClaimPage';
 import SeatingConfigurator from './components/Seating/SeatingConfigurator';
 import SponsorsDashboard from './components/Sponsors/SponsorsDashboard';
 import IndiaIngestPage from './components/IndiaIngest/IndiaIngestPage';
@@ -889,6 +890,13 @@ export default function App() {
                 token is the credential, and it can only add answers to
                 unanswered, non-identity, non-pricing questions. */}
             <Route path="/complete" element={<CompleteRegistrationPage />} />
+
+            {/* Public "create your account" page — opened from a ticket email.
+                Gives the holder of one ticket a portal account for it, including
+                a companion registered under the purchaser's email (they bring
+                their own address and the ticket moves to it). The signed
+                kind='account' token is the credential; see account-claim. */}
+            <Route path="/account" element={<AccountClaimPage />} />
 
             {/* Change password — any signed-in user can reach this. Primarily
                 used by SCAGO admins (no portal surface) + as a fallback link

@@ -3,19 +3,22 @@
 // send-ticket-email's gateway is open (verify_jwt = false) because public
 // flows — a registrant's own confirmation, a guest claiming a seat — call it
 // with no session. Most modes are safe that way: they load a row by id and
-// render OUR template to THAT row's address. Two modes are not:
+// render OUR template to THAT row's address. These modes are not:
 //
 //   raw-html                 { to, subject, html }
 //   contact-register-invite  { to, subject, html }
+//   custom-ticket            { attendeeId, subject, body } — admin-written copy
+//                            wrapped around a real ticket
 //
-// Both deliver caller-supplied HTML to a caller-supplied address, from the
-// congress sender, with our SMTP reputation behind it. Unauthenticated, that
-// is an open relay: anyone who finds the function URL could send a
-// convincing "GANSID Congress" email linking anywhere. Every legitimate
+// Each delivers caller-supplied HTML — to a caller-supplied address, or to any
+// attendee the caller names — from the congress sender, with our SMTP
+// reputation behind it. Unauthenticated, that is an open relay: anyone who
+// finds the function URL could send a convincing "GANSID Congress" email
+// linking anywhere. Every legitimate
 // caller is either another edge function (service-role key) or an admin in
 // the dashboard (their session JWT), so those are the only two accepted.
 
-export const CALLER_CONTENT_MODES: ReadonlySet<string> = new Set(['raw-html', 'contact-register-invite']);
+export const CALLER_CONTENT_MODES: ReadonlySet<string> = new Set(['raw-html', 'contact-register-invite', 'custom-ticket']);
 
 export const SENDER_ROLES: ReadonlySet<string> = new Set(['admin', 'super_admin']);
 

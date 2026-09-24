@@ -96,3 +96,12 @@ verify_jwt = false
 # admin/super_admin JWT inside the function before minting anything.
 [functions.registration-complete]
 verify_jwt = false
+
+# Public, token-gated "create your account" for the holder of one ticket
+# (/#/account?token=…). The person has no session yet, so the gateway is open;
+# the kind='account' HMAC token is the credential. It can only create an
+# account at the ticket's own emailed address, or move a ticket with no account
+# of its own to a new address for a normal confirm-by-email sign-up. See
+# supabase/functions/_shared/accountClaim.ts.
+[functions.account-claim]
+verify_jwt = false

@@ -439,6 +439,37 @@ Deploys with the other edge functions on merge; `config.toml` sets
 `verify_jwt = false` because registrants have no session — `link` and `send`
 assert an admin JWT inside the function.
 
+### 5z. "Create your account" (`account-claim`) and the custom ticket email
+
+A companion registered under the purchaser's email (TSCS India lets a buyer type
+one address for everyone) holds a real ticket but can never sign up at that
+address — it is the purchaser's account.
+
+* **Public page** `/#/account?token=…` gives the holder of ONE ticket an account
+  for it. A kind='account' HMAC token is the credential; every other verifier
+  refuses it and it refuses theirs. Rules in `_shared/accountClaim.ts`:
+  * own, emailed address → a pre-verified account there (the link reaching that
+    inbox proves it), then sign-in;
+  * a new address (always, for a shared-address companion) → the ticket is
+    re-addressed there with the purchaser's account cleared from it, then a
+    normal confirm-by-email sign-up. An existing account at that address just
+    gets the ticket. The purchaser still sees it: My Tickets lists a booking's
+    companions by `primary_attendee_id`, not by email;
+  * never: a ticket already linked at its own address, the purchaser's address
+    as a destination, or a pre-verified account for a typed address.
+* **Custom ticket email** — Attendees → **Ticket email**. The admin picks
+  recipients and writes the copy (preset: *TSCS India registration*);
+  `send-ticket-email` mode `custom-ticket` attaches each person's own ticket PDF,
+  inline QR and download link, the PDFs of anyone they booked for (up to 6), and
+  a signed account link per person. Copy may branch on `has_account`,
+  `is_companion` and `has_companions` with `{{#if x}}…{{else}}…{{/if}}`.
+  Preview is per recipient from the same server code. Admin / service-role only
+  (`CALLER_CONTENT_MODES`); logged to `email_sends` (`custom-ticket`).
+* **Companion inside a group booking.** Groups nest one level, so a guest of a
+  paid group member hangs off the booking's primary. Set
+  `answers.companion_of_id` to the member who brought them: their email names
+  that person, and that person's email lists them.
+
 ### 5z. Supabase Auth email templates
 
 The signup-confirmation, magic-link, recovery, invite and email-change mails
