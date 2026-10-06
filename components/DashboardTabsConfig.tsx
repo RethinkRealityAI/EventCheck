@@ -11,6 +11,7 @@ export type DashboardTabId =
   | 'sponsor-tickets'
   | 'groups'
   | 'speakers'
+  | 'dmhos'
   | 'test'
   | 'exhibitors'
   | 'signups'
@@ -32,6 +33,9 @@ export interface DashboardTabMeta {
    *  least one sponsor booking — a gala with no sponsorship programme never
    *  sees it. */
   requiresSponsorData?: boolean;
+  /** When true, the tab only appears once at least one live DMHO delegate
+   *  (attendee_category='dmho') is registered. */
+  requiresDmhoData?: boolean;
 }
 
 /** Every gate a tab can be conditioned on. Computed once by the dashboard
@@ -43,6 +47,7 @@ export interface DashboardTabGates {
   portalEnabled: boolean;
   hasSpeakers?: boolean;
   hasSponsorData?: boolean;
+  hasDmhoData?: boolean;
 }
 
 /** True when a tab cannot appear on this site regardless of admin prefs. */
@@ -51,6 +56,7 @@ export function isTabUnavailable(meta: DashboardTabMeta, gates: DashboardTabGate
   if (meta.requiresPortal && !gates.portalEnabled) return true;
   if (meta.requiresSpeakerData && !gates.hasSpeakers) return true;
   if (meta.requiresSponsorData && !gates.hasSponsorData) return true;
+  if (meta.requiresDmhoData && !gates.hasDmhoData) return true;
   return false;
 }
 
@@ -68,6 +74,7 @@ export const DASHBOARD_TAB_META: readonly DashboardTabMeta[] = [
   { id: 'exhibitors', label: 'Exhibitors', description: 'Exhibitor org + staff rows', requiresExhibitorForms: true },
   { id: 'signups', label: 'Signups', description: 'Portal users + registration progress', requiresPortal: true },
   { id: 'contacts', label: 'Contacts', description: 'Bulk-imported contacts + email campaigns' },
+  { id: 'dmhos', label: 'DMHOs', description: 'District medical team delegates — physical day tickets at the desk, never emailed', requiresDmhoData: true },
 ];
 
 /** Resolve the ordered list of tabs to render, honoring both site-availability

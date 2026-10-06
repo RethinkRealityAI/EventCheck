@@ -44,3 +44,25 @@ describe('TSCS India preset', () => {
     expect(renderConditionals(tscs.body, { has_companions: false })).not.toContain('{{companions}}');
   });
 });
+
+describe('Complimentary preset', () => {
+  const comp = CUSTOM_TICKET_PRESETS.find(p => p.id === 'complimentary')!;
+
+  it('never tells anyone they paid', () => {
+    for (const flags of combos) {
+      const out = renderConditionals(comp.body, flags);
+      expect(out).not.toMatch(/\bpaid\b/i);
+      expect(out).toMatch(/complimentary/i);
+    }
+  });
+
+  it('gives each person without an account their own create-account link', () => {
+    expect(renderConditionals(comp.body, { has_account: false })).toContain('{{account_url}}');
+    expect(renderConditionals(comp.body, { has_account: true })).not.toContain('{{account_url}}');
+  });
+
+  it('names the booker only for companions', () => {
+    expect(renderConditionals(comp.body, { is_companion: true })).toContain('{{purchaser}}');
+    expect(renderConditionals(comp.body, { is_companion: false })).not.toContain('{{purchaser}}');
+  });
+});

@@ -36,6 +36,9 @@ import CustomTicketEmailModal from './Email/CustomTicketEmailModal';
 import CompletionSendDialog from './RegistrationCompleteness/CompletionSendDialog';
 import { completionStatus, needsCompletion, type CompletionStatus } from '../utils/registrationCompletion';
 import { nestUnderParents } from '../utils/rowNesting';
+import { daysAttendingOf, distinctDays, matchesDaysFilter, shortDayLabel, DAYS_NOT_SPECIFIED } from '../utils/daysAttending';
+import { isSuppressedCategory } from '../supabase/functions/_shared/emailSuppression';
+import DmhoNotice from './Dmho/DmhoNotice';
 import ModalPortal from './ModalPortal';
 import { buildAttendeeVars, type BulkRecipient } from '../utils/adminEmailCompose';
 import {
@@ -217,6 +220,7 @@ const STANDARD_COLUMNS: ColumnDef[] = [
   { key: 'country', label: 'Country', group: 'standard' },
   { key: 'formTitle', label: 'Event/Form', group: 'standard' },
   { key: 'ticketType', label: 'Ticket Type', group: 'standard' },
+  { key: 'days', label: 'Days Attending', group: 'standard' },
   { key: 'kind', label: 'Type', group: 'standard' },
   { key: 'seating', label: 'Seating', group: 'standard' },
   { key: 'status', label: 'Check-in Status', group: 'standard' },
@@ -313,6 +317,8 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
   // Advanced Filter State
   const [statusFilter, setStatusFilter] = useState<'all' | 'checked-in' | 'pending'>('all');
   const [paymentFilter, setPaymentFilter] = useState<'all' | 'paid' | 'free' | 'pending'>('all');
+  // 'all' | DAYS_NOT_SPECIFIED | one day label (utils/daysAttending).
+  const [daysFilter, setDaysFilter] = useState<string>('all');
 
   // Response Filter State
   const [responseFilters, setResponseFilters] = useState<Array<{ fieldId: string, value: string }>>([]);
@@ -342,6 +348,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     isPrimary: true,
     registrationKind: true,
     organization: true,
+    daysAttending: true,
   });
 
   const fieldLabels: Record<string, string> = {
@@ -366,6 +373,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     isPrimary: 'Primary / Guest',
     registrationKind: 'Registration type',
     organization: 'Organization',
+    daysAttending: 'Days Attending',
   };
 
   // ── Export scope/filter state ──────────────────────────────────────────────
@@ -498,9 +506,16 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     }
     return m;
   }, [attendees, formById, kindOf]);
+  // "Can be asked online for missing details" — DMHO delegates are excluded:
+  // they are never emailed, so they would only inflate the count and the
+  // completion-link audience with people nobody can reach.
+  const needsOnlineCompletion = useCallback(
+    (a: Attendee) => !isSuppressedCategory(a.attendeeCategory) && needsCompletion(completionById.get(a.id)!),
+    [completionById],
+  );
   const incompleteCount = useMemo(
-    () => attendees.filter(a => !a.isTest && needsCompletion(completionById.get(a.id)!)).length,
-    [attendees, completionById],
+    () => attendees.filter(a => !a.isTest && needsOnlineCompletion(a)).length,
+    [attendees, needsOnlineCompletion],
   );
   // Org name shown for a row: the booking's company for org rows, the parent
   // booking's company for delegates, nothing for ordinary attendees.
@@ -583,6 +598,15 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     [attendees],
   );
 
+  // DMHOs tab only renders once the district medical teams are registered.
+  const hasDmhoData = useMemo(
+    () => attendees.some(a => a.attendeeCategory === 'dmho' && a.isTest !== true),
+    [attendees],
+  );
+
+  // Every day anyone has picked, earliest first — the Days filter's options.
+  const dayOptions = useMemo(() => distinctDays(attendees.filter(a => !a.isTest)), [attendees]);
+
   // Resolved tab list — driven by admin prefs + site-availability gates.
   // Memoized so the active-tab fallback effect below doesn't fire on every render.
   const visibleTabs = useMemo(
@@ -591,8 +615,9 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
       portalEnabled: CURRENT_SITE.portalEnabled,
       hasSpeakers,
       hasSponsorData,
+      hasDmhoData,
     }),
-    [settings?.dashboardTabPrefs, hasExhibitorForms, hasSpeakers, hasSponsorData],
+    [settings?.dashboardTabPrefs, hasExhibitorForms, hasSpeakers, hasSponsorData, hasDmhoData],
   );
 
   // If the admin hides (or site availability strips) the currently-active tab,
@@ -763,6 +788,9 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     else if (activeTab === 'speakers') {
       matchesTab = !isTest && a.guestType === 'speaker';
     }
+    else if (activeTab === 'dmhos') {
+      matchesTab = !isTest && a.attendeeCategory === 'dmho';
+    }
     // Live shows EVERY real registration — sponsor / exhibitor delegates
     // included. They used to be dropped here as "placeholder ghost rows",
     // which left no single place to see a sponsor's people beside everyone
@@ -774,7 +802,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     // Unclaimed seats are off the roster unless explicitly asked for. The Test
     // tab is exempt: it exists to show exactly what a rehearsal wrote.
     const matchesPendingSeat = showPendingSeats || activeTab === 'test' || !isPendingGuest(a);
-    const matchesIncomplete = !showIncompleteOnly || needsCompletion(completionById.get(a.id)!);
+    const matchesIncomplete = !showIncompleteOnly || needsOnlineCompletion(a);
 
     const matchesStatus = statusFilter === 'all'
       ? true
@@ -785,6 +813,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
       : a.paymentStatus === paymentFilter;
 
     const matchesAccount = matchesAccountFilter(a, accountFilter);
+    const matchesDays = matchesDaysFilter(a, daysFilter);
 
     const matchesResponseFilters = responseFilters.every(rf => {
       const answer = a.answers?.[rf.fieldId];
@@ -797,7 +826,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
       return String(answer || '') === rf.value;
     });
 
-    return matchesSearch && matchesForm && matchesTab && matchesKind && matchesPendingSeat && matchesIncomplete && matchesStatus && matchesPayment && matchesAccount && matchesResponseFilters;
+    return matchesSearch && matchesForm && matchesTab && matchesKind && matchesPendingSeat && matchesIncomplete && matchesStatus && matchesPayment && matchesAccount && matchesDays && matchesResponseFilters;
   });
 
   // Count donated seats for badge
@@ -932,7 +961,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
   const openBulkEmail = () => {
     const chips = describeActiveFilters({
       search: searchTerm, status: statusFilter, payment: paymentFilter, account: accountFilter,
-      kind: kindFilter, responseFilterCount: responseFilters.length,
+      kind: kindFilter, days: daysFilter, responseFilterCount: responseFilters.length,
     });
     const tabLabel = visibleTabs.find(t => t.id === activeTab)?.label ?? activeTab;
     const formLabel = selectedFormId === '_all' ? 'All forms' : (selectedForm?.title ?? 'Form');
@@ -941,6 +970,9 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
       // An unclaimed seat has no name and no inbox — there is nobody to write
       // to. It stays visible under its purchaser; it is never a recipient.
       .filter(a => !isPendingGuest(a))
+      // DMHO delegates are never emailed (physical tickets only). The server
+      // refuses them anyway; leaving them out here keeps the count honest.
+      .filter(a => !isSuppressedCategory(a.attendeeCategory))
       .map(a => {
         const kind = kindOf(a);
         const org = orgNameFor(a);
@@ -984,7 +1016,8 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
       : 'all';
     setExportScope(seedScope);
     setExportFormId(selectedFormId);
-    setExportCategory('all');
+    // The DMHOs tab is a category slice — seed the export with that category.
+    setExportCategory(activeTab === 'dmhos' ? 'dmho' : 'all');
     setExportCountry('all');
     setExportRegistration('all');
     setShowExportModal(true);
@@ -1068,6 +1101,9 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     }
     if (key === 'organization') {
       return orgNameFor(attendee) ?? '';
+    }
+    if (key === 'daysAttending') {
+      return daysAttendingOf(attendee).join('; ');
     }
     let val = (attendee as any)[key];
     if (val && (key === 'registeredAt' || key === 'checkedInAt')) {
@@ -1337,6 +1373,8 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
         </div>
 
         {/* Filters Row */}
+        {activeTab === 'dmhos' && <DmhoNotice attendees={attendees} />}
+
         {activeTab === 'signups' || activeTab === 'contacts' || activeTab === 'sponsors' ? null : activeTab === 'tables' ? (
           <div className="flex flex-wrap items-center gap-2 text-sm bg-white/50 backdrop-blur-sm p-3 rounded-lg border border-white/40">
             <button
@@ -1420,6 +1458,21 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
               </select>
             </div>
 
+            {/* Days attending — the desk, catering and rooms all plan by day. */}
+            <div className="flex items-center gap-2">
+              <span className="text-slate-400">Days:</span>
+              <select
+                value={daysFilter}
+                onChange={e => { setDaysFilter(e.target.value); setCurrentPage(1); }}
+                className="bg-transparent font-medium text-slate-700 outline-none cursor-pointer"
+                aria-label="Filter by day attending"
+              >
+                <option value="all">All Days</option>
+                {dayOptions.map(d => <option key={d} value={d}>{shortDayLabel(d)}</option>)}
+                <option value={DAYS_NOT_SPECIFIED}>Not specified</option>
+              </select>
+            </div>
+
             {/* Unclaimed seats — booked and paid, nobody named yet. Off by
                 default so the roster only shows people you can actually reach. */}
             {pendingSeatCount > 0 && (
@@ -1486,7 +1539,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
             {showIncompleteOnly && sortedFiltered.length > 0 && (
               <button
                 type="button"
-                onClick={() => setCompletionRecipients(sortedFiltered.filter(a => needsCompletion(completionById.get(a.id)!)))}
+                onClick={() => setCompletionRecipients(sortedFiltered.filter(needsOnlineCompletion))}
                 data-testid="send-completion-links"
                 className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700"
               >
@@ -1625,6 +1678,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
             payment: paymentFilter,
             account: accountFilter,
             kind: kindFilter,
+            days: daysFilter,
             responseFilterCount: responseFilters.length,
           });
           if (chips.length === 0) return null;
@@ -1649,6 +1703,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                   setPaymentFilter('all');
                   setAccountFilter('all');
                   setKindFilter('all');
+                  setDaysFilter('all');
                   setResponseFilters([]);
                   setCurrentPage(1);
                 }}
@@ -1949,6 +2004,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                 {isColumnVisible('country') && <th className="px-4 py-2.5 min-w-[120px] text-xs font-semibold uppercase tracking-wide text-gray-500">Country</th>}
                 {isColumnVisible('formTitle') && <th className="px-4 py-2.5 min-w-[140px] text-xs font-semibold uppercase tracking-wide text-gray-500">Event/Form</th>}
                 {isColumnVisible('ticketType') && <th className="px-4 py-2.5 min-w-[110px] text-xs font-semibold uppercase tracking-wide text-gray-500">Ticket Type</th>}
+                {isColumnVisible('days') && <th className="px-4 py-2.5 min-w-[120px] text-xs font-semibold uppercase tracking-wide text-gray-500">Days Attending</th>}
                 {isColumnVisible('kind') && <th className="px-4 py-2.5 min-w-[150px] text-xs font-semibold uppercase tracking-wide text-gray-500">Type</th>}
                 {isColumnVisible('seating') && <th className="px-4 py-2.5 min-w-[120px] text-xs font-semibold uppercase tracking-wide text-gray-500">Seating</th>}
                 {isColumnVisible('status') && <th className="px-4 py-2.5 min-w-[120px] text-xs font-semibold uppercase tracking-wide text-gray-500">Check-in Status</th>}
@@ -2161,6 +2217,24 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                           </span>
                         </td>
                       )}
+                      {isColumnVisible('days') && (() => {
+                        const days = daysAttendingOf(attendee);
+                        return (
+                          <td className="px-4 py-3">
+                            {days.length === 0 ? (
+                              <span className="text-gray-300" title="No days selected">—</span>
+                            ) : (
+                              <div className="flex flex-wrap gap-1" title={days.join(', ')}>
+                                {days.map(d => (
+                                  <span key={d} className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold bg-sky-50 text-sky-700 border border-sky-100 whitespace-nowrap">
+                                    {shortDayLabel(d)}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </td>
+                        );
+                      })()}
                       {isColumnVisible('kind') && (() => {
                         const kind = kindOf(attendee);
                         const meta = REGISTRATION_KIND_META[kind];
@@ -2389,7 +2463,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
       {tabsConfigOpen && settings && (
         <DashboardTabsConfig
           settings={settings}
-          gates={{ hasExhibitorForms, portalEnabled: CURRENT_SITE.portalEnabled, hasSpeakers, hasSponsorData }}
+          gates={{ hasExhibitorForms, portalEnabled: CURRENT_SITE.portalEnabled, hasSpeakers, hasSponsorData, hasDmhoData }}
           onSave={async (next) => {
             const updated = { ...settings, dashboardTabPrefs: next };
             await saveSettings(updated);
