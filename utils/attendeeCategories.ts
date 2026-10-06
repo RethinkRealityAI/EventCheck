@@ -14,7 +14,8 @@ export type AttendeeCategory =
   | 'awardee'
   | 'scholarship'
   | 'performer'
-  | 'volunteer';
+  | 'volunteer'
+  | 'dmho';
 
 export interface CategoryMeta {
   id: AttendeeCategory;
@@ -120,6 +121,23 @@ export const ATTENDEE_CATEGORIES: readonly CategoryMeta[] = [
     pillTextDark: 'text-sky-300',
     pillBorderDark: 'border-sky-500/30',
     hex: '#0ea5e9',
+  },
+  {
+    // Government district medical teams invited through TSCS India. They hold
+    // physical day tickets handed out at the registration desk and are NEVER
+    // emailed — see supabase/functions/_shared/emailSuppression.ts.
+    id: 'dmho',
+    label: 'DMHO Delegate (physical ticket, no email)',
+    shortLabel: 'DMHO',
+    icon: '🏥',
+    pillBg: 'bg-teal-100',
+    pillText: 'text-teal-800',
+    pillBorder: 'border-teal-200',
+    pillBgDark: 'bg-teal-500/20',
+    pillTextDark: 'text-teal-300',
+    pillBorderDark: 'border-teal-500/30',
+    hex: '#14b8a6',
+    portalOnly: true,
   },
 ];
 

@@ -25,6 +25,7 @@ import { assessPayability } from '../_shared/payBalance.ts';
 import { isPlaceholderEmail } from '../_shared/companionIdentity.ts';
 import { isMultiSeatPurchase } from '../_shared/purchaseShape.ts';
 import { authorizeCallerContentSend, CALLER_CONTENT_MODES } from '../_shared/senderAuth.ts';
+import { EMAIL_SUPPRESSED_MESSAGE, recipientAddresses, suppressedAddresses } from '../_shared/emailSuppression.ts';
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -143,11 +144,45 @@ function buildTransporter(smtpConfig?: any) {
     }), smtpUser, fromName, fromAddress };
 }
 
+/** Thrown when a recipient must never be emailed (see _shared/emailSuppression.ts). */
+class EmailSuppressedError extends Error {
+    constructor(public addresses: string[]) { super(EMAIL_SUPPRESSED_MESSAGE); }
+}
+
+/**
+ * Refuse a send to any address that belongs only to never-email registrations
+ * (DMHO delegates). Called immediately before EVERY sendMail in this function —
+ * it is the single exit for all outbound mail, so no mode, screen or bulk
+ * action can route around it.
+ *
+ * Fails OPEN on a lookup error: an unreachable attendees table must not stop
+ * every ticket in the system, and the dashboard already keeps these rows out
+ * of bulk audiences.
+ */
+async function assertRecipientsAllowed(to: unknown): Promise<void> {
+    const addresses = recipientAddresses(to);
+    const url = Deno.env.get('SUPABASE_URL');
+    const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    if (addresses.length === 0 || !url || !key) return;
+    // ilike for case-insensitivity; `_` would match any char, which only
+    // over-fetches — suppressedAddresses() compares exactly.
+    const filter = addresses.map(a => `email.ilike."${a.replace(/["\\]/g, '')}"`).join(',');
+    const { data, error } = await createClient(url, key)
+        .from('attendees').select('email, attendee_category, is_test').or(filter);
+    if (error) {
+        console.error('[send-ticket-email] suppression lookup failed — sending anyway', error.message);
+        return;
+    }
+    const blocked = suppressedAddresses(addresses, (data ?? []) as any[]);
+    if (blocked.length > 0) throw new EmailSuppressedError(blocked);
+}
+
 /**
  * Send a simple HTML email (no attachments).
  * Reads SMTP config from environment variables.
  */
 async function sendSimpleEmail({ to, subject, html, smtpConfig, attachments, headerImageUrl }: { to: string; subject: string; html: string; smtpConfig?: any; attachments?: any[]; headerImageUrl?: string }) {
+    await assertRecipientsAllowed(to);
     const { transporter, fromName, fromAddress } = buildTransporter(smtpConfig);
     // Inline the branded header logo as cid: as well. It is a hotlinked remote
     // image, so corporate gateways blank it by default — and that empty box is
@@ -359,6 +394,7 @@ serve(async (req: Request) => {
             const rawHtml = body.trackingId
                 ? appendTrackingPixel(html, buildOpenPixelUrl(Deno.env.get('SUPABASE_URL') || '', String(body.trackingId)))
                 : html;
+            await assertRecipientsAllowed(to);
             await transporter.sendMail({
                 from: `"${fromName}" <${fromAddress}>`,
                 to,
@@ -2060,6 +2096,7 @@ serve(async (req: Request) => {
             contentType: att.contentType || 'application/pdf',
         }));
 
+        await assertRecipientsAllowed(email.to);
         await transporter.sendMail({
             from: `"${fromName}" <${fromAddress}>`,
             to: email.to,
@@ -2073,6 +2110,12 @@ serve(async (req: Request) => {
             { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
     } catch (error: unknown) {
+        // A deliberate refusal, not a failure: no email_failures row (it would
+        // invite a "retry"), and a 422 the caller reports as "not sent".
+        if (error instanceof EmailSuppressedError) {
+            console.warn('[send-ticket-email] refused never-email recipient', JSON.stringify({ mode: failureCtx.mode, attendeeId: failureCtx.attendeeId }));
+            return jsonResponse({ error: EMAIL_SUPPRESSED_MESSAGE, code: 'email-suppressed', suppressed: error.addresses }, 422);
+        }
         const message = error instanceof Error ? error.message : 'Unknown error';
         console.error('send-ticket-email error:', message);
 

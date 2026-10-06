@@ -102,3 +102,12 @@ describe('registration-type chip', () => {
     expect(chips.map(c => c.key)).toEqual(['search', 'status', 'payment', 'account', 'kind', 'responses']);
   });
 });
+
+describe('days chip', () => {
+  it('names the day filter after the type filter, and stays silent on "all"', () => {
+    expect(describeActiveFilters({ days: 'all' })).toEqual([]);
+    const chips = describeActiveFilters({ kind: 'sponsors', days: 'October 24, 2026', responseFilterCount: 1 });
+    expect(chips.map(c => c.key)).toEqual(['kind', 'days', 'responses']);
+    expect(chips[1].label).toBe('Attending Oct 24');
+  });
+});

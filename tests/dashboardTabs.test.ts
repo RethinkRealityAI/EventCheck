@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { resolveVisibleTabs, isTabUnavailable, DASHBOARD_TAB_META } from '../components/DashboardTabsConfig';
 
-const ALL_AVAILABLE = { hasExhibitorForms: true, portalEnabled: true, hasSpeakers: true, hasSponsorData: true };
+const ALL_AVAILABLE = { hasExhibitorForms: true, portalEnabled: true, hasSpeakers: true, hasSponsorData: true, hasDmhoData: true };
 const SCAGO_LIKE = { hasExhibitorForms: false, portalEnabled: false, hasSpeakers: false, hasSponsorData: false };
 
 describe('resolveVisibleTabs', () => {
@@ -133,5 +133,15 @@ describe('isTabUnavailable', () => {
     expect(isTabUnavailable(byId.signups, SCAGO_LIKE)).toBe(true);
     expect(isTabUnavailable(byId.live, SCAGO_LIKE)).toBe(false);
     for (const m of DASHBOARD_TAB_META) expect(isTabUnavailable(m, ALL_AVAILABLE)).toBe(false);
+  });
+});
+
+describe('DMHOs tab', () => {
+  it('appears only once DMHO delegates are registered', () => {
+    expect(resolveVisibleTabs(undefined, { ...ALL_AVAILABLE, hasDmhoData: false }).find(t => t.id === 'dmhos')).toBeUndefined();
+    expect(resolveVisibleTabs(undefined, ALL_AVAILABLE).find(t => t.id === 'dmhos')).toBeDefined();
+  });
+  it('is appended last so saved tab orders keep their positions', () => {
+    expect(DASHBOARD_TAB_META[DASHBOARD_TAB_META.length - 1].id).toBe('dmhos');
   });
 });

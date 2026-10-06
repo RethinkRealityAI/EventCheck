@@ -15,6 +15,7 @@
 // Pure + data-only so both are unit-tested (CLAUDE.md §16 rule #14).
 
 import { REGISTRATION_KIND_FILTER_LABELS, type RegistrationKindFilter } from './registrationKind';
+import { daysFilterLabel } from './daysAttending';
 
 export const ACCOUNT_FILTERS = ['all', 'linked', 'none'] as const;
 export type AccountFilter = typeof ACCOUNT_FILTERS[number];
@@ -47,10 +48,12 @@ export interface ActiveFilterState {
   kind?: RegistrationKindFilter;
   /** Count of per-form response filters applied. */
   responseFilterCount?: number;
+  /** 'all' | DAYS_NOT_SPECIFIED | a day label (see utils/daysAttending). */
+  days?: string;
 }
 
 export interface ActiveFilterChip {
-  key: 'search' | 'status' | 'payment' | 'account' | 'kind' | 'responses';
+  key: 'search' | 'status' | 'payment' | 'account' | 'kind' | 'days' | 'responses';
   label: string;
 }
 
@@ -84,6 +87,9 @@ export function describeActiveFilters(state: ActiveFilterState): ActiveFilterChi
   }
   if (state.kind && state.kind !== 'all') {
     chips.push({ key: 'kind', label: REGISTRATION_KIND_FILTER_LABELS[state.kind] ?? state.kind });
+  }
+  if (state.days && state.days !== 'all') {
+    chips.push({ key: 'days', label: daysFilterLabel(state.days) });
   }
   const n = state.responseFilterCount ?? 0;
   if (n > 0) chips.push({ key: 'responses', label: `${n} response filter${n > 1 ? 's' : ''}` });
