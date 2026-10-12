@@ -7,7 +7,7 @@ Two layers, both required before a PR is marked ready.
 ```
 npx tsc --noEmit
 npm run check:edge          # edge-function types + scope
-npm test                    # vitest (needs VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY set — any value)
+npm test                    # vitest (no env needed — vitest.config.ts supplies placeholders)
 npm run lint:migrations
 npm run build
 ```
