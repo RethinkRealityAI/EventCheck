@@ -37,6 +37,7 @@ import CompletionSendDialog from './RegistrationCompleteness/CompletionSendDialo
 import { completionStatus, needsCompletion, type CompletionStatus } from '../utils/registrationCompletion';
 import { nestUnderParents } from '../utils/rowNesting';
 import { daysAttendingOf, distinctDays, matchesDaysFilter, shortDayLabel, DAYS_NOT_SPECIFIED } from '../utils/daysAttending';
+import { attendeeTitleOf, nameWithTitle } from '../utils/attendeeTitle';
 import { isSuppressedCategory } from '../supabase/functions/_shared/emailSuppression';
 import DmhoNotice from './Dmho/DmhoNotice';
 import ModalPortal from './ModalPortal';
@@ -2070,7 +2071,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                               // Keeps names aligned down the column when some rows have a toggle.
                               <span className="w-5 flex-shrink-0" aria-hidden="true" />
                             ))}
-                            <div className="font-medium text-gray-900">{attendee.name}</div>
+                            <div className="font-medium text-gray-900">{nameWithTitle(attendee.name, attendeeTitleOf(attendee, formById.get(attendee.formId)))}</div>
                             {children.length > 0 && !groupPrimaryIds.has(attendee.id) && (
                               <span
                                 className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200 whitespace-nowrap"
