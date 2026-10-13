@@ -12,6 +12,7 @@ export type DashboardTabId =
   | 'groups'
   | 'speakers'
   | 'dmhos'
+  | 'tscs'
   | 'test'
   | 'exhibitors'
   | 'signups'
@@ -36,6 +37,9 @@ export interface DashboardTabMeta {
   /** When true, the tab only appears once at least one live DMHO delegate
    *  (attendee_category='dmho') is registered. */
   requiresDmhoData?: boolean;
+  /** When true, the tab only appears once at least one registration came in
+   *  through TSCS India (utils/tscsRegistration). */
+  requiresTscsData?: boolean;
 }
 
 /** Every gate a tab can be conditioned on. Computed once by the dashboard
@@ -48,6 +52,7 @@ export interface DashboardTabGates {
   hasSpeakers?: boolean;
   hasSponsorData?: boolean;
   hasDmhoData?: boolean;
+  hasTscsData?: boolean;
 }
 
 /** True when a tab cannot appear on this site regardless of admin prefs. */
@@ -57,6 +62,7 @@ export function isTabUnavailable(meta: DashboardTabMeta, gates: DashboardTabGate
   if (meta.requiresSpeakerData && !gates.hasSpeakers) return true;
   if (meta.requiresSponsorData && !gates.hasSponsorData) return true;
   if (meta.requiresDmhoData && !gates.hasDmhoData) return true;
+  if (meta.requiresTscsData && !gates.hasTscsData) return true;
   return false;
 }
 
@@ -75,6 +81,7 @@ export const DASHBOARD_TAB_META: readonly DashboardTabMeta[] = [
   { id: 'signups', label: 'Signups', description: 'Portal users + registration progress', requiresPortal: true },
   { id: 'contacts', label: 'Contacts', description: 'Bulk-imported contacts + email campaigns' },
   { id: 'dmhos', label: 'DMHOs', description: 'District medical team delegates — physical day tickets at the desk, never emailed', requiresDmhoData: true },
+  { id: 'tscs', label: 'TSCS', description: 'Everyone registered through TSCS India — their website, email feed and delegate lists (DMHOs have their own tab)', requiresTscsData: true },
 ];
 
 /** Resolve the ordered list of tabs to render, honoring both site-availability

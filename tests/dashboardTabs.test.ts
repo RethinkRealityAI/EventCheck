@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { resolveVisibleTabs, isTabUnavailable, DASHBOARD_TAB_META } from '../components/DashboardTabsConfig';
 
-const ALL_AVAILABLE = { hasExhibitorForms: true, portalEnabled: true, hasSpeakers: true, hasSponsorData: true, hasDmhoData: true };
+const ALL_AVAILABLE = { hasExhibitorForms: true, portalEnabled: true, hasSpeakers: true, hasSponsorData: true, hasDmhoData: true, hasTscsData: true };
 const SCAGO_LIKE = { hasExhibitorForms: false, portalEnabled: false, hasSpeakers: false, hasSponsorData: false };
 
 describe('resolveVisibleTabs', () => {
@@ -141,7 +141,26 @@ describe('DMHOs tab', () => {
     expect(resolveVisibleTabs(undefined, { ...ALL_AVAILABLE, hasDmhoData: false }).find(t => t.id === 'dmhos')).toBeUndefined();
     expect(resolveVisibleTabs(undefined, ALL_AVAILABLE).find(t => t.id === 'dmhos')).toBeDefined();
   });
+  it('is appended after the older tabs so saved tab orders keep their positions', () => {
+    const ids = DASHBOARD_TAB_META.map(m => m.id);
+    expect(ids.indexOf('dmhos')).toBe(ids.indexOf('contacts') + 1);
+  });
+});
+
+describe('TSCS tab gate', () => {
   it('is appended last so saved tab orders keep their positions', () => {
-    expect(DASHBOARD_TAB_META[DASHBOARD_TAB_META.length - 1].id).toBe('dmhos');
+    expect(DASHBOARD_TAB_META[DASHBOARD_TAB_META.length - 1].id).toBe('tscs');
+  });
+
+  it('appears only once something has come in through TSCS', () => {
+    const withData = resolveVisibleTabs(undefined, { hasExhibitorForms: false, portalEnabled: false, hasTscsData: true });
+    expect(withData.find(t => t.id === 'tscs')).toBeDefined();
+    const without = resolveVisibleTabs(undefined, { hasExhibitorForms: false, portalEnabled: false });
+    expect(without.find(t => t.id === 'tscs')).toBeUndefined();
+  });
+
+  it('is reachable for admins who saved their tab order before it existed', () => {
+    const ids = resolveVisibleTabs({ order: ['live', 'tables'], hidden: [] }, { hasExhibitorForms: false, portalEnabled: false, hasTscsData: true }).map(t => t.id);
+    expect(ids).toContain('tscs');
   });
 });

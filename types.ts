@@ -678,7 +678,7 @@ export interface BogoClaim {
 // User Portal
 // ============================================================
 
-export type UserRole = 'attendee' | 'exhibitor' | 'sponsor' | 'admin' | 'super_admin';
+export type UserRole = 'attendee' | 'exhibitor' | 'sponsor' | 'admin' | 'super_admin' | 'viewer';
 
 /**
  * Per-admin page-level permissions, stored on profiles.admin_permissions.

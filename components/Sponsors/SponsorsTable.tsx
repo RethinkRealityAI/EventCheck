@@ -12,6 +12,8 @@ interface Props {
   sponsors: Attendee[];
   settings: AppSettings;
   onChanged: () => void | Promise<void>;
+  /** Read-only viewers can look but not mark payments. */
+  readOnly?: boolean;
 }
 
 /** The fields a delegate line needs — fetched once for every sponsor. */
@@ -29,7 +31,7 @@ interface DelegateRow {
 
 const COLUMN_COUNT = 10;
 
-export const SponsorsTable: React.FC<Props> = ({ sponsors, settings, onChanged }) => {
+export const SponsorsTable: React.FC<Props> = ({ sponsors, settings, onChanged, readOnly = false }) => {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'paid' | 'pending'>('all');
   const [methodFilter, setMethodFilter] = useState<'all' | 'paypal' | 'cheque'>('all');
@@ -226,7 +228,7 @@ export const SponsorsTable: React.FC<Props> = ({ sponsors, settings, onChanged }
                 <td className="px-4 py-3 text-slate-500">{new Date(s.registeredAt).toLocaleDateString()}</td>
                 <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                   <button onClick={() => setDetailFor(s)} className="text-indigo-600 hover:underline text-xs mr-2">View</button>
-                  {s.paymentStatus === 'pending' && (
+                  {!readOnly && s.paymentStatus === 'pending' && (
                     <button onClick={() => setChequeFor(s)} className="text-emerald-600 hover:underline text-xs">Mark Paid</button>
                   )}
                 </td>
@@ -283,7 +285,7 @@ export const SponsorsTable: React.FC<Props> = ({ sponsors, settings, onChanged }
         </table>
       </div>
 
-      {detailFor && <SponsorDetailModal attendee={detailFor} settings={settings} onClose={() => setDetailFor(null)} onChanged={onChanged} onMarkCheque={() => { setChequeFor(detailFor); setDetailFor(null); }} />}
+      {detailFor && <SponsorDetailModal attendee={detailFor} settings={settings} onClose={() => setDetailFor(null)} onChanged={onChanged} readOnly={readOnly} onMarkCheque={() => { setChequeFor(detailFor); setDetailFor(null); }} />}
       {chequeFor && <ChequeReceivedModal attendee={chequeFor} settings={settings} onClose={() => setChequeFor(null)} onConfirmed={async () => { setChequeFor(null); await onChanged(); }} />}
     </>
   );

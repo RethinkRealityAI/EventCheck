@@ -6,6 +6,7 @@ import {
   FALLBACK_ADMIN_PERMISSIONS,
   allAdminPermissions,
   canAccessPage,
+  canEditAdminData,
   canManageAdmins,
   canUseFeature,
   effectiveFeaturePermissions,
@@ -14,6 +15,7 @@ import {
   hasAdminAccess,
   isAdmin,
   isSuperAdmin,
+  isViewer,
 } from '../utils/adminPermissions';
 
 const baseProfile = (overrides: Partial<Profile>): Profile => ({
@@ -279,5 +281,39 @@ describe('allAdminPermissions', () => {
       if (k === 'dashboard') continue;
       expect(DEFAULT_ADMIN_PERMISSIONS.pages[k]).toBe(false);
     }
+  });
+});
+
+describe('viewer (read-only partner) role', () => {
+  const viewer = baseProfile({ role: 'viewer' });
+
+  it('reaches the admin UI but only the attendee dashboard', () => {
+    expect(hasAdminAccess(viewer)).toBe(true);
+    expect(canAccessPage(viewer, 'dashboard')).toBe(true);
+    for (const page of ADMIN_PAGE_KEYS.filter(p => p !== 'dashboard')) {
+      expect(canAccessPage(viewer, page)).toBe(false);
+    }
+    expect(firstAccessiblePage(viewer)).toBe('dashboard');
+  });
+
+  it('cannot edit, export, manage users or manage admins', () => {
+    expect(canEditAdminData(viewer)).toBe(false);
+    expect(canUseFeature(viewer, 'exportAttendees')).toBe(false);
+    expect(canUseFeature(viewer, 'manageUsers')).toBe(false);
+    expect(canManageAdmins(viewer)).toBe(false);
+    expect(isViewer(viewer)).toBe(true);
+  });
+
+  it('ignores any stored admin permissions — a viewer is never widened', () => {
+    const widened = baseProfile({ role: 'viewer', adminPermissions: allAdminPermissions() });
+    expect(canAccessPage(widened, 'settings')).toBe(false);
+    expect(canUseFeature(widened, 'exportAttendees')).toBe(false);
+  });
+
+  it('admins and super admins can still edit; attendees cannot', () => {
+    expect(canEditAdminData(baseProfile({ role: 'admin' }))).toBe(true);
+    expect(canEditAdminData(baseProfile({ role: 'super_admin' }))).toBe(true);
+    expect(canEditAdminData(baseProfile({ role: 'attendee' }))).toBe(false);
+    expect(hasAdminAccess(baseProfile({ role: 'attendee' }))).toBe(false);
   });
 });

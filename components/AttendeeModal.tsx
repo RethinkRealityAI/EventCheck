@@ -7,6 +7,8 @@ import QRCode from 'react-qr-code';
 import { updateAttendee, deleteAttendee, getAttendee, getAllSeatingTablesForForm, createGuestForPrimary, syncAttendeeSeatingToChart } from '../services/storageService';
 import { supabase } from '../services/supabaseClient';
 import { useNotifications } from './NotificationSystem';
+import { useAuth } from './AuthContext';
+import { canEditAdminData } from '../utils/adminPermissions';
 import { resendTicketEmailForAttendee } from '../utils/resendTicketEmail';
 import { getCountryName } from '../utils/countries';
 import { CURRENT_SITE } from '../config/sites';
@@ -36,6 +38,10 @@ interface AttendeeModalProps {
 const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingTables, attendees, onClose, onDelete, onOpenAttendee, onAttendeeUpdated }) => {
   const [resending, setResending] = useState<'idle' | 'primary' | 'all'>('idle');
   const [isEditing, setIsEditing] = useState(false);
+  // Viewers (read-only partner accounts) see everything but change nothing.
+  // The database refuses their writes regardless; this keeps the buttons away.
+  const { profile } = useAuth();
+  const readOnly = !canEditAdminData(profile);
   const [editData, setEditData] = useState<Partial<Attendee>>({});
   const [activeTab, setActiveTab] = useState<'details' | 'responses'>('details');
   const [localAttendee, setLocalAttendee] = useState(attendee);
@@ -440,6 +446,8 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
             </div>
           </div>
           <div className="flex items-center gap-0.5 sm:gap-1.5 relative z-10 flex-shrink-0">
+            {!readOnly && (
+              <>
             <button
               onClick={() => {
                 setEditData(localAttendee);
@@ -458,6 +466,8 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
               <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
             </button>
             <div className="hidden sm:block w-px h-6 bg-white/20 mx-1"></div>
+              </>
+            )}
             <button
               onClick={() => { onClose(); }}
               className="p-2 sm:p-2.5 text-white/70 hover:text-white hover:bg-white/10 rounded-xl transition-all"
@@ -634,6 +644,7 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
 
                 <div className="w-full space-y-2">
                   {/* Check In / Undo Button */}
+                  {!readOnly && (
                   <button
                     onClick={handleToggleCheckIn}
                     className={`w-full py-3.5 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 transition-all shadow-md ${
@@ -645,6 +656,7 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
                     <CheckCircle className="w-4 h-4" />
                     {localAttendee.checkedInAt ? 'Undo Check-In' : 'Check In Now'}
                   </button>
+                  )}
 
                   {/* Status card */}
                   <div className="bg-white/60 p-3 rounded-xl border border-white/60 flex justify-between items-center text-sm shadow-sm">
@@ -677,6 +689,7 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
                         <select
                           value={localAttendee.assignedTableId || ''}
                           onChange={e => handleTableAssignment(e.target.value || null)}
+                          disabled={readOnly}
                           className="w-full px-3 py-2 bg-white/80 backdrop-blur-sm border border-white/60 rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
                         >
                           <option value="">Unassigned</option>
@@ -693,6 +706,7 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
                               max={localSeatingTables.find(t => t.id === localAttendee.assignedTableId)?.capacity ?? 99}
                               value={draftSeat}
                               onChange={e => setDraftSeat(e.target.value)}
+                              disabled={readOnly}
                               onBlur={() => { void commitSeatAssignment(); }}
                               onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
                               placeholder="Optional"
@@ -718,7 +732,7 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
                     )}
                   </div>
 
-                  {(() => {
+                  {!readOnly && (() => {
                     const isPrimary = localAttendee.isPrimary !== false && !localAttendee.primaryAttendeeId && !isPendingClaimGuest;
                     const linkedCount = isPrimary
                       ? (attendees?.filter(a => a.primaryAttendeeId === localAttendee.id).length ?? 0)
@@ -778,7 +792,7 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
                       button, no re-registration. Paid/free/cheque/external
                       rows never see this button (the server refuses them
                       too — this gate is cosmetic, that one is real). */}
-                  {localAttendee.paymentStatus === 'pending'
+                  {!readOnly && localAttendee.paymentStatus === 'pending'
                     && (localAttendee.paymentMethod === 'paypal' || localAttendee.paymentMethod === 'card') && (
                     <div className="mt-2">
                       <button
@@ -1022,7 +1036,7 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
                           <span className="bg-indigo-100 text-indigo-600 text-[10px] px-2 py-0.5 rounded-full font-bold">{localGuestIds.length}</span>
                         )}
                       </h4>
-                      {!showLinkPanel && !showAddGuestPanel && (
+                      {!readOnly && !showLinkPanel && !showAddGuestPanel && (
                         <div className="flex items-center gap-2">
                           <button
                             onClick={() => setShowAddGuestPanel(true)}
@@ -1095,6 +1109,7 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
                                   <ExternalLink className="w-3 h-3" />
                                 </button>
                               )}
+                              {!readOnly && (
                               <button
                                 onClick={() => handleUnlinkGuest(g.id)}
                                 disabled={unlinkingIds.has(g.id)}
@@ -1103,6 +1118,7 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
                               >
                                 {unlinkingIds.has(g.id) ? <span className="text-slate-400">…</span> : <X className="w-3 h-3" />}
                               </button>
+                              )}
                             </div>
                           </div>
                           );
@@ -1306,7 +1322,7 @@ const AttendeeModal: React.FC<AttendeeModalProps> = ({ attendee, forms, seatingT
           ) : (
             /* Responses Tab */
             <div>
-              <CompletenessPanel attendee={localAttendee} status={completion} />
+              <CompletenessPanel attendee={localAttendee} status={completion} readOnly={readOnly} />
               {answersEntries.length > 0 ? (
                 <div className="space-y-3">
                   {answersEntries.map(([key, val]) => (
