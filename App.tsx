@@ -35,8 +35,10 @@ import AdminsManagement from './components/Admins/AdminsManagement';
 import ChangePasswordPage from './components/ChangePasswordPage';
 import {
   canAccessPage,
+  canEditAdminData,
   canManageAdmins,
   firstAccessiblePage,
+  hasAdminAccess,
   isSuperAdmin,
   type AdminPageKey,
 } from './utils/adminPermissions';
@@ -265,10 +267,12 @@ const AdminLayout = () => {
   const canSeeSettings = canAccessPage(profile, 'settings');
   const canSeeContent = CURRENT_SITE.portalEnabled && canAccessPage(profile, 'content');
   const canSeeAdmins = canManageAdmins(profile);
+  // Viewers (read-only partners) never check anyone in or change data.
+  const canEditData = canEditAdminData(profile);
   // India/TSCS ingest is a GANSID-only pipeline (its tables live on that
   // project only), and it shows registration data — so it rides the same
   // permission as the attendee dashboard rather than inventing a new key.
-  const canSeeIndia = CURRENT_SITE.key === 'gansid' && canAccessPage(profile, 'dashboard');
+  const canSeeIndia = CURRENT_SITE.key === 'gansid' && canAccessPage(profile, 'dashboard') && canEditData;
 
   const handleLogout = async () => {
     await signOut();
@@ -477,16 +481,18 @@ const AdminLayout = () => {
                 <Handshake className="w-6 h-6" />
               </Link>
             )}
-            <button
-              onClick={() => { setShowScanner(true); setIsMobileMenuOpen(false); }}
-              title="Scan tickets"
-              className={`p-3 rounded-xl transition-all ${showScanner
-                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20 hover:bg-indigo-500'
-                : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
-              }`}
-            >
-              <ScanLine className="w-6 h-6" />
-            </button>
+            {canEditData && (
+              <button
+                onClick={() => { setShowScanner(true); setIsMobileMenuOpen(false); }}
+                title="Scan tickets"
+                className={`p-3 rounded-xl transition-all ${showScanner
+                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20 hover:bg-indigo-500'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+                }`}
+              >
+                <ScanLine className="w-6 h-6" />
+              </button>
+            )}
             {canSeeIndia && (
               <Link to="/admin/india" onClick={() => setIsMobileMenuOpen(false)} className="p-3 text-slate-300 hover:text-white hover:bg-slate-800/80 rounded-xl transition-all" title="India Registrations">
                 <Inbox className="w-6 h-6" />
@@ -620,15 +626,17 @@ const AdminLayout = () => {
           </div>
 
           <div className="pt-4 mt-4 border-t border-slate-700/50 mx-2">
-            <button
-              onClick={() => { setShowScanner(true); setIsMobileMenuOpen(false); }}
-              className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all group ${(isSidebarCollapsed && !isSidebarPinned) ? 'justify-center bg-indigo-500/10 text-indigo-400' : 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white shadow-lg shadow-indigo-900/20'
-                }`}
-              title="Scan Tickets"
-            >
-              <ScanLine className={`w-5 h-5 transition-transform group-hover:scale-110 ${(isSidebarCollapsed && !isSidebarPinned) ? '' : 'text-white'}`} />
-              <span className={`font-medium whitespace-nowrap transition-all duration-300 ${(isSidebarCollapsed && !isSidebarPinned) ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}>Scan Tickets</span>
-            </button>
+            {canEditData && (
+              <button
+                onClick={() => { setShowScanner(true); setIsMobileMenuOpen(false); }}
+                className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all group ${(isSidebarCollapsed && !isSidebarPinned) ? 'justify-center bg-indigo-500/10 text-indigo-400' : 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white shadow-lg shadow-indigo-900/20'
+                  }`}
+                title="Scan Tickets"
+              >
+                <ScanLine className={`w-5 h-5 transition-transform group-hover:scale-110 ${(isSidebarCollapsed && !isSidebarPinned) ? '' : 'text-white'}`} />
+                <span className={`font-medium whitespace-nowrap transition-all duration-300 ${(isSidebarCollapsed && !isSidebarPinned) ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}>Scan Tickets</span>
+              </button>
+            )}
           </div>
         </nav>
 
@@ -715,7 +723,7 @@ const AdminLayout = () => {
               path="/india"
               element={
                 <ProtectedRoute requirePage="dashboard">
-                  {CURRENT_SITE.key === 'gansid' ? <IndiaIngestPage /> : <Navigate to="/admin" replace />}
+                  {CURRENT_SITE.key === 'gansid' && canEditAdminData(profile) ? <IndiaIngestPage /> : <Navigate to="/admin" replace />}
                 </ProtectedRoute>
               }
             />
@@ -775,7 +783,7 @@ const ProtectedRoute = ({ children, requireRole, requireSuperAdmin, requirePage 
       return;
     }
     // Admin role gate: admin AND super_admin both qualify.
-    if (requireRole === 'admin' && profile !== null && profile.role !== 'admin' && profile.role !== 'super_admin') {
+    if (requireRole === 'admin' && profile !== null && !hasAdminAccess(profile)) {
       navigate(CURRENT_SITE.portalEnabled ? '/portal' : '/', { replace: true });
       return;
     }
@@ -812,7 +820,7 @@ const ProtectedRoute = ({ children, requireRole, requireSuperAdmin, requirePage 
     );
   }
 
-  if (requireRole === 'admin' && profile?.role !== 'admin' && profile?.role !== 'super_admin') return null;
+  if (requireRole === 'admin' && !hasAdminAccess(profile)) return null;
   if (requireSuperAdmin && !isSuperAdmin(profile)) return null;
   if (requirePage && !canAccessPage(profile, requirePage)) return null;
 

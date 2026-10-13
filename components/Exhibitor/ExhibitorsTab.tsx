@@ -15,9 +15,11 @@ interface Props {
   /** Shared page size from the dashboard's overhead control — same value
    *  used by every other tab, so switching tabs doesn't change page size. */
   itemsPerPage: number;
+  /** Read-only viewers see staff but no resend / mark-complete actions. */
+  readOnly?: boolean;
 }
 
-export default function ExhibitorsTab({ attendees, forms, onRefresh, itemsPerPage }: Props) {
+export default function ExhibitorsTab({ attendees, forms, onRefresh, itemsPerPage, readOnly = false }: Props) {
   // Staff are shown under their organisation by default — seeing who is
   // registered shouldn't take a click per exhibitor. The set holds what the
   // admin has folded away.
@@ -168,6 +170,7 @@ export default function ExhibitorsTab({ attendees, forms, onRefresh, itemsPerPag
                         title="Hall Only staff"
                         staff={hallStaff}
                         orgFormId={org.formId}
+                        readOnly={readOnly}
                         onRefresh={onRefresh}
                         showNotification={showNotification}
                       />
@@ -175,6 +178,7 @@ export default function ExhibitorsTab({ attendees, forms, onRefresh, itemsPerPag
                         title="Full Access staff"
                         staff={fullStaff}
                         orgFormId={org.formId}
+                        readOnly={readOnly}
                         onRefresh={onRefresh}
                         showNotification={showNotification}
                       />
@@ -220,12 +224,14 @@ function StaffSection({
   title,
   staff,
   orgFormId,
+  readOnly,
   onRefresh,
   showNotification,
 }: {
   title: string;
   staff: Attendee[];
   orgFormId: string;
+  readOnly: boolean;
   onRefresh?: () => void;
   showNotification: (m: string, t?: 'success' | 'error' | 'info') => void;
 }) {
@@ -245,6 +251,7 @@ function StaffSection({
           <StaffRow
             key={s.id}
             staff={s}
+            readOnly={readOnly}
             onRefresh={onRefresh}
             showNotification={showNotification}
           />
@@ -256,10 +263,12 @@ function StaffSection({
 
 function StaffRow({
   staff,
+  readOnly,
   onRefresh,
   showNotification,
 }: {
   staff: Attendee;
+  readOnly: boolean;
   onRefresh?: () => void;
   showNotification: (m: string, t?: 'success' | 'error' | 'info') => void;
 }) {
@@ -324,7 +333,7 @@ function StaffRow({
           Paid extra
         </span>
       )}
-      {isPending && (
+      {isPending && !readOnly && (
         <div className="ml-auto flex gap-1">
           <button onClick={copyLink} title="Copy link" className="p-1 hover:bg-slate-200 rounded">
             <Copy className="w-3.5 h-3.5" />

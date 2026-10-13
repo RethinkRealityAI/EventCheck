@@ -25,6 +25,8 @@ const ROLE_TO_FORM_TYPES: Record<Profile['role'], string[]> = {
   sponsor: ['sponsor', 'sponsor_exhibitor'],
   admin: ['event', 'exhibitor', 'sponsor', 'sponsor_exhibitor'],
   super_admin: ['event', 'exhibitor', 'sponsor', 'sponsor_exhibitor'],
+  // A read-only partner account; it can still register itself like anyone.
+  viewer: ['event'],
 };
 
 // Completed = user already has a confirmed (paid or free) submission for this form.

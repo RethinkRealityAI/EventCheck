@@ -9,6 +9,13 @@
 //                    NULL permissions is treated as "dashboard only" as a
 //                    safe fallback (should never happen in practice because
 //                    the UI always writes a populated object).
+//   * viewer       — read-only dashboard. Sees the attendee dashboard and
+//                    nothing else; every write is refused by the database
+//                    (RLS only grants viewers SELECT) and by the edge
+//                    functions (they admit admin / super_admin only). The UI
+//                    hides write actions so viewers aren't offered buttons
+//                    that would fail. Used for partner organisations (e.g.
+//                    TSCS) who need to check their own delegates.
 //   * attendee / exhibitor / sponsor — no dashboard access at all.
 
 import type { Profile } from '../types';
@@ -152,8 +159,18 @@ export function isAdmin(profile: Profile | null): boolean {
   return profile?.role === 'admin';
 }
 
-/** True for both admin and super_admin — anyone who can see the admin UI. */
+/** Read-only dashboard role — see the model note at the top of this file. */
+export function isViewer(profile: Profile | null): boolean {
+  return profile?.role === 'viewer';
+}
+
+/** True for admin, super_admin and viewer — anyone who can see the admin UI. */
 export function hasAdminAccess(profile: Profile | null): boolean {
+  return profile?.role === 'admin' || profile?.role === 'super_admin' || profile?.role === 'viewer';
+}
+
+/** True when the profile may change data from the admin UI (not a viewer). */
+export function canEditAdminData(profile: Profile | null): boolean {
   return profile?.role === 'admin' || profile?.role === 'super_admin';
 }
 
@@ -180,6 +197,17 @@ export function effectivePagePermissions(profile: Profile | null): AdminPagePerm
       generateQr: true,
       settings: true,
       content: true,
+    };
+  }
+  if (isViewer(profile)) {
+    return {
+      dashboard: true,
+      forms: false,
+      sponsors: false,
+      seating: false,
+      generateQr: false,
+      settings: false,
+      content: false,
     };
   }
   if (!isAdmin(profile)) {

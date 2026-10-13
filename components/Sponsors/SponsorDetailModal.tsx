@@ -14,9 +14,10 @@ interface Props {
   onClose: () => void;
   onChanged: () => void | Promise<void>;
   onMarkCheque: () => void;
+  readOnly?: boolean;
 }
 
-const SponsorDetailModal: React.FC<Props> = ({ attendee, settings, onClose, onChanged, onMarkCheque }) => {
+const SponsorDetailModal: React.FC<Props> = ({ attendee, settings, onClose, onChanged, onMarkCheque, readOnly = false }) => {
   const [guests, setGuests] = useState<any[]>([]);
   const [notes, setNotes] = useState(attendee.adminNotes || '');
   const { showNotification } = useNotifications();
@@ -151,7 +152,7 @@ const SponsorDetailModal: React.FC<Props> = ({ attendee, settings, onClose, onCh
             <button onClick={downloadReceipt} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm">
               <Download className="w-4 h-4" /> Download Receipt
             </button>
-            {attendee.paymentStatus === 'pending' && (
+            {!readOnly && attendee.paymentStatus === 'pending' && (
               <button onClick={onMarkCheque} className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm">
                 <CheckCircle className="w-4 h-4" /> Mark Cheque Received
               </button>

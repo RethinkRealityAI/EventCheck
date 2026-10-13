@@ -5,6 +5,7 @@ import { useNotifications } from './NotificationSystem';
 import { useNavigate } from 'react-router-dom';
 import { CURRENT_SITE } from '../config/sites';
 import { useAuth } from './AuthContext';
+import { hasAdminAccess } from '../utils/adminPermissions';
 
 const Login = () => {
     const [email, setEmail] = useState('');
@@ -20,7 +21,7 @@ const Login = () => {
     useEffect(() => {
         if (authLoading || !user) return;
         // super_admin and admin both land in /admin. Anyone else → portal/home.
-        if (profile?.role === 'admin' || profile?.role === 'super_admin') {
+        if (hasAdminAccess(profile)) {
             navigate('/admin', { replace: true });
         } else if (profile !== null) {
             navigate(CURRENT_SITE.portalEnabled ? '/portal' : '/', { replace: true });

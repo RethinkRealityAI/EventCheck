@@ -12,7 +12,7 @@ import { CATEGORY_META, ATTENDEE_CATEGORIES, resolveAttendeeCategory } from '../
 import { resolveAttendeeCountryCode } from '../utils/resolveAttendeeCountry';
 import { getCountryName } from '../utils/countries';
 import { useAuth } from './AuthContext';
-import { canUseFeature } from '../utils/adminPermissions';
+import { canEditAdminData, canUseFeature } from '../utils/adminPermissions';
 import { generateAttendeeListPDF } from '../utils/pdfGenerator';
 import ExhibitorsTab from './Exhibitor/ExhibitorsTab';
 import SignupsTab from './Signups/SignupsTab';
@@ -38,6 +38,7 @@ import { completionStatus, needsCompletion, type CompletionStatus } from '../uti
 import { nestUnderParents } from '../utils/rowNesting';
 import { daysAttendingOf, distinctDays, matchesDaysFilter, shortDayLabel, DAYS_NOT_SPECIFIED } from '../utils/daysAttending';
 import { attendeeTitleOf, nameWithTitle } from '../utils/attendeeTitle';
+import { isTscsRegistration } from '../utils/tscsRegistration';
 import { isSuppressedCategory } from '../supabase/functions/_shared/emailSuppression';
 import DmhoNotice from './Dmho/DmhoNotice';
 import ModalPortal from './ModalPortal';
@@ -231,6 +232,11 @@ const STANDARD_COLUMNS: ColumnDef[] = [
   { key: 'actions', label: 'Actions', group: 'standard' },
 ];
 
+// Tabs that are admin tools rather than views of who is registered: portal
+// account management, contact imports + campaigns, and form-preview test rows.
+// Read-only viewers don't get them.
+const ADMIN_ONLY_TABS: ReadonlySet<DashboardTabId> = new Set(['signups', 'contacts', 'test']);
+
 const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading = false, onRefresh }) => {
   const [searchTerm, setSearchTerm] = useState('');
   // "Who can't sign in?" — the dimension the account-management tools act on.
@@ -254,6 +260,9 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
   // the toolbar button and the modal on it. Defaults to granted for admins —
   // see utils/adminPermissions.effectiveFeaturePermissions.
   const canExport = canUseFeature(profile, 'exportAttendees');
+  // Viewers (read-only partner accounts) get the dashboard without any control
+  // that changes data or sends mail. The database refuses those writes anyway.
+  const canEdit = canEditAdminData(profile);
   const [showExportModal, setShowExportModal] = useState(false);
   // Failed sends used to be invisible: nothing recorded them, and once
   // email_failures existed nothing surfaced it. The badge appears ONLY when
@@ -605,6 +614,9 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     [attendees],
   );
 
+  // TSCS tab only renders once something has come in through TSCS India.
+  const hasTscsData = useMemo(() => attendees.some(isTscsRegistration), [attendees]);
+
   // Every day anyone has picked, earliest first — the Days filter's options.
   const dayOptions = useMemo(() => distinctDays(attendees.filter(a => !a.isTest)), [attendees]);
 
@@ -617,8 +629,9 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
       hasSpeakers,
       hasSponsorData,
       hasDmhoData,
-    }),
-    [settings?.dashboardTabPrefs, hasExhibitorForms, hasSpeakers, hasSponsorData, hasDmhoData],
+      hasTscsData,
+    }).filter(t => canEdit || !ADMIN_ONLY_TABS.has(t.id)),
+    [settings?.dashboardTabPrefs, hasExhibitorForms, hasSpeakers, hasSponsorData, hasDmhoData, hasTscsData, canEdit],
   );
 
   // If the admin hides (or site availability strips) the currently-active tab,
@@ -791,6 +804,9 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     }
     else if (activeTab === 'dmhos') {
       matchesTab = !isTest && a.attendeeCategory === 'dmho';
+    }
+    else if (activeTab === 'tscs') {
+      matchesTab = isTscsRegistration(a);
     }
     // Live shows EVERY real registration — sponsor / exhibitor delegates
     // included. They used to be dropped here as "placeholder ghost rows",
@@ -1196,7 +1212,18 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
       <div className="p-5 border-b border-white/40 space-y-4 relative z-10 backdrop-blur-2xl bg-white/40">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="flex flex-col gap-3">
-            <h2 className="font-semibold text-lg text-gray-900">Registered Attendees</h2>
+            <h2 className="font-semibold text-lg text-gray-900 flex items-center gap-2">
+              Registered Attendees
+              {!canEdit && (
+                <span
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200 text-[11px] font-semibold"
+                  title="You can look through everything here, but this account can't change registrations or send email."
+                  data-testid="view-only-badge"
+                >
+                  <Eye className="w-3 h-3" /> View-only access
+                </span>
+              )}
+            </h2>
             <div className="flex items-center gap-1 bg-white/50 backdrop-blur-sm p-1 rounded-lg w-fit border border-white/40">
               {visibleTabs.map(meta => {
                 const isActive = activeTab === meta.id;
@@ -1221,14 +1248,16 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                   </button>
                 );
               })}
-              <button
-                onClick={() => setTabsConfigOpen(true)}
-                className="px-2 py-1 text-gray-400 hover:text-indigo-600 hover:bg-white rounded-md transition"
-                title="Customize tabs — reorder or hide"
-                aria-label="Customize dashboard tabs"
-              >
-                <SettingsIcon className="w-3.5 h-3.5" />
-              </button>
+              {canEdit && (
+                <button
+                  onClick={() => setTabsConfigOpen(true)}
+                  className="px-2 py-1 text-gray-400 hover:text-indigo-600 hover:bg-white rounded-md transition"
+                  title="Customize tabs — reorder or hide"
+                  aria-label="Customize dashboard tabs"
+                >
+                  <SettingsIcon className="w-3.5 h-3.5" />
+                </button>
+              )}
               {/* Separator */}
               <div className="h-5 w-px bg-gray-300/50 mx-1"></div>
               {/* Form Selector */}
@@ -1242,17 +1271,19 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                   <option key={f.id} value={f.id}>{f.title}</option>
                 ))}
               </select>
-              <button
-                onClick={handleSetDefaultForm}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md transition-all border text-xs font-bold ml-1 ${settings?.defaultDashboardFormId === selectedFormId && selectedFormId !== '_all'
-                  ? 'bg-blue-100 text-blue-700 border-blue-200 shadow-sm'
-                  : 'bg-white/40 text-slate-500 border-white/40 hover:bg-white hover:text-blue-500 hover:border-blue-100 hover:shadow-sm'
-                }`}
-                title={settings?.defaultDashboardFormId === selectedFormId && selectedFormId !== '_all' ? 'This is your default view' : 'Set as default view'}
-              >
-                <Pin className={`w-3.5 h-3.5 transition-transform ${settings?.defaultDashboardFormId === selectedFormId && selectedFormId !== '_all' ? 'fill-blue-500 text-blue-600 -rotate-12 scale-110' : ''}`} />
-                {settings?.defaultDashboardFormId === selectedFormId && selectedFormId !== '_all' ? 'Pinned' : 'Pin'}
-              </button>
+              {canEdit && (
+                <button
+                  onClick={handleSetDefaultForm}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md transition-all border text-xs font-bold ml-1 ${settings?.defaultDashboardFormId === selectedFormId && selectedFormId !== '_all'
+                    ? 'bg-blue-100 text-blue-700 border-blue-200 shadow-sm'
+                    : 'bg-white/40 text-slate-500 border-white/40 hover:bg-white hover:text-blue-500 hover:border-blue-100 hover:shadow-sm'
+                  }`}
+                  title={settings?.defaultDashboardFormId === selectedFormId && selectedFormId !== '_all' ? 'This is your default view' : 'Set as default view'}
+                >
+                  <Pin className={`w-3.5 h-3.5 transition-transform ${settings?.defaultDashboardFormId === selectedFormId && selectedFormId !== '_all' ? 'fill-blue-500 text-blue-600 -rotate-12 scale-110' : ''}`} />
+                  {settings?.defaultDashboardFormId === selectedFormId && selectedFormId !== '_all' ? 'Pinned' : 'Pin'}
+                </button>
+              )}
               {/* Separator */}
               <div className="h-5 w-px bg-gray-300/50 mx-1"></div>
               {/* Rows-per-page — overhead control, always visible regardless of
@@ -1297,14 +1328,16 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                 onHideAll={handleHideAllColumns}
               />
 
-              <button
-                onClick={() => setShowAddModal(true)}
-                className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition shadow-sm"
-                title="Add attendee manually"
-              >
-                <Plus className="w-4 h-4" />
-                <span className="hidden sm:inline">Add</span>
-              </button>
+              {canEdit && (
+                <button
+                  onClick={() => setShowAddModal(true)}
+                  className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition shadow-sm"
+                  title="Add attendee manually"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span className="hidden sm:inline">Add</span>
+                </button>
+              )}
 
               {canExport && (
                 <button
@@ -1317,7 +1350,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                 </button>
               )}
 
-              {BULK_EMAIL_TABS.has(activeTab) && (
+              {canEdit && BULK_EMAIL_TABS.has(activeTab) && (
                 <button
                   onClick={openBulkEmail}
                   disabled={!settings || !smtpReady || sortedFiltered.length === 0}
@@ -1334,7 +1367,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                 </button>
               )}
 
-              {BULK_EMAIL_TABS.has(activeTab) && (
+              {canEdit && BULK_EMAIL_TABS.has(activeTab) && (
                 <button
                   onClick={() => setShowCustomTicketEmail(true)}
                   className="flex items-center gap-2 px-4 py-2 bg-white border border-sky-300 text-sky-700 rounded-lg text-sm font-medium hover:bg-sky-50 transition shadow-sm"
@@ -1346,7 +1379,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                 </button>
               )}
 
-              {deliveryIssueCount > 0 && (
+              {canEdit && deliveryIssueCount > 0 && (
                 <button
                   onClick={() => setShowDeliveryIssues(true)}
                   className="flex items-center gap-2 px-4 py-2 bg-amber-500 text-white rounded-lg text-sm font-medium hover:bg-amber-600 transition shadow-sm"
@@ -1360,15 +1393,17 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                 </button>
               )}
 
-              <button
-                onClick={() => setShowBulkImport(true)}
-                disabled={!settings}
-                className="flex items-center gap-2 px-4 py-2 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700 transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                title={settings ? 'Bulk-import contacts from a CSV + send a campaign' : 'Loading settings…'}
-              >
-                <Upload className="w-4 h-4" />
-                <span className="hidden sm:inline">Import</span>
-              </button>
+              {canEdit && (
+                <button
+                  onClick={() => setShowBulkImport(true)}
+                  disabled={!settings}
+                  className="flex items-center gap-2 px-4 py-2 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700 transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={settings ? 'Bulk-import contacts from a CSV + send a campaign' : 'Loading settings…'}
+                >
+                  <Upload className="w-4 h-4" />
+                  <span className="hidden sm:inline">Import</span>
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -1537,7 +1572,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                 <span className="font-bold">{incompleteCount}</span>
               </button>
             )}
-            {showIncompleteOnly && sortedFiltered.length > 0 && (
+            {canEdit && showIncompleteOnly && sortedFiltered.length > 0 && (
               <button
                 type="button"
                 onClick={() => setCompletionRecipients(sortedFiltered.filter(needsOnlineCompletion))}
@@ -1746,7 +1781,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
               </a>
             </div>
             {settings ? (
-              <SponsorsTable sponsors={sponsorOrgs} settings={settings} onChanged={async () => { onRefresh?.(); }} />
+              <SponsorsTable sponsors={sponsorOrgs} settings={settings} onChanged={async () => { onRefresh?.(); }} readOnly={!canEdit} />
             ) : (
               <div className="p-12 text-center text-gray-400">
                 <Loader2 className="w-8 h-8 mx-auto mb-2 animate-spin text-indigo-500" />
@@ -1756,7 +1791,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
           </div>
         ) : activeTab === 'exhibitors' ? (
           <div className="p-4">
-            <ExhibitorsTab attendees={attendees} forms={forms} onRefresh={onRefresh} itemsPerPage={itemsPerPage} />
+            <ExhibitorsTab attendees={attendees} forms={forms} onRefresh={onRefresh} itemsPerPage={itemsPerPage} readOnly={!canEdit} />
           </div>
         ) : activeTab === 'tables' ? (
           <div className="p-4 space-y-4">
@@ -1860,6 +1895,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                                     <select
                                       value={primary.assignedTableId || ''}
                                       onChange={e => handleSeatingAssignment(primary.id, e.target.value || null)}
+                                      disabled={!canEdit}
                                       onClick={e => e.stopPropagation()}
                                       className="px-2 py-1 border border-gray-200 rounded text-xs bg-white outline-none focus:ring-1 focus:ring-indigo-500"
                                     >
@@ -1913,6 +1949,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                                       <select
                                         value={g.assignedTableId || ''}
                                         onChange={e => handleSeatingAssignment(g.id, e.target.value || null)}
+                                        disabled={!canEdit}
                                         onClick={e => e.stopPropagation()}
                                         className="px-2 py-1 border border-gray-200 rounded text-xs bg-white outline-none focus:ring-1 focus:ring-indigo-500"
                                       >
@@ -1939,6 +1976,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                                   </td>
                                 </tr>
                               )}
+                              {canEdit && (
                               <tr className="bg-emerald-50/30">
                                 <td colSpan={seatingTables.length > 0 ? 6 : 5} className="px-4 py-3">
                                   {addingGuestForPrimaryId === primary.id ? (
@@ -1986,6 +2024,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                                   )}
                                 </td>
                               </tr>
+                              )}
                             </tbody>
                           </table>
                         </div>
@@ -2333,7 +2372,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                       {isColumnVisible('actions') && (
                         <td className="px-4 py-3 text-right sticky right-0 bg-white/95 backdrop-blur-sm z-10 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.06)]">
                           <div className="flex items-center justify-end gap-1">
-                            {isGuestRow && (
+                            {canEdit && isGuestRow && (
                               <GuestActions guest={attendee} formId={attendee.formId} onRefresh={onRefresh ?? (() => {})} />
                             )}
                             <button
@@ -2464,7 +2503,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
       {tabsConfigOpen && settings && (
         <DashboardTabsConfig
           settings={settings}
-          gates={{ hasExhibitorForms, portalEnabled: CURRENT_SITE.portalEnabled, hasSpeakers, hasSponsorData, hasDmhoData }}
+          gates={{ hasExhibitorForms, portalEnabled: CURRENT_SITE.portalEnabled, hasSpeakers, hasSponsorData, hasDmhoData, hasTscsData }}
           onSave={async (next) => {
             const updated = { ...settings, dashboardTabPrefs: next };
             await saveSettings(updated);

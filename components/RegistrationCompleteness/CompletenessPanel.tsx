@@ -18,7 +18,7 @@ import { useNotifications } from '../NotificationSystem';
  * which, separates "never asked" from "asked and left blank", and puts the fix
  * one click away.
  */
-export default function CompletenessPanel({ attendee, status }: { attendee: Attendee; status: CompletionStatus }) {
+export default function CompletenessPanel({ attendee, status, readOnly = false }: { attendee: Attendee; status: CompletionStatus; readOnly?: boolean }) {
   const { showNotification } = useNotifications();
   const [busy, setBusy] = useState<null | 'send' | 'copy'>(null);
 
@@ -118,7 +118,7 @@ export default function CompletenessPanel({ attendee, status }: { attendee: Atte
           Has not agreed to {report.consentsMissing.length} required polic{report.consentsMissing.length === 1 ? 'y' : 'ies'} (terms, liability or photo consent).
         </p>
       )}
-      {actions}
+      {!readOnly && actions}
     </div>
   );
 }
