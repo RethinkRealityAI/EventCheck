@@ -105,3 +105,9 @@ verify_jwt = false
 # supabase/functions/_shared/accountClaim.ts.
 [functions.account-claim]
 verify_jwt = false
+
+# Admin-only backfill: reads PayPal order line items to record which add-ons
+# (e.g. the Networking Reception) each registrant bought. The function also
+# asserts admin / super_admin itself.
+[functions.addon-sync]
+verify_jwt = true

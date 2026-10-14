@@ -37,6 +37,25 @@ type ResolvedTxn =
   | { ok: true; transactionId: string; amountMajorUnits: number; currency: string; method: 'paypal' | 'flutterwave'; paypal?: { apiBase: string; accessToken: string } }
   | { ok: false; response: Response };
 
+/**
+ * The add-ons a registrant actually paid for, as the template knows them.
+ * Recorded on the row as `answers._addons` so the dashboard can say who holds
+ * e.g. a Networking Reception ticket (utils/receptionTicket.ts). Until this
+ * existed the selection only fed the price and was then thrown away. Unknown
+ * ids are dropped, exactly as the price calculation already ignores them.
+ */
+function paidAddonIds(addonIds: string[], tpl: any): string[] {
+  const known = new Set<string>((tpl?.addons ?? []).map((a: any) => a.id));
+  return [...new Set(addonIds.filter(id => known.has(id)))];
+}
+
+/** answers with `_addons` merged in — untouched when nothing was bought. */
+function withAddons(answers: unknown, addonIds: string[]): Record<string, unknown> | undefined {
+  const base = (answers && typeof answers === 'object') ? answers as Record<string, unknown> : undefined;
+  if (addonIds.length === 0) return base;
+  return { ...(base ?? {}), _addons: addonIds };
+}
+
 async function resolvePaidTransaction(opts: {
   provider: 'paypal' | 'flutterwave';
   paypalOrderId?: string | null;
@@ -1890,7 +1909,7 @@ serve(async (req: Request) => {
         if (tiers.length === 0) return jsonResponse({ error: 'No tiers configured' }, 400);
 
         // 3. Per-person resolution
-        const memberResolutions: Array<{ cents: number; tierId: string; bracketId: string; categoryId: string }> = [];
+        const memberResolutions: Array<{ cents: number; tierId: string; bracketId: string; categoryId: string; addonIds: string[] }> = [];
         let categoryCentsTotal = 0;
         let addonsCentsTotal = 0;
         for (let i = 0; i < groupPricingSelections.length; i++) {
@@ -1908,7 +1927,7 @@ serve(async (req: Request) => {
           }, 0);
           categoryCentsTotal += fee;
           addonsCentsTotal += addonTotal;
-          memberResolutions.push({ cents: fee + addonTotal, tierId: tier.id, bracketId: activeBracket.id, categoryId: cat.id });
+          memberResolutions.push({ cents: fee + addonTotal, tierId: tier.id, bracketId: activeBracket.id, categoryId: cat.id, addonIds: paidAddonIds(addonIds, tpl) });
         }
 
         const expectedCents = categoryCentsTotal + addonsCentsTotal;
@@ -2048,6 +2067,7 @@ serve(async (req: Request) => {
             pricing_tier: m.tierId,
             pricing_bracket: m.bracketId,
             pricing_category_id: m.categoryId,
+            answers: withAddons(attendeeDraft.answers, m.addonIds) ?? attendeeDraft.answers,
             applied_promo_code: groupAppliedPromoCode,
             // Primary submitter gets user_id stamped; pending-claim guests get null
             // (they'll claim via ?ref= link without auth — a future task can stamp
@@ -2316,6 +2336,7 @@ serve(async (req: Request) => {
           pricing_bracket: activeBracket.id,
           pricing_tier: activeTier.id,
           pricing_category_id: cat.id,
+          answers: withAddons(primary.answers, paidAddonIds(addonIds, tpl)) ?? primary.answers,
           applied_promo_code: soloAppliedPromoCode,
           guest_type: soloPromoSpeakerStamp ? 'speaker' : (primary.guest_type ?? null),
           attendee_category: soloPromoSpeakerStamp ? 'speaker' : (primary.attendee_category ?? null),
