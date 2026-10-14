@@ -13,6 +13,7 @@ export type DashboardTabId =
   | 'speakers'
   | 'dmhos'
   | 'tscs'
+  | 'badges'
   | 'test'
   | 'exhibitors'
   | 'signups'
@@ -40,6 +41,8 @@ export interface DashboardTabMeta {
   /** When true, the tab only appears once at least one registration came in
    *  through TSCS India (utils/tscsRegistration). */
   requiresTscsData?: boolean;
+  /** When true, the tab only appears on deployments that print badges (GANSID). */
+  requiresBadgePrinting?: boolean;
 }
 
 /** Every gate a tab can be conditioned on. Computed once by the dashboard
@@ -53,6 +56,7 @@ export interface DashboardTabGates {
   hasSponsorData?: boolean;
   hasDmhoData?: boolean;
   hasTscsData?: boolean;
+  hasBadgePrinting?: boolean;
 }
 
 /** True when a tab cannot appear on this site regardless of admin prefs. */
@@ -63,6 +67,7 @@ export function isTabUnavailable(meta: DashboardTabMeta, gates: DashboardTabGate
   if (meta.requiresSponsorData && !gates.hasSponsorData) return true;
   if (meta.requiresDmhoData && !gates.hasDmhoData) return true;
   if (meta.requiresTscsData && !gates.hasTscsData) return true;
+  if (meta.requiresBadgePrinting && !gates.hasBadgePrinting) return true;
   return false;
 }
 
@@ -82,6 +87,7 @@ export const DASHBOARD_TAB_META: readonly DashboardTabMeta[] = [
   { id: 'contacts', label: 'Contacts', description: 'Bulk-imported contacts + email campaigns' },
   { id: 'dmhos', label: 'DMHOs', description: 'District medical team delegates — physical day tickets at the desk, never emailed', requiresDmhoData: true },
   { id: 'tscs', label: 'TSCS', description: 'Everyone registered through TSCS India — their website, email feed and delegate lists (DMHOs have their own tab)', requiresTscsData: true },
+  { id: 'badges', label: 'Badge Printing', description: 'Badge list in the registration vendor\'s format — what still needs printing, every exported batch', requiresBadgePrinting: true },
 ];
 
 /** Resolve the ordered list of tabs to render, honoring both site-availability

@@ -14,6 +14,7 @@ import { getCountryName } from '../utils/countries';
 import { useAuth } from './AuthContext';
 import { canEditAdminData, canUseFeature } from '../utils/adminPermissions';
 import { generateAttendeeListPDF } from '../utils/pdfGenerator';
+import BadgePrintingTab from './BadgePrinting/BadgePrintingTab';
 import ExhibitorsTab from './Exhibitor/ExhibitorsTab';
 import SignupsTab from './Signups/SignupsTab';
 import ImportedContactsTab from './Contacts/ImportedContactsTab';
@@ -676,6 +677,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
       hasSponsorData,
       hasDmhoData,
       hasTscsData,
+      hasBadgePrinting: CURRENT_SITE.key === 'gansid',
     }).filter(t => canEdit || !ADMIN_ONLY_TABS.has(t.id)),
     [settings?.dashboardTabPrefs, hasExhibitorForms, hasSpeakers, hasSponsorData, hasDmhoData, hasTscsData, canEdit],
   );
@@ -1357,7 +1359,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
 
           {/* Attendee-table controls — hidden on the Signups + Contacts tabs since
               those views have their own filter + search bars. */}
-          {activeTab !== 'signups' && activeTab !== 'contacts' && activeTab !== 'sponsors' && (
+          {activeTab !== 'signups' && activeTab !== 'contacts' && activeTab !== 'sponsors' && activeTab !== 'badges' && (
             <div className="flex flex-wrap items-center gap-2">
               <div className="relative flex-1 min-w-[200px]">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -1461,7 +1463,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
         {/* Filters Row */}
         {activeTab === 'dmhos' && <DmhoNotice attendees={attendees} />}
 
-        {activeTab === 'signups' || activeTab === 'contacts' || activeTab === 'sponsors' ? null : activeTab === 'tables' ? (
+        {activeTab === 'signups' || activeTab === 'contacts' || activeTab === 'sponsors' || activeTab === 'badges' ? null : activeTab === 'tables' ? (
           <div className="flex flex-wrap items-center gap-2 text-sm bg-white/50 backdrop-blur-sm p-3 rounded-lg border border-white/40">
             <button
               onClick={handleExpandAll}
@@ -1869,6 +1871,10 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                 <p>Loading…</p>
               </div>
             )}
+          </div>
+        ) : activeTab === 'badges' ? (
+          <div className="p-4">
+            <BadgePrintingTab attendees={attendees} forms={forms} onRefresh={onRefresh} />
           </div>
         ) : activeTab === 'exhibitors' ? (
           <div className="p-4">
@@ -2495,7 +2501,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
           (each fed by the shared `itemsPerPage` above), so this footer
           (driven by the outer `filtered`/`currentPage`) is hidden there to
           avoid showing a mismatched/duplicate page count. */}
-      {activeTab !== 'signups' && activeTab !== 'contacts' && activeTab !== 'exhibitors' && activeTab !== 'sponsors' && (
+      {activeTab !== 'signups' && activeTab !== 'contacts' && activeTab !== 'exhibitors' && activeTab !== 'sponsors' && activeTab !== 'badges' && (
       <div className="px-4 py-3 border-t border-white/20 bg-white/60 backdrop-blur-sm flex items-center justify-between">
         <div className="text-xs text-gray-500">
           {activeTab === 'tables' ? (
@@ -2591,7 +2597,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
       {tabsConfigOpen && settings && (
         <DashboardTabsConfig
           settings={settings}
-          gates={{ hasExhibitorForms, portalEnabled: CURRENT_SITE.portalEnabled, hasSpeakers, hasSponsorData, hasDmhoData, hasTscsData }}
+          gates={{ hasExhibitorForms, portalEnabled: CURRENT_SITE.portalEnabled, hasSpeakers, hasSponsorData, hasDmhoData, hasTscsData, hasBadgePrinting: CURRENT_SITE.key === 'gansid' }}
           onSave={async (next) => {
             const updated = { ...settings, dashboardTabPrefs: next };
             await saveSettings(updated);

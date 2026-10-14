@@ -488,6 +488,7 @@ export function mapAttendeeFromDb(db: AttendeeRow): Attendee {
     bogoDismissedByPayerAt: (db as any).bogo_dismissed_by_payer_at ?? null,
     appliedPromoCode: (db as any).applied_promo_code ?? null,
     attendeeCategory: (db as any).attendee_category ?? null,
+    regCode: (db as any).reg_code ?? null,
   };
 }
 
