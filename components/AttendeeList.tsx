@@ -14,6 +14,7 @@ import { getCountryName } from '../utils/countries';
 import { useAuth } from './AuthContext';
 import { canEditAdminData, canUseFeature } from '../utils/adminPermissions';
 import { generateAttendeeListPDF } from '../utils/pdfGenerator';
+import BadgePrintingTab from './BadgePrinting/BadgePrintingTab';
 import ExhibitorsTab from './Exhibitor/ExhibitorsTab';
 import SignupsTab from './Signups/SignupsTab';
 import ImportedContactsTab from './Contacts/ImportedContactsTab';
@@ -39,6 +40,7 @@ import { nestUnderParents } from '../utils/rowNesting';
 import { daysAttendingOf, distinctDays, matchesDaysFilter, shortDayLabel, DAYS_NOT_SPECIFIED } from '../utils/daysAttending';
 import { attendeeTitleOf, nameWithTitle } from '../utils/attendeeTitle';
 import { isTscsRegistration } from '../utils/tscsRegistration';
+import { hasReceptionTicket, matchesReceptionFilter, type ReceptionFilter } from '../utils/receptionTicket';
 import { isSuppressedCategory } from '../supabase/functions/_shared/emailSuppression';
 import DmhoNotice from './Dmho/DmhoNotice';
 import ModalPortal from './ModalPortal';
@@ -223,6 +225,7 @@ const STANDARD_COLUMNS: ColumnDef[] = [
   { key: 'formTitle', label: 'Event/Form', group: 'standard' },
   { key: 'ticketType', label: 'Ticket Type', group: 'standard' },
   { key: 'days', label: 'Days Attending', group: 'standard' },
+  { key: 'reception', label: 'Reception', group: 'standard' },
   { key: 'kind', label: 'Type', group: 'standard' },
   { key: 'seating', label: 'Seating', group: 'standard' },
   { key: 'status', label: 'Check-in Status', group: 'standard' },
@@ -235,6 +238,19 @@ const STANDARD_COLUMNS: ColumnDef[] = [
 // Tabs that are admin tools rather than views of who is registered: portal
 // account management, contact imports + campaigns, and form-preview test rows.
 // Read-only viewers don't get them.
+/** Golden "Reception" pill — holds a Networking Reception ticket. */
+function ReceptionPill() {
+  return (
+    <span
+      className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-amber-100 text-amber-800 border border-amber-300 whitespace-nowrap"
+      title="Has a Networking Reception ticket"
+      data-testid="reception-pill"
+    >
+      Reception
+    </span>
+  );
+}
+
 const ADMIN_ONLY_TABS: ReadonlySet<DashboardTabId> = new Set(['signups', 'contacts', 'test']);
 
 const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading = false, onRefresh }) => {
@@ -329,6 +345,9 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
   const [paymentFilter, setPaymentFilter] = useState<'all' | 'paid' | 'free' | 'pending'>('all');
   // 'all' | DAYS_NOT_SPECIFIED | one day label (utils/daysAttending).
   const [daysFilter, setDaysFilter] = useState<string>('all');
+  // Networking Reception ticket holders (utils/receptionTicket).
+  const [receptionFilter, setReceptionFilter] = useState<ReceptionFilter>('all');
+  const [syncingAddons, setSyncingAddons] = useState(false);
 
   // Response Filter State
   const [responseFilters, setResponseFilters] = useState<Array<{ fieldId: string, value: string }>>([]);
@@ -359,6 +378,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     registrationKind: true,
     organization: true,
     daysAttending: true,
+    reception: true,
   });
 
   const fieldLabels: Record<string, string> = {
@@ -384,6 +404,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     registrationKind: 'Registration type',
     organization: 'Organization',
     daysAttending: 'Days Attending',
+    reception: 'Reception Ticket',
   };
 
   // ── Export scope/filter state ──────────────────────────────────────────────
@@ -614,6 +635,32 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     [attendees],
   );
 
+  // Networking Reception ticket holders across real registrations.
+  const receptionCount = useMemo(() => attendees.filter(a => !a.isTest && hasReceptionTicket(a)).length, [attendees]);
+
+  // Reception purchases made before checkout started recording them live only
+  // in PayPal's order line items; the addon-sync function reads them back.
+  // Safe to re-run — it only ever adds.
+  const handleSyncAddons = async () => {
+    setSyncingAddons(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('addon-sync', { body: {} });
+      if (error) throw error;
+      const updated = (data?.updated ?? []).length;
+      const issues = (data?.errors ?? []).length + (data?.unmatched ?? []).length;
+      showNotification(
+        `Checked ${data?.orders ?? 0} PayPal orders: ${updated} reception ticket${updated === 1 ? '' : 's'} recorded`
+          + (issues ? `, ${issues} could not be matched` : ''),
+        issues ? 'info' : 'success',
+      );
+      onRefresh?.();
+    } catch (e) {
+      showNotification(`Could not sync from PayPal: ${(e as Error).message}`, 'error');
+    } finally {
+      setSyncingAddons(false);
+    }
+  };
+
   // TSCS tab only renders once something has come in through TSCS India.
   const hasTscsData = useMemo(() => attendees.some(isTscsRegistration), [attendees]);
 
@@ -630,6 +677,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
       hasSponsorData,
       hasDmhoData,
       hasTscsData,
+      hasBadgePrinting: CURRENT_SITE.key === 'gansid',
     }).filter(t => canEdit || !ADMIN_ONLY_TABS.has(t.id)),
     [settings?.dashboardTabPrefs, hasExhibitorForms, hasSpeakers, hasSponsorData, hasDmhoData, hasTscsData, canEdit],
   );
@@ -831,6 +879,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
 
     const matchesAccount = matchesAccountFilter(a, accountFilter);
     const matchesDays = matchesDaysFilter(a, daysFilter);
+    const matchesReception = matchesReceptionFilter(a, receptionFilter);
 
     const matchesResponseFilters = responseFilters.every(rf => {
       const answer = a.answers?.[rf.fieldId];
@@ -843,7 +892,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
       return String(answer || '') === rf.value;
     });
 
-    return matchesSearch && matchesForm && matchesTab && matchesKind && matchesPendingSeat && matchesIncomplete && matchesStatus && matchesPayment && matchesAccount && matchesDays && matchesResponseFilters;
+    return matchesSearch && matchesForm && matchesTab && matchesKind && matchesPendingSeat && matchesIncomplete && matchesStatus && matchesPayment && matchesAccount && matchesDays && matchesReception && matchesResponseFilters;
   });
 
   // Count donated seats for badge
@@ -978,7 +1027,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
   const openBulkEmail = () => {
     const chips = describeActiveFilters({
       search: searchTerm, status: statusFilter, payment: paymentFilter, account: accountFilter,
-      kind: kindFilter, days: daysFilter, responseFilterCount: responseFilters.length,
+      kind: kindFilter, days: daysFilter, reception: receptionFilter, responseFilterCount: responseFilters.length,
     });
     const tabLabel = visibleTabs.find(t => t.id === activeTab)?.label ?? activeTab;
     const formLabel = selectedFormId === '_all' ? 'All forms' : (selectedForm?.title ?? 'Form');
@@ -1118,6 +1167,9 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
     }
     if (key === 'organization') {
       return orgNameFor(attendee) ?? '';
+    }
+    if (key === 'reception') {
+      return hasReceptionTicket(attendee) ? 'Yes' : 'No';
     }
     if (key === 'daysAttending') {
       return daysAttendingOf(attendee).join('; ');
@@ -1307,7 +1359,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
 
           {/* Attendee-table controls — hidden on the Signups + Contacts tabs since
               those views have their own filter + search bars. */}
-          {activeTab !== 'signups' && activeTab !== 'contacts' && activeTab !== 'sponsors' && (
+          {activeTab !== 'signups' && activeTab !== 'contacts' && activeTab !== 'sponsors' && activeTab !== 'badges' && (
             <div className="flex flex-wrap items-center gap-2">
               <div className="relative flex-1 min-w-[200px]">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -1411,7 +1463,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
         {/* Filters Row */}
         {activeTab === 'dmhos' && <DmhoNotice attendees={attendees} />}
 
-        {activeTab === 'signups' || activeTab === 'contacts' || activeTab === 'sponsors' ? null : activeTab === 'tables' ? (
+        {activeTab === 'signups' || activeTab === 'contacts' || activeTab === 'sponsors' || activeTab === 'badges' ? null : activeTab === 'tables' ? (
           <div className="flex flex-wrap items-center gap-2 text-sm bg-white/50 backdrop-blur-sm p-3 rounded-lg border border-white/40">
             <button
               onClick={handleExpandAll}
@@ -1507,6 +1559,35 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                 {dayOptions.map(d => <option key={d} value={d}>{shortDayLabel(d)}</option>)}
                 <option value={DAYS_NOT_SPECIFIED}>Not specified</option>
               </select>
+            </div>
+
+            {/* Networking Reception — the paid evening add-on; catering and the
+                door list need the headcount. */}
+            <div className="flex items-center gap-2">
+              <span className="text-slate-400">Reception:</span>
+              <select
+                value={receptionFilter}
+                onChange={e => { setReceptionFilter(e.target.value as ReceptionFilter); setCurrentPage(1); }}
+                className="bg-transparent font-medium text-slate-700 outline-none cursor-pointer"
+                aria-label="Filter by reception ticket"
+                data-testid="reception-filter"
+              >
+                <option value="all">Everyone</option>
+                <option value="yes">Has reception ticket ({receptionCount})</option>
+                <option value="no">No reception ticket</option>
+              </select>
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={handleSyncAddons}
+                  disabled={syncingAddons}
+                  className="text-xs font-medium text-amber-700 hover:text-amber-900 underline decoration-dotted disabled:opacity-50"
+                  title="Read reception purchases from PayPal order details (for registrations made before reception tickets were recorded automatically)"
+                  data-testid="sync-addons"
+                >
+                  {syncingAddons ? 'Syncing…' : 'Sync from PayPal'}
+                </button>
+              )}
             </div>
 
             {/* Unclaimed seats — booked and paid, nobody named yet. Off by
@@ -1715,6 +1796,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
             account: accountFilter,
             kind: kindFilter,
             days: daysFilter,
+            reception: receptionFilter,
             responseFilterCount: responseFilters.length,
           });
           if (chips.length === 0) return null;
@@ -1740,6 +1822,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                   setAccountFilter('all');
                   setKindFilter('all');
                   setDaysFilter('all');
+                  setReceptionFilter('all');
                   setResponseFilters([]);
                   setCurrentPage(1);
                 }}
@@ -1788,6 +1871,10 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                 <p>Loading…</p>
               </div>
             )}
+          </div>
+        ) : activeTab === 'badges' ? (
+          <div className="p-4">
+            <BadgePrintingTab attendees={attendees} forms={forms} onRefresh={onRefresh} />
           </div>
         ) : activeTab === 'exhibitors' ? (
           <div className="p-4">
@@ -2045,6 +2132,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                 {isColumnVisible('formTitle') && <th className="px-4 py-2.5 min-w-[140px] text-xs font-semibold uppercase tracking-wide text-gray-500">Event/Form</th>}
                 {isColumnVisible('ticketType') && <th className="px-4 py-2.5 min-w-[110px] text-xs font-semibold uppercase tracking-wide text-gray-500">Ticket Type</th>}
                 {isColumnVisible('days') && <th className="px-4 py-2.5 min-w-[120px] text-xs font-semibold uppercase tracking-wide text-gray-500">Days Attending</th>}
+                {isColumnVisible('reception') && <th className="px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">Reception</th>}
                 {isColumnVisible('kind') && <th className="px-4 py-2.5 min-w-[150px] text-xs font-semibold uppercase tracking-wide text-gray-500">Type</th>}
                 {isColumnVisible('seating') && <th className="px-4 py-2.5 min-w-[120px] text-xs font-semibold uppercase tracking-wide text-gray-500">Seating</th>}
                 {isColumnVisible('status') && <th className="px-4 py-2.5 min-w-[120px] text-xs font-semibold uppercase tracking-wide text-gray-500">Check-in Status</th>}
@@ -2111,6 +2199,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                               <span className="w-5 flex-shrink-0" aria-hidden="true" />
                             ))}
                             <div className="font-medium text-gray-900">{nameWithTitle(attendee.name, attendeeTitleOf(attendee, formById.get(attendee.formId)))}</div>
+                            {hasReceptionTicket(attendee) && <ReceptionPill />}
                             {children.length > 0 && !groupPrimaryIds.has(attendee.id) && (
                               <span
                                 className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200 whitespace-nowrap"
@@ -2275,6 +2364,11 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
                           </td>
                         );
                       })()}
+                      {isColumnVisible('reception') && (
+                        <td className="px-4 py-3">
+                          {hasReceptionTicket(attendee) ? <ReceptionPill /> : <span className="text-gray-300" title="No reception ticket">—</span>}
+                        </td>
+                      )}
                       {isColumnVisible('kind') && (() => {
                         const kind = kindOf(attendee);
                         const meta = REGISTRATION_KIND_META[kind];
@@ -2407,7 +2501,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
           (each fed by the shared `itemsPerPage` above), so this footer
           (driven by the outer `filtered`/`currentPage`) is hidden there to
           avoid showing a mismatched/duplicate page count. */}
-      {activeTab !== 'signups' && activeTab !== 'contacts' && activeTab !== 'exhibitors' && activeTab !== 'sponsors' && (
+      {activeTab !== 'signups' && activeTab !== 'contacts' && activeTab !== 'exhibitors' && activeTab !== 'sponsors' && activeTab !== 'badges' && (
       <div className="px-4 py-3 border-t border-white/20 bg-white/60 backdrop-blur-sm flex items-center justify-between">
         <div className="text-xs text-gray-500">
           {activeTab === 'tables' ? (
@@ -2503,7 +2597,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
       {tabsConfigOpen && settings && (
         <DashboardTabsConfig
           settings={settings}
-          gates={{ hasExhibitorForms, portalEnabled: CURRENT_SITE.portalEnabled, hasSpeakers, hasSponsorData, hasDmhoData, hasTscsData }}
+          gates={{ hasExhibitorForms, portalEnabled: CURRENT_SITE.portalEnabled, hasSpeakers, hasSponsorData, hasDmhoData, hasTscsData, hasBadgePrinting: CURRENT_SITE.key === 'gansid' }}
           onSave={async (next) => {
             const updated = { ...settings, dashboardTabPrefs: next };
             await saveSettings(updated);

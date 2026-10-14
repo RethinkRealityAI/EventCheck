@@ -14,6 +14,7 @@
 //
 // Pure + data-only so both are unit-tested (CLAUDE.md §16 rule #14).
 
+import { RECEPTION_FILTER_LABELS, type ReceptionFilter } from './receptionTicket';
 import { REGISTRATION_KIND_FILTER_LABELS, type RegistrationKindFilter } from './registrationKind';
 import { daysFilterLabel } from './daysAttending';
 
@@ -50,10 +51,12 @@ export interface ActiveFilterState {
   responseFilterCount?: number;
   /** 'all' | DAYS_NOT_SPECIFIED | a day label (see utils/daysAttending). */
   days?: string;
+  /** 'all' | 'yes' | 'no' — Networking Reception ticket (utils/receptionTicket). */
+  reception?: ReceptionFilter;
 }
 
 export interface ActiveFilterChip {
-  key: 'search' | 'status' | 'payment' | 'account' | 'kind' | 'days' | 'responses';
+  key: 'search' | 'status' | 'payment' | 'account' | 'kind' | 'days' | 'reception' | 'responses';
   label: string;
 }
 
@@ -90,6 +93,9 @@ export function describeActiveFilters(state: ActiveFilterState): ActiveFilterChi
   }
   if (state.days && state.days !== 'all') {
     chips.push({ key: 'days', label: daysFilterLabel(state.days) });
+  }
+  if (state.reception && state.reception !== 'all') {
+    chips.push({ key: 'reception', label: RECEPTION_FILTER_LABELS[state.reception] });
   }
   const n = state.responseFilterCount ?? 0;
   if (n > 0) chips.push({ key: 'responses', label: `${n} response filter${n > 1 ? 's' : ''}` });

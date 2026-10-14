@@ -111,3 +111,11 @@ describe('days chip', () => {
     expect(chips[1].label).toBe('Attending Oct 24');
   });
 });
+
+describe('reception chip', () => {
+  it('appears only when the reception filter is narrowing the list', () => {
+    expect(describeActiveFilters({ reception: 'all' })).toEqual([]);
+    expect(describeActiveFilters({ reception: 'yes' })).toEqual([{ key: 'reception', label: 'Reception ticket' }]);
+    expect(describeActiveFilters({ reception: 'no' })[0].label).toBe('No reception ticket');
+  });
+});

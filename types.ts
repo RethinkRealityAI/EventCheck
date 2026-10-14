@@ -54,6 +54,8 @@ export interface Attendee {
    *  state — `null` means we never sent (or we only sent before this field
    *  existed). */
   lastTicketEmailAt?: string | null;
+  /** Permanent badge / desk code, e.g. GSD_IND_001 (utils/badgeList). */
+  regCode?: string | null;
   /** True when this attendee row was purchased as an additional booth staff
    *  spot (sponsor_exhibitor flow), distinct from tier/booth-allotted staff.
    *  Extras are paid online by card via PayPal at $50 USD each. The PayPal
