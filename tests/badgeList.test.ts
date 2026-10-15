@@ -96,11 +96,13 @@ describe('badge list', () => {
     const general = base({ id: 'ga', ticketType: 'General Admission' });
     const bracket = base({ id: 'eb', ticketType: 'Physicians/Researchers — Early Bird' });
     const crew = base({ id: 'cr', ticketType: 'Supporting Staff' });
-    const c = ctxFor([buyer, bogo, invited, guest, general, bracket, crew]);
+    const supporter = base({ id: 'ts', ticketType: 'Full Congress', answers: { tscs_source: 'list' } });
+    const c = ctxFor([buyer, bogo, invited, guest, general, bracket, crew, supporter]);
     expect(regCategoryOf(bogo, c)).toBe('Patients or Family Members');
     expect(regCategoryOf(invited, c)).toBe('Invited Delegate');
     expect(regCategoryOf(guest, c)).toBe('Guest');
-    expect(regCategoryOf(general, c)).toBe('Delegate');
+    expect(regCategoryOf(general, c)).toBe('Attendee');
+    expect(regCategoryOf(supporter, c)).toBe('Attendee');
     expect(regCategoryOf(bracket, c)).toBe('Physicians/Researchers');
     expect(regCategoryOf(crew, c)).toBe('Crew');
   });

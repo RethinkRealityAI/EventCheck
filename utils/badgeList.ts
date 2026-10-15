@@ -131,7 +131,9 @@ function isHallOnly(a: Attendee): boolean {
 const ISSUED_AS_INVITE = /^(issued \(free\)|invited \(free\)|manual entry)$/i;
 const ISSUED_AS_GUEST = /^registration \(free guest\)$/i;
 const ISSUED_AS_COMPANION = /^registration( \(free add-on\))?$/i;
-const GENERIC_ADMISSION = /^(general admission|paid admission|registration)$/i;
+// Generic admission, and "Full Congress" bought outside an exhibitor / sponsor
+// booking (e.g. TSCS supporters): Full Access is only a staff-package label.
+const GENERIC_ADMISSION = /^(general admission|paid admission|registration|full congress|full access)$/i;
 
 /** "Physicians/Researchers — Early Bird" → "Physicians/Researchers". */
 function baseTicketName(t: string): string {
@@ -143,7 +145,8 @@ function baseTicketName(t: string): string {
  *   Speakers → Speaker; DMHO delegates → DMHO Delegate;
  *   exhibitor / sponsor staff → "<Exhibitor|Sponsor> – <Full Access|Hall Only>" from their package;
  *   a buy-one-get-one companion → the category of the delegate who bought it;
- *   invited / free-guest tickets → Invited Delegate / Guest; otherwise the ticket bought.
+ *   invited / free-guest tickets → Invited Delegate / Guest; generic admission → Attendee;
+ *   otherwise the ticket bought.
  */
 export function regCategoryOf(a: Attendee, ctx: BadgeContext): string {
   if (a.guestType === 'speaker' || a.attendeeCategory === 'speaker') return 'Speaker';
@@ -161,7 +164,7 @@ export function regCategoryOf(a: Attendee, ctx: BadgeContext): string {
   }
   if (ISSUED_AS_INVITE.test(ticket)) return 'Invited Delegate';
   if (ISSUED_AS_GUEST.test(ticket)) return 'Guest';
-  if (!ticket || GENERIC_ADMISSION.test(ticket)) return 'Delegate';
+  if (!ticket || GENERIC_ADMISSION.test(ticket)) return 'Attendee';
   return ticket;
 }
 
