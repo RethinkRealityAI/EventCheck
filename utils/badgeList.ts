@@ -15,6 +15,11 @@
 //   * Meals: Lunch and Dinner are "Yes" for each congress day the person
 //     attends (Days Attending); no days on file means all three days.
 //   * Hall-only exhibitor staff get no conference kit or certificate.
+//   * One category column (2026-10-15): the vendor's sheet had both "Badge
+//     Category" and "Reg. Category", which disagreed. Only *Reg. Category is
+//     kept, filled from the person's ticket. Full Access / Hall Only is an
+//     exhibitor & sponsor staff distinction, so it only appears for them
+//     ("Exhibitor – Full Access", "Sponsor – Hall Only", …).
 //
 // Pure + data-only so it is unit-tested.
 
@@ -29,7 +34,7 @@ export const CONGRESS_DAYS = ['2026-10-23', '2026-10-24', '2026-10-25'] as const
 
 export const BADGE_COLUMNS = [
   'Sr. no.', '*Reg. ID', '*Lunch 1', 'Dinner 1*', '*Lunch 2', '*Dinner 2', '*Lunch 3', '*Conf. Kit',
-  '*Certificate', '*Badge Category', '*Name', '*City/Country', '*Mobile', '*Email Id', 'Reg. Status',
+  '*Certificate', '*Name', '*City/Country', '*Mobile', '*Email Id', 'Reg. Status',
   '*Reg. Category', 'Designation/ Affiliation', 'Institute', 'Medical Council State',
   'Medical Council Reg Number', 'State/Country', 'Confirmation email', 'Remark',
 ] as const;
@@ -42,7 +47,6 @@ export interface BadgeFields {
   lunch1: string; dinner1: string; lunch2: string; dinner2: string; lunch3: string;
   kit: string;
   certificate: string;
-  badgeCategory: string;
   name: string;
   cityCountry: string;
   mobile: string;
@@ -123,18 +127,42 @@ function isHallOnly(a: Attendee): boolean {
   return staffCategoryOf(a) === 'hall_only' || /hall[\s-]*only/i.test(a.ticketType ?? '');
 }
 
-export function badgeCategoryOf(a: Attendee, ctx: BadgeContext): string {
+// Ticket types that name how a ticket was issued, not who the person is.
+const ISSUED_AS_INVITE = /^(issued \(free\)|invited \(free\)|manual entry)$/i;
+const ISSUED_AS_GUEST = /^registration \(free guest\)$/i;
+const ISSUED_AS_COMPANION = /^registration( \(free add-on\))?$/i;
+const GENERIC_ADMISSION = /^(general admission|paid admission|registration)$/i;
+
+/** "Physicians/Researchers — Early Bird" → "Physicians/Researchers". */
+function baseTicketName(t: string): string {
+  return t.split(' — ')[0].trim();
+}
+
+/**
+ * The single category printed on the badge (*Reg. Category).
+ *   Speakers → Speaker; DMHO delegates → DMHO Delegate;
+ *   exhibitor / sponsor staff → "<Exhibitor|Sponsor> – <Full Access|Hall Only>" from their package;
+ *   a buy-one-get-one companion → the category of the delegate who bought it;
+ *   invited / free-guest tickets → Invited Delegate / Guest; otherwise the ticket bought.
+ */
+export function regCategoryOf(a: Attendee, ctx: BadgeContext): string {
   if (a.guestType === 'speaker' || a.attendeeCategory === 'speaker') return 'Speaker';
-  if (a.attendeeCategory === 'dmho') return 'DMHO';
+  if (a.attendeeCategory === 'dmho') return 'DMHO Delegate';
   const orgId = ctx.index.orgIdByDelegateId.get(a.id);
   const org = orgId ? ctx.index.orgById.get(orgId) : undefined;
-  if (org) {
-    if (org.kind === 'sponsor') return 'Sponsor';
-    return isHallOnly(a) ? 'Exhibitor (Hall Only)' : 'Exhibitor';
+  if (org) return `${org.kind === 'sponsor' ? 'Sponsor' : 'Exhibitor'} – ${isHallOnly(a) ? 'Hall Only' : 'Full Access'}`;
+
+  const ticket = baseTicketName(a.ticketType ?? '');
+  if (/^supporting staff$/i.test(ticket)) return 'Crew';
+  if (ISSUED_AS_COMPANION.test(ticket) && a.primaryAttendeeId) {
+    const parent = ctx.attendeesById.get(a.primaryAttendeeId);
+    const parentTicket = parent ? baseTicketName(parent.ticketType ?? '') : '';
+    if (parent && parentTicket && !ISSUED_AS_COMPANION.test(parentTicket)) return regCategoryOf(parent, ctx);
   }
-  if (/^medical team$/i.test(a.ticketType ?? '')) return 'Medical Team';
-  if (/^supporting staff$/i.test(a.ticketType ?? '')) return 'Crew';
-  return 'Full Access';
+  if (ISSUED_AS_INVITE.test(ticket)) return 'Invited Delegate';
+  if (ISSUED_AS_GUEST.test(ticket)) return 'Guest';
+  if (!ticket || GENERIC_ADMISSION.test(ticket)) return 'Delegate';
+  return ticket;
 }
 
 function regStatusOf(a: Attendee): string {
@@ -176,13 +204,12 @@ export function buildBadgeRow(a: Attendee, ctx: BadgeContext): BadgeRow {
     lunch3: yes(attends(d3)),
     kit: yes(!hallOnly),
     certificate: yes(!hallOnly),
-    badgeCategory: badgeCategoryOf(a, ctx),
     name: nameWithTitle(a.name ?? '', attendeeTitleOf(a, form)),
     cityCountry: [city, countryName].filter(Boolean).join(', '),
     mobile: mobileOf(a),
     email: (a.email ?? '').trim(),
     regStatus: regStatusOf(a),
-    regCategory: (a.ticketType ?? '').trim(),
+    regCategory: regCategoryOf(a, ctx),
     designation: str(answers.f_role),
     institute: str(answers.f_org) || (org ? orgDisplayName(org.row) : ''),
     councilState: 'NA',
@@ -198,7 +225,7 @@ export function buildBadgeRow(a: Attendee, ctx: BadgeContext): BadgeRow {
 export function badgeSheetRow(srNo: number, f: BadgeFields): (string | number)[] {
   return [
     srNo, f.regId, f.lunch1, f.dinner1, f.lunch2, f.dinner2, f.lunch3, f.kit, f.certificate,
-    f.badgeCategory, f.name, f.cityCountry, f.mobile, f.email, f.regStatus, f.regCategory,
+    f.name, f.cityCountry, f.mobile, f.email, f.regStatus, f.regCategory,
     f.designation, f.institute, f.councilState, f.councilRegNo, f.stateCountry, f.confirmationEmail, f.remark,
   ];
 }

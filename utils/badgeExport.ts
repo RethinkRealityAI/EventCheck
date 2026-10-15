@@ -15,12 +15,13 @@ export async function downloadBadgeWorkbook(fields: BadgeFields[], fileName: str
   const header = ws.addRow([...BADGE_COLUMNS]);
   header.font = { bold: true };
   header.alignment = { vertical: 'middle', wrapText: true };
+  const mobileCol = BADGE_COLUMNS.indexOf('*Mobile') + 1;
   fields.forEach((f, i) => {
     const row = ws.addRow(badgeSheetRow(i + 1, f));
-    row.getCell(13).numFmt = '@';
-    row.getCell(13).value = f.mobile;
+    row.getCell(mobileCol).numFmt = '@';
+    row.getCell(mobileCol).value = f.mobile;
   });
-  const widths = [7, 14, 8, 8, 8, 8, 8, 9, 10, 18, 30, 24, 16, 32, 14, 30, 30, 30, 14, 14, 18, 12, 20];
+  const widths = [7, 14, 8, 8, 8, 8, 8, 9, 10, 30, 24, 16, 32, 14, 30, 30, 30, 14, 14, 18, 12, 20];
   widths.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
   ws.views = [{ state: 'frozen', ySplit: 2 }];
 
