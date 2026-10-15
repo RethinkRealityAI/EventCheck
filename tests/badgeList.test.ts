@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Attendee, Form } from '../types';
 import { buildRegistrationIndex } from '../utils/registrationKind';
 import {
-  BADGE_COLUMNS, badgeSheetRow, buildBadgeRow, fingerprintOf, isBadgeEligible, printStatusOf,
+  BADGE_COLUMNS, badgeSheetRow, buildBadgeRow, fingerprintOf, isBadgeEligible, printStatusOf, regCategoryOf,
 } from '../utils/badgeList';
 
 const base = (o: Partial<Attendee>): Attendee => ({
@@ -45,7 +45,7 @@ describe('badge list', () => {
   it('fills the vendor template from the registration', () => {
     const r = buildBadgeRow(delegate, ctx);
     expect(r.fields).toMatchObject({
-      regId: 'GSD_IND_001', name: 'Dr. Jane Doe', badgeCategory: 'Full Access',
+      regId: 'GSD_IND_001', name: 'Dr. Jane Doe', regCategory: 'Physicians/Researchers',
       lunch1: 'Yes', dinner1: 'Yes', lunch2: 'No', dinner2: 'No', lunch3: 'Yes',
       kit: 'Yes', certificate: 'Yes', cityCountry: 'Hyderabad, India', mobile: '+919800000000',
       regStatus: 'Paid', designation: 'Consultant', institute: 'NIMS', councilState: 'NA', confirmationEmail: 'Yes',
@@ -54,9 +54,9 @@ describe('badge list', () => {
     expect(badgeSheetRow(1, r.fields)).toHaveLength(BADGE_COLUMNS.length);
   });
 
-  it('gives hall-only exhibitor staff their org, an Exhibitor badge and no kit / certificate', () => {
+  it('gives hall-only exhibitor staff their org, an Exhibitor – Hall Only category and no kit / certificate', () => {
     const r = buildBadgeRow(hallStaff, ctx);
-    expect(r.fields).toMatchObject({ badgeCategory: 'Exhibitor (Hall Only)', kit: 'No', certificate: 'No', institute: 'Acme Pharma' });
+    expect(r.fields).toMatchObject({ regCategory: 'Exhibitor – Hall Only', kit: 'No', certificate: 'No', institute: 'Acme Pharma' });
     expect(r.fields.lunch1 + r.fields.lunch3).toBe('YesYes');
     expect(r.countryUnknown).toBe(true);
     expect(r.region).toBe('IND');
@@ -68,9 +68,43 @@ describe('badge list', () => {
 
   it('labels speakers, DMHOs and complimentary registrations', () => {
     const sp = buildBadgeRow(base({ id: 'sp', guestType: 'speaker' as any, paymentStatus: 'free' }), ctx);
-    expect(sp.fields.badgeCategory).toBe('Speaker');
+    expect(sp.fields.regCategory).toBe('Speaker');
     expect(sp.fields.regStatus).toBe('Complimentary');
-    expect(buildBadgeRow(base({ id: 'dm', attendeeCategory: 'dmho' as any }), ctx).fields.badgeCategory).toBe('DMHO');
+    expect(buildBadgeRow(base({ id: 'dm', attendeeCategory: 'dmho' as any, ticketType: 'DMHO Delegate — 23 Oct' }), ctx).fields.regCategory).toBe('DMHO Delegate');
+  });
+
+  it('has a single category column (no separate Badge Category)', () => {
+    expect(BADGE_COLUMNS).not.toContain('*Badge Category');
+    expect(BADGE_COLUMNS).toContain('*Reg. Category');
+    expect(BADGE_COLUMNS).toHaveLength(22);
+  });
+
+  it('gives full-access exhibitor and sponsor staff the package from their booking', () => {
+    const sponsor = base({ id: 'sp1', formId: 'exhibitors', name: 'Big Pharma', ticketType: 'Sponsor', companyInfo: { orgName: 'Big Pharma' } as any, answers: { registrationType: 'sponsor' } });
+    const sStaff = base({ id: 'ss1', formId: 'exhibitors', name: 'Sue', isPrimary: false, primaryAttendeeId: 'sp1', ticketType: 'Full Congress', guestType: 'staff-claimed' as any, answers: { staffCategory: 'full_access' } });
+    const eStaff = base({ id: 'es1', formId: 'exhibitors', name: 'Eve', isPrimary: false, primaryAttendeeId: 'o1', ticketType: 'Full Congress', guestType: 'staff-claimed' as any, answers: { staffCategory: 'full_access' } });
+    const c = ctxFor([...all, sponsor, sStaff, eStaff]);
+    expect(regCategoryOf(eStaff, c)).toBe('Exhibitor – Full Access');
+    expect(regCategoryOf(sStaff, c)).toMatch(/– Full Access$/);
+  });
+
+  it('turns issuing labels into who the person is', () => {
+    const buyer = base({ id: 'b1', ticketType: 'Patients or Family Members' });
+    const bogo = base({ id: 'b2', isPrimary: false, primaryAttendeeId: 'b1', ticketType: 'Registration (Free Add-on)' });
+    const invited = base({ id: 'iv', ticketType: 'Issued (free)', paymentStatus: 'free' });
+    const guest = base({ id: 'g1', ticketType: 'Registration (Free Guest)', paymentStatus: 'free' });
+    const general = base({ id: 'ga', ticketType: 'General Admission' });
+    const bracket = base({ id: 'eb', ticketType: 'Physicians/Researchers — Early Bird' });
+    const crew = base({ id: 'cr', ticketType: 'Supporting Staff' });
+    const supporter = base({ id: 'ts', ticketType: 'Full Congress', answers: { tscs_source: 'list' } });
+    const c = ctxFor([buyer, bogo, invited, guest, general, bracket, crew, supporter]);
+    expect(regCategoryOf(bogo, c)).toBe('Patients or Family Members');
+    expect(regCategoryOf(invited, c)).toBe('Invited Delegate');
+    expect(regCategoryOf(guest, c)).toBe('Guest');
+    expect(regCategoryOf(general, c)).toBe('Attendee');
+    expect(regCategoryOf(supporter, c)).toBe('Attendee');
+    expect(regCategoryOf(bracket, c)).toBe('Physicians/Researchers');
+    expect(regCategoryOf(crew, c)).toBe('Crew');
   });
 });
 

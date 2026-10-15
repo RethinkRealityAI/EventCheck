@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Attendee, Form, AppSettings, SeatingTable } from '../types';
-import { LayoutDashboard, Users, ChevronDown, ChevronRight, UserPlus, CheckCircle, Clock, Search, Calendar, Eye, X, Mail, User, Download, FileSpreadsheet, Check, ChevronLeft, Filter, Loader2, Copy, ChevronsDown, ChevronsRight, Star, Pin, Plus, SlidersHorizontal, Heart, Upload, AlertTriangle, Send as SendIcon, Building2, Ticket as TicketIcon } from 'lucide-react';
+import { LayoutDashboard, Users, ChevronDown, ChevronRight, UserPlus, CheckCircle, Clock, Search, Calendar, Eye, X, Mail, User, Download, FileSpreadsheet, Check, ChevronLeft, Filter, Loader2, Copy, ChevronsDown, ChevronsRight, Star, Pin, Plus, SlidersHorizontal, Heart, Upload, AlertTriangle, Send as SendIcon, Building2, Ticket as TicketIcon, MoreHorizontal } from 'lucide-react';
 import { format } from 'date-fns';
 import { updateAttendee, getSettings, saveSettings, getAllSeatingTablesForForm, createGuestForPrimary, syncAttendeeSeatingToChart } from '../services/storageService';
 import { supabase } from '../services/supabaseClient';
@@ -293,6 +293,17 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
   useEffect(() => { refreshDeliveryIssues(); }, [refreshDeliveryIssues]);
   const [exporting, setExporting] = useState(false);
   const [showBulkImport, setShowBulkImport] = useState(false);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!moreMenuOpen) return;
+    const close = (e: MouseEvent | KeyboardEvent) => {
+      if (e instanceof KeyboardEvent ? e.key === 'Escape' : !moreMenuRef.current?.contains(e.target as Node)) setMoreMenuOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', close);
+    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', close); };
+  }, [moreMenuOpen]);
 
   // Pagination State. Default page size is 50 and the user's choice persists
   // per-browser in localStorage — and across every tab (including Exhibitors/
@@ -813,6 +824,7 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
       a.name.toLowerCase().includes(q) ||
       a.email.toLowerCase().includes(q) ||
       a.id.toLowerCase().includes(q) ||
+      (a.regCode?.toLowerCase().includes(q) ?? false) ||
       (a.ticketType?.toLowerCase().includes(q) ?? false) ||
       (a.transactionId?.toLowerCase().includes(q) ?? false) ||
       (a.appliedPromoCode?.toLowerCase().includes(q) ?? false) ||
@@ -1262,203 +1274,240 @@ const AttendeeList: React.FC<AttendeeListProps> = ({ attendees, forms, isLoading
       <div className="absolute inset-0 bg-gradient-to-b from-white/40 to-transparent pointer-events-none"></div>
       {/* Header & Tabs */}
       <div className="p-5 border-b border-white/40 space-y-4 relative z-10 backdrop-blur-2xl bg-white/40">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div className="flex flex-col gap-3">
-            <h2 className="font-semibold text-lg text-gray-900 flex items-center gap-2">
-              Registered Attendees
-              {!canEdit && (
-                <span
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200 text-[11px] font-semibold"
-                  title="You can look through everything here, but this account can't change registrations or send email."
-                  data-testid="view-only-badge"
-                >
-                  <Eye className="w-3 h-3" /> View-only access
-                </span>
-              )}
-            </h2>
-            <div className="flex items-center gap-1 bg-white/50 backdrop-blur-sm p-1 rounded-lg w-fit border border-white/40">
-              {visibleTabs.map(meta => {
-                const isActive = activeTab === meta.id;
-                const activeCls = meta.id === 'donated'
-                  ? 'bg-white text-emerald-600 shadow-sm'
-                  : 'bg-white text-indigo-600 shadow-sm';
-                return (
-                  <button
-                    key={meta.id}
-                    onClick={() => { setActiveTab(meta.id as typeof activeTab); setCurrentPage(1); }}
-                    className={`px-3 py-1 text-xs font-medium rounded-md transition flex items-center gap-1 ${isActive ? activeCls : 'text-gray-500 hover:text-gray-900'}`}
-                    title={meta.description}
-                  >
-                    {meta.id === 'tables' && <LayoutDashboard className="w-3 h-3" />}
-                    {meta.label}
-                    {meta.id === 'donated' && totalDonatedCount > 0 && (
-                      <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{totalDonatedCount}</span>
-                    )}
-                    {meta.id === 'groups' && groupPrimaryIds.size > 0 && (
-                      <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{groupPrimaryIds.size}</span>
-                    )}
-                  </button>
-                );
-              })}
-              {canEdit && (
-                <button
-                  onClick={() => setTabsConfigOpen(true)}
-                  className="px-2 py-1 text-gray-400 hover:text-indigo-600 hover:bg-white rounded-md transition"
-                  title="Customize tabs — reorder or hide"
-                  aria-label="Customize dashboard tabs"
-                >
-                  <SettingsIcon className="w-3.5 h-3.5" />
-                </button>
-              )}
-              {/* Separator */}
-              <div className="h-5 w-px bg-gray-300/50 mx-1"></div>
-              {/* Form Selector */}
-              <select
-                value={selectedFormId}
-                onChange={e => { setSelectedFormId(e.target.value); setCurrentPage(1); }}
-                className="px-2 py-1 border border-white/40 rounded-md text-xs font-medium bg-white/80 backdrop-blur-sm outline-none focus:ring-2 focus:ring-indigo-500 max-w-[200px]"
-              >
-                <option value="_all">All Forms</option>
-                {forms.map(f => (
-                  <option key={f.id} value={f.id}>{f.title}</option>
-                ))}
-              </select>
-              {canEdit && (
-                <button
-                  onClick={handleSetDefaultForm}
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md transition-all border text-xs font-bold ml-1 ${settings?.defaultDashboardFormId === selectedFormId && selectedFormId !== '_all'
-                    ? 'bg-blue-100 text-blue-700 border-blue-200 shadow-sm'
-                    : 'bg-white/40 text-slate-500 border-white/40 hover:bg-white hover:text-blue-500 hover:border-blue-100 hover:shadow-sm'
-                  }`}
-                  title={settings?.defaultDashboardFormId === selectedFormId && selectedFormId !== '_all' ? 'This is your default view' : 'Set as default view'}
-                >
-                  <Pin className={`w-3.5 h-3.5 transition-transform ${settings?.defaultDashboardFormId === selectedFormId && selectedFormId !== '_all' ? 'fill-blue-500 text-blue-600 -rotate-12 scale-110' : ''}`} />
-                  {settings?.defaultDashboardFormId === selectedFormId && selectedFormId !== '_all' ? 'Pinned' : 'Pin'}
-                </button>
-              )}
-              {/* Separator */}
-              <div className="h-5 w-px bg-gray-300/50 mx-1"></div>
-              {/* Rows-per-page — overhead control, always visible regardless of
-                  the active tab (unlike the per-tab controls row below, which
-                  hides on Signups/Contacts). Governs every tab's page size,
-                  including Exhibitors/Signups/Contacts. */}
-              <select
-                value={itemsPerPage}
-                onChange={e => { setItemsPerPage(Number(e.target.value)); setCurrentPage(1); }}
-                className="px-2 py-1 border border-white/40 rounded-md text-xs font-medium bg-white/80 backdrop-blur-sm outline-none focus:ring-2 focus:ring-indigo-500"
-                title="Rows per page (applies to every tab)"
-              >
-                <option value={10}>10 / page</option>
-                <option value={20}>20 / page</option>
-                <option value={25}>25 / page</option>
-                <option value={50}>50 / page</option>
-                <option value={100}>100 / page</option>
-              </select>
-            </div>
-          </div>
+        {(() => {
+          const showTableControls = activeTab !== 'signups' && activeTab !== 'contacts' && activeTab !== 'sponsors' && activeTab !== 'badges';
+          const isPinned = settings?.defaultDashboardFormId === selectedFormId && selectedFormId !== '_all';
+          const showEmail = canEdit && BULK_EMAIL_TABS.has(activeTab);
+          const hasMore = canEdit;
+          const secondaryBtn = 'inline-flex items-center gap-2 h-10 px-3.5 rounded-lg border border-slate-200 bg-white text-sm font-medium text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed';
+          const selectCls = 'h-10 px-3 rounded-lg border border-slate-200 bg-white text-sm font-medium text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm';
+          return (
+            <>
+              {/* Row 1 — title on the left, actions on the right. */}
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h2 className="font-semibold text-lg text-gray-900 flex items-center gap-2 min-w-0">
+                  Registered Attendees
+                  {!canEdit && (
+                    <span
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200 text-[11px] font-semibold"
+                      title="You can look through everything here, but this account can't change registrations or send email."
+                      data-testid="view-only-badge"
+                    >
+                      <Eye className="w-3 h-3" /> View-only access
+                    </span>
+                  )}
+                  {canEdit && deliveryIssueCount > 0 && (
+                    <button
+                      onClick={() => setShowDeliveryIssues(true)}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-300 text-xs font-semibold hover:bg-amber-100 transition"
+                      title="Some emails could not be delivered — review and resend"
+                    >
+                      <AlertTriangle className="w-3.5 h-3.5" />
+                      {deliveryIssueCount} delivery {deliveryIssueCount === 1 ? 'issue' : 'issues'}
+                    </button>
+                  )}
+                </h2>
 
-          {/* Attendee-table controls — hidden on the Signups + Contacts tabs since
-              those views have their own filter + search bars. */}
-          {activeTab !== 'signups' && activeTab !== 'contacts' && activeTab !== 'sponsors' && activeTab !== 'badges' && (
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="relative flex-1 min-w-[200px]">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder="Search..."
-                  className="pl-9 pr-4 py-2 border border-white/40 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none w-full bg-white/80 backdrop-blur-sm"
-                  value={searchTerm}
-                  onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }}
-                />
+                {showTableControls && (canEdit || canExport) && (
+                  <div className="flex items-center gap-2" data-testid="attendee-actions">
+                    {showEmail && (
+                      <button
+                        onClick={openBulkEmail}
+                        disabled={!settings || !smtpReady || sortedFiltered.length === 0}
+                        className={secondaryBtn}
+                        title={!smtpReady
+                          ? 'Configure SMTP in Settings first'
+                          : sortedFiltered.length === 0
+                            ? 'No one matches the current filters'
+                            : `Compose one email to the ${sortedFiltered.length} ${sortedFiltered.length === 1 ? 'person' : 'people'} matching the current filters (all pages)`}
+                        data-testid="attendees-email-all"
+                      >
+                        <SendIcon className="w-4 h-4 text-sky-600" />
+                        <span className="hidden sm:inline">Email</span>
+                        <span className="text-xs font-semibold text-slate-500">{sortedFiltered.length}</span>
+                      </button>
+                    )}
+                    {canExport && (
+                      <button onClick={openExportModal} className={secondaryBtn} title="Export attendees (CSV / PDF)">
+                        <Download className="w-4 h-4 text-slate-500" />
+                        <span className="hidden sm:inline">Export</span>
+                      </button>
+                    )}
+                    {canEdit && (
+                      <button
+                        onClick={() => setShowAddModal(true)}
+                        className="inline-flex items-center gap-2 h-10 px-4 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 transition shadow-sm"
+                        title="Add attendee manually"
+                      >
+                        <Plus className="w-4 h-4" />
+                        <span className="hidden sm:inline">Add attendee</span>
+                      </button>
+                    )}
+                    {hasMore && (
+                      <div className="relative" ref={moreMenuRef}>
+                        <button
+                          onClick={() => setMoreMenuOpen(o => !o)}
+                          className={`${secondaryBtn} px-2.5`}
+                          aria-haspopup="menu"
+                          aria-expanded={moreMenuOpen}
+                          aria-label="More actions"
+                          title="More actions"
+                          data-testid="attendee-more-actions"
+                        >
+                          <MoreHorizontal className="w-4 h-4" />
+                        </button>
+                        {moreMenuOpen && (
+                          <div role="menu" className="absolute right-0 mt-2 w-60 rounded-xl border border-slate-200 bg-white shadow-xl py-1.5 z-30">
+                            {showEmail && (
+                              <button
+                                role="menuitem"
+                                onClick={() => { setMoreMenuOpen(false); setShowCustomTicketEmail(true); }}
+                                className="w-full flex items-start gap-2.5 px-3 py-2 text-left hover:bg-slate-50"
+                                data-testid="attendees-custom-ticket-email"
+                              >
+                                <TicketIcon className="w-4 h-4 mt-0.5 text-sky-600" />
+                                <span>
+                                  <span className="block text-sm font-medium text-slate-800">Ticket email</span>
+                                  <span className="block text-xs text-slate-500">Your own message with each ticket attached</span>
+                                </span>
+                              </button>
+                            )}
+                            <button
+                              role="menuitem"
+                              onClick={() => { setMoreMenuOpen(false); setShowBulkImport(true); }}
+                              disabled={!settings}
+                              className="w-full flex items-start gap-2.5 px-3 py-2 text-left hover:bg-slate-50 disabled:opacity-50"
+                            >
+                              <Upload className="w-4 h-4 mt-0.5 text-violet-600" />
+                              <span>
+                                <span className="block text-sm font-medium text-slate-800">Import contacts</span>
+                                <span className="block text-xs text-slate-500">Bulk-import from a CSV and send a campaign</span>
+                              </span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
-              <ColumnVisibilityDropdown
-                columns={allColumns}
-                visibleColumns={columnVisibility}
-                onToggle={handleToggleColumn}
-                onShowAll={handleShowAllColumns}
-                onHideAll={handleHideAllColumns}
-              />
+              {/* Row 2 — tabs, full width; wrap rather than hide any. */}
+              <div className="flex flex-wrap items-center gap-1 bg-white/50 backdrop-blur-sm p-1 rounded-lg border border-white/40">
+                {visibleTabs.map(meta => {
+                  const isActive = activeTab === meta.id;
+                  const activeCls = meta.id === 'donated'
+                    ? 'bg-white text-emerald-600 shadow-sm'
+                    : 'bg-white text-indigo-600 shadow-sm';
+                  return (
+                    <button
+                      key={meta.id}
+                      onClick={() => { setActiveTab(meta.id as typeof activeTab); setCurrentPage(1); }}
+                      className={`px-3 py-1.5 text-sm font-medium rounded-md transition flex items-center gap-1 whitespace-nowrap shrink-0 ${isActive ? activeCls : 'text-gray-500 hover:text-gray-900'}`}
+                      title={meta.description}
+                    >
+                      {meta.id === 'tables' && <LayoutDashboard className="w-3.5 h-3.5" />}
+                      {meta.label}
+                      {meta.id === 'donated' && totalDonatedCount > 0 && (
+                        <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{totalDonatedCount}</span>
+                      )}
+                      {meta.id === 'groups' && groupPrimaryIds.size > 0 && (
+                        <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{groupPrimaryIds.size}</span>
+                      )}
+                    </button>
+                  );
+                })}
+                {canEdit && (
+                  <button
+                    onClick={() => setTabsConfigOpen(true)}
+                    className="ml-auto shrink-0 px-2 py-1.5 text-gray-400 hover:text-indigo-600 hover:bg-white rounded-md transition"
+                    title="Customize tabs — reorder or hide"
+                    aria-label="Customize dashboard tabs"
+                  >
+                    <SettingsIcon className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
 
-              {canEdit && (
-                <button
-                  onClick={() => setShowAddModal(true)}
-                  className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition shadow-sm"
-                  title="Add attendee manually"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span className="hidden sm:inline">Add</span>
-                </button>
-              )}
-
-              {canExport && (
-                <button
-                  onClick={openExportModal}
-                  className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition shadow-sm"
-                  title="Export attendees (CSV / PDF)"
-                >
-                  <Download className="w-4 h-4" />
-                  <span className="hidden sm:inline">Export</span>
-                </button>
-              )}
-
-              {canEdit && BULK_EMAIL_TABS.has(activeTab) && (
-                <button
-                  onClick={openBulkEmail}
-                  disabled={!settings || !smtpReady || sortedFiltered.length === 0}
-                  className="flex items-center gap-2 px-4 py-2 bg-sky-600 text-white rounded-lg text-sm font-medium hover:bg-sky-700 transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                  title={!smtpReady
-                    ? 'Configure SMTP in Settings first'
-                    : sortedFiltered.length === 0
-                      ? 'No one matches the current filters'
-                      : `Compose one email to the ${sortedFiltered.length} ${sortedFiltered.length === 1 ? 'person' : 'people'} matching the current filters (all pages)`}
-                  data-testid="attendees-email-all"
-                >
-                  <SendIcon className="w-4 h-4" />
-                  <span className="hidden sm:inline">Email ({sortedFiltered.length})</span>
-                </button>
-              )}
-
-              {canEdit && BULK_EMAIL_TABS.has(activeTab) && (
-                <button
-                  onClick={() => setShowCustomTicketEmail(true)}
-                  className="flex items-center gap-2 px-4 py-2 bg-white border border-sky-300 text-sky-700 rounded-lg text-sm font-medium hover:bg-sky-50 transition shadow-sm"
-                  title="Write your own email and send it with each person's ticket attached"
-                  data-testid="attendees-custom-ticket-email"
-                >
-                  <TicketIcon className="w-4 h-4" />
-                  <span className="hidden sm:inline">Ticket email</span>
-                </button>
-              )}
-
-              {canEdit && deliveryIssueCount > 0 && (
-                <button
-                  onClick={() => setShowDeliveryIssues(true)}
-                  className="flex items-center gap-2 px-4 py-2 bg-amber-500 text-white rounded-lg text-sm font-medium hover:bg-amber-600 transition shadow-sm"
-                  title="Some emails could not be delivered — review and resend"
-                >
-                  <AlertTriangle className="w-4 h-4" />
-                  <span className="hidden sm:inline">Delivery issues</span>
-                  <span className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full bg-white/25 text-xs font-bold">
-                    {deliveryIssueCount}
-                  </span>
-                </button>
-              )}
-
-              {canEdit && (
-                <button
-                  onClick={() => setShowBulkImport(true)}
-                  disabled={!settings}
-                  className="flex items-center gap-2 px-4 py-2 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700 transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                  title={settings ? 'Bulk-import contacts from a CSV + send a campaign' : 'Loading settings…'}
-                >
-                  <Upload className="w-4 h-4" />
-                  <span className="hidden sm:inline">Import</span>
-                </button>
-              )}
-            </div>
-          )}
-        </div>
+              {/* Row 3 — a big search, then the view controls. */}
+              <div className="flex flex-wrap items-center gap-2">
+                {showTableControls && (
+                  <div className="relative basis-full md:basis-0 md:flex-1 md:min-w-[260px]">
+                    <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
+                    <input
+                      type="search"
+                      placeholder="Search by name, email, organisation, ticket, country or Reg. ID"
+                      aria-label="Search attendees"
+                      className="w-full h-11 pl-11 pr-10 rounded-xl border border-slate-200 bg-white text-[15px] text-slate-800 placeholder:text-slate-400 shadow-sm outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100"
+                      value={searchTerm}
+                      onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }}
+                      data-testid="attendee-search"
+                    />
+                    {searchTerm && (
+                      <button
+                        onClick={() => { setSearchTerm(''); setCurrentPage(1); }}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+                        aria-label="Clear search"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                )}
+                <div className="flex flex-wrap items-center gap-2 min-w-0">
+                  <div className="flex items-center">
+                    <select
+                      value={selectedFormId}
+                      onChange={e => { setSelectedFormId(e.target.value); setCurrentPage(1); }}
+                      className={`${selectCls} max-w-[180px] sm:max-w-[220px] ${canEdit ? 'rounded-r-none border-r-0' : ''}`}
+                      aria-label="Form"
+                    >
+                      <option value="_all">All forms</option>
+                      {forms.map(f => (
+                        <option key={f.id} value={f.id}>{f.title}</option>
+                      ))}
+                    </select>
+                    {canEdit && (
+                      <button
+                        onClick={handleSetDefaultForm}
+                        className={`h-10 px-2.5 rounded-r-lg border shadow-sm transition ${isPinned
+                          ? 'bg-blue-50 text-blue-700 border-blue-200'
+                          : 'bg-white text-slate-400 border-slate-200 hover:text-blue-600'}`}
+                        title={isPinned ? 'This form is your default view' : 'Make this form your default view'}
+                        aria-label={isPinned ? 'Pinned as default view' : 'Pin as default view'}
+                      >
+                        <Pin className={`w-4 h-4 ${isPinned ? 'fill-blue-500 -rotate-12' : ''}`} />
+                      </button>
+                    )}
+                  </div>
+                  {showTableControls && (
+                    <ColumnVisibilityDropdown
+                      columns={allColumns}
+                      visibleColumns={columnVisibility}
+                      onToggle={handleToggleColumn}
+                      onShowAll={handleShowAllColumns}
+                      onHideAll={handleHideAllColumns}
+                    />
+                  )}
+                  {/* Rows-per-page governs every tab's page size. */}
+                  <select
+                    value={itemsPerPage}
+                    onChange={e => { setItemsPerPage(Number(e.target.value)); setCurrentPage(1); }}
+                    className={selectCls}
+                    title="Rows per page (applies to every tab)"
+                    aria-label="Rows per page"
+                  >
+                    <option value={10}>10 / page</option>
+                    <option value={20}>20 / page</option>
+                    <option value={25}>25 / page</option>
+                    <option value={50}>50 / page</option>
+                    <option value={100}>100 / page</option>
+                  </select>
+                </div>
+              </div>
+            </>
+          );
+        })()}
 
         {/* Filters Row */}
         {activeTab === 'dmhos' && <DmhoNotice attendees={attendees} />}

@@ -117,7 +117,7 @@ export default function BadgePrintingTab({ attendees, forms, onRefresh }: Props)
     return c;
   }, [statusById]);
 
-  const categories = useMemo(() => [...new Set(rows.map(r => r.fields.badgeCategory))].sort(), [rows]);
+  const categories = useMemo(() => [...new Set(rows.map(r => r.fields.regCategory))].sort(), [rows]);
   const lastExport = exportsList[0];
 
   // ── Filtering + sorting ──
@@ -130,7 +130,7 @@ export default function BadgePrintingTab({ attendees, forms, onRefresh }: Props)
       if (statusFilter === 'to-print' && status === 'printed') return false;
       if (statusFilter !== 'all' && statusFilter !== 'to-print' && status !== statusFilter) return false;
       if (batchId != null && !(history.get(a.id) ?? []).some(p => p.exportId === batchId)) return false;
-      if (categoryFilter !== 'all' && r.fields.badgeCategory !== categoryFilter) return false;
+      if (categoryFilter !== 'all' && r.fields.regCategory !== categoryFilter) return false;
       if (regStatusFilter !== 'all' && r.fields.regStatus !== regStatusFilter) return false;
       if (regionFilter === 'unknown' && !r.countryUnknown) return false;
       if ((regionFilter === 'IND' || regionFilter === 'INT') && r.region !== regionFilter) return false;
@@ -293,8 +293,8 @@ export default function BadgePrintingTab({ attendees, forms, onRefresh }: Props)
           <option value="all">All batches</option>
           {exportsList.map(b => <option key={b.id} value={String(b.id)}>Batch #{b.id} · {fmtDate(b.createdAt)} ({b.rowCount})</option>)}
         </select>
-        <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)} className={selectCls} aria-label="Badge category">
-          <option value="all">All badge categories</option>
+        <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)} className={selectCls} aria-label="Registration category">
+          <option value="all">All registration categories</option>
           {categories.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
         <select value={regStatusFilter} onChange={e => setRegStatusFilter(e.target.value)} className={selectCls} aria-label="Registration status">
@@ -382,7 +382,6 @@ export default function BadgePrintingTab({ attendees, forms, onRefresh }: Props)
               <th className="px-3 py-2">Print status</th>
               <th className="px-3 py-2">Reg. ID</th>
               <th className="px-3 py-2">Name</th>
-              <th className="px-3 py-2">Badge category</th>
               <th className="px-3 py-2">Reg. category</th>
               <th className="px-3 py-2" title="Lunch / dinner per day">Meals (L1 D1 L2 D2 L3)</th>
               <th className="px-3 py-2">Kit / Cert.</th>
@@ -396,13 +395,13 @@ export default function BadgePrintingTab({ attendees, forms, onRefresh }: Props)
           </thead>
           <tbody>
             {filtered.length === 0 && (
-              <tr><td colSpan={13} className="px-3 py-8 text-center text-slate-400">No badges match these filters.</td></tr>
+              <tr><td colSpan={12} className="px-3 py-8 text-center text-slate-400">No badges match these filters.</td></tr>
             )}
             {groups.map(g => (
               <React.Fragment key={g.key}>
                 {g.label && (
                   <tr className="bg-indigo-50/60">
-                    <td colSpan={13} className="px-3 py-1.5 text-[11px] font-bold text-indigo-800">
+                    <td colSpan={12} className="px-3 py-1.5 text-[11px] font-bold text-indigo-800">
                       {g.label} <span className="font-medium text-indigo-500">· {g.rows.length} registration{g.rows.length === 1 ? '' : 's'}</span>
                     </td>
                   </tr>
@@ -420,7 +419,6 @@ export default function BadgePrintingTab({ attendees, forms, onRefresh }: Props)
                       </td>
                       <td className="px-3 py-2 font-mono text-slate-700 whitespace-nowrap">{f.regId || <span className="text-slate-300">assigning…</span>}</td>
                       <td className="px-3 py-2 font-medium text-slate-900 whitespace-nowrap">{f.name}</td>
-                      <td className="px-3 py-2 whitespace-nowrap">{f.badgeCategory}</td>
                       <td className="px-3 py-2 text-slate-600 max-w-[180px] truncate" title={f.regCategory}>{f.regCategory}</td>
                       <td className="px-3 py-2 font-mono tracking-widest whitespace-nowrap" title={`Lunch 1 ${f.lunch1} · Dinner 1 ${f.dinner1} · Lunch 2 ${f.lunch2} · Dinner 2 ${f.dinner2} · Lunch 3 ${f.lunch3}`}>
                         {[f.lunch1, f.dinner1, f.lunch2, f.dinner2, f.lunch3].map((m, i) => (
