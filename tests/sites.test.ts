@@ -21,7 +21,7 @@ describe('site config resolution', () => {
     const { CURRENT_SITE } = await import('../config/sites');
     expect(CURRENT_SITE.key).toBe('gansid');
     expect(CURRENT_SITE.displayName).toBe('GANSID Congress');
-    expect(CURRENT_SITE.logoImage).toBe('/branding/gansid/mark.svg');
+    expect(CURRENT_SITE.logoImage).toBe('/branding/gansid/mark.png');
   });
 
   it('falls back to scago on unknown VITE_SITE value', async () => {
@@ -29,5 +29,15 @@ describe('site config resolution', () => {
     vi.resetModules();
     const { CURRENT_SITE } = await import('../config/sites');
     expect(CURRENT_SITE.key).toBe('scago');
+  });
+});
+
+describe('favicons', () => {
+  it('gives each site its own tab icon', async () => {
+    const { faviconTags, faviconSiteKey } = await import('../config/favicons');
+    expect(faviconTags(faviconSiteKey('gansid'))).toContain('/branding/gansid/favicon.ico');
+    expect(faviconTags(faviconSiteKey('gansid'))).toContain('apple-touch-icon');
+    expect(faviconTags(faviconSiteKey(''))).toContain('/branding/eventcheck/favicon.svg');
+    expect(faviconSiteKey('nonsense')).toBe('scago');
   });
 });

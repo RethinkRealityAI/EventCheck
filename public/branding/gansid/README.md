@@ -5,11 +5,14 @@ logo when `VITE_SITE=gansid`.
 
 ## Required files
 
-- **`mark.svg`** (or `mark.png`) — year-agnostic GANSID mark. The small
-  blood-drops icon next to the "GANSID CONGRESS" wordmark. Used as the admin
-  shell logo. Referenced by `config/sites.ts` `logoImage`. If you save a
-  `.png` instead of `.svg`, update `logoImage` in `config/sites.ts` to
-  `/branding/gansid/mark.png`.
+- **`mark.png`** — year-agnostic GANSID mark (512×512, transparent). The
+  blood-drops icon next to the "GANSID CONGRESS" wordmark, cut from
+  `congress-logo-white.png`. Used as the admin shell / login logo
+  (`config/sites.ts` `logoImage`).
+
+- **`favicon.ico`**, **`favicon-192.png`**, **`apple-touch-icon.png`** — the
+  mark on a white rounded tile, so it reads on light and dark browser tabs.
+  Written into `index.html` at build time from `config/favicons.ts`.
 
 - **`wordmark-2026.png`** — year-specific "GANSID CONGRESS 2026 / HYDERABAD"
   wordmark. Uploaded by the GANSID admin into
@@ -23,4 +26,4 @@ logo when `VITE_SITE=gansid`.
 
 When a new year's Congress starts, replace the `-2026` suffixed assets with
 the new year's artwork and update `app_settings` via the Settings UI.
-`mark.svg` stays unchanged year-over-year.
+`mark.png` and the favicons stay unchanged year-over-year.

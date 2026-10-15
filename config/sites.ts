@@ -1,3 +1,5 @@
+import { faviconSiteKey } from './favicons';
+
 export type SiteKey = 'scago' | 'gansid';
 
 export interface SiteConfig {
@@ -27,7 +29,7 @@ const CONFIGS: Record<SiteKey, SiteConfig> = {
     displayName: 'GANSID Congress',
     adminSubtitle: 'Congress Admin',
     pageTitle: 'GANSID Congress — Registration',
-    logoImage: '/branding/gansid/mark.svg',
+    logoImage: '/branding/gansid/mark.png',
     // GANSID brand: blue is the primary (the "GANSID" wordmark in the logo).
     // Red is the secondary accent (the "CONGRESS" wordmark + blood-drops mark).
     fallbackColors: { primary: '#1E4A8C', accent: '#B3282D' },
@@ -39,8 +41,7 @@ const CONFIGS: Record<SiteKey, SiteConfig> = {
 export const SITES = CONFIGS;
 
 function resolveSiteKey(): SiteKey {
-  const raw = import.meta.env.VITE_SITE ?? '';
-  return raw === 'gansid' ? 'gansid' : 'scago';
+  return faviconSiteKey(import.meta.env.VITE_SITE ?? '');
 }
 
 export const CURRENT_SITE: SiteConfig = CONFIGS[resolveSiteKey()];
