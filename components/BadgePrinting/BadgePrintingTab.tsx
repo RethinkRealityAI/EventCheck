@@ -13,7 +13,7 @@ import type { Attendee, Form } from '../../types';
 import { buildRegistrationIndex } from '../../utils/registrationKind';
 import { daysAttendingOf, shortDayLabel } from '../../utils/daysAttending';
 import {
-  CONGRESS_DAYS, PRINT_STATUS_LABELS, buildBadgeRow, isBadgeEligible, printStatusOf,
+  BADGE_DESIGNS, CONGRESS_DAYS, PRINT_STATUS_LABELS, badgeCategoryFor, buildBadgeRow, isBadgeEligible, printStatusOf,
   type BadgeFields, type BadgeRow, type PrintRecord, type PrintStatus,
 } from '../../utils/badgeList';
 import { downloadBadgeWorkbook } from '../../utils/badgeExport';
@@ -40,6 +40,22 @@ const STATUS_STYLES: Record<PrintStatus, string> = {
 const fmtDate = (iso: string) => (iso ? format(new Date(iso), 'd MMM yyyy') : '—');
 const fmtDateTime = (iso: string) => (iso ? format(new Date(iso), 'd MMM yyyy, HH:mm') : '—');
 
+const DESIGN_CHIP: Record<string, string> = {
+  'Speaker': 'bg-violet-50 text-violet-700 border-violet-200',
+  'Full Access': 'bg-indigo-50 text-indigo-700 border-indigo-200',
+  'Exhibitor': 'bg-amber-50 text-amber-800 border-amber-200',
+  'Organizer': 'bg-rose-50 text-rose-700 border-rose-200',
+  'Volunteer': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+};
+
+function BadgeDesignChip({ design }: { design: string }) {
+  return (
+    <span className={`inline-flex px-2 py-0.5 rounded-full border text-[11px] font-semibold ${DESIGN_CHIP[design] ?? 'bg-slate-50 text-slate-600 border-slate-200'}`}>
+      {design}
+    </span>
+  );
+}
+
 export default function BadgePrintingTab({ attendees, forms, onRefresh }: Props) {
   const { showNotification } = useNotifications();
 
@@ -52,6 +68,7 @@ export default function BadgePrintingTab({ attendees, forms, onRefresh }: Props)
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [batchFilter, setBatchFilter] = useState<string>('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
+  const [badgeFilter, setBadgeFilter] = useState('all');
   const [regStatusFilter, setRegStatusFilter] = useState('all');
   const [regionFilter, setRegionFilter] = useState<'all' | 'IND' | 'INT' | 'unknown'>('all');
   const [dayFilter, setDayFilter] = useState('all');
@@ -118,6 +135,11 @@ export default function BadgePrintingTab({ attendees, forms, onRefresh }: Props)
   }, [statusById]);
 
   const categories = useMemo(() => [...new Set(rows.map(r => r.fields.regCategory))].sort(), [rows]);
+  const badgeCounts = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const r of rows) m[r.fields.badgeCategory] = (m[r.fields.badgeCategory] ?? 0) + 1;
+    return m;
+  }, [rows]);
   const lastExport = exportsList[0];
 
   // ── Filtering + sorting ──
@@ -130,6 +152,7 @@ export default function BadgePrintingTab({ attendees, forms, onRefresh }: Props)
       if (statusFilter === 'to-print' && status === 'printed') return false;
       if (statusFilter !== 'all' && statusFilter !== 'to-print' && status !== statusFilter) return false;
       if (batchId != null && !(history.get(a.id) ?? []).some(p => p.exportId === batchId)) return false;
+      if (badgeFilter !== 'all' && r.fields.badgeCategory !== badgeFilter) return false;
       if (categoryFilter !== 'all' && r.fields.regCategory !== categoryFilter) return false;
       if (regStatusFilter !== 'all' && r.fields.regStatus !== regStatusFilter) return false;
       if (regionFilter === 'unknown' && !r.countryUnknown) return false;
@@ -157,7 +180,7 @@ export default function BadgePrintingTab({ attendees, forms, onRefresh }: Props)
       }
     });
     return list;
-  }, [rows, statusById, history, search, statusFilter, batchFilter, categoryFilter, regStatusFilter, regionFilter, dayFilter, fromDate, toDate, sortKey]);
+  }, [rows, statusById, history, search, statusFilter, batchFilter, badgeFilter, categoryFilter, regStatusFilter, regionFilter, dayFilter, fromDate, toDate, sortKey]);
 
   const toPrint = useMemo(() => filtered.filter(r => statusById.get(r.attendee.id) !== 'printed'), [filtered, statusById]);
 
@@ -175,7 +198,7 @@ export default function BadgePrintingTab({ attendees, forms, onRefresh }: Props)
   }, [filtered, sortKey]);
 
   const activeFilters = {
-    search, status: statusFilter, batch: batchFilter, category: categoryFilter, regStatus: regStatusFilter,
+    search, status: statusFilter, batch: batchFilter, badge: badgeFilter, category: categoryFilter, regStatus: regStatusFilter,
     region: regionFilter, day: dayFilter, from: fromDate, to: toDate,
   };
 
@@ -223,6 +246,7 @@ export default function BadgePrintingTab({ attendees, forms, onRefresh }: Props)
       const snaps = await loadExportSnapshot(exportId);
       const fields = snaps
         .map(s => s as unknown as BadgeFields)
+        .map(f => ({ ...f, badgeCategory: f.badgeCategory || badgeCategoryFor(f.regCategory) }))
         .sort((x, y) => (x.regId ?? '').localeCompare(y.regId ?? '', undefined, { numeric: true }));
       await downloadBadgeWorkbook(fields, `GANSID26_badges_batch${exportId}_copy.xlsx`);
     } catch (e) {
@@ -233,7 +257,7 @@ export default function BadgePrintingTab({ attendees, forms, onRefresh }: Props)
   };
 
   const resetFilters = () => {
-    setSearch(''); setStatusFilter('all'); setBatchFilter('all'); setCategoryFilter('all');
+    setSearch(''); setStatusFilter('all'); setBatchFilter('all'); setBadgeFilter('all'); setCategoryFilter('all');
     setRegStatusFilter('all'); setRegionFilter('all'); setDayFilter('all'); setFromDate(''); setToDate('');
   };
 
@@ -292,6 +316,10 @@ export default function BadgePrintingTab({ attendees, forms, onRefresh }: Props)
         <select value={batchFilter} onChange={e => setBatchFilter(e.target.value)} className={selectCls} aria-label="Batch">
           <option value="all">All batches</option>
           {exportsList.map(b => <option key={b.id} value={String(b.id)}>Batch #{b.id} · {fmtDate(b.createdAt)} ({b.rowCount})</option>)}
+        </select>
+        <select value={badgeFilter} onChange={e => setBadgeFilter(e.target.value)} className={selectCls} aria-label="Badge category" data-testid="badge-design-filter">
+          <option value="all">All badge categories</option>
+          {BADGE_DESIGNS.map(c => <option key={c} value={c}>{c} ({badgeCounts[c] ?? 0})</option>)}
         </select>
         <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)} className={selectCls} aria-label="Registration category">
           <option value="all">All registration categories</option>
@@ -382,6 +410,7 @@ export default function BadgePrintingTab({ attendees, forms, onRefresh }: Props)
               <th className="px-3 py-2">Print status</th>
               <th className="px-3 py-2">Reg. ID</th>
               <th className="px-3 py-2">Name</th>
+              <th className="px-3 py-2">Badge</th>
               <th className="px-3 py-2">Reg. category</th>
               <th className="px-3 py-2" title="Lunch / dinner per day">Meals (L1 D1 L2 D2 L3)</th>
               <th className="px-3 py-2">Kit / Cert.</th>
@@ -395,13 +424,13 @@ export default function BadgePrintingTab({ attendees, forms, onRefresh }: Props)
           </thead>
           <tbody>
             {filtered.length === 0 && (
-              <tr><td colSpan={12} className="px-3 py-8 text-center text-slate-400">No badges match these filters.</td></tr>
+              <tr><td colSpan={13} className="px-3 py-8 text-center text-slate-400">No badges match these filters.</td></tr>
             )}
             {groups.map(g => (
               <React.Fragment key={g.key}>
                 {g.label && (
                   <tr className="bg-indigo-50/60">
-                    <td colSpan={12} className="px-3 py-1.5 text-[11px] font-bold text-indigo-800">
+                    <td colSpan={13} className="px-3 py-1.5 text-[11px] font-bold text-indigo-800">
                       {g.label} <span className="font-medium text-indigo-500">· {g.rows.length} registration{g.rows.length === 1 ? '' : 's'}</span>
                     </td>
                   </tr>
@@ -419,6 +448,7 @@ export default function BadgePrintingTab({ attendees, forms, onRefresh }: Props)
                       </td>
                       <td className="px-3 py-2 font-mono text-slate-700 whitespace-nowrap">{f.regId || <span className="text-slate-300">assigning…</span>}</td>
                       <td className="px-3 py-2 font-medium text-slate-900 whitespace-nowrap">{f.name}</td>
+                      <td className="px-3 py-2 whitespace-nowrap"><BadgeDesignChip design={f.badgeCategory} /></td>
                       <td className="px-3 py-2 text-slate-600 max-w-[180px] truncate" title={f.regCategory}>{f.regCategory}</td>
                       <td className="px-3 py-2 font-mono tracking-widest whitespace-nowrap" title={`Lunch 1 ${f.lunch1} · Dinner 1 ${f.dinner1} · Lunch 2 ${f.lunch2} · Dinner 2 ${f.dinner2} · Lunch 3 ${f.lunch3}`}>
                         {[f.lunch1, f.dinner1, f.lunch2, f.dinner2, f.lunch3].map((m, i) => (

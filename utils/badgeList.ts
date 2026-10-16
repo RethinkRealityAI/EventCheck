@@ -20,6 +20,11 @@
 //     kept, filled from the person's ticket. Full Access / Hall Only is an
 //     exhibitor & sponsor staff distinction, so it only appears for them
 //     ("Exhibitor – Full Access", "Sponsor – Hall Only", …).
+//   * Badge Category (2026-10-16): MICE IDEAS print five badge designs —
+//     Speaker, Full Access, Exhibitor, Organizer, Volunteer. *Badge Category
+//     is derived from *Reg. Category alone (badgeCategoryFor), so it never
+//     disagrees with it and can be filled in for batches printed before the
+//     column existed.
 //
 // Pure + data-only so it is unit-tested.
 
@@ -34,12 +39,34 @@ export const CONGRESS_DAYS = ['2026-10-23', '2026-10-24', '2026-10-25'] as const
 
 export const BADGE_COLUMNS = [
   'Sr. no.', '*Reg. ID', '*Lunch 1', 'Dinner 1*', '*Lunch 2', '*Dinner 2', '*Lunch 3', '*Conf. Kit',
-  '*Certificate', '*Name', '*City/Country', '*Mobile', '*Email Id', 'Reg. Status',
+  '*Certificate', '*Badge Category', '*Name', '*City/Country', '*Mobile', '*Email Id', 'Reg. Status',
   '*Reg. Category', 'Designation/ Affiliation', 'Institute', 'Medical Council State',
   'Medical Council Reg Number', 'State/Country', 'Confirmation email', 'Remark',
 ] as const;
 
 export type BadgeRegion = 'IND' | 'INT';
+
+/** The badge designs MICE IDEAS print. */
+export const BADGE_DESIGNS = ['Speaker', 'Full Access', 'Exhibitor', 'Organizer', 'Volunteer'] as const;
+export type BadgeDesign = typeof BADGE_DESIGNS[number];
+
+/**
+ * Which of the five badges a registration category gets.
+ *   Speaker → Speaker
+ *   Exhibitor / Sponsor – Hall Only → Exhibitor (exhibition hall only)
+ *   Medical Team → Organizer (event operations staff)
+ *   Crew (supporting staff) → Volunteer
+ *   everyone else — delegates, DMHOs, guests, invited delegates, and exhibitor
+ *   / sponsor staff on a Full Access package → Full Access
+ */
+export function badgeCategoryFor(regCategory: string): BadgeDesign {
+  const c = (regCategory ?? '').trim();
+  if (/^speaker$/i.test(c)) return 'Speaker';
+  if (/hall only$/i.test(c)) return 'Exhibitor';
+  if (/^medical team$/i.test(c)) return 'Organizer';
+  if (/^(crew|supporting staff|volunteer)$/i.test(c)) return 'Volunteer';
+  return 'Full Access';
+}
 
 /** The printed fields — everything on the sheet except Sr. no. */
 export interface BadgeFields {
@@ -47,6 +74,8 @@ export interface BadgeFields {
   lunch1: string; dinner1: string; lunch2: string; dinner2: string; lunch3: string;
   kit: string;
   certificate: string;
+  /** One of MICE IDEAS' five badge designs — see badgeCategoryFor. */
+  badgeCategory: BadgeDesign;
   name: string;
   cityCountry: string;
   mobile: string;
@@ -176,7 +205,9 @@ function regStatusOf(a: Attendee): string {
 
 /** Small, stable, non-cryptographic hash (djb2) — enough to spot a change. */
 export function fingerprintOf(fields: BadgeFields): string {
-  const { confirmationEmail: _ignored, ...printed } = fields;
+  // Badge Category is derived from Reg. Category (already hashed), so it is
+  // left out: adding the column must not mark every printed badge "changed".
+  const { confirmationEmail: _ignored, badgeCategory: _derived, ...printed } = fields;
   const s = JSON.stringify(printed);
   let h = 5381;
   for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
@@ -198,6 +229,7 @@ export function buildBadgeRow(a: Attendee, ctx: BadgeContext): BadgeRow {
   const org = orgId ? ctx.index.orgById.get(orgId) : undefined;
   const city = str(answers.f_city);
 
+  const regCategory = regCategoryOf(a, ctx);
   const fields: BadgeFields = {
     regId: a.regCode ?? '',
     lunch1: yes(attends(d1)),
@@ -207,12 +239,13 @@ export function buildBadgeRow(a: Attendee, ctx: BadgeContext): BadgeRow {
     lunch3: yes(attends(d3)),
     kit: yes(!hallOnly),
     certificate: yes(!hallOnly),
+    badgeCategory: badgeCategoryFor(regCategory),
     name: nameWithTitle(a.name ?? '', attendeeTitleOf(a, form)),
     cityCountry: [city, countryName].filter(Boolean).join(', '),
     mobile: mobileOf(a),
     email: (a.email ?? '').trim(),
     regStatus: regStatusOf(a),
-    regCategory: regCategoryOf(a, ctx),
+    regCategory,
     designation: str(answers.f_role),
     institute: str(answers.f_org) || (org ? orgDisplayName(org.row) : ''),
     councilState: 'NA',
@@ -228,7 +261,7 @@ export function buildBadgeRow(a: Attendee, ctx: BadgeContext): BadgeRow {
 export function badgeSheetRow(srNo: number, f: BadgeFields): (string | number)[] {
   return [
     srNo, f.regId, f.lunch1, f.dinner1, f.lunch2, f.dinner2, f.lunch3, f.kit, f.certificate,
-    f.name, f.cityCountry, f.mobile, f.email, f.regStatus, f.regCategory,
+    f.badgeCategory || badgeCategoryFor(f.regCategory), f.name, f.cityCountry, f.mobile, f.email, f.regStatus, f.regCategory,
     f.designation, f.institute, f.councilState, f.councilRegNo, f.stateCountry, f.confirmationEmail, f.remark,
   ];
 }
