@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Attendee, Form } from '../types';
 import { buildRegistrationIndex } from '../utils/registrationKind';
 import {
-  BADGE_COLUMNS, badgeSheetRow, buildBadgeRow, fingerprintOf, isBadgeEligible, printStatusOf, regCategoryOf,
+  BADGE_COLUMNS, badgeSheetRow, buildBadgeRow, fingerprintOf, isBadgeEligible, printStatusOf, regCategoryOf, badgeCategoryFor,
 } from '../utils/badgeList';
 
 const base = (o: Partial<Attendee>): Attendee => ({
@@ -56,7 +56,7 @@ describe('badge list', () => {
 
   it('gives hall-only exhibitor staff their org, an Exhibitor – Hall Only category and no kit / certificate', () => {
     const r = buildBadgeRow(hallStaff, ctx);
-    expect(r.fields).toMatchObject({ regCategory: 'Exhibitor – Hall Only', kit: 'No', certificate: 'No', institute: 'Acme Pharma' });
+    expect(r.fields).toMatchObject({ regCategory: 'Exhibitor – Hall Only', badgeCategory: 'Exhibitor', kit: 'No', certificate: 'No', institute: 'Acme Pharma' });
     expect(r.fields.lunch1 + r.fields.lunch3).toBe('YesYes');
     expect(r.countryUnknown).toBe(true);
     expect(r.region).toBe('IND');
@@ -73,10 +73,31 @@ describe('badge list', () => {
     expect(buildBadgeRow(base({ id: 'dm', attendeeCategory: 'dmho' as any, ticketType: 'DMHO Delegate — 23 Oct' }), ctx).fields.regCategory).toBe('DMHO Delegate');
   });
 
-  it('has a single category column (no separate Badge Category)', () => {
-    expect(BADGE_COLUMNS).not.toContain('*Badge Category');
+  it("has the vendor's 23 columns, Badge Category included", () => {
+    expect(BADGE_COLUMNS).toContain('*Badge Category');
     expect(BADGE_COLUMNS).toContain('*Reg. Category');
-    expect(BADGE_COLUMNS).toHaveLength(22);
+    expect(BADGE_COLUMNS).toHaveLength(23);
+    expect(BADGE_COLUMNS.indexOf('*Badge Category')).toBe(BADGE_COLUMNS.indexOf('*Certificate') + 1);
+  });
+
+  it("maps every registration category onto MICE IDEAS' five badges", () => {
+    expect(badgeCategoryFor('Speaker')).toBe('Speaker');
+    expect(badgeCategoryFor('Exhibitor – Hall Only')).toBe('Exhibitor');
+    expect(badgeCategoryFor('Sponsor – Hall Only')).toBe('Exhibitor');
+    expect(badgeCategoryFor('Exhibitor – Full Access')).toBe('Full Access');
+    expect(badgeCategoryFor('Sponsor – Full Access')).toBe('Full Access');
+    expect(badgeCategoryFor('Medical Team')).toBe('Organizer');
+    expect(badgeCategoryFor('Crew')).toBe('Volunteer');
+    for (const c of ['DMHO Delegate', 'Physicians/Researchers', 'Guest', 'Invited Delegate', 'Attendee', 'Patients or Family Members', 'Industry Partners']) {
+      expect(badgeCategoryFor(c)).toBe('Full Access');
+    }
+  });
+
+  it('adding the badge category does not mark printed badges as changed', () => {
+    const r = buildBadgeRow(delegate, ctx);
+    const { badgeCategory: _b, ...withoutBadge } = r.fields;
+    expect(fingerprintOf({ ...withoutBadge } as any)).toBe(r.fingerprint);
+    expect(badgeSheetRow(1, { ...withoutBadge, badgeCategory: '' } as any)[9]).toBe('Full Access');
   });
 
   it('gives full-access exhibitor and sponsor staff the package from their booking', () => {

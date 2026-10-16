@@ -21,7 +21,7 @@ export async function downloadBadgeWorkbook(fields: BadgeFields[], fileName: str
     row.getCell(mobileCol).numFmt = '@';
     row.getCell(mobileCol).value = f.mobile;
   });
-  const widths = [7, 14, 8, 8, 8, 8, 8, 9, 10, 30, 24, 16, 32, 14, 30, 30, 30, 14, 14, 18, 12, 20];
+  const widths = [7, 14, 8, 8, 8, 8, 8, 9, 10, 14, 30, 24, 16, 32, 14, 30, 30, 30, 14, 14, 18, 12, 20];
   widths.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
   ws.views = [{ state: 'frozen', ySplit: 2 }];
 
