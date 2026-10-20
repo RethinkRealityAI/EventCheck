@@ -101,6 +101,21 @@ export function PortalEditor({
   return (
     <div className="space-y-6">
       <SectionCard
+        title="Partner tile"
+        description="The Novartis tile at the bottom of the portal home screen"
+        accent="neutral"
+        defaultOpen
+        onReset={() => onChange({ ...draft, showSponsorTile: PORTAL_DEFAULTS.showSponsorTile })}
+      >
+        <CmsToggle
+          checked={draft.showSponsorTile !== false}
+          onChange={(showSponsorTile) => onChange({ ...draft, showSponsorTile })}
+          label="Show the Novartis tile"
+          description="Turn off to hide it for every delegate. Takes effect when you publish."
+        />
+      </SectionCard>
+
+      <SectionCard
         title="Portal welcome copy"
         description="Optional subheading below “Welcome back” on the dashboard"
         accent="blue"

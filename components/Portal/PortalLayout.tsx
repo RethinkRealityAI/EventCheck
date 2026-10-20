@@ -3,6 +3,7 @@ import { Outlet, Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../AuthContext';
 import { AuthNoticeBanner } from '../AuthNoticeBanner';
 import { MenuIcon } from './Dashboard/navIcons';
+import { PortalQuickNav } from './Dashboard/PortalQuickNav';
 
 export function PortalLayout() {
   const { profile, signOut } = useAuth();
@@ -192,10 +193,13 @@ export function PortalLayout() {
       {/* scroll-mt-24 keeps any programmatic scroll-to-top / #anchor target from
           hiding beneath the sticky header. The content scrolls on the document,
           so the sticky header now reserves its own space above <main>. */}
-      <main className="mx-auto max-w-7xl scroll-mt-24 px-6 pb-8 pt-6">
+      <main className="mx-auto max-w-7xl scroll-mt-24 px-6 pb-28 pt-6 lg:pb-8">
         <AuthNoticeBanner className="!px-0 !pt-0 !pb-4" />
         <Outlet />
       </main>
+      {/* Mobile bottom bar on every portal screen (was home-only), so the
+          Programme, Speakers and detail screens keep their navigation. */}
+      <PortalQuickNav />
     </div>
   );
 }

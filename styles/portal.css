@@ -54,3 +54,23 @@
   0%, 100% { transform: translate(0, 0) scale(1); }
   50% { transform: translate(20px, -20px) scale(1.05); }
 }
+
+/*
+  Novartis's corporate typeface, used only inside their partner tile on the
+  portal home (components/Portal/Dashboard/SponsorSlot.tsx). Supplied with
+  Novartis's permission for the GANSID Congress app; do not reuse elsewhere.
+*/
+@font-face {
+  font-family: 'Volta Modern Display';
+  src: url('/fonts/novartis/VoltaModernDisplay-55Roman.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Volta Modern Display';
+  src: url('/fonts/novartis/VoltaModernDisplay-65Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}

@@ -2,6 +2,13 @@ import { describe, it, expect } from 'vitest';
 import { mergeContent } from '../services/siteContentService';
 
 describe('mergeContent', () => {
+  it('lets a saved false override a true default (portal toggles)', () => {
+    const defaults = { showSponsorTile: true, sidebarLinks: [] as string[] };
+    expect(mergeContent(defaults, { showSponsorTile: false }).showSponsorTile).toBe(false);
+    expect(mergeContent(defaults, {}).showSponsorTile).toBe(true);
+    expect(mergeContent(defaults, { showSponsorTile: null }).showSponsorTile).toBe(true);
+  });
+
   it('returns defaults when override is empty', () => {
     const defaults = { hero: { badge: 'A' }, includes: ['x'] };
     expect(mergeContent(defaults, {})).toEqual(defaults);

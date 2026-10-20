@@ -8,6 +8,7 @@ import type { SidebarLink } from '../../../types';
 import {
   HomeIcon,
   TicketIcon,
+  AgendaIcon,
   MenuIcon,
   ClockIcon,
   iconForSidebarLink,
@@ -19,8 +20,8 @@ import {
  * anchored bottom-center, safe-area aware, with custom minimal white stroke
  * SVG icons + small labels underneath.
  *
- * Layout: Home + Tickets are always present (with active-route highlight),
- * then up to two of the CMS `sidebarLinks` Quick Access items, then a Menu
+ * Layout: Home, Tickets and Programme are always present (with active-route
+ * highlight), then one CMS `sidebarLinks` Quick Access item, then a Menu
  * button that opens {@link PortalMenuSheet} carrying everything else
  * (Profile, My Tickets, Admin, Sign Out) so the bar never crowds. Each Quick
  * Access item keeps its original behaviour: external link (`target="_top"`),
@@ -36,10 +37,11 @@ export function PortalQuickNav() {
   const path = location.pathname;
   const isHome = path === '/portal' || path === '/portal/';
   const isTickets = path.startsWith('/portal/tickets');
+  const isProgram = path.startsWith('/portal/program') || path.startsWith('/portal/my-schedule');
 
-  // Take the two most important Quick Access items for the inline bar; the
+  // One CMS Quick Access item fits inline next to the in-app Programme; the
   // rest live in the menu sheet so the bar stays to 5 slots max.
-  const inlineLinks = (sidebarLinks ?? []).slice(0, 2);
+  const inlineLinks = (sidebarLinks ?? []).slice(0, 1);
 
   // Shared cell styling. `active` gets a filled frosted pill; the rest are
   // ghost cells that light up on press.
@@ -133,7 +135,20 @@ export function PortalQuickNav() {
             {label('Tickets')}
           </Link>
 
-          {/* Quick Access items (up to 2) */}
+          {/* Programme (in-app, bookmarkable) */}
+          <Link
+            to="/portal/program"
+            aria-label="Programme"
+            aria-current={isProgram ? 'page' : undefined}
+            className={cellClass(isProgram)}
+          >
+            <IconShell active={isProgram}>
+              <AgendaIcon className="h-[22px] w-[22px]" />
+            </IconShell>
+            {label('Programme')}
+          </Link>
+
+          {/* Quick Access item (one) */}
           {inlineLinks.map((link) => {
             const Icon = iconForSidebarLink(link);
             const soon = link.mode === 'soon';

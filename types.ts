@@ -776,6 +776,8 @@ export interface SidebarLink { id: string; label: string; description?: string; 
 export interface PortalContent {
   intro?: { heading?: string; subheadingHtml?: string };
   sidebarLinks: SidebarLink[];
+  /** Novartis partner tile on the portal home. Missing = shown. */
+  showSponsorTile?: boolean;
 }
 
 export interface Announcement {

@@ -31,6 +31,13 @@ import MyTicketsPage from './components/Portal/MyTickets/MyTicketsPage';
 import { PortalDashboard } from './components/Portal/Dashboard/PortalDashboard';
 import { ProfilePage } from './components/Portal/Profile/ProfilePage';
 import { ResetPasswordPage } from './components/Portal/ResetPassword/ResetPasswordPage';
+import { ProgramPage } from './components/Portal/Program/ProgramPage';
+import { MySchedulePage } from './components/Portal/Program/MySchedulePage';
+import { SessionDetailPage } from './components/Portal/Program/SessionDetailPage';
+import { VenuePage } from './components/Portal/Venue/VenuePage';
+import { SpeakersPage } from './components/Portal/Speakers/SpeakersPage';
+import { SpeakerDetailPage } from './components/Portal/Speakers/SpeakerDetailPage';
+import { UpdatesPage } from './components/Portal/Updates/UpdatesPage';
 import AdminsManagement from './components/Admins/AdminsManagement';
 import ChangePasswordPage from './components/ChangePasswordPage';
 import {
@@ -860,6 +867,13 @@ export default function App() {
                   <Route index element={<PortalDashboard />} />
                   <Route path="tickets" element={<MyTicketsPage />} />
                   <Route path="profile" element={<ProfilePage />} />
+                  <Route path="program" element={<ProgramPage />} />
+                  <Route path="program/session/:sessionId" element={<SessionDetailPage />} />
+                  <Route path="my-schedule" element={<MySchedulePage />} />
+                  <Route path="speakers" element={<SpeakersPage />} />
+                  <Route path="speakers/:speakerId" element={<SpeakerDetailPage />} />
+                  <Route path="venue" element={<VenuePage />} />
+                  <Route path="updates" element={<UpdatesPage />} />
                 </Route>
               </>
             ) : (
