@@ -27,12 +27,11 @@ const NV = {
 };
 
 /**
- * Novartis's corporate typeface is Volta Modern Display (self-hosted on
- * novartis.com, licensed — not a public web font, so it is NOT bundled here).
- * Once Novartis supplies the webfont files, add an @font-face for this family
- * and the tile picks it up; until then it falls back to their own fallback stack.
+ * Novartis's corporate typeface, Volta Modern Display — 55 Roman (400) and
+ * 65 Medium (500), used with their permission. Files live in
+ * public/fonts/novartis/ and the @font-face rules in styles/portal.css.
  */
-const NV_FONT = '"Volta Modern Display", "volta_modern_display55_roman", "Helvetica Neue", Helvetica, Arial, sans-serif';
+const NV_FONT = '"Volta Modern Display", "Helvetica Neue", Helvetica, Arial, sans-serif';
 
 export interface SponsorTileProps {
   /** Partner name — logo alt text and the CTA label. */
