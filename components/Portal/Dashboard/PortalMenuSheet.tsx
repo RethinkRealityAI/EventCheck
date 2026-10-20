@@ -6,11 +6,13 @@ import { useAuth } from '../../AuthContext';
 import { usePortalContent } from '../content/ContentProvider';
 import { IframeViewer } from '../ui/IframeViewer';
 import type { SidebarLink } from '../../../types';
-import { X } from 'lucide-react';
+import { Bell, Bookmark, Users, X } from 'lucide-react';
 import {
   UserIcon,
   TicketIcon,
   ShieldIcon,
+  AgendaIcon,
+  VenueIcon,
   LogoutIcon,
   ClockIcon,
   ChevronRightIcon,
@@ -176,6 +178,24 @@ export function PortalMenuSheet({ onClose }: { onClose: () => void }) {
             </span>
             <ChevronRightIcon className="h-4.5 w-4.5 text-gansid-on-surface/30 transition-transform duration-300 ease-viscous group-hover:translate-x-0.5" aria-hidden />
           </Link>
+
+          {/* In-app Congress screens. The CMS links below (incl. the embedded
+              programme site) stay as they are; these are the native versions. */}
+          {[
+            { to: '/portal/program', label: 'Programme', Icon: AgendaIcon },
+            { to: '/portal/my-schedule', label: 'My schedule', Icon: Bookmark },
+            { to: '/portal/speakers', label: 'Speakers', Icon: Users },
+            { to: '/portal/venue', label: 'Venue & Hyderabad', Icon: VenueIcon },
+            { to: '/portal/updates', label: 'Updates', Icon: Bell },
+          ].map(({ to, label, Icon }) => (
+            <Link key={to} to={to} onClick={onClose} className={rowClass}>
+              <span className={iconWrap} aria-hidden>
+                <Icon className="h-5 w-5" />
+              </span>
+              <span className="flex-1 font-display text-[15px] font-semibold text-gansid-on-surface">{label}</span>
+              <ChevronRightIcon className="h-4.5 w-4.5 text-gansid-on-surface/30 transition-transform duration-300 ease-viscous group-hover:translate-x-0.5" aria-hidden />
+            </Link>
+          ))}
 
           {/* CMS Quick Access links — Congress website, Program, Venue & Travel,
               Congress Materials, etc. */}

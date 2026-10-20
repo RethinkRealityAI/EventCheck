@@ -19,9 +19,8 @@ import { WelcomeBlock } from './WelcomeBlock';
 import { VerifyEmailBanner } from './VerifyEmailBanner';
 import { AvailableFormsGrid } from './AvailableFormsGrid';
 import { CredentialCard } from './CredentialCard';
-import { AnnouncementsFeed } from './AnnouncementsFeed';
+import { HomeTiles } from './HomeTiles';
 import { QuickLinks } from './QuickLinks';
-import { PortalQuickNav } from './PortalQuickNav';
 import { TicketsSummaryTile } from './TicketsSummaryTile';
 import { RegisterModal } from './RegisterModal';
 import TeamTable from '../../SponsorExhibitor/TeamTable';
@@ -268,15 +267,15 @@ export function PortalDashboard() {
 
   return (
     <>
-      {/* pb on mobile keeps content clear of the floating Quick Access bar */}
-      <div className="pb-24 lg:pb-0">
+      <div>
         <VerifyEmailBanner />
         <div className="grid grid-cols-1 items-start gap-8 lg:grid-cols-[1.7fr_1fr] xl:gap-10">
           <div className="space-y-8 min-w-0">
             {/* Greeting stays at the very top as the first thing. */}
             <WelcomeBlock profile={profile} latestAttendee={latestAttendee} staffOrg={staffOrg} />
-            {/* Announcements right after the greeting — prominent, above the forms. */}
-            <AnnouncementsFeed />
+            {/* The six Congress cards. Announcements now live behind the
+                Updates card (/portal/updates). */}
+            <HomeTiles />
             {userPrimary && (
               <TeamTable
                 primary={userPrimary}
@@ -295,13 +294,17 @@ export function PortalDashboard() {
                 }
               />
             )}
-            <AvailableFormsGrid
-              forms={forms}
-              userAttendees={attendees}
-              role={profile.role}
-              userId={user.id}
-              onStartRegistration={(id, _opts) => setRegisterFormId(id)}
-            />
+            {/* Registration is off the home screen once someone holds a ticket;
+                anyone still unregistered keeps the way in. */}
+            {!latestPaidAttendee && (
+              <AvailableFormsGrid
+                forms={forms}
+                userAttendees={attendees}
+                role={profile.role}
+                userId={user.id}
+                onStartRegistration={(id, _opts) => setRegisterFormId(id)}
+              />
+            )}
           </div>
           <aside className="space-y-6 lg:sticky lg:top-24">
             {/* Credential card is desktop-only — on mobile the header credential
@@ -318,7 +321,6 @@ export function PortalDashboard() {
           </aside>
         </div>
       </div>
-      <PortalQuickNav />
       {registerFormId && (
         <RegisterModal formId={registerFormId} onClose={handleModalClose} onSaveAndClose={handleSaveAndClose} />
       )}

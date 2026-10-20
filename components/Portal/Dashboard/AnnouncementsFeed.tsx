@@ -122,18 +122,24 @@ function AnnouncementCard({
   );
 }
 
-export function AnnouncementsFeed() {
+/**
+ * Pass `items` to render a list the caller already loaded (the Updates page
+ * does, so it can track read state); otherwise the feed fetches the latest 3.
+ */
+export function AnnouncementsFeed({ items: provided, showHeading = true }: { items?: Announcement[]; showHeading?: boolean } = {}) {
   const site = CURRENT_SITE.key;
-  const [items, setItems] = useState<Announcement[]>([]);
+  const [fetched, setFetched] = useState<Announcement[]>([]);
   const [iframeItem, setIframeItem] = useState<Announcement | null>(null);
+  const items = provided ?? fetched;
 
   useEffect(() => {
-    listActiveAnnouncements(site, 3).then(setItems);
-  }, [site]);
+    if (provided) return;
+    listActiveAnnouncements(site, 3).then(setFetched);
+  }, [site, provided]);
 
   return (
     <section aria-labelledby="announcements-heading">
-      <div className="mb-4 flex items-center gap-3">
+      <div className={showHeading ? 'mb-4 flex items-center gap-3' : 'sr-only'}>
         <h2 id="announcements-heading" className="font-display text-2xl font-bold text-gansid-on-surface">
           Announcements
         </h2>
