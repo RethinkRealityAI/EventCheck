@@ -16,11 +16,13 @@ import { GLASS_CARD, PRESS, useNow } from '../ui/congressUi';
 import { useMySchedule } from '../Program/useMySchedule';
 import { useUpdates } from '../Updates/useUpdates';
 import { SponsorTile } from './SponsorSlot';
+import { AnnouncementsFeed } from './AnnouncementsFeed';
 
 /**
  * Portal home — six cards, in order: the live Programme card, My schedule, then
- * a 2×2 of Speakers, My ticket, Hyderabad guide and Updates. The partner tile
- * (flag-gated) and a footer line sit underneath.
+ * a 2×2 of Speakers, My ticket, Hyderabad guide and Updates. The latest
+ * announcements sit right under the Programme card (hidden when there are
+ * none), and the partner tile (flag-gated) plus a footer line sit underneath.
  *
  * Time-dependent copy is derived from Date.now() against the IST session
  * times and refreshes every minute and on focus.
@@ -170,6 +172,9 @@ export function HomeTiles() {
   return (
     <section aria-label="Congress shortcuts" className="space-y-3">
       <ProgrammeCard now={now} />
+      {/* Latest announcements, as on the old home. The Programme card stays the
+          hero; the Updates card keeps the unread count and full list. */}
+      <AnnouncementsFeed hideWhenEmpty />
       <MyScheduleCard now={now} />
 
       <div className="grid grid-cols-2 gap-3">
@@ -209,7 +214,6 @@ export function HomeTiles() {
         name="Novartis"
         logoUrl="/branding/gansid/partners/novartis-logo.png"
         imageUrl="/branding/gansid/partners/novartis-cover.jpg"
-        imagePosition="50% 25%"
         body="Novartis is an innovative medicines company. Every day, we work to reimagine medicine to improve and extend people's lives so that patients, healthcare professionals and societies are empowered in the face of serious disease. Our medicines reach 304 million people worldwide."
         href="https://www.novartis.com"
       />

@@ -125,8 +125,13 @@ function AnnouncementCard({
 /**
  * Pass `items` to render a list the caller already loaded (the Updates page
  * does, so it can track read state); otherwise the feed fetches the latest 3.
+ * `hideWhenEmpty` renders nothing when there are no announcements (home).
  */
-export function AnnouncementsFeed({ items: provided, showHeading = true }: { items?: Announcement[]; showHeading?: boolean } = {}) {
+export function AnnouncementsFeed({
+  items: provided,
+  showHeading = true,
+  hideWhenEmpty = false,
+}: { items?: Announcement[]; showHeading?: boolean; hideWhenEmpty?: boolean } = {}) {
   const site = CURRENT_SITE.key;
   const [fetched, setFetched] = useState<Announcement[]>([]);
   const [iframeItem, setIframeItem] = useState<Announcement | null>(null);
@@ -136,6 +141,9 @@ export function AnnouncementsFeed({ items: provided, showHeading = true }: { ite
     if (provided) return;
     listActiveAnnouncements(site, 3).then(setFetched);
   }, [site, provided]);
+
+  // On the home screen an empty "No announcements yet" card is just noise.
+  if (hideWhenEmpty && items.length === 0) return null;
 
   return (
     <section aria-labelledby="announcements-heading">
