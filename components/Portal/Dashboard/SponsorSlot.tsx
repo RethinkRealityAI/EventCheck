@@ -38,7 +38,7 @@ export interface SponsorTileProps {
   name?: string;
   /** Partner logo, shown full-colour above the copy. */
   logoUrl?: string | null;
-  /** Cover image, shown edge to edge at 4:3. */
+  /** Cover image, shown edge to edge at 5:2 (cropped toward the top). */
   imageUrl?: string | null;
   /** The partner's own paragraph. */
   body?: string;
@@ -52,24 +52,24 @@ export function SponsorTile({ name = 'Novartis', logoUrl = null, imageUrl = null
   return (
     <article
       aria-label={name}
-      className="overflow-hidden rounded-[26px] bg-white"
+      className="overflow-hidden rounded-[22px] bg-white"
       style={{ boxShadow: `inset 0 0 0 1px ${NV.lightGrey}, 0 20px 44px -24px rgba(28,28,26,0.45)` }}
     >
-      {imageUrl && <img src={imageUrl} alt="" loading="lazy" className="aspect-[4/3] w-full object-cover" />}
+      {imageUrl && <img src={imageUrl} alt="" loading="lazy" className="aspect-[5/2] w-full object-cover object-[50%_10%]" />}
 
-      <div className="px-6 pb-6 pt-6">
+      <div className="px-4 pb-4 pt-3.5">
         {logoUrl ? (
-          <img src={logoUrl} alt={name} className="h-auto w-[150px] max-w-full" />
+          <img src={logoUrl} alt={name} className="h-auto w-[104px] max-w-full" />
         ) : (
-          <span className="font-display text-xl font-bold uppercase tracking-[0.06em]" style={{ color: NV.warmBlack }}>
+          <span className="font-display text-base font-bold uppercase tracking-[0.06em]" style={{ color: NV.warmBlack }}>
             {name}
           </span>
         )}
 
         {body && (
           <>
-            <div className="my-5 h-px" style={{ background: NV.lightGrey }} />
-            <p className="text-[15px] leading-[1.7]" style={{ color: NV.body, fontFamily: NV_FONT }}>
+            <div className="my-3 h-px" style={{ background: NV.lightGrey }} />
+            <p className="text-[12.5px] leading-[1.55]" style={{ color: NV.body, fontFamily: NV_FONT }}>
               {body}
             </p>
           </>
@@ -80,11 +80,11 @@ export function SponsorTile({ name = 'Novartis', logoUrl = null, imageUrl = null
             href={href}
             target="_blank"
             rel="noopener noreferrer"
-            className="mt-6 flex w-full items-center justify-center gap-2.5 rounded-[14px] py-3.5 text-[16px] font-medium text-white shadow-[0_14px_28px_-16px_rgba(28,28,26,0.7)] transition-transform duration-300 ease-viscous active:scale-[0.98]"
+            className="mt-3.5 flex w-full items-center justify-center gap-2 rounded-[12px] py-2.5 text-[14px] font-medium text-white shadow-[0_14px_28px_-16px_rgba(28,28,26,0.7)] transition-transform duration-300 ease-viscous active:scale-[0.98]"
             style={{ background: NV.warmBlack, fontFamily: NV_FONT }}
           >
             Visit {name}
-            <ArrowUpRight className="h-4 w-4" aria-hidden />
+            <ArrowUpRight className="h-3.5 w-3.5" aria-hidden />
           </a>
         )}
       </div>
