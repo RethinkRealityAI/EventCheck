@@ -54,7 +54,7 @@ export function SponsorTile({ name = 'Novartis', logoUrl = null, imageUrl = null
   return (
     <article
       aria-label={name}
-      className="mx-auto w-full max-w-[260px] overflow-hidden rounded-[22px] bg-white"
+      className="mx-auto w-full max-w-[290px] overflow-hidden rounded-[22px] bg-white"
       style={{ boxShadow: `inset 0 0 0 1px ${NV.lightGrey}, 0 20px 44px -24px rgba(28,28,26,0.45)` }}
     >
       {imageUrl && <img src={imageUrl} alt="" loading="lazy" className="aspect-[4/3] w-full object-cover" />}
