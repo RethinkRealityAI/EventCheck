@@ -38,7 +38,7 @@ export interface SponsorTileProps {
   name?: string;
   /** Partner logo, shown full-colour above the copy. */
   logoUrl?: string | null;
-  /** Cover image, shown edge to edge at 5:2 (cropped toward the top). */
+  /** Cover image, shown edge to edge at 4:3. */
   imageUrl?: string | null;
   /** The partner's own paragraph. */
   body?: string;
@@ -49,17 +49,19 @@ export interface SponsorTileProps {
 export function SponsorTile({ name = 'Novartis', logoUrl = null, imageUrl = null, body, href }: SponsorTileProps) {
   if (!FEATURES.sponsorTiles) return null;
 
+  // Narrow portrait card, centred: the photo keeps its full 4:3 height and the
+  // tile takes less room by giving up width rather than height.
   return (
     <article
       aria-label={name}
-      className="overflow-hidden rounded-[22px] bg-white"
+      className="mx-auto w-full max-w-[260px] overflow-hidden rounded-[22px] bg-white"
       style={{ boxShadow: `inset 0 0 0 1px ${NV.lightGrey}, 0 20px 44px -24px rgba(28,28,26,0.45)` }}
     >
-      {imageUrl && <img src={imageUrl} alt="" loading="lazy" className="aspect-[5/2] w-full object-cover object-[50%_10%]" />}
+      {imageUrl && <img src={imageUrl} alt="" loading="lazy" className="aspect-[4/3] w-full object-cover" />}
 
       <div className="px-4 pb-4 pt-3.5">
         {logoUrl ? (
-          <img src={logoUrl} alt={name} className="h-auto w-[104px] max-w-full" />
+          <img src={logoUrl} alt={name} className="h-auto w-[140px] max-w-full" />
         ) : (
           <span className="font-display text-base font-bold uppercase tracking-[0.06em]" style={{ color: NV.warmBlack }}>
             {name}
@@ -69,7 +71,7 @@ export function SponsorTile({ name = 'Novartis', logoUrl = null, imageUrl = null
         {body && (
           <>
             <div className="my-3 h-px" style={{ background: NV.lightGrey }} />
-            <p className="text-[12.5px] leading-[1.55]" style={{ color: NV.body, fontFamily: NV_FONT }}>
+            <p className="text-[13px] leading-[1.55]" style={{ color: NV.body, fontFamily: NV_FONT }}>
               {body}
             </p>
           </>
