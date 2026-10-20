@@ -4,11 +4,17 @@ import { getSiteContent, mergeContent } from '../../../services/siteContentServi
 import { LANDING_DEFAULTS, PORTAL_DEFAULTS } from './landingDefaults';
 import type { LandingContent, PortalContent } from '../../../types';
 
-interface Ctx { landing: LandingContent; portal: PortalContent; }
-const ContentContext = createContext<Ctx>({ landing: LANDING_DEFAULTS, portal: PORTAL_DEFAULTS });
+interface Ctx { landing: LandingContent; portal: PortalContent; portalLoaded: boolean; }
+const ContentContext = createContext<Ctx>({ landing: LANDING_DEFAULTS, portal: PORTAL_DEFAULTS, portalLoaded: false });
 
 export function useLandingContent() { return useContext(ContentContext).landing; }
 export function usePortalContent() { return useContext(ContentContext).portal; }
+/**
+ * True once the published portal content has arrived (always true in preview).
+ * Use it to hold back anything an admin can switch OFF, so it does not flash
+ * on from the defaults before the real setting loads.
+ */
+export function usePortalContentLoaded() { return useContext(ContentContext).portalLoaded; }
 
 // previewMode: when true, skip the DB fetch and render content received via
 // postMessage from the CMS editor parent (live preview). Otherwise fetch the
@@ -16,11 +22,15 @@ export function usePortalContent() { return useContext(ContentContext).portal; }
 export function ContentProvider({ children, previewMode = false }: { children: ReactNode; previewMode?: boolean }) {
   const [landingOv, setLandingOv] = useState<Record<string, unknown>>({});
   const [portalOv, setPortalOv] = useState<Record<string, unknown>>({});
+  const [portalLoaded, setPortalLoaded] = useState(previewMode);
 
   useEffect(() => {
     if (previewMode) return;
     getSiteContent(CURRENT_SITE.key, 'landing').then(setLandingOv);
-    getSiteContent(CURRENT_SITE.key, 'portal').then(setPortalOv);
+    getSiteContent(CURRENT_SITE.key, 'portal').then((ov) => {
+      setPortalOv(ov);
+      setPortalLoaded(true);
+    });
   }, [previewMode]);
 
   useEffect(() => {
@@ -45,6 +55,7 @@ export function ContentProvider({ children, previewMode = false }: { children: R
   const value: Ctx = {
     landing: mergeContent(LANDING_DEFAULTS, landingOv),
     portal: mergeContent(PORTAL_DEFAULTS, portalOv),
+    portalLoaded,
   };
   return <ContentContext.Provider value={value}>{children}</ContentContext.Provider>;
 }

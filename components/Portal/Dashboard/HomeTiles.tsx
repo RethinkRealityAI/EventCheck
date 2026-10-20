@@ -17,6 +17,7 @@ import { useMySchedule } from '../Program/useMySchedule';
 import { useUpdates } from '../Updates/useUpdates';
 import { SponsorTile } from './SponsorSlot';
 import { AnnouncementsFeed } from './AnnouncementsFeed';
+import { usePortalContent, usePortalContentLoaded } from '../content/ContentProvider';
 
 /**
  * Portal home — six cards, in order: the live Programme card, My schedule, then
@@ -168,6 +169,10 @@ export function HomeTiles() {
   const now = useNow();
   const { unread } = useUpdates();
   const started = congressStarted(now);
+  // Admins switch the partner tile off in /admin/content → Portal. Wait for
+  // the real setting so a switched-off tile never flashes on from defaults.
+  const { showSponsorTile } = usePortalContent();
+  const tileOn = usePortalContentLoaded() && showSponsorTile !== false;
 
   return (
     <section aria-label="Congress shortcuts" className="space-y-3">
@@ -209,14 +214,15 @@ export function HomeTiles() {
         />
       </div>
 
-      {/* Partner tile — on by default; VITE_FEATURE_SPONSOR_TILES=false hides it. */}
-      <SponsorTile
+      {/* Partner tile — admin toggle in the Content CMS; the build flag
+          VITE_FEATURE_SPONSOR_TILES=false removes it entirely. */}
+      {tileOn && <SponsorTile
         name="Novartis"
         logoUrl="/branding/gansid/partners/novartis-logo.png"
         imageUrl="/branding/gansid/partners/novartis-cover.jpg"
         body="Novartis is an innovative medicines company. Every day, we work to reimagine medicine to improve and extend people's lives so that patients, healthcare professionals and societies are empowered in the face of serious disease. Our medicines reach 304 million people worldwide."
         href="https://www.novartis.com"
-      />
+      />}
 
       <p className="pt-2 text-center font-body text-xs text-gansid-on-surface/40">GANSID Congress 2026 · Hyderabad, India</p>
     </section>

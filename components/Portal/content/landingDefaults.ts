@@ -152,6 +152,7 @@ export const LANDING_DEFAULTS: LandingContent = {
 // ---------------------------------------------------------------------------
 
 export const PORTAL_DEFAULTS: PortalContent = {
+  showSponsorTile: true,
   intro: {
     heading: 'Welcome',
     subheadingHtml: '',
