@@ -1,14 +1,24 @@
 import { useEffect, useRef, useState } from 'react';
-import { Outlet, Link, useNavigate } from 'react-router-dom';
+import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
+import { Bell } from 'lucide-react';
 import { useAuth } from '../AuthContext';
 import { AuthNoticeBanner } from '../AuthNoticeBanner';
 import { MenuIcon } from './Dashboard/navIcons';
 import { PortalQuickNav } from './Dashboard/PortalQuickNav';
+import { usePortalContent } from './content/ContentProvider';
+import { useUpdates } from './Updates/useUpdates';
+import { greetingName } from '../../utils/greetingName';
 
 export function PortalLayout() {
   const { profile, signOut } = useAuth();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
+  const { intro } = usePortalContent();
+  const { unread } = useUpdates();
   const [menuOpen, setMenuOpen] = useState(false);
+  // Home carries the greeting inside the blue header; every other screen gets
+  // the compact bar only.
+  const isHome = pathname === '/portal' || pathname === '/portal/';
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Close the desktop menu on outside-click.
@@ -32,40 +42,30 @@ export function PortalLayout() {
 
   const isAdmin = profile?.role === 'admin' || profile?.role === 'super_admin';
 
-  // Role → credential label + gradient, mirroring CredentialCard.tsx so the
-  // header pill reads the same standing as the (desktop) credential card.
-  const credentialLabel =
-    profile?.role === 'exhibitor' ? 'Exhibitor'
-    : profile?.role === 'sponsor' ? 'Sponsor'
-    : profile?.role === 'super_admin' ? 'Super Admin'
-    : profile?.role === 'admin' ? 'Admin'
-    : 'Attendee';
-  const credentialGradient =
-    profile?.role === 'exhibitor' ? 'linear-gradient(135deg,#8b2a5e 0%,#5a3575 100%)'
-    : profile?.role === 'sponsor' ? 'linear-gradient(135deg,#2260a1 0%,#1a4880 100%)'
-    : profile?.role === 'super_admin' ? 'linear-gradient(135deg,#78350f 0%,#b45309 100%)'
-    : profile?.role === 'admin' ? 'linear-gradient(135deg,#0f172a 0%,#1a4880 100%)'
-    : 'linear-gradient(135deg,#ba0028 0%,#E0243C 60%,#2260a1 100%)';
-
-  // The initials avatar + a small credential pill beneath it — both link to the
-  // profile page. Frosted glass ring so it reads cleanly against the blue
-  // header gradient. The pill gives mobile a credential presence now that the
-  // dashboard credential card is desktop-only.
+  // Plain frosted initials disc (the new design drops the role pill).
   const avatar = (
     <Link
       to="/portal/profile"
-      aria-label={`Your profile — ${credentialLabel}`}
-      className="group flex shrink-0 flex-col items-center gap-1 rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+      aria-label="Your profile"
+      className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-white/15 font-display text-[13px] font-bold text-white shadow-[inset_0_0_0_2px_rgba(255,255,255,0.45),0_8px_20px_-8px_rgba(0,0,0,0.55)] backdrop-blur-sm transition-transform duration-300 ease-viscous active:scale-[0.94] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
     >
-      <span className="grid h-10 w-10 place-items-center rounded-full bg-white/15 font-display text-sm font-bold text-white shadow-[0_8px_20px_-8px_rgba(0,0,0,0.55)] ring-2 ring-white/45 backdrop-blur-sm transition-transform duration-300 ease-viscous group-hover:scale-105">
-        {initials}
-      </span>
-      <span
-        className="max-w-[104px] truncate rounded-full px-2.5 py-[3px] text-center font-display text-[9px] font-bold uppercase leading-none tracking-[0.08em] text-white shadow-[0_4px_12px_-4px_rgba(0,0,0,0.5)] ring-1 ring-white/25"
-        style={{ backgroundImage: credentialGradient }}
-      >
-        {credentialLabel}
-      </span>
+      {initials}
+    </Link>
+  );
+
+  // Updates bell — unread count from the same store the home Updates card uses.
+  const bell = (
+    <Link
+      to="/portal/updates"
+      aria-label={unread.length ? `Updates, ${unread.length} unread` : 'Updates'}
+      className="relative grid h-10 w-10 shrink-0 place-items-center rounded-full bg-white/15 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.35)] backdrop-blur-sm transition-transform duration-300 ease-viscous active:scale-[0.92] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+    >
+      <Bell className="h-[21px] w-[21px]" strokeWidth={1.75} aria-hidden />
+      {unread.length > 0 && (
+        <span className="absolute right-1.5 top-1.5 h-[17px] min-w-[17px] rounded-full bg-[linear-gradient(135deg,#ba0028,#E0243C)] px-1 text-center font-display text-[10px] font-bold leading-[17px] text-white shadow-[0_0_0_2px_rgba(15,51,95,0.9)]">
+          {unread.length}
+        </span>
+      )}
     </Link>
   );
 
@@ -86,7 +86,7 @@ export function PortalLayout() {
       </div>
 
       <header
-        className="sticky top-0 z-40 shadow-[0_10px_30px_-16px_rgba(18,58,107,0.7)]"
+        className={`${isHome ? 'relative' : 'sticky top-0'} z-40 shadow-[0_12px_34px_-18px_rgba(18,58,107,0.85)]`}
         style={{
           // Blue-DOMINANT GANSID gradient: deep navy → brand blue across most of
           // the bar, with only a subtle warm purple/red accent bleeding in at the
@@ -100,7 +100,8 @@ export function PortalLayout() {
           className="pointer-events-none absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/[0.10] to-transparent"
           aria-hidden
         />
-        <div className="relative mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 sm:px-6 py-2.5 sm:py-3">
+        <div className={`relative mx-auto max-w-7xl px-[18px] sm:px-6 ${isHome ? 'pb-4 pt-3' : 'py-2.5 sm:py-3'}`}>
+        <div className="flex items-center justify-between gap-3">
           {/* White transparent Congress logo — the branded asset (served from
               public/). object-contain + max-width so it never overflows on
               narrow phones. Tappable → portal home. */}
@@ -112,11 +113,12 @@ export function PortalLayout() {
             <img
               src="/branding/gansid/congress-logo-white.png"
               alt="GANSID Congress 2026"
-              className="h-10 w-auto max-w-[62vw] object-contain object-left drop-shadow-[0_2px_8px_rgba(0,0,0,0.28)] sm:h-[46px] lg:h-[50px]"
+              className="h-[38px] w-auto max-w-[62vw] object-contain object-left drop-shadow-[0_2px_8px_rgba(0,0,0,0.28)] sm:h-[44px] lg:h-[48px]"
             />
           </Link>
 
           <div className="flex items-center gap-2.5">
+            {bell}
             {avatar}
 
             {/* Desktop-only hamburger pill → dropdown menu. On mobile the menu
@@ -181,6 +183,17 @@ export function PortalLayout() {
               )}
             </div>
           </div>
+        </div>
+        {isHome && (
+          <div className="mt-4">
+            <div className="font-display text-xs font-semibold uppercase tracking-[0.16em] text-white/65">
+              {intro?.heading?.trim() || 'Welcome back'}
+            </div>
+            <div className="mt-0.5 font-display text-[30px] font-bold leading-[1.1] tracking-[-0.02em] text-white">
+              {greetingName(profile?.fullName, profile?.email)}
+            </div>
+          </div>
+        )}
         </div>
         {/* Thin bright top accent rail — a crisp highlight that grounds the
             premium blue bar. */}
