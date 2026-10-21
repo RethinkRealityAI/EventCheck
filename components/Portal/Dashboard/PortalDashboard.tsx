@@ -271,7 +271,7 @@ export function PortalDashboard() {
         <VerifyEmailBanner />
         <div className="grid grid-cols-1 items-start gap-8 lg:grid-cols-[1.7fr_1fr] xl:gap-10">
           <div className="space-y-8 min-w-0">
-            {/* Greeting stays at the very top as the first thing. */}
+            {/* Status notes only — the greeting lives in the header. */}
             <WelcomeBlock profile={profile} latestAttendee={latestAttendee} staffOrg={staffOrg} />
             {/* The six Congress cards. Announcements now live behind the
                 Updates card (/portal/updates). */}

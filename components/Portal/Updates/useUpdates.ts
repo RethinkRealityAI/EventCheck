@@ -11,6 +11,9 @@ import { useAuth } from '../../AuthContext';
  */
 
 const KEY_PREFIX = 'gansid:updates-seen';
+/** Fired on this window when read state changes, so the header bell and the
+ *  home Updates card (separate hook instances) update together. */
+const SEEN_EVENT = 'gansid:updates-seen-changed';
 const key = (userId?: string | null) => `${KEY_PREFIX}:${userId ?? 'guest'}`;
 
 function readSeen(userId?: string | null): string[] {
@@ -38,7 +41,17 @@ export function useUpdates() {
     };
   }, []);
 
-  useEffect(() => setSeen(readSeen(userId)), [userId]);
+  useEffect(() => {
+    const sync = () => setSeen(readSeen(userId));
+    sync();
+    const onStorage = (e: StorageEvent) => e.key === key(userId) && sync();
+    window.addEventListener(SEEN_EVENT, sync);
+    window.addEventListener('storage', onStorage);
+    return () => {
+      window.removeEventListener(SEEN_EVENT, sync);
+      window.removeEventListener('storage', onStorage);
+    };
+  }, [userId]);
 
   // Newest first, as listActiveAnnouncements returns them.
   const unread = useMemo(() => items.filter((a) => !seen.includes(a.id)), [items, seen]);
@@ -52,6 +65,7 @@ export function useUpdates() {
     } catch {
       /* private mode — read state simply does not persist */
     }
+    window.dispatchEvent(new Event(SEEN_EVENT));
   }, [items, seen, userId]);
 
   return { items, unread, markAllRead };
