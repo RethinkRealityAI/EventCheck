@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { AlertTriangle, CalendarPlus, Bookmark, X } from 'lucide-react';
 import { CONGRESS_DAYS, SESSION_KIND_LABEL, formatTime } from '../../../config/congressProgram';
 import { downloadIcs, useMySchedule } from './useMySchedule';
+import { RoomPill } from '../ui/congressUi';
 
 /**
  * My Schedule — the delegate's own plan, built from the interactive programme.
@@ -91,7 +92,7 @@ export function MySchedulePage() {
                       <span className="font-display text-[12.5px] font-bold tabular-nums text-gansid-on-surface">
                         {formatTime(s.start)} – {formatTime(s.end)}
                       </span>
-                      <span className="font-body text-[11.5px] text-gansid-on-surface/45">{s.room}</span>
+                      <RoomPill room={s.room} />
                       {clashing.has(s.id) && (
                         <span className="inline-flex items-center gap-1 rounded-full bg-gansid-primary/[0.08] px-2 py-0.5 font-body text-[10.5px] font-semibold text-gansid-primary">
                           <AlertTriangle className="h-3 w-3" /> Clash

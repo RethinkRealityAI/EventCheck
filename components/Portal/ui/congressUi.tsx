@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft } from 'lucide-react';
+import { ChevronLeft, MapPin } from 'lucide-react';
 import { initialsFor } from '../../../utils/congressDirectory';
 
 /**
@@ -98,6 +98,29 @@ export function SegmentedControl<T extends string | number>({
         </button>
       ))}
     </div>
+  );
+}
+
+/**
+ * The room a session is in (Hall 1, Room 5, Exhibition…) as a tinted pill with
+ * a map pin, so delegates can spot where to go at a glance. `onDark` is the
+ * frosted white version for the blue gradient cards and headers.
+ */
+export function RoomPill({ room, onDark = false, className = '' }: { room: string; onDark?: boolean; className?: string }) {
+  if (!room) return null;
+  return (
+    <span
+      className={[
+        'inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-[3px] font-display text-[11.5px] font-bold leading-tight',
+        onDark
+          ? 'bg-white/20 text-white ring-1 ring-white/30'
+          : 'bg-gansid-secondary/10 text-gansid-secondary ring-1 ring-gansid-secondary/20',
+        className,
+      ].join(' ')}
+    >
+      <MapPin className="h-3 w-3" strokeWidth={2.25} aria-hidden />
+      {room}
+    </span>
   );
 }
 

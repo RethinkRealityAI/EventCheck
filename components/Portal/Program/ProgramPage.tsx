@@ -10,7 +10,7 @@ import {
   type SessionKind,
 } from '../../../config/congressProgram';
 import { useMySchedule } from './useMySchedule';
-import { SegmentedControl } from '../ui/congressUi';
+import { RoomPill, SegmentedControl } from '../ui/congressUi';
 
 /**
  * Interactive Congress programme — the in-app, bookmarkable version of the
@@ -86,7 +86,7 @@ function SessionCard({
             >
               {SESSION_KIND_LABEL[session.kind]}
             </span>
-            <span className="font-body text-[11px] text-gansid-on-surface/45">{session.room}</span>
+            <RoomPill room={session.room} />
             {session.sponsor && (
               <span className="font-body text-[11px] text-gansid-on-surface/45">· {session.sponsor}</span>
             )}

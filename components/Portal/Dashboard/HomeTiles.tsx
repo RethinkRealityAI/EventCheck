@@ -12,7 +12,7 @@ import {
   upNext,
   weekdayDate,
 } from '../../../utils/congressDirectory';
-import { GLASS_CARD, PRESS, useNow } from '../ui/congressUi';
+import { GLASS_CARD, PRESS, RoomPill, useNow } from '../ui/congressUi';
 import { useMySchedule } from '../Program/useMySchedule';
 import { useUpdates } from '../Updates/useUpdates';
 import { SponsorTile } from './SponsorSlot';
@@ -101,11 +101,10 @@ function ProgrammeCard({ now }: { now: number }) {
       {s ? (
         <>
           <p className="mt-3 line-clamp-2 font-display text-[18px] font-bold leading-[1.22] text-pretty">{s.title}</p>
-          <p className="mt-2 flex items-baseline gap-2">
+          <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1.5">
             <span className="font-display text-[15px] font-extrabold tabular-nums">{next.live ? `Until ${s.end}` : s.start}</span>
-            <span className="font-body text-[13px] text-white/[0.82]">
-              {weekdayDate(s.day)} · {s.room}
-            </span>
+            <span className="font-body text-[13px] text-white/[0.82]">{weekdayDate(s.day)}</span>
+            <RoomPill room={s.room} onDark />
           </p>
         </>
       ) : (
@@ -153,8 +152,11 @@ function MyScheduleCard({ now }: { now: number }) {
         ) : next ? (
           <>
             <span className="mt-0.5 block truncate font-body text-[13px] text-gansid-on-surface/70">{next.title}</span>
-            <span className="mt-0.5 block truncate font-body text-xs font-semibold text-gansid-secondary">
-              Next · {weekdayDate(next.day)}, {next.start} · {next.room}
+            <span className="mt-1 flex min-w-0 items-center gap-2">
+              <span className="truncate font-body text-xs font-semibold text-gansid-secondary">
+                Next · {weekdayDate(next.day)}, {next.start}
+              </span>
+              <RoomPill room={next.room} />
             </span>
           </>
         ) : (

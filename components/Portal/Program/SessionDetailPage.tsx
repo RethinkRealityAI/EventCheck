@@ -9,7 +9,7 @@ import {
   weekdayDate,
   type SpeakerRole,
 } from '../../../utils/congressDirectory';
-import { BackHeader, GLASS_CARD, InitialsAvatar, PRESS } from '../ui/congressUi';
+import { BackHeader, GLASS_CARD, InitialsAvatar, PRESS, RoomPill } from '../ui/congressUi';
 import { useMySchedule } from './useMySchedule';
 
 /** Full session view: talks, host, and every person, each linking to their page. */
@@ -58,7 +58,7 @@ export function SessionDetailPage() {
         <p className="mt-2 font-body text-sm text-white/80">
           {weekdayDate(session.day)} · {session.start}–{session.end}
         </p>
-        <p className="font-body text-sm text-white/80">{session.room}</p>
+        <RoomPill room={session.room} onDark className="mt-2.5 text-[12.5px]" />
       </div>
 
       {bookmarkable && (

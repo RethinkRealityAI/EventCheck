@@ -16,6 +16,7 @@ import {
   nextSaved,
   parsePerson,
   sessionInstant,
+  sessionWhen,
   sessionWhenWhere,
   speakerSubline,
   topicsForSession,
@@ -116,6 +117,10 @@ describe('initialsFor / speakerSubline / sessionWhenWhere', () => {
   it('joins roles, orgs and country', () => {
     expect(speakerSubline({ roles: ['Speaker', 'Moderator'], orgs: [], country: 'India' })).toBe('Speaker · Moderator · India');
     expect(speakerSubline({ roles: ['Speaker'], orgs: ['GANSID CEO'], country: '' })).toBe('Speaker · GANSID CEO');
+  });
+
+  it('formats a session time without the room', () => {
+    expect(sessionWhen(s({ day: 2, start: '10:30', end: '11:30', room: 'Room 6' }))).toBe('Oct 24 · 10:30–11:30');
   });
 
   it('formats a session line', () => {

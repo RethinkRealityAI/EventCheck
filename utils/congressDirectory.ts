@@ -250,6 +250,11 @@ export function sessionInstant(day: 1 | 2 | 3, time: string): number {
 const MONTH_DAY: Record<1 | 2 | 3, string> = { 1: 'Oct 23', 2: 'Oct 24', 3: 'Oct 25' };
 const WEEKDAY_DATE: Record<1 | 2 | 3, string> = { 1: 'Fri 23 Oct', 2: 'Sat 24 Oct', 3: 'Sun 25 Oct' };
 
+/** "Oct 23 · 08:35–09:35" (the room goes in its own pill). */
+export function sessionWhen(s: ProgramSession): string {
+  return `${MONTH_DAY[s.day]} · ${s.start}–${s.end}`;
+}
+
 /** "Oct 23 · 08:35–09:35 · Hall 1" */
 export function sessionWhenWhere(s: ProgramSession): string {
   return `${MONTH_DAY[s.day]} · ${s.start}–${s.end} · ${s.room}`;

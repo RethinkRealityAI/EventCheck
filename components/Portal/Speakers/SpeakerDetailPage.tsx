@@ -2,8 +2,8 @@ import { useMemo } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ChevronRight } from 'lucide-react';
 import { sessionById } from '../../../config/congressProgram';
-import { buildSpeakerDirectory, initialsFor, sessionWhenWhere } from '../../../utils/congressDirectory';
-import { BackHeader, GLASS_CARD, PRESS } from '../ui/congressUi';
+import { buildSpeakerDirectory, initialsFor, sessionWhen } from '../../../utils/congressDirectory';
+import { BackHeader, GLASS_CARD, PRESS, RoomPill } from '../ui/congressUi';
 
 const SPEAKERS = buildSpeakerDirectory();
 
@@ -67,7 +67,10 @@ export function SpeakerDetailPage() {
                   <span className="block font-display text-[14px] font-bold leading-snug text-gansid-on-surface text-pretty">
                     {s.title}
                   </span>
-                  <span className="mt-0.5 block font-body text-xs text-gansid-on-surface/50">{sessionWhenWhere(s)}</span>
+                  <span className="mt-1 flex flex-wrap items-center gap-2">
+                    <span className="font-body text-xs text-gansid-on-surface/50">{sessionWhen(s)}</span>
+                    <RoomPill room={s.room} />
+                  </span>
                 </span>
                 <ChevronRight className="h-4 w-4 shrink-0 text-gansid-on-surface/30" aria-hidden />
               </Link>
