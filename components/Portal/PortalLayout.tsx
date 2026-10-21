@@ -8,13 +8,27 @@ import { PortalQuickNav } from './Dashboard/PortalQuickNav';
 import { usePortalContent } from './content/ContentProvider';
 import { useUpdates } from './Updates/useUpdates';
 import { greetingName } from '../../utils/greetingName';
+import { VirtualSessionsProvider, useVirtualSessions } from './Virtual/VirtualSessionsContext';
 
+/**
+ * Wraps the portal in VirtualSessionsProvider so the header menu, home card,
+ * programme and detail screens share one load of the virtual-session data.
+ */
 export function PortalLayout() {
+  return (
+    <VirtualSessionsProvider>
+      <PortalLayoutInner />
+    </VirtualSessionsProvider>
+  );
+}
+
+function PortalLayoutInner() {
   const { profile, signOut } = useAuth();
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const { intro } = usePortalContent();
   const { unread } = useUpdates();
+  const { canSee: canSeeVirtual } = useVirtualSessions();
   const [menuOpen, setMenuOpen] = useState(false);
   // Home carries the greeting inside the blue header; every other screen gets
   // the compact bar only.
@@ -148,6 +162,16 @@ export function PortalLayout() {
                   >
                     My Tickets
                   </Link>
+                  {canSeeVirtual && (
+                    <Link
+                      to="/portal/virtual"
+                      role="menuitem"
+                      onClick={() => setMenuOpen(false)}
+                      className="block rounded-xl px-3 py-2.5 font-display text-sm font-medium transition-colors hover:bg-gansid-surface-container-low"
+                    >
+                      Virtual presentation
+                    </Link>
+                  )}
                   <Link
                     to="/portal/profile"
                     role="menuitem"

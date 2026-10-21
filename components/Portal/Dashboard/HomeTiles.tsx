@@ -15,6 +15,7 @@ import {
 import { GLASS_CARD, PRESS, RoomPill, useNow } from '../ui/congressUi';
 import { useMySchedule } from '../Program/useMySchedule';
 import { useUpdates } from '../Updates/useUpdates';
+import { VirtualPresentationCard } from '../Virtual/VirtualPresentationCard';
 import { SponsorTile } from './SponsorSlot';
 import { AnnouncementsFeed } from './AnnouncementsFeed';
 import { usePortalContent, usePortalContentLoaded } from '../content/ContentProvider';
@@ -178,6 +179,8 @@ export function HomeTiles() {
 
   return (
     <section aria-label="Congress shortcuts" className="space-y-3">
+      {/* Virtual presenters only: their next session + Zoom link, first thing they see. */}
+      <VirtualPresentationCard now={now} />
       <ProgrammeCard now={now} />
       {/* Latest announcements, as on the old home. The Programme card stays the
           hero; the Updates card keeps the unread count and full list. */}

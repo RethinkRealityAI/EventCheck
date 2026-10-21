@@ -6,7 +6,8 @@ import { useAuth } from '../../AuthContext';
 import { usePortalContent } from '../content/ContentProvider';
 import { IframeViewer } from '../ui/IframeViewer';
 import type { SidebarLink } from '../../../types';
-import { Bell, Bookmark, Users, X } from 'lucide-react';
+import { Bell, Bookmark, Users, Video, X } from 'lucide-react';
+import { useVirtualSessions } from '../Virtual/VirtualSessionsContext';
 import {
   UserIcon,
   TicketIcon,
@@ -35,6 +36,8 @@ import {
  */
 export function PortalMenuSheet({ onClose }: { onClose: () => void }) {
   const { profile, signOut } = useAuth();
+  // Virtual presenters and admins only — RLS returns nothing to anyone else.
+  const { canSee: canSeeVirtual } = useVirtualSessions();
   const { sidebarLinks } = usePortalContent();
   const navigate = useNavigate();
   const isAdmin = profile?.role === 'admin' || profile?.role === 'super_admin';
@@ -182,6 +185,7 @@ export function PortalMenuSheet({ onClose }: { onClose: () => void }) {
           {/* In-app Congress screens. The CMS links below (incl. the embedded
               programme site) stay as they are; these are the native versions. */}
           {[
+            ...(canSeeVirtual ? [{ to: '/portal/virtual', label: 'Virtual presentation', Icon: Video }] : []),
             { to: '/portal/program', label: 'Programme', Icon: AgendaIcon },
             { to: '/portal/my-schedule', label: 'My schedule', Icon: Bookmark },
             { to: '/portal/speakers', label: 'Speakers', Icon: Users },

@@ -11,6 +11,9 @@ import {
 } from '../../../config/congressProgram';
 import { useMySchedule } from './useMySchedule';
 import { RoomPill, SegmentedControl } from '../ui/congressUi';
+import { useVirtualSessions } from '../Virtual/VirtualSessionsContext';
+import { VirtualBadge } from '../Virtual/VirtualParts';
+import { virtualPresenterLine, type VirtualSession } from '../../../utils/virtualSessions';
 
 /**
  * Interactive Congress programme — the in-app, bookmarkable version of the
@@ -22,7 +25,10 @@ import { RoomPill, SegmentedControl } from '../ui/congressUi';
  * one that feeds "My Schedule".
  */
 
-const FILTERS: { id: 'all' | SessionKind; label: string }[] = [
+type ProgramFilter = 'all' | 'virtual' | SessionKind;
+
+/** 'virtual' is added at runtime, and only for admins + virtual presenters. */
+const FILTERS: { id: ProgramFilter; label: string }[] = [
   { id: 'all', label: 'Everything' },
   { id: 'plenary', label: 'Plenary' },
   { id: 'parallel', label: 'Parallel' },
@@ -48,11 +54,14 @@ function SessionCard({
   saved,
   clashes,
   onToggle,
+  virtual,
 }: {
   session: ProgramSession;
   saved: boolean;
   clashes: boolean;
   onToggle: () => void;
+  /** Set only for admins + virtual presenters, and only on virtual sessions. */
+  virtual?: VirtualSession;
 }) {
   const isBreak = session.kind === 'break' || session.kind === 'logistics';
 
@@ -80,13 +89,14 @@ function SessionCard({
 
       <div className="relative min-w-0 flex-1 rounded-gansid-md bg-white/85 p-4 shadow-[0_16px_36px_-26px_rgba(26,28,28,0.5)] ring-1 ring-black/[0.04] backdrop-blur-viscous">
         <Link to={`/portal/program/session/${session.id}`} className="block w-full text-left">
-          <span className="flex flex-wrap items-center gap-2">
+          <span className="flex flex-wrap items-center gap-2 pr-10">
             <span
               className={`inline-flex rounded-full px-2.5 py-1 font-display text-[9.5px] font-bold uppercase tracking-[0.12em] ${KIND_PILL[session.kind]}`}
             >
               {SESSION_KIND_LABEL[session.kind]}
             </span>
             <RoomPill room={session.room} />
+            {virtual && <VirtualBadge />}
             {session.sponsor && (
               <span className="font-body text-[11px] text-gansid-on-surface/45">· {session.sponsor}</span>
             )}
@@ -101,6 +111,12 @@ function SessionCard({
               {session.speakers.join(' · ')}
             </span>
           ) : null}
+
+          {virtual && (
+            <span className="mt-1.5 block font-body text-[12px] font-semibold text-[#5a3575]">
+              Presenting virtually: {virtualPresenterLine(virtual)}
+            </span>
+          )}
 
           <span className="mt-2 inline-flex items-center gap-0.5 font-body text-[11.5px] font-medium text-gansid-secondary">
             Session details
@@ -143,15 +159,19 @@ export function ProgramPage() {
   const day = parseDay(params.get('day'));
   const setDay = (d: 1 | 2 | 3) => setParams(d === 1 ? {} : { day: String(d) }, { replace: true });
   const [query, setQuery] = useState('');
-  const [filter, setFilter] = useState<'all' | SessionKind>('all');
+  const [filter, setFilter] = useState<ProgramFilter>('all');
   const { has, toggle, count, clashing } = useMySchedule();
+  const { canSee: canSeeVirtual, byId: virtualById } = useVirtualSessions();
+  const filters = canSeeVirtual ? [FILTERS[0], { id: 'virtual' as const, label: 'Virtual' }, ...FILTERS.slice(1)] : FILTERS;
 
   const activeDay = CONGRESS_DAYS.find((d) => d.day === day)!;
 
   const sessions = useMemo(() => {
     const q = query.trim().toLowerCase();
     return sessionsForDay(day).filter((s) => {
-      if (filter !== 'all' && s.kind !== filter) return false;
+      if (filter === 'virtual') {
+        if (!virtualById.has(s.id)) return false;
+      } else if (filter !== 'all' && s.kind !== filter) return false;
       if (!q) return true;
       const haystack = [s.title, s.room, s.sponsor, s.moderator, s.chair, ...(s.speakers ?? []), ...(s.talks ?? [])]
         .filter(Boolean)
@@ -159,7 +179,7 @@ export function ProgramPage() {
         .toLowerCase();
       return haystack.includes(q);
     });
-  }, [day, query, filter]);
+  }, [day, query, filter, virtualById]);
 
   return (
     <div>
@@ -202,7 +222,7 @@ export function ProgramPage() {
 
       {/* Type filters */}
       <div className="mt-3 flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {FILTERS.map((f) => (
+        {filters.map((f) => (
           <button
             key={f.id}
             type="button"
@@ -228,6 +248,7 @@ export function ProgramPage() {
             saved={has(s.id)}
             clashes={clashing.has(s.id)}
             onToggle={() => toggle(s.id)}
+            virtual={canSeeVirtual ? virtualById.get(s.id) : undefined}
           />
         ))}
       </div>

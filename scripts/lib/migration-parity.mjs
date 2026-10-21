@@ -106,6 +106,13 @@ export const REQUIRED_APP_COLUMNS = {
     'starts_at',
     'ends_at',
   ],
+  // Read by the portal's virtual-presentation features (useVirtualSessions).
+  virtual_sessions: [
+    'session_id',
+    'zoom_url',
+    'meeting_id',
+    'presenters',
+  ],
 };
 
 /** Merge migration-derived + app-required columns. */

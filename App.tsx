@@ -38,6 +38,7 @@ import { VenuePage } from './components/Portal/Venue/VenuePage';
 import { SpeakersPage } from './components/Portal/Speakers/SpeakersPage';
 import { SpeakerDetailPage } from './components/Portal/Speakers/SpeakerDetailPage';
 import { UpdatesPage } from './components/Portal/Updates/UpdatesPage';
+import { VirtualSessionsPage } from './components/Portal/Virtual/VirtualSessionsPage';
 import AdminsManagement from './components/Admins/AdminsManagement';
 import ChangePasswordPage from './components/ChangePasswordPage';
 import {
@@ -874,6 +875,7 @@ export default function App() {
                   <Route path="speakers/:speakerId" element={<SpeakerDetailPage />} />
                   <Route path="venue" element={<VenuePage />} />
                   <Route path="updates" element={<UpdatesPage />} />
+                  <Route path="virtual" element={<VirtualSessionsPage />} />
                 </Route>
               </>
             ) : (

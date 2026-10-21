@@ -11,12 +11,18 @@ import {
 } from '../../../utils/congressDirectory';
 import { BackHeader, GLASS_CARD, InitialsAvatar, PRESS, RoomPill } from '../ui/congressUi';
 import { useMySchedule } from './useMySchedule';
+import { useVirtualSessions } from '../Virtual/VirtualSessionsContext';
+import { PanelistNote, VirtualBadge, ZoomJoin } from '../Virtual/VirtualParts';
+import { isPresenterIn, isVirtualPerson, virtualPresenterLine } from '../../../utils/virtualSessions';
 
 /** Full session view: talks, host, and every person, each linking to their page. */
 export function SessionDetailPage() {
   const { sessionId } = useParams();
   const session = sessionId ? sessionById(sessionId) : undefined;
   const { has, toggle, clashing } = useMySchedule();
+  // Admins + virtual presenters only; undefined for everyone else (RLS).
+  const { canSee: canSeeVirtual, byId: virtualById, myKey } = useVirtualSessions();
+  const virtual = canSeeVirtual && sessionId ? virtualById.get(sessionId) : undefined;
 
   if (!session) {
     return (
@@ -92,6 +98,26 @@ export function SessionDetailPage() {
         </p>
       )}
 
+      {virtual && (
+        <section className="mt-4 rounded-[22px] bg-[#5a3575]/[0.06] p-4 ring-1 ring-[#5a3575]/15">
+          <div className="flex items-center gap-2">
+            <h3 className="font-display text-[10.5px] font-bold uppercase tracking-[0.16em] text-[#5a3575]">Virtual session</h3>
+            <VirtualBadge />
+          </div>
+          <p className="mt-2 font-body text-[13px] text-gansid-on-surface/75">
+            Presenting virtually: <strong className="text-gansid-on-surface">{virtualPresenterLine(virtual)}</strong>
+          </p>
+          <div className="mt-3">
+            <ZoomJoin session={virtual} />
+          </div>
+          {isPresenterIn(virtual, myKey) && (
+            <div className="mt-3">
+              <PanelistNote compact />
+            </div>
+          )}
+        </section>
+      )}
+
       {session.talks?.length ? (
         <section className={`mt-4 rounded-[22px] p-4 ${GLASS_CARD}`}>
           <h3 className="font-display text-[10.5px] font-bold uppercase tracking-[0.16em] text-gansid-on-surface/40">Talks</h3>
@@ -129,7 +155,10 @@ export function SessionDetailPage() {
                   <Link to={`/portal/speakers/${speakerIdForKey(p.key)}`} className={`flex items-center gap-3 py-3 ${PRESS}`}>
                     <InitialsAvatar name={p.name} size={44} />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate font-display text-[14.5px] font-bold text-gansid-on-surface">{p.name}</span>
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="truncate font-display text-[14.5px] font-bold text-gansid-on-surface">{p.name}</span>
+                        {isVirtualPerson(virtual, raw) && <VirtualBadge />}
+                      </span>
                       <span className="block truncate font-body text-xs text-gansid-on-surface/55">{sub}</span>
                     </span>
                     <ChevronRight className="h-4 w-4 shrink-0 text-gansid-on-surface/30" aria-hidden />
