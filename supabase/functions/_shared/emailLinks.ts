@@ -74,3 +74,82 @@ export function buildAppUrl(origin: string, path: string): string {
   const suffix = path.startsWith('/') ? path : `/${path}`;
   return `${base}${suffix}`;
 }
+
+// ── Trusted origins ──────────────────────────────────────────────────────────
+// Rule 2 above ("a caller-supplied origin wins") is only safe for links that
+// carry nothing. send-ticket-email is gateway-open, and most of its links
+// carry a signed token (ticket download, pay, complete, account): build one on
+// `body.origin: 'https://evil.example'` and the token is delivered to the
+// attendee's inbox pointing at a host that reads it off the URL the moment
+// they click. So a caller's origin is used only when it is one of the app's
+// own sites; anything else falls back to PUBLIC_SITE_URL.
+
+/** The production sites. PUBLIC_SITE_URL and ALLOWED_LINK_ORIGINS add to these. */
+export const APP_SITE_ORIGINS: readonly string[] = [
+  'https://gansid.netlify.app',
+  'https://qreventcheck.netlify.app',
+];
+
+const LOCAL_DEV_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+/** Comma/whitespace-separated list (an env var) → normalized origins. */
+export function parseOriginList(value: unknown): string[] {
+  if (typeof value !== 'string') return [];
+  return value.split(/[\s,]+/).map(normalizeOrigin).filter(Boolean);
+}
+
+/**
+ * True when `candidate` is one of the app's own origins: a production site,
+ * one of `extra` (PUBLIC_SITE_URL, ALLOWED_LINK_ORIGINS), or a loopback dev
+ * server. A loopback link can only ever reach the recipient's own machine.
+ */
+export function isTrustedOrigin(candidate: unknown, extra: readonly unknown[] = []): boolean {
+  const origin = normalizeOrigin(candidate);
+  if (!origin) return false;
+  if (APP_SITE_ORIGINS.includes(origin)) return true;
+  if (extra.some((e) => normalizeOrigin(e) === origin)) return true;
+  return LOCAL_DEV_HOSTS.has(new URL(origin).hostname);
+}
+
+export interface TrustedOriginConfig {
+  /** The project's PUBLIC_SITE_URL secret — trusted by definition, and the fallback. */
+  publicSiteUrl?: unknown;
+  /** The project's ALLOWED_LINK_ORIGINS secret (optional extra sites). */
+  allowedOrigins?: unknown;
+}
+
+/**
+ * The first caller candidate that is a trusted origin, else PUBLIC_SITE_URL,
+ * else ''. Never returns an origin the caller made up.
+ */
+export function resolveTrustedOrigin(callerCandidates: readonly unknown[], cfg: TrustedOriginConfig): string {
+  const extra = [cfg.publicSiteUrl, ...parseOriginList(cfg.allowedOrigins)];
+  for (const candidate of callerCandidates) {
+    if (isTrustedOrigin(candidate, extra)) return normalizeOrigin(candidate);
+  }
+  return normalizeOrigin(cfg.publicSiteUrl);
+}
+
+/**
+ * A caller-supplied app link, kept only on a trusted origin. A link on any
+ * other host is re-based onto the trusted origin (same path, query and hash —
+ * the app routes on the hash), or '' when there is none. A click-tracking
+ * wrapper (`trackingEndpoint`, our own track-email function) is accepted when
+ * the link it redirects to passes the same test.
+ */
+export function trustedLinkUrl(url: unknown, cfg: TrustedOriginConfig & { trackingEndpoint?: string }): string {
+  if (!isAbsoluteHttpUrl(url)) return '';
+  const raw = String(url).trim();
+  const endpoint = cfg.trackingEndpoint ?? '';
+  if (endpoint && raw.startsWith(`${endpoint}?`)) {
+    const params = new URL(raw).searchParams;
+    const inner = trustedLinkUrl(params.get('to'), { ...cfg, trackingEndpoint: undefined });
+    if (!inner) return '';
+    params.set('to', inner);
+    return `${endpoint}?${params.toString()}`;
+  }
+  const parsed = new URL(raw);
+  const origin = resolveTrustedOrigin([parsed.origin], cfg);
+  if (!origin) return '';
+  return `${origin}${parsed.pathname}${parsed.search}${parsed.hash}`;
+}

@@ -23,17 +23,20 @@
 //
 // The decisions live in _shared/accountClaim.ts (pure, unit-tested). Security:
 // the token (kind 'account') is the credential and is refused by every other
-// verifier; a ticket already linked to an account at its own address is never
+// verifier; it is bound to the address it was emailed to, so a link whose
+// ticket has since moved is refused and a legacy (unbound) link can neither
+// pre-verify nor move a ticket that has its own address; a ticket already linked to an account at its own address is never
 // touched; a new address is never pre-verified; the purchaser's address is
 // never a destination. Name, category and payment are not writable here.
 //
 // AUTH: gateway-open (verify_jwt=false) — the person has no session yet.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { verifyAccountToken } from '../_shared/registrationToken.ts';
+import { verifyAccountToken, accountEmailHash } from '../_shared/registrationToken.ts';
 import {
   claimStateOf,
   planClaim,
+  tokenBindingOf,
   CLAIM_REJECT_MESSAGES,
   MOVED_TO_KEY,
 } from '../_shared/accountClaim.ts';
@@ -93,6 +96,11 @@ Deno.serve(async (req: Request) => {
       purchaser = data ?? null;
     }
     const state = claimStateOf(row, purchaser?.email);
+    // Was this link emailed to the address the ticket has now? See TokenBinding.
+    const binding = tokenBindingOf(v.recipientHash, await accountEmailHash(row.email));
+    if (binding === 'stale') {
+      return json({ error: 'stale-link', message: CLAIM_REJECT_MESSAGES['stale-link'] }, 400);
+    }
 
     if (action === 'resolve') {
       const { data: form } = await svc.from('forms').select('title').eq('id', row.form_id).maybeSingle();
@@ -116,7 +124,7 @@ Deno.serve(async (req: Request) => {
 
     const password = String(body?.password ?? '');
     const requested = String(body?.email ?? '');
-    const plan = planClaim(state, row, requested, purchaser?.email);
+    const plan = planClaim(state, row, requested, purchaser?.email, binding);
 
     if (plan.action === 'reject') {
       const status = plan.reason === 'already-linked' ? 409 : 400;

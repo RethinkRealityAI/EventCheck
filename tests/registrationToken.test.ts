@@ -10,6 +10,7 @@ import {
   verifyInviteToken,
   signAccountToken,
   verifyAccountToken,
+  accountEmailHash,
 } from '../supabase/functions/_shared/registrationToken';
 
 const SECRET = 'test-service-role-key-abc123';
@@ -103,22 +104,24 @@ describe('completion token', () => {
 
   describe('account token', () => {
     it('round-trips', async () => {
-      const t = await signAccountToken('att-1', SECRET, NOW, TTL);
-      expect(await verifyAccountToken(t, SECRET, NOW)).toEqual({ valid: true, attendeeId: 'att-1' });
+      const t = await signAccountToken('att-1', 'guest@example.com', SECRET, NOW, TTL);
+      expect(await verifyAccountToken(t, SECRET, NOW)).toEqual({
+        valid: true, attendeeId: 'att-1', recipientHash: await accountEmailHash('guest@example.com'),
+      });
     });
 
     it('expires', async () => {
-      const t = await signAccountToken('att-1', SECRET, NOW, 1000);
+      const t = await signAccountToken('att-1', 'guest@example.com', SECRET, NOW, 1000);
       expect(await verifyAccountToken(t, SECRET, NOW + 2000)).toEqual({ valid: false, reason: 'expired' });
     });
 
     it('rejects a token signed with another secret', async () => {
-      const t = await signAccountToken('att-1', 'other-secret', NOW, TTL);
+      const t = await signAccountToken('att-1', 'guest@example.com', 'other-secret', NOW, TTL);
       expect(await verifyAccountToken(t, SECRET, NOW)).toMatchObject({ valid: false, reason: 'bad-signature' });
     });
 
     it('cannot stand in for any other kind, and no other kind stands in for it', async () => {
-      const account = await signAccountToken('att-1', SECRET, NOW, TTL);
+      const account = await signAccountToken('att-1', 'guest@example.com', SECRET, NOW, TTL);
       expect(await verifyCompleteToken(account, SECRET, NOW)).toMatchObject({ valid: false, reason: 'wrong-kind' });
       expect(await verifyPayToken(account, SECRET, NOW)).toMatchObject({ valid: false, reason: 'wrong-kind' });
       expect(await verifyInviteToken(account, SECRET, NOW)).toMatchObject({ valid: false, reason: 'wrong-kind' });
@@ -134,5 +137,52 @@ describe('completion token', () => {
         expect(await verifyAccountToken(t, SECRET, NOW)).toMatchObject({ valid: false, reason: 'wrong-kind' });
       }
     });
+  });
+});
+
+// A token minted before account tokens were bound to an address: same shape,
+// no `e`. Signed by hand so the test does not depend on the old signer.
+async function signLegacyAccountToken(attendeeId: string, secret: string, now: number, ttl: number) {
+  const b64url = (bytes: Uint8Array) => {
+    let bin = '';
+    for (const b of bytes) bin += String.fromCharCode(b);
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  };
+  const body = b64url(new TextEncoder().encode(JSON.stringify({ k: 'account', a: attendeeId, iat: now, exp: now + ttl })));
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sig = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(body)));
+  return `${body}.${b64url(sig)}`;
+}
+
+describe('account token — recipient binding', () => {
+  it('binds the normalized recipient address, not the raw one', async () => {
+    const t = await signAccountToken('att-1', '  Guest@Example.COM ', SECRET, NOW, TTL);
+    const v = await verifyAccountToken(t, SECRET, NOW);
+    expect(v.valid && v.recipientHash).toBe(await accountEmailHash('guest@example.com'));
+  });
+
+  it('different addresses give different hashes', async () => {
+    expect(await accountEmailHash('a@x.com')).not.toBe(await accountEmailHash('b@x.com'));
+    expect(await accountEmailHash('a@x.com')).toMatch(/^[A-Za-z0-9_-]{22}$/);
+  });
+
+  it('keeps the address out of the token', async () => {
+    const t = await signAccountToken('att-1', 'guest@example.com', SECRET, NOW, TTL);
+    const payload = atob(t.split('.')[0].replace(/-/g, '+').replace(/_/g, '/'));
+    expect(payload).not.toContain('guest');
+  });
+
+  it('the binding is covered by the signature', async () => {
+    const t = await signAccountToken('att-1', 'guest@example.com', SECRET, NOW, TTL);
+    const [body, sig] = t.split('.');
+    const raw = JSON.parse(atob(body.replace(/-/g, '+').replace(/_/g, '/')));
+    raw.e = await accountEmailHash('attacker@evil.org');
+    const forged = btoa(JSON.stringify(raw)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    expect(await verifyAccountToken(`${forged}.${sig}`, SECRET, NOW)).toMatchObject({ valid: false, reason: 'bad-signature' });
+  });
+
+  it('a legacy token (no binding) still verifies, with recipientHash null', async () => {
+    const t = await signLegacyAccountToken('att-1', SECRET, NOW, TTL);
+    expect(await verifyAccountToken(t, SECRET, NOW)).toEqual({ valid: true, attendeeId: 'att-1', recipientHash: null });
   });
 });

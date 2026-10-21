@@ -4,6 +4,7 @@ import {
   planClaim,
   isPlausibleEmail,
   MOVED_TO_KEY,
+  tokenBindingOf,
   type ClaimRow,
 } from '../supabase/functions/_shared/accountClaim';
 
@@ -44,44 +45,44 @@ describe('claimStateOf', () => {
 describe('planClaim', () => {
   it('creates a verified account at the emailed (own) address', () => {
     const r = row();
-    expect(planClaim(claimStateOf(r, 'b@x.com'), r, ' Guest@Example.com ', 'b@x.com')).toEqual({ action: 'create-verified' });
+    expect(planClaim(claimStateOf(r, 'b@x.com'), r, ' Guest@Example.com ', 'b@x.com', 'bound')).toEqual({ action: 'create-verified' });
   });
 
   it('refuses the shared address and asks for their own', () => {
     const r = row({ email: 'b@x.com', user_id: 'buyer' });
-    expect(planClaim(claimStateOf(r, 'b@x.com'), r, 'b@x.com', 'b@x.com'))
+    expect(planClaim(claimStateOf(r, 'b@x.com'), r, 'b@x.com', 'b@x.com', 'bound'))
       .toEqual({ action: 'reject', reason: 'needs-own-email' });
   });
 
   it('moves a shared-address ticket to the companion\'s own address', () => {
     const r = row({ email: 'b@x.com', user_id: 'buyer' });
-    expect(planClaim(claimStateOf(r, 'b@x.com'), r, 'Me@Mine.org', 'b@x.com'))
+    expect(planClaim(claimStateOf(r, 'b@x.com'), r, 'Me@Mine.org', 'b@x.com', 'bound'))
       .toEqual({ action: 'move', email: 'me@mine.org' });
   });
 
   it('never moves a ticket onto the purchaser\'s address', () => {
     const r = row();
-    expect(planClaim(claimStateOf(r, 'b@x.com'), r, 'B@x.com', 'b@x.com'))
+    expect(planClaim(claimStateOf(r, 'b@x.com'), r, 'B@x.com', 'b@x.com', 'bound'))
       .toEqual({ action: 'reject', reason: 'purchaser-email' });
   });
 
   it('does not pre-verify an address the page itself moved the ticket to', () => {
     const r = row({ email: 'typed@mine.org', answers: { [MOVED_TO_KEY]: 'typed@mine.org' } });
-    expect(planClaim(claimStateOf(r, 'b@x.com'), r, 'typed@mine.org', 'b@x.com')).toEqual({ action: 'signup-unverified' });
+    expect(planClaim(claimStateOf(r, 'b@x.com'), r, 'typed@mine.org', 'b@x.com', 'bound')).toEqual({ action: 'signup-unverified' });
   });
 
   it('refuses a linked ticket and an unavailable seat', () => {
     const linked = row({ user_id: 'u' });
-    expect(planClaim(claimStateOf(linked, 'b@x.com'), linked, 'new@x.org', 'b@x.com'))
+    expect(planClaim(claimStateOf(linked, 'b@x.com'), linked, 'new@x.org', 'b@x.com', 'bound'))
       .toEqual({ action: 'reject', reason: 'already-linked' });
     const pending = row({ guest_type: 'pending-claim' });
-    expect(planClaim(claimStateOf(pending, 'b@x.com'), pending, 'new@x.org', 'b@x.com'))
+    expect(planClaim(claimStateOf(pending, 'b@x.com'), pending, 'new@x.org', 'b@x.com', 'bound'))
       .toEqual({ action: 'reject', reason: 'unavailable' });
   });
 
   it('rejects implausible addresses before anything moves', () => {
     const r = row();
-    expect(planClaim(claimStateOf(r, 'b@x.com'), r, 'not-an-email', 'b@x.com'))
+    expect(planClaim(claimStateOf(r, 'b@x.com'), r, 'not-an-email', 'b@x.com', 'bound'))
       .toEqual({ action: 'reject', reason: 'invalid-email' });
   });
 });
@@ -92,5 +93,47 @@ describe('isPlausibleEmail', () => {
   });
   it.each(['', 'a@b', 'a b@c.com', 'vaishalimare@gmail.com.com'])('rejects %s', (e) => {
     expect(isPlausibleEmail(e)).toBe(false);
+  });
+});
+
+describe('planClaim — token binding', () => {
+  it('refuses a stale link (the ticket has moved since it was sent)', () => {
+    const r = row();
+    expect(planClaim(claimStateOf(r, 'b@x.com'), r, 'guest@example.com', 'b@x.com', 'stale'))
+      .toEqual({ action: 'reject', reason: 'stale-link' });
+    expect(planClaim(claimStateOf(r, 'b@x.com'), r, 'new@mine.org', 'b@x.com', 'stale'))
+      .toEqual({ action: 'reject', reason: 'stale-link' });
+  });
+
+  it('a legacy link never pre-verifies — the address must be confirmed by email', () => {
+    const r = row();
+    expect(planClaim(claimStateOf(r, 'b@x.com'), r, 'guest@example.com', 'b@x.com', 'legacy'))
+      .toEqual({ action: 'signup-unverified' });
+  });
+
+  it('a legacy link cannot move a ticket that has its own address (the booker may hold it)', () => {
+    const r = row();
+    expect(planClaim(claimStateOf(r, 'b@x.com'), r, 'attacker@evil.org', 'b@x.com', 'legacy'))
+      .toEqual({ action: 'reject', reason: 'needs-ticket-email' });
+  });
+
+  it('a legacy link may still move a shared-address ticket out of the booker\'s inbox', () => {
+    const r = row({ email: 'b@x.com', user_id: 'buyer' });
+    expect(planClaim(claimStateOf(r, 'b@x.com'), r, 'me@mine.org', 'b@x.com', 'legacy'))
+      .toEqual({ action: 'move', email: 'me@mine.org' });
+  });
+
+  it('an already-linked ticket is reported as linked whatever the binding', () => {
+    const linked = row({ user_id: 'u' });
+    expect(planClaim(claimStateOf(linked, 'b@x.com'), linked, 'guest@example.com', 'b@x.com', 'stale'))
+      .toEqual({ action: 'reject', reason: 'already-linked' });
+  });
+});
+
+describe('tokenBindingOf', () => {
+  it('classifies a token by its recipient hash', () => {
+    expect(tokenBindingOf(null, 'h1')).toBe('legacy');
+    expect(tokenBindingOf('h1', 'h1')).toBe('bound');
+    expect(tokenBindingOf('h1', 'h2')).toBe('stale');
   });
 });

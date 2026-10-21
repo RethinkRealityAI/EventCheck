@@ -6,8 +6,8 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import nodemailer from 'npm:nodemailer';
 import { renderEmailShell, applyPlaceholders } from '../_shared/emailShell.ts';
 import { resolveEmailTemplate } from '../_shared/emailTemplates.ts';
-import { buildAppUrl, isAbsoluteHttpUrl, resolveOrigin } from '../_shared/emailLinks.ts';
-import { buildOpenPixelUrl, appendTrackingPixel } from '../_shared/emailTracking.ts';
+import { buildAppUrl, isAbsoluteHttpUrl, resolveTrustedOrigin, trustedLinkUrl } from '../_shared/emailLinks.ts';
+import { buildOpenPixelUrl, appendTrackingPixel, trackingEndpoint } from '../_shared/emailTracking.ts';
 import { buildQrImageUrl, fetchQrPng, inlineQrSrc, qrAttachments } from '../_shared/qrEmbed.ts';
 import { HEADER_LOGO_CID, fetchRemoteImage, inlineImageSrc, inlineAttachmentEntry } from '../_shared/imageEmbed.ts';
 import { ensureTicketBlocks, prependReissueNotice, attachmentNoteFor } from '../_shared/ticketBlock.ts';
@@ -41,20 +41,41 @@ function jsonResponse(body: Record<string, any>, status = 200) {
     });
 }
 
+/** PUBLIC_SITE_URL + ALLOWED_LINK_ORIGINS: what counts as one of our own sites. */
+function linkOriginConfig() {
+    return {
+        publicSiteUrl: Deno.env.get('PUBLIC_SITE_URL'),
+        allowedOrigins: Deno.env.get('ALLOWED_LINK_ORIGINS'),
+    };
+}
+
 /**
  * The origin every link in this send is built from: what the caller passed,
- * else the request's own Origin header, else the project's PUBLIC_SITE_URL.
- * Returns '' only when none of the three is an absolute http(s) URL.
+ * else the request's own Origin header — but only when that is one of the
+ * app's own sites (_shared/emailLinks.ts isTrustedOrigin) — else the project's
+ * PUBLIC_SITE_URL. Returns '' only when nothing trusted resolves.
  *
  * Callers used to reach for `body.origin || ''` individually, which shipped
  * relative hrefs — dead buttons in an inbox — whenever Origin was stripped.
+ * And any origin used to be accepted: this function is gateway-open, so
+ * `origin: 'https://evil.example'` put a signed ticket/pay/account token on an
+ * attacker's host, delivered to the attendee's own inbox.
  */
 function sendOrigin(body: any, req: Request): string {
-    return resolveOrigin(
-        body?.origin,
-        req.headers.get('origin'),
-        Deno.env.get('PUBLIC_SITE_URL'),
-    );
+    return resolveTrustedOrigin([body?.origin, req.headers.get('origin')], linkOriginConfig());
+}
+
+/**
+ * A full link the CALLER wrote (registration-confirmed downloadUrl, staff-invite
+ * completeUrl/signupUrl), kept only on a trusted origin — re-based onto
+ * PUBLIC_SITE_URL otherwise, '' when there is none. Our own click-tracking
+ * wrapper passes when the link inside it does.
+ */
+function trustedCallerLink(url: unknown): string {
+    return trustedLinkUrl(url, {
+        ...linkOriginConfig(),
+        trackingEndpoint: trackingEndpoint(Deno.env.get('SUPABASE_URL') ?? ''),
+    });
 }
 
 /**
@@ -68,7 +89,7 @@ function missingOriginResponse(mode: string) {
         hasPublicSiteUrl: !!Deno.env.get('PUBLIC_SITE_URL'),
     }));
     return jsonResponse({
-        error: `${mode}: could not build an absolute link. Pass body.origin, or set the PUBLIC_SITE_URL secret on this project.`,
+        error: `${mode}: could not build an absolute link on one of the app's own sites. Set the PUBLIC_SITE_URL secret on this project (body.origin counts only when it is one of the app's sites).`,
     }, 400);
 }
 
@@ -620,13 +641,16 @@ serve(async (req: Request) => {
             // that does nothing from an inbox. Drop it to '' so the block is
             // omitted entirely, and log it — the confirmation itself is still
             // worth sending, and the recipient can re-request the ticket.
+            // An absolute one on a host that isn't ours is re-based onto
+            // PUBLIC_SITE_URL: this mode is gateway-open, and the link carries
+            // a signed ticket token.
             const rawDownloadUrl = body.downloadUrl || '';
             if (rawDownloadUrl && !isAbsoluteHttpUrl(rawDownloadUrl)) {
                 console.error('[send-ticket-email registration-confirmed] dropping non-absolute downloadUrl', JSON.stringify({
                     rawDownloadUrl, primaryAttendeeId: body.primaryAttendeeId,
                 }));
             }
-            const downloadUrl = isAbsoluteHttpUrl(rawDownloadUrl) ? rawDownloadUrl : '';
+            const downloadUrl = trustedCallerLink(rawDownloadUrl);
             const downloadBlock = downloadUrl
                 ? `<div style="margin-top:20px;padding:16px 18px;background:#f0f7ff;border-left:3px solid #1E4A8C;border-radius:6px;">
                      <p style="margin:0 0 10px;font-weight:600;">Your tickets</p>
@@ -650,10 +674,8 @@ serve(async (req: Request) => {
             let completeUrl = '';
             if (body.includeCompletionLink === true && !isPlaceholderEmail(primary.email)) {
                 const report = assessCompleteness(Array.isArray(form?.fields) ? form.fields : [], primary.answers ?? {});
-                const linkOrigin = resolveOrigin(
-                    Deno.env.get('PUBLIC_SITE_URL'),
-                    downloadUrl ? new URL(downloadUrl).origin : '',
-                );
+                // Never the downloadUrl's own host: that came from the caller.
+                const linkOrigin = resolveTrustedOrigin([], linkOriginConfig());
                 if (!report.complete && linkOrigin) {
                     const completeToken = await signCompleteToken(primary.id, supabaseServiceKey, Date.now(), 180 * 24 * 60 * 60 * 1000);
                     completeUrl = buildAppUrl(linkOrigin, `/#/complete?token=${encodeURIComponent(completeToken)}`);
@@ -990,6 +1012,11 @@ serve(async (req: Request) => {
             if (!isAbsoluteHttpUrl(completeUrl)) {
                 return jsonResponse({ error: `staff-invite: completeUrl must be absolute (got: ${completeUrl}). Caller must supply body.origin or a fully-qualified completeUrl.` }, 400);
             }
+            // Pre-composed callers write these URLs themselves, unauthenticated:
+            // keep them on our own sites only.
+            completeUrl = trustedCallerLink(completeUrl);
+            if (!completeUrl) return missingOriginResponse('staff-invite');
+            signupUrl = signupUrl ? trustedCallerLink(signupUrl) : signupUrl;
 
             const { data: appSettings } = await supabase
                 .from('app_settings').select('*').eq('id', 1).maybeSingle();
@@ -1096,8 +1123,11 @@ serve(async (req: Request) => {
                 .sort((a: any, b: any) => String(a.name ?? '').localeCompare(String(b.name ?? '')));
 
             const TTL = 180 * 24 * 60 * 60 * 1000;
-            const accountUrlFor = async (id: string) =>
-                buildAppUrl(origin, `/#/account?token=${encodeURIComponent(await signAccountToken(id, serviceKey, Date.now(), TTL))}`);
+            // Bound to `recipient`, the inbox this email goes to (row.email):
+            // account-claim only honours the link while the ticket it names
+            // still has that address.
+            const accountUrlFor = async (id: string, recipient: string) =>
+                buildAppUrl(origin, `/#/account?token=${encodeURIComponent(await signAccountToken(id, recipient, serviceKey, Date.now(), TTL))}`);
             const norm = (e: unknown) => String(e ?? '').trim().toLowerCase();
 
             // PDFs: the recipient's own first, then each companion's. Capped so a
@@ -1117,7 +1147,11 @@ serve(async (req: Request) => {
                     sharesRecipientEmail: shares,
                     email: shares ? null : c.email,
                     hasOwnAccount: !shares && !!c.user_id,
-                    accountUrl: await accountUrlFor(c.id),
+                    // Only for a companion registered under THIS inbox. One with
+                    // an address of their own must get their link there: in the
+                    // booker's email it let the booker create a pre-verified
+                    // account at the companion's address, or move their ticket.
+                    accountUrl: shares ? await accountUrlFor(c.id, row.email) : '',
                     pdfAttached: !!pdf,
                 });
             }
@@ -1166,7 +1200,7 @@ serve(async (req: Request) => {
                 registration_id: row.id,
                 booking_ref: (row.answers?.tscs_ref as string) || row.transaction_id || '',
                 purchaser: (booker as any)?.name || '',
-                account_url: hasAccount ? '' : await accountUrlFor(row.id),
+                account_url: hasAccount ? '' : await accountUrlFor(row.id, row.email),
                 portal_url: buildAppUrl(origin, '/#/portal'),
                 ticket_download_url: downloadUrl,
                 qr_image_url: qrImageUrl,

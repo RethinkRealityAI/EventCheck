@@ -260,21 +260,40 @@ export async function verifyCompleteToken(
 // to a new address. It can never touch a ticket already linked to someone
 // else's account, and it cannot change the name, category or payment.
 
+//
+// The token is also bound to the ADDRESS it was emailed to (`e`, a hash, so no
+// address sits in a URL). Holding the link proves you can read that inbox and
+// nothing else: account-claim pre-verifies an account only while the ticket's
+// address is still the bound one, and refuses the link once the ticket has
+// moved elsewhere. Tokens minted before the binding existed carry no `e`
+// (recipientHash null) and are treated as unproven — some of them were emailed
+// to a booker rather than to the companion they name.
+
 export interface AccountTokenPayload {
   k: 'account';
   a: string; // attendees.id
+  e?: string; // accountEmailHash(recipient address); absent on legacy tokens
   iat: number;
   exp: number;
 }
 
 export type AccountVerifyResult =
-  | { valid: true; attendeeId: string }
+  | { valid: true; attendeeId: string; recipientHash: string | null }
   | { valid: false; reason: 'malformed' | 'bad-signature' | 'expired' | 'wrong-kind' };
 
+/** Short, stable hash of a normalized address — what an account token binds. */
+export async function accountEmailHash(email: string | null | undefined): Promise<string> {
+  const normalized = String(email ?? '').trim().toLowerCase();
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`account-email:${normalized}`));
+  return b64urlEncode(new Uint8Array(digest)).slice(0, 22);
+}
+
 export async function signAccountToken(
-  attendeeId: string, secret: string, nowMs: number, ttlMs: number,
+  attendeeId: string, recipientEmail: string, secret: string, nowMs: number, ttlMs: number,
 ): Promise<string> {
-  const payload: AccountTokenPayload = { k: 'account', a: attendeeId, iat: nowMs, exp: nowMs + ttlMs };
+  const payload: AccountTokenPayload = {
+    k: 'account', a: attendeeId, e: await accountEmailHash(recipientEmail), iat: nowMs, exp: nowMs + ttlMs,
+  };
   const body = b64urlEncode(new TextEncoder().encode(JSON.stringify(payload)));
   const sig = await hmacBase64Url(secret, body);
   return `${body}.${sig}`;
@@ -297,5 +316,6 @@ export async function verifyAccountToken(
   if (raw.k !== 'account') return { valid: false, reason: 'wrong-kind' };
   if (nowMs > (raw.exp as number)) return { valid: false, reason: 'expired' };
   if (typeof raw.a !== 'string' || !raw.a) return { valid: false, reason: 'malformed' };
-  return { valid: true, attendeeId: raw.a as string };
+  const recipientHash = typeof raw.e === 'string' && raw.e ? raw.e : null;
+  return { valid: true, attendeeId: raw.a as string, recipientHash };
 }

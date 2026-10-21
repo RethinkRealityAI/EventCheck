@@ -90,16 +90,37 @@ export type ClaimRejectReason =
   | 'already-linked'
   | 'unavailable'
   | 'needs-own-email'
-  | 'purchaser-email';
+  | 'purchaser-email'
+  | 'stale-link'
+  | 'needs-ticket-email';
+
+/**
+ * How the link's token relates to the ticket's CURRENT address
+ * (registrationToken.ts, account token `e`):
+ *   'bound'  — the token was emailed to the address the ticket still has;
+ *   'stale'  — it was emailed to some other address (the ticket has moved since);
+ *   'legacy' — minted before tokens were bound, so we cannot tell who got it.
+ *              Early ticket emails handed bookers the links of companions who
+ *              had their own address, so a legacy link proves nothing.
+ */
+export type TokenBinding = 'bound' | 'stale' | 'legacy';
+
+/** `recipientHash` from the verified token vs accountEmailHash(row.email). */
+export function tokenBindingOf(recipientHash: string | null, currentEmailHash: string): TokenBinding {
+  if (!recipientHash) return 'legacy';
+  return recipientHash === currentEmailHash ? 'bound' : 'stale';
+}
 
 export function planClaim(
   state: ClaimState,
   row: ClaimRow,
   requestedEmail: string,
   purchaserEmail: string | null | undefined,
+  binding: TokenBinding,
 ): ClaimPlan {
   if (state.kind === 'unavailable') return { action: 'reject', reason: 'unavailable' };
   if (state.kind === 'linked') return { action: 'reject', reason: 'already-linked' };
+  if (binding === 'stale') return { action: 'reject', reason: 'stale-link' };
 
   const email = norm(requestedEmail);
   if (!isPlausibleEmail(email)) return { action: 'reject', reason: 'invalid-email' };
@@ -107,14 +128,20 @@ export function planClaim(
   if (email === norm(row.email)) {
     if (state.sharedEmail) return { action: 'reject', reason: 'needs-own-email' };
     // Proven only if this is the address we emailed the link to. An address
-    // this page moved the ticket to earlier was typed, not proven.
+    // this page moved the ticket to earlier was typed, not proven, and a
+    // legacy link may never have been in this inbox at all.
     const movedTo = norm(row.answers?.[MOVED_TO_KEY] as string | undefined);
-    return movedTo && movedTo === email ? { action: 'signup-unverified' } : { action: 'create-verified' };
+    if (movedTo && movedTo === email) return { action: 'signup-unverified' };
+    return binding === 'bound' ? { action: 'create-verified' } : { action: 'signup-unverified' };
   }
 
   if (row.primary_attendee_id && norm(purchaserEmail) && email === norm(purchaserEmail)) {
     return { action: 'reject', reason: 'purchaser-email' };
   }
+  // A legacy link to a ticket with its own address may be in the booker's
+  // hands; moving the ticket would take it from the person it names. Only
+  // the shared-address case (the booker's own inbox) may still move.
+  if (binding === 'legacy' && !state.sharedEmail) return { action: 'reject', reason: 'needs-ticket-email' };
   return { action: 'move', email };
 }
 
@@ -125,4 +152,6 @@ export const CLAIM_REJECT_MESSAGES: Record<ClaimRejectReason, string> = {
   'unavailable': 'This ticket is not ready for an account yet. Please contact the congress team.',
   'needs-own-email': 'This ticket was registered under the email of the person who booked it. Please enter your own email address.',
   'purchaser-email': 'That is the email of the person who booked this ticket. Please use your own email address.',
+  'stale-link': 'The email address on this ticket has changed since this link was sent. Please use the link sent to the new address, or contact the congress team.',
+  'needs-ticket-email': 'This link can only create an account at the email address on the ticket. To use a different address, please contact the congress team.',
 };
