@@ -3,9 +3,10 @@
 -- after editing to update. Requires 20261020120000_add_virtual_sessions.sql.
 --
 -- presenter_key ties a presenter's email(s) to their entries in
--- virtual_sessions.presenters. Akshat Jain and Abdulaziz Mohammed have no
--- portal account on GANSID yet, so they have no email rows — add them when
--- their addresses are known (they still appear as virtual presenters).
+-- virtual_sessions.presenters. Akshat Jain and Abdulaziz Mohammed's addresses
+-- came from the updated Zoom schedule; neither had a GANSID portal account on
+-- 2026-10-20, so the app recognises them once they sign up with these addresses
+-- and confirm their email.
 
 INSERT INTO public.virtual_presenters (email, presenter_key, name) VALUES
   ('carllander@pkdia.org',            'carl-lander',         'Mr. Carl Lander'),
@@ -19,7 +20,9 @@ INSERT INTO public.virtual_presenters (email, presenter_key, name) VALUES
   ('kunleadekile@gmail.com',          'adekunle-adekile',    'Prof. Adekunle Adekile'),
   ('klingon@bu.edu',                  'elizabeth-klings',    'Dr. Elizabeth Klings'),
   ('prabhatpositive@gmail.com',       'prabhat-sinha',       'Mr. Prabhat Sinha'),
-  ('prabhat.sinha@takeda.com',        'prabhat-sinha',       'Mr. Prabhat Sinha')
+  ('prabhat.sinha@takeda.com',        'prabhat-sinha',       'Mr. Prabhat Sinha'),
+  ('akshatjainusa@gmail.com',         'akshat-jain',         'Dr. Akshat Jain'),
+  ('mohammedab@africacdc.org',        'abdulaziz-mohammed',  'Dr. Abdulaziz Mohammed')
 ON CONFLICT (email) DO UPDATE
   SET presenter_key = EXCLUDED.presenter_key, name = EXCLUDED.name;
 
