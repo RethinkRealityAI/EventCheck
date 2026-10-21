@@ -39,6 +39,7 @@ const BULK_TEMPLATE_FOR_FILTER: Record<PortalUserFilterKey, AdminEmailTemplateKe
 const TEMPLATE_SHORT_LABELS: Record<string, string> = {
   reminder: 'Reminder',
   invitation: 'Invitation',
+  'virtual-presenters': 'Virtual',
   blank: 'Custom',
   custom: 'Custom',
 };

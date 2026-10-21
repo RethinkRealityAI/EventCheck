@@ -20,7 +20,7 @@ import type { Attendee, Form } from '../types';
 
 // ── Templates ─────────────────────────────────────────────────────────────
 
-export type AdminEmailTemplateKey = 'reminder' | 'invitation' | 'announcement' | 'blank';
+export type AdminEmailTemplateKey = 'reminder' | 'invitation' | 'announcement' | 'virtual-presenters' | 'blank';
 
 export interface EmailFields {
   heading: string;
@@ -81,6 +81,46 @@ export const ADMIN_EMAIL_TEMPLATES: Record<AdminEmailTemplateKey, { subject: str
         "You're receiving this because you registered for {{event}}. Reply to this email with any questions.",
     },
   },
+  // GANSID Congress 2026: the panelist-link email for virtual presenters.
+  // Offered on GANSID only (templateOptionsFor). The CTA opens the RLS-gated
+  // /portal/virtual page, which only virtual presenters and admins can see.
+  'virtual-presenters': {
+    subject: 'Your virtual presentation at GANSID Congress 2026 — panelist link and back-up access',
+    fields: {
+      heading: 'Your virtual presentation: panelist link and back-up access',
+      message: [
+        "Dear {{name}},",
+        "",
+        "Thank you for presenting virtually at the 4th International GANSID Congress, 23–25 October 2026.",
+        "",
+        "You have now been invited as a panelist to each of your virtual sessions. Zoom has emailed a personal panelist link to this address for each session. Please use that panelist link to join — it takes you straight in as a presenter.",
+        "",
+        "Haven't received your panelist link? Please reply to this email, or write to admin@inheritedblooddisorders.world, as soon as possible and we will resend it. It's worth checking your spam or junk folder first, and searching your inbox for \"Zoom\" or \"panelist\".",
+        "",
+        "Back-up only: the Zoom link for each of your sessions is also in the Congress app.",
+        "1. Sign in with this email address (button below). If you don't have an account yet, create one with this email address first.",
+        "2. Open \"Virtual presentation\" — there is also a card at the top of your home screen.",
+        "3. Tap \"Join on Zoom\" for your session.",
+        "",
+        "Joining this way brings you in as an attendee, and our team will then promote you to panelist. That takes a moment, so please use your panelist link whenever you can. The Virtual presentation section is visible only to our virtual presenters and the organising team.",
+        "",
+        "A few tips:",
+        "- All session times are India Standard Time (IST, UTC+5:30).",
+        "- Please join 15 minutes before your session for a sound and video check. We understand this may not be possible if you have back-to-back sessions.",
+        "- Use headphones and a wired connection if you can.",
+        "",
+        "If you have any questions, just reply to this email or write to admin@inheritedblooddisorders.world.",
+        "",
+        "We look forward to your session.",
+        "",
+        "Kind regards,",
+        "The GANSID Congress 2026 team",
+      ].join('\n'),
+      ctaLabel: 'Open my virtual sessions',
+      ctaUrl: '{{portal_url}}/virtual',
+      footerNote: 'Sign in with the email address this message was sent to.',
+    },
+  },
   blank: {
     subject: '',
     fields: { ...EMPTY_FIELDS },
@@ -97,6 +137,7 @@ export const ADMIN_EMAIL_TEMPLATE_OPTIONS: ReadonlyArray<AdminEmailTemplateOptio
   { key: 'reminder', label: 'Registration Reminder', description: 'Nudge someone who started but did not finish' },
   { key: 'invitation', label: 'Invitation / Marketing', description: 'Invite someone who has not signed up yet' },
   { key: 'announcement', label: 'Announcement / Update', description: 'News for people who are already registered' },
+  { key: 'virtual-presenters', label: 'Virtual presenters — panelist link', description: 'GANSID virtual presenters: use the Zoom panelist link; the app link is a back-up' },
   { key: 'blank', label: 'Blank / Custom', description: 'Start from scratch' },
 ];
 
@@ -105,6 +146,7 @@ export const ADMIN_EMAIL_TEMPLATE_LABELS: Record<string, string> = {
   reminder: 'Registration Reminder',
   invitation: 'Invitation / Marketing',
   announcement: 'Announcement / Update',
+  'virtual-presenters': 'Virtual presenters',
   blank: 'Blank / Custom',
   custom: 'Custom',
   bulk: 'Campaign',
@@ -117,11 +159,13 @@ export type AdminEmailAudience = 'signups' | 'attendees';
 
 /** Reminder / invitation only make sense for portal accounts (they resume
  *  or start a registration); registered attendees get announcement + blank. */
-export function templateOptionsFor(audience: AdminEmailAudience): AdminEmailTemplateOption[] {
+export function templateOptionsFor(audience: AdminEmailAudience, site: string = CURRENT_SITE.key): AdminEmailTemplateOption[] {
+  // The virtual-presenters email is GANSID Congress copy; SCAGO never sees it.
+  const forSite = ADMIN_EMAIL_TEMPLATE_OPTIONS.filter(o => o.key !== 'virtual-presenters' || site === 'gansid');
   if (audience === 'attendees') {
-    return ADMIN_EMAIL_TEMPLATE_OPTIONS.filter(o => o.key === 'announcement' || o.key === 'blank');
+    return forSite.filter(o => o.key === 'announcement' || o.key === 'virtual-presenters' || o.key === 'blank');
   }
-  return [...ADMIN_EMAIL_TEMPLATE_OPTIONS];
+  return forSite;
 }
 
 /** Registered means paid OR free — a comped registrant must not be offered

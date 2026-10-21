@@ -49,6 +49,21 @@ describe('templateOptionsFor', () => {
     expect(templateOptionsFor('signups').map(o => o.key)).toEqual(['reminder', 'invitation', 'announcement', 'blank']);
     expect(templateOptionsFor('attendees').map(o => o.key)).toEqual(['announcement', 'blank']);
   });
+
+  it('offers the virtual-presenters template on GANSID only, to both audiences', () => {
+    expect(templateOptionsFor('signups', 'gansid').map(o => o.key)).toEqual(['reminder', 'invitation', 'announcement', 'virtual-presenters', 'blank']);
+    expect(templateOptionsFor('attendees', 'gansid').map(o => o.key)).toEqual(['announcement', 'virtual-presenters', 'blank']);
+    expect(templateOptionsFor('signups', 'scago').map(o => o.key)).not.toContain('virtual-presenters');
+  });
+
+  it('virtual-presenters template carries the panelist guidance and the app back-up link', () => {
+    const t = ADMIN_EMAIL_TEMPLATES['virtual-presenters'];
+    expect(t.fields.ctaUrl).toBe('{{portal_url}}/virtual');
+    expect(t.fields.message).toContain('panelist link');
+    expect(t.fields.message).toContain('admin@inheritedblooddisorders.world');
+    expect(t.fields.message).toContain('back-to-back');
+    expect(t.fields.message.startsWith('Dear {{name}},')).toBe(true);
+  });
 });
 
 describe('buildPortalUserVars', () => {
