@@ -48,7 +48,8 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { signRegistrationToken } from '../_shared/registrationToken.ts';
-import { buildAppUrl, resolveOrigin } from '../_shared/emailLinks.ts';
+import { buildAppUrl } from '../_shared/emailLinks.ts';
+import { trustedSiteOrigin } from '../_shared/siteOrigin.ts';
 import { plainTextToHtml, renderEmailShell } from '../_shared/emailShell.ts';
 import {
   parseTscsEmail,
@@ -158,7 +159,7 @@ async function sendTicketFor(attendeeId: string, origin: string): Promise<{ ok: 
   try {
     const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const token = await signRegistrationToken(attendeeId, TSCS_FORM_ID, serviceKey, Date.now(), 180 * 24 * 60 * 60 * 1000);
-    const base = resolveOrigin(origin, Deno.env.get('PUBLIC_SITE_URL'));
+    const base = trustedSiteOrigin(origin);
     const downloadUrl = base ? buildAppUrl(base, `/#/tickets?token=${encodeURIComponent(token)}`) : '';
     const resp = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/send-ticket-email`, {
       method: 'POST',
@@ -222,7 +223,7 @@ async function recordRun(supabase: any, row: Record<string, unknown>): Promise<v
 async function alertNeedsReview(count: number, source: string, origin: string): Promise<void> {
   try {
     const to = Deno.env.get('TSCS_ALERT_EMAIL') || 'admin@inheritedblooddisorders.world';
-    const base = resolveOrigin(origin, Deno.env.get('PUBLIC_SITE_URL'));
+    const base = trustedSiteOrigin(origin);
     const link = base ? buildAppUrl(base, '/#/admin/india') : '';
     const noun = count === 1 ? 'registration email' : 'registration emails';
     // raw-html mode sends exactly what it is given, so the shell must be

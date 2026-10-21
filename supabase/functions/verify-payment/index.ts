@@ -7,7 +7,8 @@ import {
 import { signRegistrationToken } from '../_shared/registrationToken.ts';
 import { normalizeAttendeeRows, escapeLikePattern } from '../_shared/attendeeRows.ts';
 import { verifyFlutterwaveTransaction } from '../_shared/flutterwaveVerify.ts';
-import { buildAppUrl, resolveOrigin } from '../_shared/emailLinks.ts';
+import { buildAppUrl } from '../_shared/emailLinks.ts';
+import { trustedSiteOrigin } from '../_shared/siteOrigin.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -303,7 +304,7 @@ async function sendRegistrationConfirmedEmail(
     // the PayPal-capture note below). Fall back to the per-project PUBLIC_SITE_URL
     // env so the emailed link is never host-relative (which is unclickable from
     // an inbox). If both are absent we still send — the link works in-app.
-    const base = resolveOrigin(origin, Deno.env.get('PUBLIC_SITE_URL'));
+    const base = trustedSiteOrigin(origin);
     if (!base) {
       // Send the confirmation anyway — it's still proof of registration — but
       // with NO download link rather than a relative one that renders as a

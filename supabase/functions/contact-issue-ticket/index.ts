@@ -16,6 +16,8 @@ import { signRegistrationToken } from '../_shared/registrationToken.ts';
 import { buildIssuedAttendeeRow } from '../_shared/issuedTicket.ts';
 import { pickAttendeeForContact } from '../_shared/attendeeIdentity.ts';
 import { wrapClickUrl } from '../_shared/emailTracking.ts';
+import { buildAppUrl } from '../_shared/emailLinks.ts';
+import { trustedSiteOrigin } from '../_shared/siteOrigin.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -71,11 +73,12 @@ Deno.serve(async (req: Request) => {
       let ok = false;
       let subject = 'Your ticket';
       try {
-        const base = String(origin || Deno.env.get('PUBLIC_SITE_URL') || '');
+        // Only one of our own sites — never the caller's origin as given.
+        const base = trustedSiteOrigin(origin, req.headers.get('origin'));
         const token = await signRegistrationToken(attendeeId, formId, serviceKey, Date.now(), DOWNLOAD_TTL_MS);
         // The download link is the one actionable URL in this email — wrap it
         // so clicks register, exactly like a campaign CTA.
-        const rawDownloadUrl = `${base}/#/tickets?token=${encodeURIComponent(token)}`;
+        const rawDownloadUrl = buildAppUrl(base, `/#/tickets?token=${encodeURIComponent(token)}`);
         const downloadUrl = wrapClickUrl(url, trackingId, rawDownloadUrl);
         const resp = await fetch(`${url}/functions/v1/send-ticket-email`, {
           method: 'POST',

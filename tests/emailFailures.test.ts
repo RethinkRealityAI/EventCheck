@@ -50,9 +50,10 @@ describe('planRetry', () => {
     }
   });
 
-  it('passes an explicit recipient for staff-claim-completed', () => {
+  it('never passes a recipient — the server sends to the row\'s current address', () => {
     const plan = planRetry(rec({ mode: 'staff-claim-completed' }), ORIGIN);
-    if (plan.kind === 'auto') expect(plan.body.to).toBe('sameera.g@novartis.com');
+    expect(plan.kind).toBe('auto');
+    if (plan.kind === 'auto') expect(plan.body).not.toHaveProperty('to');
   });
 
   it('sends raw-html to the composer instead of offering a button that cannot work', () => {

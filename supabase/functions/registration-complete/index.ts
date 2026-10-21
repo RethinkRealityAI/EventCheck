@@ -30,7 +30,8 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { signCompleteToken, verifyCompleteToken } from '../_shared/registrationToken.ts';
-import { buildAppUrl, resolveOrigin } from '../_shared/emailLinks.ts';
+import { buildAppUrl } from '../_shared/emailLinks.ts';
+import { trustedSiteOrigin } from '../_shared/siteOrigin.ts';
 import { appendTrackingPixel, buildOpenPixelUrl, wrapClickUrl } from '../_shared/emailTracking.ts';
 import { emailButtonStyle, renderEmailShell, type SiteKey } from '../_shared/emailShell.ts';
 import {
@@ -231,7 +232,7 @@ Deno.serve(async (req: Request) => {
       const admin = await assertAdmin(req, url, anonKey, svc);
       if (!admin) return json({ error: 'forbidden' }, 403);
 
-      const origin = resolveOrigin(body?.origin, req.headers.get('origin'), Deno.env.get('PUBLIC_SITE_URL'));
+      const origin = trustedSiteOrigin(body?.origin, req.headers.get('origin'));
       if (!origin) return json({ error: 'origin must be an absolute http(s) URL (or set PUBLIC_SITE_URL)' }, 400);
 
       const mintLink = async (attendeeId: string) => {

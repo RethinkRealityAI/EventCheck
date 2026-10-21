@@ -35,7 +35,8 @@
 
 // @deno-types="npm:@supabase/supabase-js"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.46.1';
-import { buildAppUrl, resolveOrigin } from '../_shared/emailLinks.ts';
+import { buildAppUrl } from '../_shared/emailLinks.ts';
+import { trustedSiteOrigin } from '../_shared/siteOrigin.ts';
 import { canCallerActOnTarget, generateTempPassword, ADMIN_USER_ACTIONS } from '../_shared/adminUserActions.ts';
 
 const corsHeaders: Record<string, string> = {
@@ -134,7 +135,7 @@ Deno.serve(async (req: Request) => {
   const email = String(body.email || '').trim().toLowerCase();
   if (!email || !EMAIL_RE.test(email)) return json({ error: 'Valid email required' }, 400);
 
-  const origin = resolveOrigin(req.headers.get('Origin'), Deno.env.get('PUBLIC_SITE_URL'));
+  const origin = trustedSiteOrigin(req.headers.get('Origin'));
   if (!origin) return json({ error: 'origin unavailable (set PUBLIC_SITE_URL)' }, 400);
 
   const targetUser = await findAuthUserByEmail(admin, email);

@@ -6,7 +6,8 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import nodemailer from 'npm:nodemailer';
 import { renderEmailShell, applyPlaceholders } from '../_shared/emailShell.ts';
 import { resolveEmailTemplate } from '../_shared/emailTemplates.ts';
-import { buildAppUrl, isAbsoluteHttpUrl, resolveTrustedOrigin, trustedLinkUrl } from '../_shared/emailLinks.ts';
+import { buildAppUrl, isAbsoluteHttpUrl, trustedLinkUrl } from '../_shared/emailLinks.ts';
+import { siteOriginConfig, trustedSiteOrigin } from '../_shared/siteOrigin.ts';
 import { buildOpenPixelUrl, appendTrackingPixel, trackingEndpoint } from '../_shared/emailTracking.ts';
 import { buildQrImageUrl, fetchQrPng, inlineQrSrc, qrAttachments } from '../_shared/qrEmbed.ts';
 import { HEADER_LOGO_CID, fetchRemoteImage, inlineImageSrc, inlineAttachmentEntry } from '../_shared/imageEmbed.ts';
@@ -19,6 +20,7 @@ import { resolveAttendeeDisplayName } from '../_shared/attendeeDisplayName.ts';
 import { guessImageContentType, isFetchableImageUrl } from '../_shared/imageEmbed.ts';
 import { signRegistrationToken, signPayToken, signCompleteToken, signAccountToken } from '../_shared/registrationToken.ts';
 import { claimStateOf } from '../_shared/accountClaim.ts';
+import { refFromClaimUrl, resolveStaffRecipient } from '../_shared/staffRecipient.ts';
 import { renderConditionals, strayConditionalTokens, buildCompanionListHtml, eventDisplayName, type CompanionTicket } from '../_shared/customTicket.ts';
 import { assessCompleteness } from '../_shared/registrationCompleteness.ts';
 import { assessPayability } from '../_shared/payBalance.ts';
@@ -41,13 +43,6 @@ function jsonResponse(body: Record<string, any>, status = 200) {
     });
 }
 
-/** PUBLIC_SITE_URL + ALLOWED_LINK_ORIGINS: what counts as one of our own sites. */
-function linkOriginConfig() {
-    return {
-        publicSiteUrl: Deno.env.get('PUBLIC_SITE_URL'),
-        allowedOrigins: Deno.env.get('ALLOWED_LINK_ORIGINS'),
-    };
-}
 
 /**
  * The origin every link in this send is built from: what the caller passed,
@@ -62,7 +57,7 @@ function linkOriginConfig() {
  * attacker's host, delivered to the attendee's own inbox.
  */
 function sendOrigin(body: any, req: Request): string {
-    return resolveTrustedOrigin([body?.origin, req.headers.get('origin')], linkOriginConfig());
+    return trustedSiteOrigin(body?.origin, req.headers.get('origin'));
 }
 
 /**
@@ -73,7 +68,7 @@ function sendOrigin(body: any, req: Request): string {
  */
 function trustedCallerLink(url: unknown): string {
     return trustedLinkUrl(url, {
-        ...linkOriginConfig(),
+        ...siteOriginConfig(),
         trackingEndpoint: trackingEndpoint(Deno.env.get('SUPABASE_URL') ?? ''),
     });
 }
@@ -675,7 +670,7 @@ serve(async (req: Request) => {
             if (body.includeCompletionLink === true && !isPlaceholderEmail(primary.email)) {
                 const report = assessCompleteness(Array.isArray(form?.fields) ? form.fields : [], primary.answers ?? {});
                 // Never the downloadUrl's own host: that came from the caller.
-                const linkOrigin = resolveTrustedOrigin([], linkOriginConfig());
+                const linkOrigin = trustedSiteOrigin();
                 if (!report.complete && linkOrigin) {
                     const completeToken = await signCompleteToken(primary.id, supabaseServiceKey, Date.now(), 180 * 24 * 60 * 60 * 1000);
                     completeUrl = buildAppUrl(linkOrigin, `/#/complete?token=${encodeURIComponent(completeToken)}`);
@@ -918,16 +913,15 @@ serve(async (req: Request) => {
         }
 
         // ── STAFF INVITE (sponsor_exhibitor combined form): send registration-completion link
-        //    to a staff member. Two call patterns:
-        //      1) Pre-composed: caller supplies (to, name, purchaser, orgName, category,
-        //         completeUrl, signupUrl, eventName). Used by PublicSponsorExhibitorForm
-        //         and PortalDashboard at submit/fill-in time when they already have all
-        //         the org context loaded.
-        //      2) Hydrate-from-attendeeId: caller supplies only `attendeeId` (+ optional
-        //         `origin`). Used by the admin "Resend invitation" action in
-        //         ExhibitorsTab where the client only has the staff row's id. We fetch
-        //         the staff row, primary org, and form server-side and compose the
-        //         claim URL as `${origin}/#/form/<staff.form_id>?ref=<staff.id>`.
+        //    to a staff member. Body: { attendeeId, origin? } (ExhibitorsTab "Resend",
+        //    PublicSponsorExhibitorForm). The Portal dashboard's older pre-composed
+        //    shape { to, completeUrl, … } still works: the staff id is read from
+        //    completeUrl's ?ref=, `to` must match the row, and every other field
+        //    it sends is IGNORED. Recipient, names and links always come from the
+        //    staff row, primary org and form — this mode is gateway-open, and
+        //    taking them from the request made it an unauthenticated relay to any
+        //    address (2026-10-20). The claim URL is
+        //    `${trusted origin}/#/form/<staff.form_id>?ref=<staff.id>`.
         //    Either way, the completeUrl MUST point at the public registration form
         //    (`/#/form/<formId>?ref=<id>`) so PublicRegistration's pending-claim
         //    handler can pre-fill the staff member's name/email/category. Pointing at
@@ -941,30 +935,36 @@ serve(async (req: Request) => {
             const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
             const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-            // Hydrate any missing fields from the staff attendee row when the
-            // caller supplied an attendeeId (admin "Resend" path). Fields the
-            // caller passes explicitly always take precedence.
-            let to = body.to as string | undefined;
-            let name = body.name as string | undefined;
-            let purchaser = body.purchaser as string | undefined;
-            let orgName = body.orgName as string | undefined;
-            let category = body.category as string | undefined;
-            let completeUrl = body.completeUrl as string | undefined;
-            let signupUrl = body.signupUrl as string | undefined;
-            let eventName = body.eventName as string | undefined;
-            // Per-form overrides are only resolvable when we hydrate the form row
-            // (pattern 2). Pre-composed callers (pattern 1) don't identify the form,
-            // so they get the global/default template chain.
+            // Everything comes from the staff row — recipient, names, links.
+            // This mode is gateway-open, and it used to send caller-written
+            // copy and links to a caller-chosen `to` (_shared/staffRecipient.ts).
+            // The row is named by attendeeId, or — for the Portal dashboard's
+            // fill-in send, which predates attendeeId — by the ?ref= in its
+            // completeUrl. A caller `to` must match the row's address.
+            const staffId = (typeof body.attendeeId === 'string' && body.attendeeId) || refFromClaimUrl(body.completeUrl);
+            if (!staffId) return jsonResponse({ error: 'staff-invite: attendeeId is required' }, 400);
+            let to: string;
+            let name: string;
+            let purchaser: string;
+            let orgName: string;
+            let category: string;
+            let completeUrl: string;
+            let signupUrl: string;
+            let eventName: string;
             let formEmailOverrides: any = undefined;
-
-            const needsHydration = !to || !completeUrl || !name;
-            if (needsHydration && body.attendeeId) {
+            {
                 const { data: staff } = await supabase
                     .from('attendees')
                     .select('*')
-                    .eq('id', body.attendeeId)
+                    .eq('id', staffId)
                     .maybeSingle();
                 if (!staff) return jsonResponse({ error: 'Staff member not found' }, 404);
+                const recipient = resolveStaffRecipient(staff.email, body.to);
+                if (!recipient.ok) {
+                    return jsonResponse({ error: recipient.reason === 'mismatch'
+                        ? 'staff-invite: `to` does not match this staff member\'s email — save the new address first'
+                        : 'staff-invite: this staff seat has no email address yet' }, 400);
+                }
 
                 const { data: org } = staff.primary_attendee_id
                     ? await supabase
@@ -988,35 +988,28 @@ serve(async (req: Request) => {
                     : staffCategory === 'full_congress' ? 'Full Congress'
                     : 'Staff';
 
-                if (!to) to = staff.email;
-                if (!name) name = staff.name || 'there';
+                to = recipient.to;
+                name = staff.name || 'there';
                 // Prefer the contact person's name (company_info.contactName) over
                 // the primary attendee's `name` column. For sponsor_exhibitor primaries
                 // verify-payment writes `name: org.orgName` (the organization name),
                 // so falling back to `org.name` first would produce emails reading
                 // "Acme Corp has registered you for the Congress" instead of
                 // "John Smith has registered you for the Congress".
-                if (!purchaser) purchaser = (org?.company_info as any)?.contactName || org?.name || 'A colleague';
-                if (!orgName) orgName = (org?.company_info as any)?.orgName || '';
-                if (!category) category = categoryLabel;
-                if (!completeUrl) completeUrl = buildAppUrl(origin, `/#/form/${staff.form_id}?ref=${staff.id}`);
-                if (!signupUrl) signupUrl = buildAppUrl(origin, '/#/');
-                if (!eventName) eventName = form?.title || 'the event';
+                purchaser = (org?.company_info as any)?.contactName || org?.name || 'A colleague';
+                orgName = (org?.company_info as any)?.orgName || '';
+                category = categoryLabel;
+                // Origin falls back to the caller's completeUrl host, which
+                // trustedSiteOrigin accepts only when it is one of our sites.
+                const linkOrigin = origin || trustedSiteOrigin(body.completeUrl);
+                completeUrl = buildAppUrl(linkOrigin, `/#/form/${staff.form_id}?ref=${staff.id}`);
+                signupUrl = buildAppUrl(linkOrigin, '/#/');
+                eventName = form?.title || 'the event';
             }
 
-            if (!to) return jsonResponse({ error: 'staff-invite: missing recipient (to/attendeeId)' }, 400);
-            if (!completeUrl) return jsonResponse({ error: 'staff-invite: missing completeUrl (and could not derive from attendeeId)' }, 400);
             // completeUrl must be absolute — relative URLs render as dead links in
-            // email clients. This catches a missing `body.origin` in the hydrate path
-            // before we silently send a broken invitation.
-            if (!isAbsoluteHttpUrl(completeUrl)) {
-                return jsonResponse({ error: `staff-invite: completeUrl must be absolute (got: ${completeUrl}). Caller must supply body.origin or a fully-qualified completeUrl.` }, 400);
-            }
-            // Pre-composed callers write these URLs themselves, unauthenticated:
-            // keep them on our own sites only.
-            completeUrl = trustedCallerLink(completeUrl);
+            // email clients.
             if (!completeUrl) return missingOriginResponse('staff-invite');
-            signupUrl = signupUrl ? trustedCallerLink(signupUrl) : signupUrl;
 
             const { data: appSettings } = await supabase
                 .from('app_settings').select('*').eq('id', 1).maybeSingle();
@@ -1402,8 +1395,17 @@ serve(async (req: Request) => {
                 ? await embedQrForEmail(html, qrData, qrImageUrl, pdfAttachments.length === 0)
                 : { html, attachments: [] as any[] };
 
-            const to = body.to || staffRow?.email;
-            if (!to) return jsonResponse({ error: 'staff-claim-completed: missing recipient (to/attendeeId)' }, 400);
+            // Only ever the row's own address: this mode carries the person's
+            // real ticket (PDF, QR, download token), and `body.to || row.email`
+            // let anyone have it sent wherever they liked (staffRecipient.ts).
+            if (!staffRow) return jsonResponse({ error: 'staff-claim-completed: attendeeId is required' }, 400);
+            const recipient = resolveStaffRecipient(staffRow.email, body.to);
+            if (!recipient.ok) {
+                return jsonResponse({ error: recipient.reason === 'mismatch'
+                    ? 'staff-claim-completed: `to` does not match this staff member\'s email — save the new address first'
+                    : 'staff-claim-completed: this staff seat has no email address yet' }, 400);
+            }
+            const to = recipient.to;
 
             await sendSimpleEmail({
                 to,

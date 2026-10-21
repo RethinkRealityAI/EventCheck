@@ -13,7 +13,8 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { signInviteToken } from '../_shared/registrationToken.ts';
-import { buildAppUrl, resolveOrigin } from '../_shared/emailLinks.ts';
+import { buildAppUrl } from '../_shared/emailLinks.ts';
+import { trustedSiteOrigin } from '../_shared/siteOrigin.ts';
 import { buildOpenPixelUrl, wrapClickUrl, appendTrackingPixel } from '../_shared/emailTracking.ts';
 
 // supabase-js v2.45+ injects x-supabase-client-platform + x-supabase-api-version
@@ -51,7 +52,7 @@ serve(async (req: Request) => {
     const { contactId, formId, origin, subject, html, trackingId: rawTrackingId } = await req.json();
     if (!contactId || !formId || !origin || !subject || !html) return json({ error: 'missing-fields' }, 400);
     // The invite IS the link — a relative origin would email a dead button.
-    const inviteOrigin = resolveOrigin(origin, req.headers.get('origin'), Deno.env.get('PUBLIC_SITE_URL'));
+    const inviteOrigin = trustedSiteOrigin(origin, req.headers.get('origin'));
     if (!inviteOrigin) return json({ error: 'origin must be an absolute http(s) URL (or set PUBLIC_SITE_URL)' }, 400);
 
     const { data: contact } = await svc.from('imported_contacts').select('id, email').eq('id', contactId).maybeSingle();

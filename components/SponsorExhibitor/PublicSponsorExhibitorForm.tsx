@@ -26,7 +26,6 @@ import { supabase } from '../../services/supabaseClient';
 import { describePayPalError, payPalErrorReference } from '../../utils/paypalPayer';
 import { logPaymentFailure } from '../../services/paymentDiagnosticsService';
 import { CURRENT_SITE } from '../../config/sites';
-import { staffCategoryLabel } from '../../utils/teamTickets';
 
 interface Props {
   form: Form;
@@ -320,17 +319,10 @@ export default function PublicSponsorExhibitorForm({ form, settings, isEmbedded 
       if (fnErr) throw new Error(fnErr.message);
 
       const staffIds = (data?.staffIds || []) as string[];
-      // Staff invite link MUST point at the public registration form
-      // (`/#/form/<staffFormId>?ref=<staffId>`) so PublicRegistration's
-      // pending-claim handler can pre-fill the staff member's name/email/category
-      // and let them complete the remaining personal fields without being
-      // forced through the portal landing/signup at `/`. The optional
-      // `signupUrl` (still pointing at `/`) is offered as a separate "create
-      // a portal account" link inside the email body.
-      const complete = (id: string) => `${window.location.origin}/#/form/${staffFormId}?ref=${id}`;
-      const signup = `${window.location.origin}/#/`;
+      // The staff invite's claim link (`/#/form/<staffFormId>?ref=<staffId>`)
+      // is built server-side from the staff row — see send-ticket-email
+      // staff-invite.
       const eventName = (CURRENT_SITE as any).displayName || form.title;
-      const categoryLabel = staffCategoryLabel;
 
       for (let i = 0; i < staff.length; i++) {
         const entry = staff[i];
@@ -365,16 +357,13 @@ export default function PublicSponsorExhibitorForm({ form, settings, isEmbedded 
             });
           } else {
             await supabase.functions.invoke('send-ticket-email', {
+              // The server builds the invite from the staff row (recipient,
+              // names, links); `to` is only checked against it.
               body: {
                 mode: 'staff-invite',
+                attendeeId: id,
                 to: entry.email,
-                name: entry.name,
-                purchaser: org.contactName,
-                orgName: org.orgName,
-                category: categoryLabel(entry.category),
-                completeUrl: complete(id),
-                signupUrl: signup,
-                eventName,
+                origin: window.location.origin,
               },
             });
           }

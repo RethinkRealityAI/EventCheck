@@ -77,10 +77,10 @@ export function planRetry(f: EmailFailureRecord, origin: string): RetryPlan {
     return { kind: 'auto', mode, body: { mode, primaryAttendeeId: id, origin } };
   }
   if (RETRYABLE_BY_ATTENDEE_ID.has(mode)) {
+    // No `to`, for any mode: the server always sends to the row's CURRENT
+    // address (staffRecipient.ts), and a recipient copied from the failure
+    // record is refused once that address has changed.
     const body: Record<string, unknown> = { mode, attendeeId: id, origin };
-    // staff-claim-completed is the one mode that still needs an explicit
-    // recipient — its caller historically passed pre-composed fields.
-    if (mode === 'staff-claim-completed' && f.recipient) body.to = f.recipient;
     return { kind: 'auto', mode, body };
   }
 
