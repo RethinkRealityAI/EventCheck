@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ChevronRight } from 'lucide-react';
 import { sessionById } from '../../../config/congressProgram';
-import { buildSpeakerDirectory, initialsFor, sessionWhen } from '../../../utils/congressDirectory';
+import { abstractsByPerson, buildSpeakerDirectory, initialsFor, sessionWhen } from '../../../utils/congressDirectory';
 import { BackHeader, GLASS_CARD, PRESS, RoomPill } from '../ui/congressUi';
 
 const SPEAKERS = buildSpeakerDirectory();
@@ -67,6 +67,11 @@ export function SpeakerDetailPage() {
                   <span className="block font-display text-[14px] font-bold leading-snug text-gansid-on-surface text-pretty">
                     {s.title}
                   </span>
+                  {abstractsByPerson(s, speaker.key).map((a) => (
+                    <span key={a.title} className="mt-1 block font-body text-[12.5px] leading-snug text-gansid-on-surface/65 text-pretty">
+                      {a.start}–{a.end} · {a.title}
+                    </span>
+                  ))}
                   <span className="mt-1 flex flex-wrap items-center gap-2">
                     <span className="font-body text-xs text-gansid-on-surface/50">{sessionWhen(s)}</span>
                     <RoomPill room={s.room} />

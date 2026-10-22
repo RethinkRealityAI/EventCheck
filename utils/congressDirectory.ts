@@ -2,6 +2,7 @@ import {
   CONGRESS_PROGRAM,
   DAY_DATE,
   SESSION_KIND_LABEL,
+  type AbstractTalk,
   type ProgramSession,
 } from '../config/congressProgram';
 
@@ -86,6 +87,11 @@ export interface Speaker {
   bio?: string;
 }
 
+/** The oral abstracts a person presents in a session (matched on name key). */
+export function abstractsByPerson(s: ProgramSession, key: string): AbstractTalk[] {
+  return (s.abstracts ?? []).filter((a) => a.presenters.some((p) => parsePerson(p).key === key));
+}
+
 const surname = (key: string) => key.split(' ').slice(-1)[0];
 
 export function buildSpeakerDirectory(sessions: ProgramSession[] = CONGRESS_PROGRAM): Speaker[] {
@@ -162,7 +168,7 @@ export const ALL_TOPICS = 'All topics';
  */
 export function topicsForSession(s: ProgramSession): string[] {
   if (s.topics && s.topics.length) return s.topics;
-  const hay = [s.title, SESSION_KIND_LABEL[s.kind], ...(s.talks ?? [])].join(' ');
+  const hay = [s.title, SESSION_KIND_LABEL[s.kind], ...(s.talks ?? []), ...(s.abstracts ?? []).map((a) => a.title)].join(' ');
   return TOPICS.filter((t) => t.re.test(hay)).map((t) => t.label);
 }
 
@@ -217,6 +223,10 @@ export function filterSpeakers(
         ...sp.orgs,
         ...sp.roles,
         ...sp.appearances.map((a) => sessionById(a.sessionId)?.title ?? ''),
+        ...sp.appearances.flatMap((a) => {
+          const s = sessionById(a.sessionId);
+          return s ? abstractsByPerson(s, sp.key).map((t) => t.title) : [];
+        }),
       ]
         .join(' ')
         .toLowerCase();
