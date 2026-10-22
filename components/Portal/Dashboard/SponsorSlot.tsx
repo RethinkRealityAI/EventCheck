@@ -51,12 +51,20 @@ export interface SponsorTileProps {
 }
 
 /**
- * Proportions follow Novartis's approved artwork (FA-11814270, 10/2026),
- * scaled to a narrow 290px card: ~6% side padding, logo ~38% of the width,
- * tight corner radius, a regular-weight CTA and the legal/FUSE footer under
- * the button. Body text is deliberately NOT scaled down with the rest — a
- * literal scale would land near 8px — so it stays legible on a phone.
+ * A scaled-down copy of Novartis's approved artwork (FA-11814270, 10/2026).
+ *
+ * Every size below is written in the artwork's own points (the card is 420pt
+ * wide) and converted to container-query units of the card's width, so the
+ * whole tile scales as ONE piece: as wide as the column allows, capped at the
+ * artwork's native 420px, with spacing, type, logo, button and footer keeping
+ * the PDF's proportions at any width. Measured from the PDF itself with
+ * PyMuPDF. The only deviation: the two footer lines have a small floor so they
+ * stay readable on a phone instead of shrinking to ~4px.
  */
+const ART_WIDTH_PT = 420;
+const pt = (v: number) => `${((v / ART_WIDTH_PT) * 100).toFixed(3)}cqw`;
+const ptMin = (v: number, minPx: number) => `max(${pt(v)}, ${minPx}px)`;
+
 export function SponsorTile({
   name = 'Novartis',
   logoUrl = null,
@@ -69,51 +77,84 @@ export function SponsorTile({
   if (!FEATURES.sponsorTiles) return null;
 
   return (
-    <article
-      aria-label={name}
-      className="mx-auto w-full max-w-[290px] overflow-hidden rounded-[12px] bg-white"
-      style={{ boxShadow: `inset 0 0 0 1px ${NV.lightGrey}, 0 18px 40px -24px rgba(28,28,26,0.45)` }}
-    >
-      {imageUrl && <img src={imageUrl} alt="" loading="lazy" className="aspect-[4/3] w-full object-cover" />}
+    // The wrapper is the size container the cqw units resolve against.
+    <div className="mx-auto w-full max-w-[420px]" style={{ containerType: 'inline-size' }}>
+      <article
+        aria-label={name}
+        className="overflow-hidden bg-white"
+        style={{
+          borderRadius: pt(13),
+          boxShadow: `inset 0 0 0 1px ${NV.lightGrey}, 0 18px 40px -24px rgba(28,28,26,0.45)`,
+        }}
+      >
+        {imageUrl && <img src={imageUrl} alt="" loading="lazy" className="aspect-[4/3] w-full object-cover" />}
 
-      <div className="px-[18px] pb-2.5 pt-5">
-        {logoUrl ? (
-          <img src={logoUrl} alt={name} className="h-auto w-[112px] max-w-full" />
-        ) : (
-          <span className="font-display text-base font-bold uppercase tracking-[0.06em]" style={{ color: NV.warmBlack }}>
-            {name}
-          </span>
-        )}
+        <div style={{ padding: `${pt(27.8)} ${pt(27)} ${pt(5)}` }}>
+          {logoUrl ? (
+            <img src={logoUrl} alt={name} className="block h-auto" style={{ width: pt(160.5) }} />
+          ) : (
+            <span className="font-display font-bold uppercase tracking-[0.06em]" style={{ color: NV.warmBlack, fontSize: pt(16) }}>
+              {name}
+            </span>
+          )}
 
-        {body && (
-          <>
-            <div className="mb-[11px] mt-3 h-px" style={{ background: NV.lightGrey }} />
-            <p className="text-[12.5px] leading-[1.65]" style={{ color: NV.warmBlack, fontFamily: NV_FONT }}>
-              {body}
-            </p>
-          </>
-        )}
+          {body && (
+            <>
+              <div style={{ marginTop: pt(17.9), height: 'max(1px, 0.19cqw)', background: NV.lightGrey }} />
+              <p
+                style={{
+                  marginTop: pt(13.6),
+                  fontSize: pt(12.69),
+                  lineHeight: 20 / 12.69,
+                  color: NV.warmBlack,
+                  fontFamily: NV_FONT,
+                }}
+              >
+                {body}
+              </p>
+            </>
+          )}
 
-        {href && (
-          <a
-            href={href}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="mt-[18px] flex w-full items-center justify-center gap-2 rounded-[8px] py-[9px] text-[13.5px] font-normal text-white shadow-[0_10px_22px_-14px_rgba(28,28,26,0.7)] transition-transform duration-300 ease-viscous active:scale-[0.98]"
-            style={{ background: NV.warmBlack, fontFamily: NV_FONT }}
-          >
-            Visit {name}
-            <ArrowUpRight className="h-3.5 w-3.5" aria-hidden />
-          </a>
-        )}
+          {href && (
+            <a
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex w-full items-center justify-center font-normal text-white shadow-[0_10px_22px_-14px_rgba(28,28,26,0.7)] transition-transform duration-300 ease-viscous active:scale-[0.98]"
+              style={{
+                marginTop: pt(23),
+                height: pt(46),
+                gap: pt(12),
+                borderRadius: pt(9),
+                fontSize: pt(12.5),
+                background: NV.warmBlack,
+                fontFamily: NV_FONT,
+              }}
+            >
+              Visit {name}
+              <ArrowUpRight aria-hidden style={{ width: pt(10), height: pt(10) }} />
+            </a>
+          )}
 
-        {(legalLine || referenceId) && (
-          <div className="mt-2.5 flex items-end justify-between gap-2" style={{ color: NV.warmBlack, fontFamily: NV_FONT }}>
-            {legalLine && <p className="min-w-0 text-[7px] leading-[1.35]">{legalLine}</p>}
-            {referenceId && <p className="shrink-0 whitespace-nowrap text-[8px] leading-[1.35]">{referenceId}</p>}
-          </div>
-        )}
-      </div>
-    </article>
+          {(legalLine || referenceId) && (
+            <div
+              className="flex items-end justify-between"
+              style={{ marginTop: pt(15.5), gap: pt(8), color: NV.warmBlack, lineHeight: 1.35 }}
+            >
+              {legalLine && (
+                <p className="min-w-0" style={{ fontSize: ptMin(5.2, 5), fontFamily: 'Helvetica, Arial, sans-serif' }}>
+                  {legalLine}
+                </p>
+              )}
+              {referenceId && (
+                <p className="shrink-0 whitespace-nowrap" style={{ fontSize: ptMin(7.12, 6), fontFamily: 'Arial, Helvetica, sans-serif' }}>
+                  {referenceId}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      </article>
+    </div>
   );
 }
