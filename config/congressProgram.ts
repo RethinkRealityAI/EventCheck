@@ -7,6 +7,10 @@
  * link in the menu (gc2026.framer.website/program) stays as it is — this is the
  * in-app, bookmarkable version.
  *
+ * Oral abstract presenters and titles come from the Oral Abstract Presentation
+ * programme, less the withdrawn abstracts (Naresh Tayade, Day 1 Room 6;
+ * Dr. Gayatri Desai, Day 3 Room 6).
+ *
  * Times are local (IST) 24-hour strings so they sort and compare cleanly.
  */
 
@@ -20,6 +24,16 @@ export type SessionKind =
   | 'break'
   | 'social'
   | 'logistics';
+
+/** One oral abstract within an abstract session, from the oral abstract programme. */
+export interface AbstractTalk {
+  /** 24h local time, e.g. "10:14" */
+  start: string;
+  end: string;
+  /** Presenters as printed, same format as `speakers`. */
+  presenters: string[];
+  title: string;
+}
 
 export interface ProgramSession {
   id: string;
@@ -35,6 +49,8 @@ export interface ProgramSession {
   stream?: string;
   /** Individual talks within the session, in running order. */
   talks?: string[];
+  /** Oral abstracts with their slot and presenter(s), in running order. */
+  abstracts?: AbstractTalk[];
   speakers?: string[];
   moderator?: string;
   chair?: string;
@@ -133,7 +149,16 @@ export const CONGRESS_PROGRAM: ProgramSession[] = [
     kind: 'abstracts',
     room: 'Hall 1',
     speakers: [
-      'Selected Abstract Authors',
+      'Dr. Kalpita Gawit',
+      'Dr. Judith Lubega',
+      'Dr. Yee Yee Yap',
+      'Mohana Reddy',
+    ],
+    abstracts: [
+      { start: '10:00', end: '10:12', presenters: ['Dr. Kalpita Gawit'], title: 'Characterisation of Sickle β-Thalassemia Cohort: A Study on Clinical Burden, Haematological, and Molecular Variability from Central India' },
+      { start: '10:14', end: '10:26', presenters: ['Dr. Judith Lubega'], title: 'Prevalence and Factors Associated with Iron Deficiency Among Under-Five Children with Sickle Cell Anaemia at Mulago Hospital Sickle Cell Clinic, Uganda: A Cross-Sectional Study' },
+      { start: '10:28', end: '10:40', presenters: ['Dr. Yee Yee Yap'], title: 'Bloodless Care in Thalassaemia Major' },
+      { start: '10:42', end: '10:54', presenters: ['Mohana Reddy'], title: 'Outcomes of Matched and Haploidentical Hematopoietic Stem Cell Transplantation for Sickle Cell Disease in a Resource-Limited Setting' },
     ],
     moderator: 'Dr. Deepika Darbari (USA)',
     bookmarkable: true,
@@ -147,7 +172,16 @@ export const CONGRESS_PROGRAM: ProgramSession[] = [
     kind: 'abstracts',
     room: 'Hall 2',
     speakers: [
-      'Selected Abstract Authors',
+      'Dr. Akshay Khandeparkar',
+      'Dr. Sayali Chandrashekhar Tiwari',
+      'Dr. Padma Gunda (India)',
+      'Yazdi Italia',
+    ],
+    abstracts: [
+      { start: '10:00', end: '10:12', presenters: ['Dr. Akshay Khandeparkar'], title: 'Phase 1/2 HIBISCUS KIDS Study of Etavopivat in Pediatric Patients with Sickle Cell Disease: Safety and Efficacy Findings from the Complete First Cohort' },
+      { start: '10:14', end: '10:26', presenters: ['Dr. Sayali Chandrashekhar Tiwari'], title: 'National Sickle Cell Anaemia Elimination Mission 2047: Preparedness, Challenges, and Way Forward – A Qualitative Perspective' },
+      { start: '10:28', end: '10:40', presenters: ['Dr. Padma Gunda (India)'], title: 'Uncovering Hidden Carriers: Findings from Extended Family Screening for Hemoglobinopathies' },
+      { start: '10:42', end: '10:54', presenters: ['Yazdi Italia'], title: 'Integrating IVF with Preimplantation Genetic Diagnosis into National Hemoglobinopathy Prevention Programs' },
     ],
     moderator: 'Mr. Prabhat Sinha (India)',
     bookmarkable: true,
@@ -161,7 +195,14 @@ export const CONGRESS_PROGRAM: ProgramSession[] = [
     kind: 'abstracts',
     room: 'Room 6',
     speakers: [
-      'Selected Abstract Authors',
+      'Dorothy Carolyne Mabunde',
+      'Mohana Reddy',
+      'Norafiza binti Mohd Yasin',
+    ],
+    abstracts: [
+      { start: '10:00', end: '10:12', presenters: ['Dorothy Carolyne Mabunde'], title: 'A Revolving Fund Pharmacy Model to Improve Access to Essential Medicines for People Living with Sickle Cell in Rural Kenya' },
+      { start: '10:14', end: '10:26', presenters: ['Mohana Reddy'], title: 'Can Targeted Antenatal Screening for Hemoglobinopathies Be Scaled in Public Health Systems? Evidence from a Multi-State Program in India' },
+      { start: '10:42', end: '10:54', presenters: ['Norafiza binti Mohd Yasin'], title: 'Evidence of Telomere Healing in Human Chromosome 16p13.3 Terminal Deletions Associated with α-Thalassaemia' },
     ],
     moderator: 'Mr. Delaney Hines (Canada)',
     bookmarkable: true,
@@ -175,7 +216,16 @@ export const CONGRESS_PROGRAM: ProgramSession[] = [
     kind: 'abstracts',
     room: 'Room 6',
     speakers: [
-      'Selected Authors',
+      'Prosanto Kumar Chowdhury',
+      'Bhavna Jain',
+      'Dr. Devesh Raicha',
+      'Naidu Tejaswini',
+    ],
+    abstracts: [
+      { start: '11:05', end: '11:17', presenters: ['Prosanto Kumar Chowdhury'], title: 'Aqueous Extract of Terminalia catappa Leaf: A Potential Transfusion-Sparing Agent for Hb E Beta Thalassaemia' },
+      { start: '11:19', end: '11:31', presenters: ['Bhavna Jain'], title: 'A Rare Adult Diagnosis of Sickle Cell Disease Following Newborn Screening: A Case Report' },
+      { start: '11:33', end: '11:45', presenters: ['Dr. Devesh Raicha'], title: 'Beyond Haemoglobin Polymerization: Mapping the Therapeutic Potential of SYK Signalling Modulation in Sickle Cell Disease' },
+      { start: '11:47', end: '11:59', presenters: ['Naidu Tejaswini'], title: 'Iron Status among Patients with Sickle Cell Anaemia in India: A Systematic Review of Evidence Published from 2023–2025' },
     ],
     moderator: 'Ms. Anubha Taneja (India)',
     bookmarkable: true,
@@ -456,13 +506,24 @@ export const CONGRESS_PROGRAM: ProgramSession[] = [
   {
     id: 'd2-abs-hall1',
     day: 2,
-    start: '10:30',
+    start: '10:25',
     end: '11:30',
     title: 'Abstract Presentations — Hall 1',
     kind: 'abstracts',
     room: 'Hall 1',
     speakers: [
-      'Selected Abstract Authors',
+      'Dr. Neelesh Jain',
+      'Dr. Vasiliki Danilatou (Cyprus)',
+      'Surbhi Meshram',
+      'Darshi Vyas',
+      'Prof. Obiageli Nnodu',
+    ],
+    abstracts: [
+      { start: '10:25', end: '10:37', presenters: ['Dr. Neelesh Jain'], title: 'Automated Red Blood Cell Exchange (Erythrocytapheresis) in Sickle Cell Anaemia: A Four-Year Retrospective Observational Study from a Tertiary Centre in Chhattisgarh, India' },
+      { start: '10:38', end: '10:50', presenters: ['Dr. Vasiliki Danilatou (Cyprus)'], title: 'Global Disparities in Clinical Trial Capacity: Insights from a Comparative Survey of HICs and LMICs' },
+      { start: '10:51', end: '11:03', presenters: ['Surbhi Meshram'], title: 'Screening without Rights: Auditing the Implementation Architecture of India\'s National Sickle Cell Elimination Mission Against Health Equity Standards' },
+      { start: '11:04', end: '11:16', presenters: ['Darshi Vyas'], title: 'Is There an Increased Laterality Towards the Left Hip in Sickle Cell Disease Patients With Avascular Necrosis of Hip?' },
+      { start: '11:17', end: '11:29', presenters: ['Prof. Obiageli Nnodu'], title: 'SPARC-TRAIN: Building Multidisciplinary Capacity for Sickle Cell Disease Research and Management Across West Africa' },
     ],
     moderator: 'Mr. Delaney Hines (Canada)',
     bookmarkable: true,
@@ -470,13 +531,24 @@ export const CONGRESS_PROGRAM: ProgramSession[] = [
   {
     id: 'd2-abs-hall2',
     day: 2,
-    start: '10:30',
+    start: '10:25',
     end: '11:30',
     title: 'Abstract Presentations — Hall 2',
     kind: 'abstracts',
     room: 'Hall 2',
     speakers: [
-      'Selected Abstract Authors',
+      'Dr. Abu Yousuf Md Nazim Uddin',
+      'Dr. Aditi Kamdar',
+      'Tarun Sahu',
+      'K. Jothi',
+      'Dr. Meera Varadarajan',
+    ],
+    abstracts: [
+      { start: '10:25', end: '10:37', presenters: ['Dr. Abu Yousuf Md Nazim Uddin'], title: 'Optimizing Transfusion Stewardship in Inherited Blood Disorders: Rational Use of Blood Products in Thalassemia and Sickle Cell Disease from Two Tertiary Hospitals and a Regional Blood Center in Bangladesh' },
+      { start: '10:38', end: '10:50', presenters: ['Dr. Aditi Kamdar'], title: 'The Clot Thickens: Recurrent Pulmonary Embolism in a Patient with Sickle Cell Disease and Acute Chest Syndrome' },
+      { start: '10:51', end: '11:03', presenters: ['Tarun Sahu'], title: 'Neurocognitive Benefits of Slow Deep Breathing Exercise in Adult Homozygous Sickle Cell Disease Patients' },
+      { start: '11:04', end: '11:16', presenters: ['K. Jothi'], title: 'DKMS Access to Transplantation (ATT) Program: Giving Hope for a Healthy Future' },
+      { start: '11:17', end: '11:29', presenters: ['Dr. Meera Varadarajan'], title: 'Efficacy and Safety of Oral Tetrahydrouridine-Decitabine (NDEC) in Adults with Sickle Cell Disease: Results from the Phase 2, Global, Randomized, Parallel-Group ASCENT1 Trial' },
     ],
     moderator: 'Dr. K.K. Radhika (India)',
     bookmarkable: true,
@@ -484,13 +556,24 @@ export const CONGRESS_PROGRAM: ProgramSession[] = [
   {
     id: 'd2-abs-room6',
     day: 2,
-    start: '10:30',
+    start: '10:25',
     end: '11:30',
     title: 'Abstract Presentations — Room 6',
     kind: 'abstracts',
     room: 'Room 6',
     speakers: [
-      'Selected Abstract Authors',
+      'Dr. Jacob Pendergrast (Canada)',
+      'Kshitij Suryawanshi',
+      'Kapilkumar Dave',
+      'Sreyali Poojari',
+      'Dr. Moussa Aden Oubeche',
+    ],
+    abstracts: [
+      { start: '10:25', end: '10:37', presenters: ['Dr. Jacob Pendergrast (Canada)'], title: 'Understanding the Educational and Support Needs of Individuals With Sickle Cell Disease to Improve Hydroxyurea Use and Daily Medication Routines (Canada)' },
+      { start: '10:38', end: '10:50', presenters: ['Kshitij Suryawanshi'], title: 'Multidimensional Psychosocial Burden in Indian Adults with Sickle Cell Disease: A Pragmatic Hybrid Tele-Research Study Using ASCQ-Me and WHOQOL-BREF' },
+      { start: '10:51', end: '11:03', presenters: ['Kapilkumar Dave'], title: 'Integrating Sickle Cell Screening into Primary Health Centre Immunization Platforms: Evidence from a Tribal Pilot in Gujarat, India' },
+      { start: '11:04', end: '11:16', presenters: ['Sreyali Poojari'], title: 'Analytical Performance Evaluation of the Gazelle™ Ferritin FIA Point-of-Care Test Compared with a Reference' },
+      { start: '11:17', end: '11:29', presenters: ['Dr. Moussa Aden Oubeche'], title: 'Minor Surgery under Emicizumab (Hemlibra) in Patients with Hemophilia A: Experience from the Pediatric Hematology-Oncology Department of Rabat (SHOP)' },
     ],
     moderator: 'Dr. Len Valentino (USA)',
     bookmarkable: true,
@@ -778,7 +861,16 @@ export const CONGRESS_PROGRAM: ProgramSession[] = [
     kind: 'abstracts',
     room: 'Hall 1',
     speakers: [
-      'Selected Abstract Authors',
+      'Mohana Reddy',
+      'Dr. Jennifer Bryan (Canada)',
+      'Dr. Saroja Kondaveeti',
+      'Javed Islam Thachorath',
+    ],
+    abstracts: [
+      { start: '10:25', end: '10:37', presenters: ['Mohana Reddy'], title: 'Sickle-Only Screening Misses 40% of Hemoglobinopathy Burden: Evidence from Large-Scale Antenatal Screening in India' },
+      { start: '10:39', end: '10:51', presenters: ['Dr. Jennifer Bryan (Canada)'], title: 'A Five-Year Initiative to Improve the Quality of Emergency Department Care of People Living with Sickle Cell Disease' },
+      { start: '10:53', end: '11:05', presenters: ['Dr. Saroja Kondaveeti'], title: 'Antenatal Screening for Thalassemia and Sickle Cell Disease in Telangana: A Scalable Model for Prevention of Hemoglobinopathies' },
+      { start: '11:07', end: '11:19', presenters: ['Javed Islam Thachorath'], title: 'Decoding FOXO3 and NRF2 Gene Expression in the Redox Regulatory Gene Network of Sickle Cell Disease from an Indian Cohort' },
     ],
     moderator: 'Dr. Jacob Pendergrast (Canada)',
     bookmarkable: true,
@@ -792,7 +884,17 @@ export const CONGRESS_PROGRAM: ProgramSession[] = [
     kind: 'abstracts',
     room: 'Hall 2',
     speakers: [
-      'Selected Abstract Authors',
+      'Prashant Warang',
+      'Moji Ogunsanya',
+      'Ms. Lanre Tunji-Ajayi',
+      'Vivek Gunda',
+      'Norafiza binti Mohd Yasin',
+    ],
+    abstracts: [
+      { start: '10:25', end: '10:37', presenters: ['Prashant Warang'], title: 'Redox Proteomics Reveals Oxidative PMCA Dysfunction and Therapeutic Targets in Sickle Cell Disease' },
+      { start: '10:39', end: '10:51', presenters: ['Moji Ogunsanya', 'Ms. Lanre Tunji-Ajayi'], title: 'Insights into the Hospital Experiences of Patients and Caregivers Affected by Sickle Cell Disease in Ontario, Canada' },
+      { start: '10:53', end: '11:05', presenters: ['Vivek Gunda'], title: 'Automated Red Cell Exchange Combined with Therapeutic Plasma Exchange in Sickle Cell Crisis with Severe Hepatopathy: A Case Report' },
+      { start: '11:07', end: '11:19', presenters: ['Norafiza binti Mohd Yasin'], title: 'Fourth-Generation Sequencing: Evaluation of Single-Base Nanopore Sequencing (SNS) Technology for Comprehensive Detection of Complex α- and β-Thalassaemia Variants' },
     ],
     moderator: 'Dr. Len Valentino (USA)',
     bookmarkable: true,
@@ -806,7 +908,14 @@ export const CONGRESS_PROGRAM: ProgramSession[] = [
     kind: 'abstracts',
     room: 'Room 6',
     speakers: [
-      'Selected Abstract Authors',
+      'Madhu Gopalakrishnan',
+      'Constance Tenge',
+      'Mohana Reddy',
+    ],
+    abstracts: [
+      { start: '10:39', end: '10:51', presenters: ['Madhu Gopalakrishnan'], title: 'Buccal Swab Sampling for Point-of-Care Molecular Confirmation of Sickle Cell Disease: A Pilot Pathway from India' },
+      { start: '10:53', end: '11:05', presenters: ['Constance Tenge'], title: 'Health Care Services for Persons Living with Sickle Cell Disease in Western Kenya – Gaps and Opportunities' },
+      { start: '11:07', end: '11:19', presenters: ['Mohana Reddy'], title: 'Technology-Enabled Longitudinal Care for Sickle Cell Disease: Operationalising Hydroxyurea Monitoring and Dose Optimisation in Resource-Limited Settings' },
     ],
     moderator: 'Dr. Padma Gunda (India)',
     bookmarkable: true,
@@ -820,7 +929,16 @@ export const CONGRESS_PROGRAM: ProgramSession[] = [
     kind: 'abstracts',
     room: 'Room 6',
     speakers: [
-      'Selected Authors',
+      'Aniket Prabhudesai',
+      'Dr. Sneha Mukherjee',
+      'Parag Sagar',
+      'Mary Niharika Gali',
+    ],
+    abstracts: [
+      { start: '11:30', end: '11:42', presenters: ['Aniket Prabhudesai'], title: 'Validation of the Hi-PCR® Sickle Cell Genotyping Probe PCR Kit (MBPCR286): An Affordable Open-System IVD Solution for Confirmatory Diagnostics' },
+      { start: '11:44', end: '11:56', presenters: ['Dr. Sneha Mukherjee'], title: 'The Role of Immature Platelet Fraction in Etiological Differentiation of Thrombocytopenia in Children with Sickle Cell Disease — A Hospital-Based Cross-Sectional Study' },
+      { start: '11:58', end: '12:10', presenters: ['Parag Sagar'], title: 'Social Innovation through Policy: Scaling Sickle Cell Disease Elimination in Tribal India' },
+      { start: '12:12', end: '12:24', presenters: ['Mary Niharika Gali'], title: 'Personalized Longitudinal Physiological and Haemoglobin-Linked Monitoring Between Blood Tests Using Wearable PPG in Transfusion-Dependent Thalassaemia' },
     ],
     moderator: 'Dr. Shabnam Arsiwala (USA)',
     bookmarkable: true,

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { CONGRESS_PROGRAM, sessionById, type ProgramSession } from '../config/congressProgram';
 import {
   ALL_TOPICS,
+  abstractsByPerson,
   DEFAULT_SPEAKER_FILTERS,
   appearanceSummary,
   buildSpeakerDirectory,
@@ -240,5 +241,41 @@ describe('nextSaved / congressStarted / sessionInstant', () => {
     expect(congressStarted(ist('2026-10-23', '06:59'))).toBe(false);
     expect(congressStarted(ist('2026-10-23', '07:00'))).toBe(true);
     expect(sessionInstant(1, '08:00')).toBe(Date.parse('2026-10-23T02:30:00Z'));
+  });
+});
+
+describe('oral abstracts', () => {
+  const abstractSessions = CONGRESS_PROGRAM.filter((s) => s.kind === 'abstracts');
+
+  it('names real presenters, not placeholders, in every abstract session', () => {
+    expect(abstractSessions).toHaveLength(11);
+    for (const s of abstractSessions) {
+      expect(s.abstracts?.length, s.id).toBeGreaterThan(0);
+      expect(s.speakers?.every((p) => isPerson(p)), s.id).toBe(true);
+    }
+  });
+
+  it('keeps each abstract inside its session and lists every presenter as a speaker', () => {
+    for (const s of abstractSessions) {
+      for (const a of s.abstracts ?? []) {
+        expect(a.start >= s.start && a.end <= s.end, `${s.id} ${a.start}`).toBe(true);
+        for (const p of a.presenters) expect(s.speakers, s.id).toContain(p);
+      }
+    }
+  });
+
+  it('leaves out withdrawn abstracts', () => {
+    const all = JSON.stringify(abstractSessions);
+    expect(all).not.toMatch(/Tayade|Gayatri Desai/);
+  });
+
+  it('finds a presenter’s abstracts by name key', () => {
+    const s = sessionById('d3-abs-hall2')!;
+    expect(abstractsByPerson(s, 'lanre tunji-ajayi').map((a) => a.start)).toEqual(['10:39']);
+    const dir = buildSpeakerDirectory();
+    const reddy = dir.find((p) => p.key === 'mohana reddy')!;
+    expect(reddy.appearances.map((a) => a.sessionId).sort()).toEqual(
+      ['d1-abs-hall1', 'd1-abs-room6', 'd3-abs-hall1', 'd3-abs-room6'].sort(),
+    );
   });
 });

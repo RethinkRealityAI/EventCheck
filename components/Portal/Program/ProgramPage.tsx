@@ -173,7 +173,7 @@ export function ProgramPage() {
         if (!virtualById.has(s.id)) return false;
       } else if (filter !== 'all' && s.kind !== filter) return false;
       if (!q) return true;
-      const haystack = [s.title, s.room, s.sponsor, s.moderator, s.chair, ...(s.speakers ?? []), ...(s.talks ?? [])]
+      const haystack = [s.title, s.room, s.sponsor, s.moderator, s.chair, ...(s.speakers ?? []), ...(s.talks ?? []), ...(s.abstracts ?? []).map((a) => a.title)]
         .filter(Boolean)
         .join(' ')
         .toLowerCase();

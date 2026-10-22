@@ -134,6 +134,45 @@ export function SessionDetailPage() {
         </section>
       ) : null}
 
+      {session.abstracts?.length ? (
+        <section className={`mt-4 rounded-[22px] p-4 ${GLASS_CARD}`}>
+          <h3 className="font-display text-[10.5px] font-bold uppercase tracking-[0.16em] text-gansid-on-surface/40">
+            Oral abstracts
+          </h3>
+          <ol className="mt-1 divide-y divide-gansid-on-surface/[0.06]">
+            {session.abstracts.map((a) => (
+              <li key={`${a.start}-${a.title}`} className="flex gap-3 py-3">
+                <span className="w-[46px] shrink-0 pt-0.5 font-display text-xs font-bold tabular-nums text-gansid-secondary">
+                  {a.start}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block font-body text-[13.5px] leading-relaxed text-gansid-on-surface/80 text-pretty">
+                    {a.title}
+                  </span>
+                  <span className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5">
+                    {a.presenters.map((raw) => {
+                      const p = parsePerson(raw);
+                      return (
+                        <Link
+                          key={raw}
+                          to={`/portal/speakers/${speakerIdForKey(p.key)}`}
+                          className="font-display text-[13px] font-bold text-gansid-on-surface hover:text-gansid-secondary"
+                        >
+                          {p.name}
+                        </Link>
+                      );
+                    })}
+                    <span className="font-body text-xs text-gansid-on-surface/45">
+                      {a.start}–{a.end}
+                    </span>
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ol>
+        </section>
+      ) : null}
+
       {session.sponsor && (
         <section className={`mt-4 rounded-[22px] p-4 ${GLASS_CARD}`}>
           <h3 className="font-display text-[10.5px] font-bold uppercase tracking-[0.16em] text-gansid-on-surface/40">Hosted by</h3>
