@@ -264,9 +264,11 @@ describe('oral abstracts', () => {
     }
   });
 
-  it('leaves out withdrawn abstracts', () => {
-    const all = JSON.stringify(abstractSessions);
-    expect(all).not.toMatch(/Tayade|Gayatri Desai/);
+  it('leaves out withdrawn abstracts and applies the Tayade/Sagar swap', () => {
+    expect(JSON.stringify(abstractSessions)).not.toMatch(/Gayatri Desai/);
+    const slot = (id: string, start: string) => sessionById(id)!.abstracts!.find((a) => a.start === start)!.presenters;
+    expect(slot('d1-abs-room6', '10:28')).toEqual(['Parag Sagar']);
+    expect(slot('d3-trainees', '11:58')).toEqual(['Dr. Naresh Tayade']);
   });
 
   it('finds a presenter’s abstracts by name key', () => {

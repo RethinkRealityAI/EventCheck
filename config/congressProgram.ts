@@ -8,8 +8,9 @@
  * in-app, bookmarkable version.
  *
  * Oral abstract presenters and titles come from the Oral Abstract Presentation
- * programme, less the withdrawn abstracts (Naresh Tayade, Day 1 Room 6;
- * Dr. Gayatri Desai, Day 3 Room 6).
+ * programme, with two changes agreed afterwards: Dr. Gayatri Desai (Day 3
+ * Room 6) withdrew, and Dr. Naresh Tayade and Parag Sagar swapped slots
+ * (Parag: Day 1 Room 6 10:28; Naresh: Day 3 Room 6 11:58).
  *
  * Times are local (IST) 24-hour strings so they sort and compare cleanly.
  */
@@ -197,11 +198,13 @@ export const CONGRESS_PROGRAM: ProgramSession[] = [
     speakers: [
       'Dorothy Carolyne Mabunde',
       'Mohana Reddy',
+      'Parag Sagar',
       'Norafiza binti Mohd Yasin',
     ],
     abstracts: [
       { start: '10:00', end: '10:12', presenters: ['Dorothy Carolyne Mabunde'], title: 'A Revolving Fund Pharmacy Model to Improve Access to Essential Medicines for People Living with Sickle Cell in Rural Kenya' },
       { start: '10:14', end: '10:26', presenters: ['Mohana Reddy'], title: 'Can Targeted Antenatal Screening for Hemoglobinopathies Be Scaled in Public Health Systems? Evidence from a Multi-State Program in India' },
+      { start: '10:28', end: '10:40', presenters: ['Parag Sagar'], title: 'Social Innovation through Policy: Scaling Sickle Cell Disease Elimination in Tribal India' },
       { start: '10:42', end: '10:54', presenters: ['Norafiza binti Mohd Yasin'], title: 'Evidence of Telomere Healing in Human Chromosome 16p13.3 Terminal Deletions Associated with α-Thalassaemia' },
     ],
     moderator: 'Mr. Delaney Hines (Canada)',
@@ -931,13 +934,13 @@ export const CONGRESS_PROGRAM: ProgramSession[] = [
     speakers: [
       'Aniket Prabhudesai',
       'Dr. Sneha Mukherjee',
-      'Parag Sagar',
+      'Dr. Naresh Tayade',
       'Mary Niharika Gali',
     ],
     abstracts: [
       { start: '11:30', end: '11:42', presenters: ['Aniket Prabhudesai'], title: 'Validation of the Hi-PCR® Sickle Cell Genotyping Probe PCR Kit (MBPCR286): An Affordable Open-System IVD Solution for Confirmatory Diagnostics' },
       { start: '11:44', end: '11:56', presenters: ['Dr. Sneha Mukherjee'], title: 'The Role of Immature Platelet Fraction in Etiological Differentiation of Thrombocytopenia in Children with Sickle Cell Disease — A Hospital-Based Cross-Sectional Study' },
-      { start: '11:58', end: '12:10', presenters: ['Parag Sagar'], title: 'Social Innovation through Policy: Scaling Sickle Cell Disease Elimination in Tribal India' },
+      { start: '11:58', end: '12:10', presenters: ['Dr. Naresh Tayade'], title: 'Clinicodiagnostic Profile of Sickle Cell Anemia and Sickle β-Thalassemia: A Comparative Study' },
       { start: '12:12', end: '12:24', presenters: ['Mary Niharika Gali'], title: 'Personalized Longitudinal Physiological and Haemoglobin-Linked Monitoring Between Blood Tests Using Wearable PPG in Transfusion-Dependent Thalassaemia' },
     ],
     moderator: 'Dr. Shabnam Arsiwala (USA)',
