@@ -8,9 +8,10 @@
  * in-app, bookmarkable version.
  *
  * Oral abstract presenters and titles come from the Oral Abstract Presentation
- * programme, with two changes agreed afterwards: Dr. Gayatri Desai (Day 3
- * Room 6) withdrew, and Dr. Naresh Tayade and Parag Sagar swapped slots
- * (Parag: Day 1 Room 6 10:28; Naresh: Day 3 Room 6 11:58).
+ * programme, with changes agreed afterwards: Dr. Gayatri Desai (Day 3
+ * Room 6) and Prosanto Kumar Chowdhury (Day 1 Local Trainees, 11:05) were
+ * removed, and Dr. Naresh Tayade and Parag Sagar swapped slots (Parag: Day 1
+ * Room 6 10:28; Naresh: Day 3 Room 6 11:58).
  *
  * Times are local (IST) 24-hour strings so they sort and compare cleanly.
  */
@@ -219,13 +220,11 @@ export const CONGRESS_PROGRAM: ProgramSession[] = [
     kind: 'abstracts',
     room: 'Room 6',
     speakers: [
-      'Prosanto Kumar Chowdhury',
       'Bhavna Jain',
       'Dr. Devesh Raicha',
       'Naidu Tejaswini',
     ],
     abstracts: [
-      { start: '11:05', end: '11:17', presenters: ['Prosanto Kumar Chowdhury'], title: 'Aqueous Extract of Terminalia catappa Leaf: A Potential Transfusion-Sparing Agent for Hb E Beta Thalassaemia' },
       { start: '11:19', end: '11:31', presenters: ['Bhavna Jain'], title: 'A Rare Adult Diagnosis of Sickle Cell Disease Following Newborn Screening: A Case Report' },
       { start: '11:33', end: '11:45', presenters: ['Dr. Devesh Raicha'], title: 'Beyond Haemoglobin Polymerization: Mapping the Therapeutic Potential of SYK Signalling Modulation in Sickle Cell Disease' },
       { start: '11:47', end: '11:59', presenters: ['Naidu Tejaswini'], title: 'Iron Status among Patients with Sickle Cell Anaemia in India: A Systematic Review of Evidence Published from 2023–2025' },
