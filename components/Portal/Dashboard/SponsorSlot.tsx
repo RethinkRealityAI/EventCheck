@@ -24,7 +24,18 @@ const NV = {
   warmBlack: '#1C1C1A',
   lightGrey: '#EBEBEA',
   body: '#3A3A37',
+  /** The artwork sets its copy in pure black, not the warm black of the button. */
+  ink: '#000000',
 };
+
+/**
+ * The artwork uses 55 Roman, but browsers render it noticeably lighter than the
+ * PDF does. 65 Medium overshoots (visibly bolder than the artwork), so the copy
+ * and CTA stay in 55 Roman with a hairline stroke that adds just the missing
+ * weight — compared side by side with the PDF at phone width.
+ */
+const NV_WEIGHT = 400;
+const NV_STROKE = '0.025em currentColor';
 
 /**
  * Novartis's corporate typeface, Volta Modern Display — 55 Roman (400) and
@@ -106,8 +117,10 @@ export function SponsorTile({
                   marginTop: pt(13.6),
                   fontSize: pt(12.69),
                   lineHeight: 20 / 12.69,
-                  color: NV.warmBlack,
+                  color: NV.ink,
                   fontFamily: NV_FONT,
+                  fontWeight: NV_WEIGHT,
+                  WebkitTextStroke: NV_STROKE,
                 }}
               >
                 {body}
@@ -120,7 +133,7 @@ export function SponsorTile({
               href={href}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex w-full items-center justify-center font-normal text-white shadow-[0_10px_22px_-14px_rgba(28,28,26,0.7)] transition-transform duration-300 ease-viscous active:scale-[0.98]"
+              className="flex w-full items-center justify-center text-white shadow-[0_10px_22px_-14px_rgba(28,28,26,0.7)] transition-transform duration-300 ease-viscous active:scale-[0.98]"
               style={{
                 marginTop: pt(23),
                 height: pt(46),
@@ -129,6 +142,8 @@ export function SponsorTile({
                 fontSize: pt(12.5),
                 background: NV.warmBlack,
                 fontFamily: NV_FONT,
+                fontWeight: NV_WEIGHT,
+                WebkitTextStroke: NV_STROKE,
               }}
             >
               Visit {name}
@@ -139,7 +154,7 @@ export function SponsorTile({
           {(legalLine || referenceId) && (
             <div
               className="flex items-end justify-between"
-              style={{ marginTop: pt(15.5), gap: pt(8), color: NV.warmBlack, lineHeight: 1.35 }}
+              style={{ marginTop: pt(15.5), gap: pt(8), color: NV.ink, lineHeight: 1.35 }}
             >
               {legalLine && (
                 <p className="min-w-0" style={{ fontSize: ptMin(5.2, 5), fontFamily: 'Helvetica, Arial, sans-serif' }}>
