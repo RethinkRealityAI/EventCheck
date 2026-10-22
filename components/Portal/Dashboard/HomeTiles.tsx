@@ -227,6 +227,8 @@ export function HomeTiles() {
         imageUrl="/branding/gansid/partners/novartis-cover.jpg"
         body="Novartis is an innovative medicines company. Every day, we work to reimagine medicine to improve and extend people's lives so that patients, healthcare professionals and societies are empowered in the face of serious disease. Our medicines reach 304 million people worldwide."
         href="https://www.novartis.com"
+        legalLine="© 2026 Novartis Pharma AG, CH-4002 Basel, Switzerland 11814270 | 10/2026"
+        referenceId="FUSE ID FA-11814270 | 10/2026"
       />}
 
       <p className="pt-2 text-center font-body text-xs text-gansid-on-surface/40">GANSID Congress 2026 · Hyderabad, India</p>

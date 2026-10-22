@@ -44,24 +44,41 @@ export interface SponsorTileProps {
   body?: string;
   /** Where "Visit …" leads (opens in a new tab). */
   href?: string;
+  /** Approved legal line, bottom-left (e.g. "© 2026 Novartis Pharma AG, …"). */
+  legalLine?: string;
+  /** Approval reference, bottom-right (e.g. "FUSE ID FA-11814270 | 10/2026"). */
+  referenceId?: string;
 }
 
-export function SponsorTile({ name = 'Novartis', logoUrl = null, imageUrl = null, body, href }: SponsorTileProps) {
+/**
+ * Proportions follow Novartis's approved artwork (FA-11814270, 10/2026),
+ * scaled to a narrow 290px card: ~6% side padding, logo ~38% of the width,
+ * tight corner radius, a regular-weight CTA and the legal/FUSE footer under
+ * the button. Body text is deliberately NOT scaled down with the rest — a
+ * literal scale would land near 8px — so it stays legible on a phone.
+ */
+export function SponsorTile({
+  name = 'Novartis',
+  logoUrl = null,
+  imageUrl = null,
+  body,
+  href,
+  legalLine,
+  referenceId,
+}: SponsorTileProps) {
   if (!FEATURES.sponsorTiles) return null;
 
-  // Narrow portrait card, centred: the photo keeps its full 4:3 height and the
-  // tile takes less room by giving up width rather than height.
   return (
     <article
       aria-label={name}
-      className="mx-auto w-full max-w-[290px] overflow-hidden rounded-[22px] bg-white"
-      style={{ boxShadow: `inset 0 0 0 1px ${NV.lightGrey}, 0 20px 44px -24px rgba(28,28,26,0.45)` }}
+      className="mx-auto w-full max-w-[290px] overflow-hidden rounded-[12px] bg-white"
+      style={{ boxShadow: `inset 0 0 0 1px ${NV.lightGrey}, 0 18px 40px -24px rgba(28,28,26,0.45)` }}
     >
       {imageUrl && <img src={imageUrl} alt="" loading="lazy" className="aspect-[4/3] w-full object-cover" />}
 
-      <div className="px-4 pb-4 pt-3.5">
+      <div className="px-[18px] pb-2.5 pt-5">
         {logoUrl ? (
-          <img src={logoUrl} alt={name} className="h-auto w-[140px] max-w-full" />
+          <img src={logoUrl} alt={name} className="h-auto w-[112px] max-w-full" />
         ) : (
           <span className="font-display text-base font-bold uppercase tracking-[0.06em]" style={{ color: NV.warmBlack }}>
             {name}
@@ -70,8 +87,8 @@ export function SponsorTile({ name = 'Novartis', logoUrl = null, imageUrl = null
 
         {body && (
           <>
-            <div className="my-3 h-px" style={{ background: NV.lightGrey }} />
-            <p className="text-[13px] leading-[1.55]" style={{ color: NV.body, fontFamily: NV_FONT }}>
+            <div className="mb-[11px] mt-3 h-px" style={{ background: NV.lightGrey }} />
+            <p className="text-[12.5px] leading-[1.65]" style={{ color: NV.warmBlack, fontFamily: NV_FONT }}>
               {body}
             </p>
           </>
@@ -82,12 +99,19 @@ export function SponsorTile({ name = 'Novartis', logoUrl = null, imageUrl = null
             href={href}
             target="_blank"
             rel="noopener noreferrer"
-            className="mt-3.5 flex w-full items-center justify-center gap-2 rounded-[12px] py-2.5 text-[14px] font-medium text-white shadow-[0_14px_28px_-16px_rgba(28,28,26,0.7)] transition-transform duration-300 ease-viscous active:scale-[0.98]"
+            className="mt-[18px] flex w-full items-center justify-center gap-2 rounded-[8px] py-[9px] text-[13.5px] font-normal text-white shadow-[0_10px_22px_-14px_rgba(28,28,26,0.7)] transition-transform duration-300 ease-viscous active:scale-[0.98]"
             style={{ background: NV.warmBlack, fontFamily: NV_FONT }}
           >
             Visit {name}
             <ArrowUpRight className="h-3.5 w-3.5" aria-hidden />
           </a>
+        )}
+
+        {(legalLine || referenceId) && (
+          <div className="mt-2.5 flex items-end justify-between gap-2" style={{ color: NV.warmBlack, fontFamily: NV_FONT }}>
+            {legalLine && <p className="min-w-0 text-[7px] leading-[1.35]">{legalLine}</p>}
+            {referenceId && <p className="shrink-0 whitespace-nowrap text-[8px] leading-[1.35]">{referenceId}</p>}
+          </div>
         )}
       </div>
     </article>
