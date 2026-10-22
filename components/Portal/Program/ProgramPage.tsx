@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Bookmark, BookmarkCheck, ChevronRight, Search, AlertTriangle } from 'lucide-react';
+import { Bookmark, BookmarkCheck, ChevronRight, Download, Loader2, Search, AlertTriangle } from 'lucide-react';
 import {
   CONGRESS_DAYS,
   SESSION_KIND_LABEL,
@@ -150,6 +150,67 @@ function SessionCard({
   );
 }
 
+/**
+ * Downloads the whole programme as a PDF built from the live programme data,
+ * so the file is never out of date. jsPDF loads only when someone asks.
+ */
+function DownloadProgramButton() {
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  const download = async () => {
+    setBusy(true);
+    setFailed(false);
+    try {
+      const [{ buildProgramPdf, PROGRAM_PDF_FILENAME }, logoDataUrl] = await Promise.all([
+        import('../../../utils/programPdf'),
+        loadLogo(),
+      ]);
+      buildProgramPdf({ logoDataUrl }).save(PROGRAM_PDF_FILENAME);
+    } catch {
+      setFailed(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col items-end">
+      <button
+        type="button"
+        onClick={download}
+        disabled={busy}
+        className="inline-flex items-center gap-2 rounded-full bg-white/85 px-4 py-2.5 font-display text-sm font-bold text-gansid-secondary shadow-[0_12px_28px_-22px_rgba(26,28,28,0.5)] ring-1 ring-black/[0.06] transition-transform duration-300 ease-viscous hover:scale-[1.02] disabled:opacity-60"
+      >
+        {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+        {busy ? 'Preparing…' : 'Download PDF'}
+      </button>
+      {failed && (
+        <p role="alert" className="mt-1 font-body text-[11px] text-gansid-primary">
+          Couldn’t create the PDF. Please try again.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** White congress logo as a data URL for the PDF header; the PDF still builds without it. */
+async function loadLogo(): Promise<string | undefined> {
+  try {
+    const res = await fetch('/branding/gansid/congress-logo-white.png');
+    if (!res.ok) return undefined;
+    const blob = await res.blob();
+    return await new Promise<string>((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result));
+      r.onerror = reject;
+      r.readAsDataURL(blob);
+    });
+  } catch {
+    return undefined;
+  }
+}
+
 function parseDay(v: string | null): 1 | 2 | 3 {
   return v === '2' ? 2 : v === '3' ? 3 : 1;
 }
@@ -188,16 +249,19 @@ export function ProgramPage() {
           <h1 className="font-display text-3xl font-bold tracking-tight">Programme</h1>
           <p className="mt-1 font-body text-sm text-gansid-on-surface/60">{activeDay.date}</p>
         </div>
-        <Link
-          to="/portal/my-schedule"
-          className="inline-flex items-center gap-2 rounded-full bg-gansid-primary-gradient px-4 py-2.5 font-display text-sm font-bold text-white shadow-[0_14px_28px_-16px_rgba(186,0,40,0.75)] transition-transform duration-300 ease-viscous hover:scale-[1.02]"
-        >
-          <BookmarkCheck className="h-4 w-4" />
-          My schedule
-          {count > 0 && (
-            <span className="rounded-full bg-white/25 px-2 py-0.5 text-[11px] font-bold tabular-nums">{count}</span>
-          )}
-        </Link>
+        <div className="flex flex-wrap items-start gap-2">
+          <DownloadProgramButton />
+          <Link
+            to="/portal/my-schedule"
+            className="inline-flex items-center gap-2 rounded-full bg-gansid-primary-gradient px-4 py-2.5 font-display text-sm font-bold text-white shadow-[0_14px_28px_-16px_rgba(186,0,40,0.75)] transition-transform duration-300 ease-viscous hover:scale-[1.02]"
+          >
+            <BookmarkCheck className="h-4 w-4" />
+            My schedule
+            {count > 0 && (
+              <span className="rounded-full bg-white/25 px-2 py-0.5 text-[11px] font-bold tabular-nums">{count}</span>
+            )}
+          </Link>
+        </div>
       </div>
 
       {/* Day switcher */}
