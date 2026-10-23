@@ -11,7 +11,10 @@
  * programme, with changes agreed afterwards: Dr. Gayatri Desai (Day 3
  * Room 6) and Prosanto Kumar Chowdhury (Day 1 Local Trainees, 11:05) were
  * removed, and Dr. Naresh Tayade and Parag Sagar swapped slots (Parag: Day 1
- * Room 6 10:28; Naresh: Day 3 Room 6 11:58).
+ * Room 6 10:28; Naresh: Day 3 Room 6 11:58). Mr. Zakareya Alkadhem withdrew
+ * from the Day 2 Patient-Driven session, and moderators were updated to match
+ * the virtual session setup (Dr. Baba Inusa: Day 2 Room 6 8:00–9:00; Mr.
+ * Prabhat Sinha: Day 3 PKD).
  *
  * Times are local (IST) 24-hour strings so they sort and compare cleanly.
  */
@@ -153,13 +156,13 @@ export const CONGRESS_PROGRAM: ProgramSession[] = [
     speakers: [
       'Dr. Kalpita Gawit',
       'Dr. Judith Lubega',
-      'Dr. Yee Yee Yap',
+      'Dr. Mandy Yap (Malaysia)',
       'Mohana Reddy',
     ],
     abstracts: [
       { start: '10:00', end: '10:12', presenters: ['Dr. Kalpita Gawit'], title: 'Characterisation of Sickle β-Thalassemia Cohort: A Study on Clinical Burden, Haematological, and Molecular Variability from Central India' },
       { start: '10:14', end: '10:26', presenters: ['Dr. Judith Lubega'], title: 'Prevalence and Factors Associated with Iron Deficiency Among Under-Five Children with Sickle Cell Anaemia at Mulago Hospital Sickle Cell Clinic, Uganda: A Cross-Sectional Study' },
-      { start: '10:28', end: '10:40', presenters: ['Dr. Yee Yee Yap'], title: 'Bloodless Care in Thalassaemia Major' },
+      { start: '10:28', end: '10:40', presenters: ['Dr. Mandy Yap (Malaysia)'], title: 'Bloodless Care in Thalassaemia Major' },
       { start: '10:42', end: '10:54', presenters: ['Mohana Reddy'], title: 'Outcomes of Matched and Haploidentical Hematopoietic Stem Cell Transplantation for Sickle Cell Disease in a Resource-Limited Setting' },
     ],
     moderator: 'Dr. Deepika Darbari (USA)',
@@ -177,13 +180,13 @@ export const CONGRESS_PROGRAM: ProgramSession[] = [
       'Dr. Akshay Khandeparkar',
       'Dr. Sayali Chandrashekhar Tiwari',
       'Dr. Padma Gunda (India)',
-      'Yazdi Italia',
+      'Dr. Yazdi Italia (India)',
     ],
     abstracts: [
       { start: '10:00', end: '10:12', presenters: ['Dr. Akshay Khandeparkar'], title: 'Phase 1/2 HIBISCUS KIDS Study of Etavopivat in Pediatric Patients with Sickle Cell Disease: Safety and Efficacy Findings from the Complete First Cohort' },
       { start: '10:14', end: '10:26', presenters: ['Dr. Sayali Chandrashekhar Tiwari'], title: 'National Sickle Cell Anaemia Elimination Mission 2047: Preparedness, Challenges, and Way Forward – A Qualitative Perspective' },
       { start: '10:28', end: '10:40', presenters: ['Dr. Padma Gunda (India)'], title: 'Uncovering Hidden Carriers: Findings from Extended Family Screening for Hemoglobinopathies' },
-      { start: '10:42', end: '10:54', presenters: ['Yazdi Italia'], title: 'Integrating IVF with Preimplantation Genetic Diagnosis into National Hemoglobinopathy Prevention Programs' },
+      { start: '10:42', end: '10:54', presenters: ['Dr. Yazdi Italia (India)'], title: 'Integrating IVF with Preimplantation Genetic Diagnosis into National Hemoglobinopathy Prevention Programs' },
     ],
     moderator: 'Mr. Prabhat Sinha (India)',
     bookmarkable: true,
@@ -460,7 +463,7 @@ export const CONGRESS_PROGRAM: ProgramSession[] = [
     speakers: [
       'Dr. Heena Tabassum (India)',
     ],
-    moderator: 'Dr. Akshat Jain (USA)',
+    moderator: 'Dr. Baba Inusa (UK)',
     bookmarkable: true,
   },
   {
@@ -474,7 +477,7 @@ export const CONGRESS_PROGRAM: ProgramSession[] = [
     speakers: [
       'Dr. Abdulaziz Mohammed',
     ],
-    moderator: 'Dr. Akshat Jain (USA)',
+    moderator: 'Dr. Baba Inusa (UK)',
     bookmarkable: true,
   },
   {
@@ -715,13 +718,11 @@ export const CONGRESS_PROGRAM: ProgramSession[] = [
       'Patient Experiences with Innovative and Curative Therapies Across Health Systems',
       'From Advocacy to Policy: Leveraging the WHO Universal Health Care Framework to Drive Equitable Access for Sickle Cell Communities',
       'Building Comprehensive Thalassemia Care Within National Health Systems',
-      'Inherited Blood Disorder Programs That Work: A Bahrain Experience',
     ],
     speakers: [
       'Mr. Carl Lander (UK)',
       'Mr. Lalit Pargi (India)',
       'Ms. Anubha Taneja (India)',
-      'Mr. Zakareya Ebrahim Alkadem (Bahrain)',
     ],
     moderator: 'Dr. Len Valentino (USA)',
     bookmarkable: true,
@@ -822,7 +823,7 @@ export const CONGRESS_PROGRAM: ProgramSession[] = [
       'Dr. Deepa Anantha Laxmi N.V (India)',
       'Dr. Ravindra Kumar (India)',
     ],
-    moderator: 'Dr. Saroja K. (India)',
+    moderator: 'Dr. Saroja Kondaveeti (India)',
     bookmarkable: true,
   },
   {
@@ -958,11 +959,11 @@ export const CONGRESS_PROGRAM: ProgramSession[] = [
       'Blood Supply Shortfalls in Low- and Middle-Income Countries: Structural Barriers & Pragmatic Solutions',
     ],
     speakers: [
-      'Dr. Manisha Shivastava (India)',
+      'Dr. Manisha Shrivastava (India)',
       'Dr. Jacob Pendergrast (Canada)',
     ],
     moderator: 'Ms. Vinita Srivastava (India)',
-    chair: 'Dr. Yizdi Italia (India)',
+    chair: 'Dr. Yazdi Italia (India)',
     bookmarkable: true,
   },
   {
@@ -981,7 +982,7 @@ export const CONGRESS_PROGRAM: ProgramSession[] = [
       'Dr. Yaddanapudi Ravindranath (USA)',
       'Mr. Carl Lander (UK)',
     ],
-    moderator: 'Mr. Carl Lander (UK)',
+    moderator: 'Mr. Prabhat Sinha (India)',
     bookmarkable: true,
   },
   {
