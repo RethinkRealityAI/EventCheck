@@ -11,7 +11,7 @@
  * definitive Oral Abstract Presentation Guide (received October 23, 2026):
  * except that Parag Sagar presents Day 1 Room 6 10:28 and Dr. Naresh Tayade Day 3
  * Local Trainees 11:58 (swap kept at Dapo's request). Ms. Vinita Srivastava's talk moved from
- * the Day 3 Patient Engagement session to Day 3 Room 6 abstracts, 11:07. Mr. Zakareya Alkadhem withdrew
+ * the Day 3 Patient Engagement session to Day 3 Room 6 abstracts, 11:05. Mr. Zakareya Alkadhem withdrew
  * from the Day 2 Patient-Driven session, and moderators were updated to match
  * the virtual session setup (Dr. Baba Inusa: Day 2 Room 6 8:00–9:00; Mr.
  * Prabhat Sinha: Day 3 PKD).
@@ -920,7 +920,7 @@ export const CONGRESS_PROGRAM: ProgramSession[] = [
       { start: '10:25', end: '10:37', presenters: ['Madhu Gopalakrishnan'], title: 'Buccal Swab Sampling for Point-of-Care Molecular Confirmation of Sickle Cell Disease: A Pilot Pathway from India' },
       { start: '10:39', end: '10:51', presenters: ['Constance Tenge'], title: 'Health Care Services for Persons Living with Sickle Cell Disease in Western Kenya – Gaps and Opportunities' },
       { start: '10:53', end: '11:05', presenters: ['Mohana Reddy'], title: 'Technology-Enabled Longitudinal Care for Sickle Cell Disease: Operationalising Hydroxyurea Monitoring and Dose Optimisation in Resource-Limited Settings' },
-      { start: '11:07', end: '11:19', presenters: ['Ms. Vinita Srivastava (India)'], title: 'From Policy to Impact: Building Centres of Competence and Comprehensive Rehabilitation for Inherited Blood Disorders' },
+      { start: '11:05', end: '11:19', presenters: ['Ms. Vinita Srivastava (India)'], title: 'From Policy to Impact: Building Centres of Competence and Comprehensive Rehabilitation for Inherited Blood Disorders' },
     ],
     moderator: 'Dr. Padma Gunda (India)',
     bookmarkable: true,
