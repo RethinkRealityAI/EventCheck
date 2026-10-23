@@ -271,6 +271,8 @@ describe('oral abstracts', () => {
     expect(slot('d3-trainees', '11:58')).toEqual(['Dr. Naresh Tayade']);
     expect(slot('d1-trainees', '11:05')).toEqual(['Bhavna Jain']);
     expect(slot('d3-abs-room6', '10:25')).toEqual(['Madhu Gopalakrishnan']);
+    expect(slot('d3-abs-room6', '11:07')).toEqual(['Ms. Vinita Srivastava (India)']);
+    expect(sessionById('d3-patient')!.speakers).not.toContain('Ms. Vinita Srivastava (India)');
   });
 
   it('finds a presenter’s abstracts by name key', () => {
