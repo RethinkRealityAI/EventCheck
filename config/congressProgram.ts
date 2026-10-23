@@ -9,8 +9,8 @@
  *
  * Oral abstract sessions (slots, presenters, titles, moderators) follow the
  * definitive Oral Abstract Presentation Guide (received October 23, 2026):
- * Dr. Naresh Tayade presents Day 1 Room 6 10:28 and Parag Sagar Day 3 Local
- * Trainees 11:58. Mr. Zakareya Alkadhem withdrew
+ * except that Parag Sagar presents Day 1 Room 6 10:28 and Dr. Naresh Tayade Day 3
+ * Local Trainees 11:58 (swap kept at Dapo's request). Mr. Zakareya Alkadhem withdrew
  * from the Day 2 Patient-Driven session, and moderators were updated to match
  * the virtual session setup (Dr. Baba Inusa: Day 2 Room 6 8:00–9:00; Mr.
  * Prabhat Sinha: Day 3 PKD).
@@ -201,13 +201,13 @@ export const CONGRESS_PROGRAM: ProgramSession[] = [
     speakers: [
       'Dorothy Carolyne Mabunde',
       'Mohana Reddy',
-      'Dr. Naresh Tayade',
+      'Parag Sagar',
       'Norafiza binti Mohd Yasin',
     ],
     abstracts: [
       { start: '10:00', end: '10:12', presenters: ['Dorothy Carolyne Mabunde'], title: 'A Revolving Fund Pharmacy Model to Improve Access to Essential Medicines for People Living with Sickle Cell in Rural Kenya' },
       { start: '10:14', end: '10:26', presenters: ['Mohana Reddy'], title: 'Can Targeted Antenatal Screening for Hemoglobinopathies Be Scaled in Public Health Systems? Evidence from a Multi-State Program in India' },
-      { start: '10:28', end: '10:40', presenters: ['Dr. Naresh Tayade'], title: 'Clinicodiagnostic Profile of Sickle Cell Anemia and Sickle β-Thalassemia: A Comparative Study' },
+      { start: '10:28', end: '10:40', presenters: ['Parag Sagar'], title: 'Social Innovation through Policy: Scaling Sickle Cell Disease Elimination in Tribal India' },
       { start: '10:42', end: '10:54', presenters: ['Norafiza binti Mohd Yasin'], title: 'Evidence of Telomere Healing in Human Chromosome 16p13.3 Terminal Deletions Associated with α-Thalassaemia' },
     ],
     moderator: 'Mr. Delaney Hines (Canada)',
@@ -933,13 +933,13 @@ export const CONGRESS_PROGRAM: ProgramSession[] = [
     speakers: [
       'Aniket Prabhudesai',
       'Dr. Sneha Mukherjee',
-      'Parag Sagar',
+      'Dr. Naresh Tayade',
       'Mary Niharika Gali',
     ],
     abstracts: [
       { start: '11:30', end: '11:42', presenters: ['Aniket Prabhudesai'], title: 'Validation of the Hi-PCR® Sickle Cell Genotyping Probe PCR Kit (MBPCR286): An Affordable Open-System IVD Solution for Confirmatory Diagnostics' },
       { start: '11:44', end: '11:56', presenters: ['Dr. Sneha Mukherjee'], title: 'The Role of Immature Platelet Fraction in Etiological Differentiation of Thrombocytopenia in Children with Sickle Cell Disease — A Hospital-Based Cross-Sectional Study' },
-      { start: '11:58', end: '12:10', presenters: ['Parag Sagar'], title: 'Social Innovation through Policy: Scaling Sickle Cell Disease Elimination in Tribal India' },
+      { start: '11:58', end: '12:10', presenters: ['Dr. Naresh Tayade'], title: 'Clinicodiagnostic Profile of Sickle Cell Anemia and Sickle β-Thalassemia: A Comparative Study' },
       { start: '12:12', end: '12:24', presenters: ['Mary Niharika Gali'], title: 'Personalized Longitudinal Physiological and Haemoglobin-Linked Monitoring Between Blood Tests Using Wearable PPG in Transfusion-Dependent Thalassaemia' },
     ],
     moderator: 'Dr. Shabnam Arsiwala (USA)',

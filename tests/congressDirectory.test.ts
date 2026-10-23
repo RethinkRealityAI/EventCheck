@@ -264,11 +264,11 @@ describe('oral abstracts', () => {
     }
   });
 
-  it('leaves out withdrawn abstracts and follows the Abstract Presentation Guide slots', () => {
+  it('leaves out withdrawn abstracts and follows the Abstract Presentation Guide slots, keeping the Sagar/Tayade swap', () => {
     expect(JSON.stringify(abstractSessions)).not.toMatch(/Gayatri Desai|Prosanto/);
     const slot = (id: string, start: string) => sessionById(id)!.abstracts!.find((a) => a.start === start)!.presenters;
-    expect(slot('d1-abs-room6', '10:28')).toEqual(['Dr. Naresh Tayade']);
-    expect(slot('d3-trainees', '11:58')).toEqual(['Parag Sagar']);
+    expect(slot('d1-abs-room6', '10:28')).toEqual(['Parag Sagar']);
+    expect(slot('d3-trainees', '11:58')).toEqual(['Dr. Naresh Tayade']);
     expect(slot('d1-trainees', '11:05')).toEqual(['Bhavna Jain']);
     expect(slot('d3-abs-room6', '10:25')).toEqual(['Madhu Gopalakrishnan']);
   });
